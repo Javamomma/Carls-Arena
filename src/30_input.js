@@ -1,10 +1,14 @@
 // Touch layout (landscape): left third = defense (hold: block, swipe left: dash back);
 // right two thirds = offense (tap: light, swipe right: medium, hold >=180ms: heavy until released).
-const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SWIPE:40,HOLD_MS:180,
+const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SWIPE:40,HOLD_MS:180,POWER_HOLD_MS:400,
+  _powerT0:0,_powerShown:false,
   init(canvas){
     const pos=e=>{const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}};
-    canvas.addEventListener('pointerdown',e=>{Audio.init();if(G.state==='TITLE')return G.startFight();if(G.state!=='FIGHT')return;
-      const p=pos(e),zone=p.x<this.DEF_ZONE?'def':'off';
+    canvas.addEventListener('pointerdown',e=>{Audio.init();const p=pos(e);
+      // Pause glyph hit-test: a tap there toggles pause and must not also register as a light.
+      if(G.state==='FIGHT'&&G.hitPause(p.x,p.y)){G.togglePause();return}
+      if(G.state==='TITLE')return G.startFight();if(G.state!=='FIGHT')return;
+      const zone=p.x<this.DEF_ZONE?'def':'off';
       for(const rec of this._ptrs.values())if(rec.zone===zone)return; // one active pointer per zone
       this._ptrs.set(e.pointerId,{x0:p.x,t0:performance.now(),zone,moved:false,holdFired:false});
       if(zone==='def')this.held.block=true});
@@ -14,7 +18,7 @@ const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SW
       if(P.zone==='def')this.held.block=false;
       else{if(!P.moved&&!P.holdFired)this.q.push('light');this.held.heavy=false}};
     canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
-    for(const n of[1,2,3])document.getElementById('s'+n).addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('special'+n)});
+    this.bindButtons();
     addEventListener('keydown',e=>{if(e.repeat)return;const k=e.key.toLowerCase();
       if(e.code==='Space'&&G.state==='TITLE'){e.preventDefault();return G.startFight()}
       if(k==='p')return G.togglePause();
@@ -22,10 +26,39 @@ const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SW
       if(k==='j')this.q.push('light');if(k==='k')this.q.push('medium');if(k==='a')this.q.push('dashBack');
       if(k==='l')this.held.heavy=true;if(k==='s')this.held.block=true;if(k==='1'||k==='2'||k==='3')this.q.push('special'+k)});
     addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k==='s')this.held.block=false;if(k==='l')this.held.heavy=false})},
-  // Called once per sim frame by Ctrl.player: promotes a long press in the offense zone to a heavy hold.
-  tick(){for(const P of this._ptrs.values())if(!P.moved&&P.zone==='off'&&!P.holdFired&&performance.now()-P.t0>=this.HOLD_MS){P.holdFired=true;this.held.heavy=true}},
+  // On-screen buttons: BLOCK is a hold (mirrors the field def-zone hold); PUNCH/KICK fire on press.
+  // POWER taps 'powerAuto' (drain() resolves it to the highest affordable special); held past
+  // POWER_HOLD_MS it shows the S1-S3 picker instead, and releasing over a chip fires that special.
+  // Release point is read with elementFromPoint (not e.target) because touch pointers implicitly
+  // capture to their pointerdown target, so e.target would still be #btnPower on release.
+  bindButtons(){
+    const id=x=>document.getElementById(x);
+    const block=id('btnBlock');
+    block.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.held.block=true});
+    const blockOff=()=>{this.held.block=false};
+    block.addEventListener('pointerup',blockOff);block.addEventListener('pointercancel',blockOff);
+    id('btnPunch').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('light')});
+    id('btnKick').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('medium')});
+    const power=id('btnPower'),picker=id('powerPicker');
+    power.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this._powerT0=performance.now();this._powerShown=false});
+    const powerEnd=e=>{e.stopPropagation();
+      if(this._powerShown){
+        const el=document.elementFromPoint(e.clientX,e.clientY),m=el&&el.id&&el.id.match(/^pk([123])$/);
+        if(m&&!el.disabled)this.q.push('special'+m[1]);
+        picker.classList.remove('show')}
+      else if(this._powerT0)this.q.push('powerAuto');
+      this._powerT0=0;this._powerShown=false};
+    power.addEventListener('pointerup',powerEnd);power.addEventListener('pointercancel',powerEnd)},
+  // Called once per sim frame by Ctrl.player: promotes a long press in the offense zone to a heavy
+  // hold, and a long press on POWER to the S1-S3 picker (both use the same wall-clock pattern).
+  tick(){for(const P of this._ptrs.values())if(!P.moved&&P.zone==='off'&&!P.holdFired&&performance.now()-P.t0>=this.HOLD_MS){P.holdFired=true;this.held.heavy=true}
+    if(this._powerT0&&!this._powerShown&&performance.now()-this._powerT0>=this.POWER_HOLD_MS){this._powerShown=true;document.getElementById('powerPicker').classList.add('show')}},
   drain(){const it={light:false,medium:false,heavy:this.held.heavy,block:this.held.block,dashBack:false,special:0};
-    for(const a of this.q){if(a.startsWith('special'))it.special=+a[7];else it[a]=true}this.q.length=0;return it}};
+    for(const a of this.q){
+      if(a==='powerAuto'){const p=G.fight?G.fight.p1.power:0;let n=0;for(let k=3;k>=1;k--)if(p>=100*k){n=k;break}it.special=n}
+      else if(a.startsWith('special'))it.special=+a[7];
+      else it[a]=true}
+    this.q.length=0;return it}};
 
 const Ctrl={
   EMPTY:()=>({light:false,medium:false,heavy:false,block:false,dashBack:false,special:0}),

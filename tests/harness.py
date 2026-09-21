@@ -29,6 +29,7 @@ def main():
     ap.add_argument('--probe', action='append', default=[], help='JS sampled once per sim second')
     ap.add_argument('--pre', default=None, help='JS run after load, before start')
     ap.add_argument('--pose', default=None, help='freeze p1 in a named Rig pose (via G.debugPose) and screenshot')
+    ap.add_argument('--encounter', default=None, help="start via G.startFight({encounter:ID}) instead of --p2/--ai")
     a = ap.parse_args()
     errors, console = [], []
     with sync_playwright() as p:
@@ -48,8 +49,9 @@ def main():
             b.close()
             sys.exit(0 if r['fail'] == 0 and not errors else 1)
         ctrl = 'Ctrl.random(%d)' % a.seed if a.bot == 'random' else 'Ctrl.idle()'
-        pg.evaluate("G.sim=%s;G.startFight({seed:%d,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s})"
-                    % ('true' if a.sim else 'false', a.seed, a.p1, a.p2, a.ai, ctrl))
+        enc = ",encounter:'%s'" % a.encounter if a.encounter else ''
+        pg.evaluate("G.sim=%s;G.startFight({seed:%d,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s%s})"
+                    % ('true' if a.sim else 'false', a.seed, a.p1, a.p2, a.ai, ctrl, enc))
         if a.pose:
             pg.evaluate("G.debugPose('%s')" % a.pose)
             out['state'] = pg.evaluate('G.state')
@@ -76,8 +78,8 @@ def main():
                     seed += 1
                     fights += 1
                     ctrl2 = 'Ctrl.random(%d)' % seed if a.bot == 'random' else 'Ctrl.idle()'
-                    pg.evaluate("G.startFight({seed:%d,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s})"
-                                % (seed, a.p1, a.p2, a.ai, ctrl2))
+                    pg.evaluate("G.startFight({seed:%d,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s%s})"
+                                % (seed, a.p1, a.p2, a.ai, ctrl2, enc))
             frames_total += pg.evaluate('G.fight.frame')
             out['frames_total'] = frames_total
             out['fights'] = fights

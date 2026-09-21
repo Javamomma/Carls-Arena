@@ -267,5 +267,28 @@ const Rig={
         c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*10,h.y-30);c.stroke();
         c.fillStyle='#3a2f22';for(let i=0;i<3;i++){c.beginPath();
           c.arc(h.x+face*(6+i*2),h.y-8-i*8,3,0,Math.PI*2);c.fill()}}}
-    c.restore()}};
+    c.restore()},
+  // HUD portrait: a small front-facing head-and-shoulders bust built straight from the look's
+  // palette/proportions (not a crop of the side-view fight rig, which has no front-facing pose).
+  // Cached on the look object itself, so it's built once per character regardless of how many
+  // fighters (or hp-scaled encounter clones sharing the same look) use it.
+  portrait(look){
+    if(look._portrait)return look._portrait;
+    const S=56,cnv=document.createElement('canvas');cnv.width=S;cnv.height=S;
+    const c=cnv.getContext('2d'),skinDark=shade(look.skin,-.35);
+    const cx=S/2,headR=Math.min(16,look.headR*1.3),headY=S*0.42,shW=Math.min(S*0.92,look.shoulderW*1.7),shY=S*0.64;
+    if(look.earLen){ // drawn behind the head so the head fill covers each ear's base
+      const el=look.earLen*.6;c.fillStyle=look.skin;c.strokeStyle=skinDark;c.lineWidth=1.2;
+      c.beginPath();c.moveTo(cx-headR*.7,headY-headR*.1);c.lineTo(cx-headR*.9-el*.7,headY-el*.6);c.lineTo(cx-headR*.2,headY+headR*.3);c.closePath();c.fill();c.stroke();
+      c.beginPath();c.moveTo(cx+headR*.7,headY-headR*.1);c.lineTo(cx+headR*.9+el*.7,headY-el*.6);c.lineTo(cx+headR*.2,headY+headR*.3);c.closePath();c.fill();c.stroke()}
+    c.fillStyle=look.primary;
+    c.beginPath();c.moveTo(cx-shW/2,S+4);c.lineTo(cx-shW*.32,shY);c.lineTo(cx+shW*.32,shY);c.lineTo(cx+shW/2,S+4);c.closePath();c.fill();
+    c.strokeStyle=shade(look.primary,-.4);c.lineWidth=1.5;c.stroke();
+    c.fillStyle=look.skin;c.beginPath();c.arc(cx,headY,headR,0,Math.PI*2);c.fill();
+    c.lineWidth=1.5;c.strokeStyle=skinDark;c.stroke();
+    if(look.hair){c.fillStyle=look.hair;c.beginPath();c.arc(cx,headY-headR*.3,headR*1.05,Math.PI*1.05,Math.PI*1.95);c.fill()}
+    c.fillStyle='#141414';
+    c.beginPath();c.arc(cx-headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
+    c.beginPath();c.arc(cx+headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
+    look._portrait=cnv;return cnv}};
 for(const id in DEFS)if(LOOKS[id])DEFS[id].look=LOOKS[id];

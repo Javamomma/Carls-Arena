@@ -5,10 +5,27 @@
 canvas{display:block;image-rendering:pixelated;background:#101422}
 .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(9,11,18,.85)}.overlay.show{display:flex}
 .panel{text-align:center;padding:16px;max-width:520px}.panel h1{margin:0 0 8px;font-size:28px;letter-spacing:2px}.panel p{font-size:13px;line-height:1.5}.panel button{display:block;width:100%;margin:8px 0;padding:12px;font:inherit;font-size:16px;background:#f4c542;color:#111;border:0;border-radius:6px}
-#specials{position:absolute;right:12px;bottom:12px;display:none;flex-direction:column;gap:8px}#specials.show{display:flex}#specials button{width:64px;height:64px;border-radius:50%;border:3px solid #f4c542;background:#1a1f33;color:#f4c542;font:inherit;font-size:18px;opacity:.35}#specials button.ready{opacity:1;background:#f4c542;color:#111}
-#toast{position:absolute;left:50%;top:70px;transform:translateX(-50%);font-size:13px;color:#f4c542;pointer-events:none;text-shadow:0 1px 0 #000;white-space:nowrap}
+#btns{display:none}#btns.show{display:block}
+.cbtn{position:absolute;width:76px;height:76px;border-radius:50%;border:3px solid #f4c542;background:rgba(26,31,51,.8);color:#f4c542;font:inherit;font-size:26px;display:flex;align-items:center;justify-content:center;line-height:1}
+.cbtn::after{content:attr(data-label);position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:4px;font-size:10px;letter-spacing:1px;color:#f4c542;white-space:nowrap}
+.cbtn.ready{background:#f4c542;color:#111;box-shadow:0 0 16px 4px rgba(244,197,66,.65)}
+#btnBlock{left:22px;bottom:40px}
+#btnPower{right:22px;bottom:40px}
+#btnKick{right:110px;bottom:40px}
+#btnPunch{right:198px;bottom:40px}
+#powerPicker{position:absolute;right:14px;bottom:128px;display:none;gap:10px}
+#powerPicker.show{display:flex}
+#powerPicker button{width:52px;height:52px;border-radius:50%;border:2px solid #f4c542;background:#1a1f33;color:#f4c542;font:inherit;font-size:13px;font-weight:bold}
+#powerPicker button:disabled{opacity:.3}
+#toast{position:absolute;left:50%;top:104px;transform:translateX(-50%);font-size:13px;color:#f4c542;pointer-events:none;text-shadow:0 1px 0 #000;white-space:nowrap}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
-<div id="specials"><button id="s3">S3</button><button id="s2">S2</button><button id="s1">S1</button></div>
+<div id="btns">
+<button id="btnBlock" class="cbtn" data-label="BLOCK">&#128737;</button>
+<button id="btnPunch" class="cbtn" data-label="PUNCH">&#128074;</button>
+<button id="btnKick" class="cbtn" data-label="KICK">&#129462;</button>
+<button id="btnPower" class="cbtn" data-label="POWER">&#9889;</button>
+<div id="powerPicker"><button id="pk1">S1</button><button id="pk2">S2</button><button id="pk3">S3</button></div>
+</div>
 <div id="toast"></div>
 <div class="overlay show" id="title"><div class="panel"><h1>CARL'S DOORWAY BRAWL</h1><p>ONE THUMB. ONE DOORWAY. ONE CRAWLER LEAVES.<br>LEFT SIDE: HOLD = BLOCK, SWIPE LEFT = DODGE. RIGHT SIDE: TAP = LIGHT, SWIPE RIGHT = MEDIUM, HOLD = HEAVY.</p><button id="fightBtn">FIGHT</button><button id="titleMute">SOUND: ON</button></div></div>
 <div class="overlay" id="pauseMenu"><div class="panel"><h1>PAUSED</h1><button id="resume">RESUME</button><button id="quit">QUIT</button></div></div>

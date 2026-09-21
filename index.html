@@ -5,10 +5,27 @@
 canvas{display:block;image-rendering:pixelated;background:#101422}
 .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(9,11,18,.85)}.overlay.show{display:flex}
 .panel{text-align:center;padding:16px;max-width:520px}.panel h1{margin:0 0 8px;font-size:28px;letter-spacing:2px}.panel p{font-size:13px;line-height:1.5}.panel button{display:block;width:100%;margin:8px 0;padding:12px;font:inherit;font-size:16px;background:#f4c542;color:#111;border:0;border-radius:6px}
-#specials{position:absolute;right:12px;bottom:12px;display:none;flex-direction:column;gap:8px}#specials.show{display:flex}#specials button{width:64px;height:64px;border-radius:50%;border:3px solid #f4c542;background:#1a1f33;color:#f4c542;font:inherit;font-size:18px;opacity:.35}#specials button.ready{opacity:1;background:#f4c542;color:#111}
-#toast{position:absolute;left:50%;top:70px;transform:translateX(-50%);font-size:13px;color:#f4c542;pointer-events:none;text-shadow:0 1px 0 #000;white-space:nowrap}
+#btns{display:none}#btns.show{display:block}
+.cbtn{position:absolute;width:76px;height:76px;border-radius:50%;border:3px solid #f4c542;background:rgba(26,31,51,.8);color:#f4c542;font:inherit;font-size:26px;display:flex;align-items:center;justify-content:center;line-height:1}
+.cbtn::after{content:attr(data-label);position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:4px;font-size:10px;letter-spacing:1px;color:#f4c542;white-space:nowrap}
+.cbtn.ready{background:#f4c542;color:#111;box-shadow:0 0 16px 4px rgba(244,197,66,.65)}
+#btnBlock{left:22px;bottom:40px}
+#btnPower{right:22px;bottom:40px}
+#btnKick{right:110px;bottom:40px}
+#btnPunch{right:198px;bottom:40px}
+#powerPicker{position:absolute;right:14px;bottom:128px;display:none;gap:10px}
+#powerPicker.show{display:flex}
+#powerPicker button{width:52px;height:52px;border-radius:50%;border:2px solid #f4c542;background:#1a1f33;color:#f4c542;font:inherit;font-size:13px;font-weight:bold}
+#powerPicker button:disabled{opacity:.3}
+#toast{position:absolute;left:50%;top:104px;transform:translateX(-50%);font-size:13px;color:#f4c542;pointer-events:none;text-shadow:0 1px 0 #000;white-space:nowrap}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
-<div id="specials"><button id="s3">S3</button><button id="s2">S2</button><button id="s1">S1</button></div>
+<div id="btns">
+<button id="btnBlock" class="cbtn" data-label="BLOCK">&#128737;</button>
+<button id="btnPunch" class="cbtn" data-label="PUNCH">&#128074;</button>
+<button id="btnKick" class="cbtn" data-label="KICK">&#129462;</button>
+<button id="btnPower" class="cbtn" data-label="POWER">&#9889;</button>
+<div id="powerPicker"><button id="pk1">S1</button><button id="pk2">S2</button><button id="pk3">S3</button></div>
+</div>
 <div id="toast"></div>
 <div class="overlay show" id="title"><div class="panel"><h1>CARL'S DOORWAY BRAWL</h1><p>ONE THUMB. ONE DOORWAY. ONE CRAWLER LEAVES.<br>LEFT SIDE: HOLD = BLOCK, SWIPE LEFT = DODGE. RIGHT SIDE: TAP = LIGHT, SWIPE RIGHT = MEDIUM, HOLD = HEAVY.</p><button id="fightBtn">FIGHT</button><button id="titleMute">SOUND: ON</button></div></div>
 <div class="overlay" id="pauseMenu"><div class="panel"><h1>PAUSED</h1><button id="resume">RESUME</button><button id="quit">QUIT</button></div></div>
@@ -42,11 +59,15 @@ const Audio={ac:null,muted:Save.data.mute,_t:0,
 
 // Touch layout (landscape): left third = defense (hold: block, swipe left: dash back);
 // right two thirds = offense (tap: light, swipe right: medium, hold >=180ms: heavy until released).
-const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SWIPE:40,HOLD_MS:180,
+const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SWIPE:40,HOLD_MS:180,POWER_HOLD_MS:400,
+  _powerT0:0,_powerShown:false,
   init(canvas){
     const pos=e=>{const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}};
-    canvas.addEventListener('pointerdown',e=>{Audio.init();if(G.state==='TITLE')return G.startFight();if(G.state!=='FIGHT')return;
-      const p=pos(e),zone=p.x<this.DEF_ZONE?'def':'off';
+    canvas.addEventListener('pointerdown',e=>{Audio.init();const p=pos(e);
+      // Pause glyph hit-test: a tap there toggles pause and must not also register as a light.
+      if(G.state==='FIGHT'&&G.hitPause(p.x,p.y)){G.togglePause();return}
+      if(G.state==='TITLE')return G.startFight();if(G.state!=='FIGHT')return;
+      const zone=p.x<this.DEF_ZONE?'def':'off';
       for(const rec of this._ptrs.values())if(rec.zone===zone)return; // one active pointer per zone
       this._ptrs.set(e.pointerId,{x0:p.x,t0:performance.now(),zone,moved:false,holdFired:false});
       if(zone==='def')this.held.block=true});
@@ -56,7 +77,7 @@ const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SW
       if(P.zone==='def')this.held.block=false;
       else{if(!P.moved&&!P.holdFired)this.q.push('light');this.held.heavy=false}};
     canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
-    for(const n of[1,2,3])document.getElementById('s'+n).addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('special'+n)});
+    this.bindButtons();
     addEventListener('keydown',e=>{if(e.repeat)return;const k=e.key.toLowerCase();
       if(e.code==='Space'&&G.state==='TITLE'){e.preventDefault();return G.startFight()}
       if(k==='p')return G.togglePause();
@@ -64,10 +85,39 @@ const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SW
       if(k==='j')this.q.push('light');if(k==='k')this.q.push('medium');if(k==='a')this.q.push('dashBack');
       if(k==='l')this.held.heavy=true;if(k==='s')this.held.block=true;if(k==='1'||k==='2'||k==='3')this.q.push('special'+k)});
     addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k==='s')this.held.block=false;if(k==='l')this.held.heavy=false})},
-  // Called once per sim frame by Ctrl.player: promotes a long press in the offense zone to a heavy hold.
-  tick(){for(const P of this._ptrs.values())if(!P.moved&&P.zone==='off'&&!P.holdFired&&performance.now()-P.t0>=this.HOLD_MS){P.holdFired=true;this.held.heavy=true}},
+  // On-screen buttons: BLOCK is a hold (mirrors the field def-zone hold); PUNCH/KICK fire on press.
+  // POWER taps 'powerAuto' (drain() resolves it to the highest affordable special); held past
+  // POWER_HOLD_MS it shows the S1-S3 picker instead, and releasing over a chip fires that special.
+  // Release point is read with elementFromPoint (not e.target) because touch pointers implicitly
+  // capture to their pointerdown target, so e.target would still be #btnPower on release.
+  bindButtons(){
+    const id=x=>document.getElementById(x);
+    const block=id('btnBlock');
+    block.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.held.block=true});
+    const blockOff=()=>{this.held.block=false};
+    block.addEventListener('pointerup',blockOff);block.addEventListener('pointercancel',blockOff);
+    id('btnPunch').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('light')});
+    id('btnKick').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('medium')});
+    const power=id('btnPower'),picker=id('powerPicker');
+    power.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this._powerT0=performance.now();this._powerShown=false});
+    const powerEnd=e=>{e.stopPropagation();
+      if(this._powerShown){
+        const el=document.elementFromPoint(e.clientX,e.clientY),m=el&&el.id&&el.id.match(/^pk([123])$/);
+        if(m&&!el.disabled)this.q.push('special'+m[1]);
+        picker.classList.remove('show')}
+      else if(this._powerT0)this.q.push('powerAuto');
+      this._powerT0=0;this._powerShown=false};
+    power.addEventListener('pointerup',powerEnd);power.addEventListener('pointercancel',powerEnd)},
+  // Called once per sim frame by Ctrl.player: promotes a long press in the offense zone to a heavy
+  // hold, and a long press on POWER to the S1-S3 picker (both use the same wall-clock pattern).
+  tick(){for(const P of this._ptrs.values())if(!P.moved&&P.zone==='off'&&!P.holdFired&&performance.now()-P.t0>=this.HOLD_MS){P.holdFired=true;this.held.heavy=true}
+    if(this._powerT0&&!this._powerShown&&performance.now()-this._powerT0>=this.POWER_HOLD_MS){this._powerShown=true;document.getElementById('powerPicker').classList.add('show')}},
   drain(){const it={light:false,medium:false,heavy:this.held.heavy,block:this.held.block,dashBack:false,special:0};
-    for(const a of this.q){if(a.startsWith('special'))it.special=+a[7];else it[a]=true}this.q.length=0;return it}};
+    for(const a of this.q){
+      if(a==='powerAuto'){const p=G.fight?G.fight.p1.power:0;let n=0;for(let k=3;k>=1;k--)if(p>=100*k){n=k;break}it.special=n}
+      else if(a.startsWith('special'))it.special=+a[7];
+      else it[a]=true}
+    this.q.length=0;return it}};
 
 const Ctrl={
   EMPTY:()=>({light:false,medium:false,heavy:false,block:false,dashBack:false,special:0}),
@@ -105,6 +155,21 @@ const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',
 const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,HITSTOP=4,POWER_MAX=300;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
 const STAGE_W=1400;
+
+// Dungeon encounters: a floor + name + enemy id/tier the HUD reads for the "FLOOR n • NAME" line
+// and G.startFight uses to build p2. Pure data lookup; scaling (hpMul/atkMul) is applied by G, not
+// here, so Encounter.resolve never mutates a DEFS entry.
+const ENCOUNTERS={
+  f1_goblin:{floor:1,name:'THE DEPTHS',enemy:'goblin',tier:'basic',hpMul:1,atkMul:1},
+  f1_hob:   {floor:1,name:'THE DEPTHS',enemy:'hobgoblin',tier:'brawl',hpMul:1,atkMul:1}};
+const Encounter={
+  resolve(x){
+    const o=typeof x==='string'?ENCOUNTERS[x]:x;
+    if(!o)throw new Error('unknown encounter: '+x);
+    const enemy=typeof o.enemy==='string'?DEFS[o.enemy]:o.enemy;
+    if(!enemy)throw new Error('unknown encounter enemy: '+o.enemy);
+    return{floor:o.floor,name:o.name,enemy,tier:o.tier,
+      hpMul:o.hpMul===undefined?1:o.hpMul,atkMul:o.atkMul===undefined?1:o.atkMul}}};
 
 class Fighter{
   constructor(def,side,ctrl){this.def=def;this.side=side;this.face=side;this.ctrl=ctrl;
@@ -607,7 +672,30 @@ const Rig={
         c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*10,h.y-30);c.stroke();
         c.fillStyle='#3a2f22';for(let i=0;i<3;i++){c.beginPath();
           c.arc(h.x+face*(6+i*2),h.y-8-i*8,3,0,Math.PI*2);c.fill()}}}
-    c.restore()}};
+    c.restore()},
+  // HUD portrait: a small front-facing head-and-shoulders bust built straight from the look's
+  // palette/proportions (not a crop of the side-view fight rig, which has no front-facing pose).
+  // Cached on the look object itself, so it's built once per character regardless of how many
+  // fighters (or hp-scaled encounter clones sharing the same look) use it.
+  portrait(look){
+    if(look._portrait)return look._portrait;
+    const S=56,cnv=document.createElement('canvas');cnv.width=S;cnv.height=S;
+    const c=cnv.getContext('2d'),skinDark=shade(look.skin,-.35);
+    const cx=S/2,headR=Math.min(16,look.headR*1.3),headY=S*0.42,shW=Math.min(S*0.92,look.shoulderW*1.7),shY=S*0.64;
+    if(look.earLen){ // drawn behind the head so the head fill covers each ear's base
+      const el=look.earLen*.6;c.fillStyle=look.skin;c.strokeStyle=skinDark;c.lineWidth=1.2;
+      c.beginPath();c.moveTo(cx-headR*.7,headY-headR*.1);c.lineTo(cx-headR*.9-el*.7,headY-el*.6);c.lineTo(cx-headR*.2,headY+headR*.3);c.closePath();c.fill();c.stroke();
+      c.beginPath();c.moveTo(cx+headR*.7,headY-headR*.1);c.lineTo(cx+headR*.9+el*.7,headY-el*.6);c.lineTo(cx+headR*.2,headY+headR*.3);c.closePath();c.fill();c.stroke()}
+    c.fillStyle=look.primary;
+    c.beginPath();c.moveTo(cx-shW/2,S+4);c.lineTo(cx-shW*.32,shY);c.lineTo(cx+shW*.32,shY);c.lineTo(cx+shW/2,S+4);c.closePath();c.fill();
+    c.strokeStyle=shade(look.primary,-.4);c.lineWidth=1.5;c.stroke();
+    c.fillStyle=look.skin;c.beginPath();c.arc(cx,headY,headR,0,Math.PI*2);c.fill();
+    c.lineWidth=1.5;c.strokeStyle=skinDark;c.stroke();
+    if(look.hair){c.fillStyle=look.hair;c.beginPath();c.arc(cx,headY-headR*.3,headR*1.05,Math.PI*1.05,Math.PI*1.95);c.fill()}
+    c.fillStyle='#141414';
+    c.beginPath();c.arc(cx-headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
+    c.beginPath();c.arc(cx+headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
+    look._portrait=cnv;return cnv}};
 for(const id in DEFS)if(LOOKS[id])DEFS[id].look=LOOKS[id];
 
 const Render={ctx:canvas.getContext('2d'),
@@ -625,13 +713,67 @@ const Render={ctx:canvas.getContext('2d'),
       c.fillStyle='#fa4';c.fillRect(F.x-20,y,40*Math.min(1,F.f/F.move.charge),6)}
     if(F.state==='BLOCK'||F.state==='BLOCKSTUN'){const y=this.overlayY(F);
       c.fillStyle='#8cf';c.beginPath();c.arc(F.x,y+3,6,0,Math.PI*2);c.fill()}},
-  bar(c,x,y,w,h,pct,col,right){c.fillStyle='#222';c.fillRect(x,y,w,h);c.fillStyle=col;const fw=w*clamp(pct,0,1);c.fillRect(right?x+w-fw:x,y,fw,h)},
-  hud(c,f){const a=f.p1,b=f.p2;this.bar(c,20,16,340,18,a.hp/a.maxHp,'#4d4',false);this.bar(c,W-360,16,340,18,b.hp/b.maxHp,'#4d4',true);
-    for(let i=0;i<3;i++){this.bar(c,20+i*116,40,108,8,clamp(a.power-100*i,0,100)/100,'#fc3',false);this.bar(c,W-360+i*116,40,108,8,clamp(b.power-100*i,0,100)/100,'#fc3',true)}
-    c.fillStyle='#fff';c.font='bold 22px ui-monospace,monospace';c.textAlign='center';c.fillText(String(Math.ceil(Math.max(0,f.clock))),W/2,34);
-    c.font='11px ui-monospace,monospace';c.textAlign='left';c.fillText(a.def.name,20,62);c.textAlign='right';c.fillText(b.def.name,W-20,62);
-    c.font='bold 20px ui-monospace,monospace';if(a.combo>1){c.textAlign='left';c.fillStyle='#f4c542';c.fillText(a.combo+' HITS',20,110)}
-    if(b.combo>1){c.textAlign='right';c.fillStyle='#f66';c.fillText(b.combo+' HITS',W-20,110)}
+  // Pause glyph rect in canvas space; G.hitPause tests pointerdown against this same rect, and
+  // pauseGlyph below draws to it, so hit-test and visual stay in lockstep with a single source.
+  pauseRect:{x:W/2-18,y:38,w:36,h:24},
+  hpBar(c,x,y,w,h,pct,col){
+    c.fillStyle='#1a1a1a';c.fillRect(x,y,w,h);
+    c.fillStyle=col;c.fillRect(x,y,w*clamp(pct,0,1),h);
+    c.strokeStyle='#000';c.lineWidth=1.5;c.strokeRect(x+.75,y+.75,w-1.5,h-1.5)},
+  // p2's fill drains from the bar's right edge (matches "right" in the rendition) and is a
+  // red(low)->orange(full) gradient across the filled span, not a flat color like p1's green.
+  hpBarGrad(c,x,y,w,h,pct){
+    c.fillStyle='#1a1a1a';c.fillRect(x,y,w,h);
+    const fw=w*clamp(pct,0,1),fx=x+w-fw;
+    if(fw>0){const g=c.createLinearGradient(fx,0,fx+fw,0);g.addColorStop(0,'#c62828');g.addColorStop(1,'#ffa726');
+      c.fillStyle=g;c.fillRect(fx,y,fw,h)}
+    c.strokeStyle='#000';c.lineWidth=1.5;c.strokeRect(x+.75,y+.75,w-1.5,h-1.5)},
+  pauseGlyph(c){const r=this.pauseRect,rr=6;
+    c.fillStyle='rgba(0,0,0,.4)';c.strokeStyle='#f4c542';c.lineWidth=1.5;
+    c.beginPath();c.moveTo(r.x+rr,r.y);c.lineTo(r.x+r.w-rr,r.y);c.arcTo(r.x+r.w,r.y,r.x+r.w,r.y+rr,rr);
+    c.lineTo(r.x+r.w,r.y+r.h-rr);c.arcTo(r.x+r.w,r.y+r.h,r.x+r.w-rr,r.y+r.h,rr);
+    c.lineTo(r.x+rr,r.y+r.h);c.arcTo(r.x,r.y+r.h,r.x,r.y+r.h-rr,rr);
+    c.lineTo(r.x,r.y+rr);c.arcTo(r.x,r.y,r.x+rr,r.y,rr);c.closePath();c.fill();c.stroke();
+    c.fillStyle='#fff';const cx=r.x+r.w/2,cy=r.y+r.h/2,bw=3,bh=12,gap=4;
+    c.fillRect(cx-gap-bw,cy-bh/2,bw,bh);c.fillRect(cx+gap,cy-bh/2,bw,bh)},
+  combo(c,x,y,text,deg,col,align){
+    c.save();c.translate(x,y);c.rotate(D(deg));c.textAlign=align;c.textBaseline='alphabetic';
+    c.font='900 26px ui-monospace,monospace';c.lineWidth=3;c.strokeStyle='#000';c.strokeText(text,0,0);
+    c.fillStyle=col;c.fillText(text,0,0);c.restore()},
+  // Three chevron cells, filled from p1's power (the rendition shows one power bar for the player,
+  // not a per-side pair), one cell per 100 power toward the POWER_MAX of 300.
+  chevrons(c,power){
+    const cellW=90,cellH=14,gap=6,total=cellW*3+gap*2,x0=W/2-total/2,y=H-24,skew=8;
+    for(let i=0;i<3;i++){const x=x0+i*(cellW+gap),filled=power>=100*(i+1);
+      c.fillStyle=filled?'#f4c542':'#26262c';
+      c.beginPath();c.moveTo(x+skew,y);c.lineTo(x+cellW,y);c.lineTo(x+cellW-skew,y+cellH);c.lineTo(x,y+cellH);c.closePath();
+      c.fill();c.strokeStyle='#000';c.lineWidth=1.2;c.stroke()}},
+  hud(c,f){const a=f.p1,b=f.p2;
+    // Portraits + numeric hp bars: p1 left (green), p2 right (red->orange, drains from the right).
+    const p1x=18,p2x=W-74,barW=300,barH=18,p1barX=84,p2barX=W-74-10-barW;
+    try{c.drawImage(Rig.portrait(a.def.look),p1x,14,56,56);c.drawImage(Rig.portrait(b.def.look),p2x,14,56,56)}catch(e){}
+    c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(p1x+1,15,54,54);c.strokeRect(p2x+1,15,54,54);
+    c.textBaseline='alphabetic';
+    c.font='bold 14px ui-monospace,monospace';c.textAlign='left';c.fillStyle='#fff';c.fillText(a.def.name,p1barX,25);
+    c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p1barX,39);
+    c.font='bold 14px ui-monospace,monospace';c.textAlign='right';c.fillStyle='#fff';c.fillText(b.def.name,p2barX+barW,25);
+    c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39);
+    this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22');
+    this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp);
+    c.font='bold 12px ui-monospace,monospace';c.fillStyle='#fff';c.textAlign='center';
+    c.fillText(Math.max(0,Math.round(a.hp))+' / '+a.maxHp,p1barX+barW/2,48+barH-4);
+    c.fillText(Math.max(0,Math.round(b.hp))+' / '+b.maxHp,p2barX+barW/2,48+barH-4);
+    // Title (a horizontal squeeze approximates a condensed face without loading a web font) + pause.
+    c.save();c.translate(W/2,30);c.scale(.82,1.12);c.textAlign='center';c.lineWidth=4;c.strokeStyle='#000';
+    c.font='900 24px ui-monospace,monospace';c.strokeText('FIGHTER',0,0);c.fillStyle='#f4c542';c.fillText('FIGHTER',0,0);c.restore();
+    this.pauseGlyph(c);
+    // Floor line: reads G.encounter (a plain fight without one shows an exhibition label instead).
+    c.font='11px ui-monospace,monospace';c.fillStyle='#ccc';c.textAlign='center';c.letterSpacing='1px';
+    c.fillText(G.encounter?('FLOOR '+G.encounter.floor+' • '+G.encounter.name):'EXHIBITION • DOORWAY',W/2,88);
+    c.letterSpacing='0px';
+    if(a.combo>1)this.combo(c,56,190,a.combo+' HITS',-6,'#f4c542','left');
+    if(b.combo>1)this.combo(c,W-56,190,b.combo+' HITS',6,'#f66','right');
+    this.chevrons(c,a.power);
     if(f.over){c.textAlign='center';c.fillStyle='#fff';c.font='bold 40px ui-monospace,monospace';c.fillText('K.O.',W/2,H/2)}},
   frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
@@ -697,20 +839,32 @@ const FX={list:[],shake:0,flash:0,
         c.fillText(p.text,p.x,p.y-t*30)}}
     c.globalAlpha=1}};
 
-const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
+const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
+  // Canvas hit-test for the HUD's pause glyph (drawn by Render.hud at Render.pauseRect), consulted
+  // by Input's pointerdown handler before it does any zone/gesture handling.
+  hitPause(x,y){const r=Render.pauseRect;return x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h},
+  // {encounter:'f1_goblin'|{...}} resolves via Encounter.resolve, stores the result on G.encounter
+  // (the HUD's floor line reads it), and clones the enemy def here (never inside Fight) so p2's
+  // hp/atk carry the encounter's multipliers without mutating the shared DEFS entry.
   startFight(o={}){const seed=o.seed||this.seed;
-    this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:DEFS[o.p2||'donut'],clock:o.clock,
-      ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(o.ai||'basic',seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
+    let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
+    this.encounter=null;
+    if(o.encounter){
+      const enc=Encounter.resolve(o.encounter);this.encounter=enc;
+      p2def=Object.assign({},enc.enemy,{hp:Math.round(enc.enemy.hp*enc.hpMul),atk:Math.round(enc.enemy.atk*enc.atkMul)});
+      ai=enc.tier}
+    this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:p2def,clock:o.clock,
+      ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
     this.cam={x:STAGE_W/2,zoom:1};FX.reset();
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
-    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('specials',true);Audio.say('FIGHT!')},
+    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.say('FIGHT!')},
   onEvent(t,a){if(t==='hit')Audio.hit();if(t==='block')Audio.block();if(t==='parry'){Audio.parry();Audio.say('PARRY!')}if(t==='ko')Audio.ko();
     if(t!=='ko')return;
     this.state='RESULT';document.getElementById('resultTitle').textContent=a.side===1?'VICTORY':'DEFEATED';
     document.getElementById('resultLine').textContent=a.def.name+' wins with '+Math.round(100*a.hp/a.maxHp)+'% health.';
-    this.show('result',true);this.show('specials',false)},
+    this.show('result',true);this.show('btns',false)},
   // Freeze p1 into a named pose for screenshotting (tests/harness.py --pose). Maps a pose key to the
   // Fighter state/moveName/f (and, where poseFor divides by it, stun) that Rig.poseFor resolves back
   // to that same key. G.sim=true stops the wall-clock loop from stepping the sim, so the frame holds.
@@ -746,7 +900,7 @@ const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:
     if(m.stun!==undefined)p.stun=m.stun;
     this.sim=true},
   togglePause(){if(this.state==='FIGHT'){this.state='PAUSED';this.show('pauseMenu',true)}else if(this.state==='PAUSED'){this.state='FIGHT';this.show('pauseMenu',false);this.acc=0}},
-  toTitle(){this.state='TITLE';this.fight=null;this.show('pauseMenu',false);this.show('result',false);this.show('specials',false);this.show('title',true)},
+  toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)},
   // Steps the sim one tick, handling KO slow-mo (step every 4th tick while fight.slowmo>0) and
   // draining fight.fx into FX after any step. No rAF/wall-clock dependency, so tests can call it
   // directly. G.loop drives this once per accumulated STEP; simFrames/stepFrame delegate to it too.
@@ -757,14 +911,16 @@ const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:
     this.syncSpecials()},
   stepFrame(){this.tick()},
   simFrames(n){for(let i=0;i<n;i++)this.stepFrame()},
-  syncSpecials(){const p=this.fight.p1.power;for(const n of[1,2,3])document.getElementById('s'+n).classList.toggle('ready',p>=100*n)},
+  syncSpecials(){const p=this.fight.p1.power;
+    document.getElementById('btnPower').classList.toggle('ready',p>=100);
+    for(const n of[1,2,3])document.getElementById('pk'+n).disabled=p<100*n},
   loop(t){if(!this.sim){const dt=Math.min(.1,(t-this.last)/1000||0);this.last=t;this.acc+=dt;while(this.acc>=STEP){this.tick();this.acc-=STEP}}
     if(this.fight)Camera.update(this.cam,this.fight);
     FX.update();
     Render.frame(this.fight);requestAnimationFrame(t=>this.loop(t))},
   init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
     document.getElementById('fightBtn').onclick=()=>{Audio.init();this.startFight()};
-    document.getElementById('again').onclick=()=>this.startFight({seed:this.fight?this.fight.rng.int(1e9)+1:this.seed});
+    document.getElementById('again').onclick=()=>this.startFight({seed:this.fight?this.fight.rng.int(1e9)+1:this.seed,encounter:this.encounter});
     document.getElementById('resultTitleBtn').onclick=()=>this.toTitle();
     document.getElementById('resume').onclick=()=>this.togglePause();
     document.getElementById('quit').onclick=()=>this.toTitle();
@@ -905,5 +1061,9 @@ Test.add('hitstop is per move',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])})
 Test.add('a hit queues spark, popup and shake fx; a block queues dust',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);const kinds=f.fx.map(e=>e.kind);ok(kinds.includes('spark')&&kinds.includes('popup')&&kinds.includes('shake'),kinds.join());const g=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(g);run(g,15);ok(g.fx.some(e=>e.kind==='dust'))});
 Test.add('KO starts slow-mo and G steps the sim every 4th tick during it',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);f.p2.hp=1;run(f,5);ok(f.over&&f.slowmo>0);const before=f.slowmo;G.fight=f;G.state='FIGHT';G._tickN=0;for(let i=0;i<8;i++)G.tick();eq(f.slowmo,before-2);G.fight=null;G.state='TITLE'});
 Test.add('FX updates and expires particles deterministically',()=>{FX.reset();FX.push({kind:'spark',x:0,y:0,n:6,col:'#fff'});eq(FX.list.length,6);for(let i=0;i<120;i++)FX.update();eq(FX.list.length,0);FX.push({kind:'shake',amt:8});FX.update();ok(FX.shake>0&&FX.shake<8)});
+Test.add('on-screen buttons map to intents',()=>{Input.q.length=0;const btn=id=>document.getElementById(id);ok(btn('btnBlock')&&btn('btnPunch')&&btn('btnKick')&&btn('btnPower'));btn('btnPunch').dispatchEvent(new PointerEvent('pointerdown',{pointerId:7,bubbles:true}));btn('btnKick').dispatchEvent(new PointerEvent('pointerdown',{pointerId:8,bubbles:true}));ok(Input.q.includes('light')&&Input.q.includes('medium'));btn('btnBlock').dispatchEvent(new PointerEvent('pointerdown',{pointerId:9,bubbles:true}));eq(Input.held.block,true);btn('btnBlock').dispatchEvent(new PointerEvent('pointerup',{pointerId:9,bubbles:true}));eq(Input.held.block,false);Input.q.length=0});
+Test.add('POWER tap fires the highest affordable special',()=>{const f=mkFight();G.fight=f;f.p1.power=250;Input.q.push('powerAuto');eq(Input.drain().special,2);f.p1.power=50;Input.q.push('powerAuto');eq(Input.drain().special,0);G.fight=null});
+Test.add('encounter resolves floor, name and enemy def',()=>{const e=Encounter.resolve('f1_goblin');eq(e.floor,1);eq(e.name,'THE DEPTHS');eq(e.enemy.id,'goblin');const o=Encounter.resolve({floor:3,name:'X',enemy:'hobgoblin',tier:'brawl'});eq(o.enemy.hp,DEFS.hobgoblin.hp)});
+Test.add('startFight with an encounter sets p2 to the mob and scales hp',()=>{G.startFight({encounter:{floor:2,name:'T',enemy:'goblin',tier:'dummy',hpMul:2,atkMul:1},ctrl1:Ctrl.idle()});eq(G.fight.p2.def.id,'goblin');eq(G.fight.p2.maxHp,600);eq(G.encounter.floor,2);G.toTitle()});
 
 </script></body></html>

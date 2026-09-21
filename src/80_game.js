@@ -1,17 +1,29 @@
-const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
+const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
+  // Canvas hit-test for the HUD's pause glyph (drawn by Render.hud at Render.pauseRect), consulted
+  // by Input's pointerdown handler before it does any zone/gesture handling.
+  hitPause(x,y){const r=Render.pauseRect;return x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h},
+  // {encounter:'f1_goblin'|{...}} resolves via Encounter.resolve, stores the result on G.encounter
+  // (the HUD's floor line reads it), and clones the enemy def here (never inside Fight) so p2's
+  // hp/atk carry the encounter's multipliers without mutating the shared DEFS entry.
   startFight(o={}){const seed=o.seed||this.seed;
-    this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:DEFS[o.p2||'donut'],clock:o.clock,
-      ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(o.ai||'basic',seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
+    let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
+    this.encounter=null;
+    if(o.encounter){
+      const enc=Encounter.resolve(o.encounter);this.encounter=enc;
+      p2def=Object.assign({},enc.enemy,{hp:Math.round(enc.enemy.hp*enc.hpMul),atk:Math.round(enc.enemy.atk*enc.atkMul)});
+      ai=enc.tier}
+    this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:p2def,clock:o.clock,
+      ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
     this.cam={x:STAGE_W/2,zoom:1};FX.reset();
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
-    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('specials',true);Audio.say('FIGHT!')},
+    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.say('FIGHT!')},
   onEvent(t,a){if(t==='hit')Audio.hit();if(t==='block')Audio.block();if(t==='parry'){Audio.parry();Audio.say('PARRY!')}if(t==='ko')Audio.ko();
     if(t!=='ko')return;
     this.state='RESULT';document.getElementById('resultTitle').textContent=a.side===1?'VICTORY':'DEFEATED';
     document.getElementById('resultLine').textContent=a.def.name+' wins with '+Math.round(100*a.hp/a.maxHp)+'% health.';
-    this.show('result',true);this.show('specials',false)},
+    this.show('result',true);this.show('btns',false)},
   // Freeze p1 into a named pose for screenshotting (tests/harness.py --pose). Maps a pose key to the
   // Fighter state/moveName/f (and, where poseFor divides by it, stun) that Rig.poseFor resolves back
   // to that same key. G.sim=true stops the wall-clock loop from stepping the sim, so the frame holds.
@@ -47,7 +59,7 @@ const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:
     if(m.stun!==undefined)p.stun=m.stun;
     this.sim=true},
   togglePause(){if(this.state==='FIGHT'){this.state='PAUSED';this.show('pauseMenu',true)}else if(this.state==='PAUSED'){this.state='FIGHT';this.show('pauseMenu',false);this.acc=0}},
-  toTitle(){this.state='TITLE';this.fight=null;this.show('pauseMenu',false);this.show('result',false);this.show('specials',false);this.show('title',true)},
+  toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)},
   // Steps the sim one tick, handling KO slow-mo (step every 4th tick while fight.slowmo>0) and
   // draining fight.fx into FX after any step. No rAF/wall-clock dependency, so tests can call it
   // directly. G.loop drives this once per accumulated STEP; simFrames/stepFrame delegate to it too.
@@ -58,14 +70,16 @@ const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:
     this.syncSpecials()},
   stepFrame(){this.tick()},
   simFrames(n){for(let i=0;i<n;i++)this.stepFrame()},
-  syncSpecials(){const p=this.fight.p1.power;for(const n of[1,2,3])document.getElementById('s'+n).classList.toggle('ready',p>=100*n)},
+  syncSpecials(){const p=this.fight.p1.power;
+    document.getElementById('btnPower').classList.toggle('ready',p>=100);
+    for(const n of[1,2,3])document.getElementById('pk'+n).disabled=p<100*n},
   loop(t){if(!this.sim){const dt=Math.min(.1,(t-this.last)/1000||0);this.last=t;this.acc+=dt;while(this.acc>=STEP){this.tick();this.acc-=STEP}}
     if(this.fight)Camera.update(this.cam,this.fight);
     FX.update();
     Render.frame(this.fight);requestAnimationFrame(t=>this.loop(t))},
   init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
     document.getElementById('fightBtn').onclick=()=>{Audio.init();this.startFight()};
-    document.getElementById('again').onclick=()=>this.startFight({seed:this.fight?this.fight.rng.int(1e9)+1:this.seed});
+    document.getElementById('again').onclick=()=>this.startFight({seed:this.fight?this.fight.rng.int(1e9)+1:this.seed,encounter:this.encounter});
     document.getElementById('resultTitleBtn').onclick=()=>this.toTitle();
     document.getElementById('resume').onclick=()=>this.togglePause();
     document.getElementById('quit').onclick=()=>this.toTitle();
