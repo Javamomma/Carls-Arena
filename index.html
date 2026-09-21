@@ -333,14 +333,22 @@ function shade(hex,amt){ // amt<0 darkens, amt>0 lightens, both toward 0/255
 
 // ---- pose table: POSES[key] = [{t:0..1, ang:{...}, off:{x,y}}, ...], tweened linearly by t01 ----
 const POSES={};
+// Sorts each pose's keyframes once and caches the union of angle-key names on the array (as ._angKeys)
+// so the per-frame sample doesn't allocate a Set/spread every call. Run once, after all POSES[...]
+// assignments below, before any Rig.solve() call.
+function preparePoses(){
+  for(const k in POSES){
+    const kf=POSES[k].slice().sort((x,y)=>x.t-y.t);
+    const seen={};for(const f of kf)for(const kk in(f.ang||{}))seen[kk]=1;
+    kf._angKeys=Object.keys(seen);POSES[k]=kf}}
 function samplePose(poseKey,t01){
   const kf=POSES[poseKey];t01=clamp(t01,0,1);
   let i=0;while(i<kf.length-2&&kf[i+1].t<=t01)i++;
   const a=kf[i],b=kf[Math.min(i+1,kf.length-1)],span=(b.t-a.t)||1,lt=clamp((t01-a.t)/span,0,1);
-  const ang={},keys=new Set([...Object.keys(a.ang||{}),...Object.keys(b.ang||{})]);
-  for(const k of keys)ang[k]=(((a.ang||{})[k]||0))+((((b.ang||{})[k]||0))-(((a.ang||{})[k]||0)))*lt;
-  const off={x:(((a.off||{}).x||0))+((((b.off||{}).x||0))-(((a.off||{}).x||0)))*lt,
-             y:(((a.off||{}).y||0))+((((b.off||{}).y||0))-(((a.off||{}).y||0)))*lt};
+  const aAng=a.ang||{},bAng=b.ang||{},ang={};
+  for(const k of kf._angKeys){const av=aAng[k]||0,bv=bAng[k]||0;ang[k]=av+(bv-av)*lt}
+  const aOff=a.off||{},bOff=b.off||{};
+  const off={x:(aOff.x||0)+((bOff.x||0)-(aOff.x||0))*lt,y:(aOff.y||0)+((bOff.y||0)-(aOff.y||0))*lt};
   return{ang,off}}
 
 // idle: subtle breathing sway; legs stay put (angle 0) so feet never drift off the floor line.
@@ -357,8 +365,8 @@ POSES.dash=[
 function jab(side,o={}){
   const S=side+'Shoulder',E=side+'Elbow';
   const startSh=o.startSh!==undefined?o.startSh:-15,startEl=o.startEl!==undefined?o.startEl:25;
-  const peakSh=o.peakSh!==undefined?o.peakSh:85,peakEl=o.peakEl!==undefined?o.peakEl:5,peakOffX=o.peakOffX!==undefined?o.peakOffX:10;
-  const torsoPeak=o.torsoPeak!==undefined?o.torsoPeak:10;
+  const peakSh=o.peakSh!==undefined?o.peakSh:80,peakEl=o.peakEl!==undefined?o.peakEl:5,peakOffX=o.peakOffX!==undefined?o.peakOffX:6;
+  const torsoPeak=o.torsoPeak!==undefined?o.torsoPeak:6;
   const guard=side==='r'?{lShoulder:D(10),lElbow:D(20)}:{rShoulder:D(-10),rElbow:D(20)};
   return[
     {t:0, ang:Object.assign({torso:D(4)},{[S]:D(startSh),[E]:D(startEl)},guard),off:{x:0,y:0}},
@@ -369,17 +377,24 @@ POSES.light2=jab('l',{peakSh:90,peakOffX:12});
 POSES.light3=jab('r',{peakSh:95,peakOffX:14,torsoPeak:14});
 POSES.light4=jab('l',{peakSh:100,peakOffX:16,torsoPeak:16});
 POSES.light5=jab('r',{peakSh:118,peakEl:-10,peakOffX:26,torsoPeak:22,startEl:30});
+// Medium: a deep forward lunge, not just an arm reach — front leg bends under the driving weight,
+// rear leg kicks out straight behind, torso commits hard forward. Silhouette (wide low stance, big
+// torso lean) reads nothing like light1's near-upright jab or heavy's vertical wind-up-then-smash.
 POSES.medium=[
-  {t:0, ang:{torso:D(-6),rShoulder:D(-10),rElbow:D(15),lShoulder:D(10),lElbow:D(15),rHip:D(-8),lHip:D(8)},off:{x:-4,y:0}},
-  {t:.5,ang:{torso:D(18),rShoulder:D(92), rElbow:D(0), lShoulder:D(-18),lElbow:D(10),rHip:D(10),lHip:D(-10)},off:{x:16,y:0}},
-  {t:1, ang:{torso:D(8), rShoulder:D(40), rElbow:D(15),lShoulder:D(0),  lElbow:D(15)},off:{x:4,y:0}}];
+  {t:0, ang:{torso:D(-10),rShoulder:D(-10),rElbow:D(15),lShoulder:D(10),lElbow:D(15),rHip:D(-14),lHip:D(10),rKnee:D(20),lKnee:D(-6)},off:{x:-6,y:0}},
+  {t:.5,ang:{torso:D(34), rShoulder:D(95), rElbow:D(-4),lShoulder:D(-14),lElbow:D(10),rHip:D(34), lHip:D(-46),rKnee:D(-40),lKnee:D(6)},off:{x:30,y:6}},
+  {t:1, ang:{torso:D(12), rShoulder:D(40), rElbow:D(15),lShoulder:D(0),  lElbow:D(15),rHip:D(10), lHip:D(-10)},off:{x:8,y:0}}];
+// Heavy wind-up: fist raised straight above the head, weight shifted back (matches poseFor's
+// CHARGE->heavyCharge mapping, so this is what's held while the player charges the swing).
 POSES.heavyCharge=[
-  {t:0,ang:{torso:D(-8), rShoulder:D(-70), rElbow:D(70), lShoulder:D(10),lElbow:D(20),rHip:D(-6),lHip:D(6)},off:{x:-4,y:0}},
-  {t:1,ang:{torso:D(-18),rShoulder:D(-118),rElbow:D(118),lShoulder:D(6), lElbow:D(16),rHip:D(-10),lHip:D(10)},off:{x:-8,y:0}}];
+  {t:0,ang:{torso:D(-14),rShoulder:D(150),rElbow:D(-8),lShoulder:D(10),lElbow:D(20),rHip:D(-6),lHip:D(6)},off:{x:-4,y:2}},
+  {t:1,ang:{torso:D(-20),rShoulder:D(172),rElbow:D(-4),lShoulder:D(6), lElbow:D(16),rHip:D(-10),lHip:D(10)},off:{x:-8,y:4}}];
+// Heavy release: from overhead down through a forward-and-down smash, driving into a crouch on
+// impact (front knee bends, hip drops) — a vertical arc, unlike medium's horizontal lunge.
 POSES.heavy=[
-  {t:0, ang:{torso:D(-16),rShoulder:D(-118),rElbow:D(118)},off:{x:-6,y:0}},
-  {t:.5,ang:{torso:D(16), rShoulder:D(90),  rElbow:D(8)},  off:{x:16,y:0}},
-  {t:1, ang:{torso:D(6),  rShoulder:D(55),  rElbow:D(28)}, off:{x:6,y:0}}];
+  {t:0, ang:{torso:D(-18),rShoulder:D(175),rElbow:D(-4),rHip:D(-8), lHip:D(8)},off:{x:-8,y:4}},
+  {t:.5,ang:{torso:D(26), rShoulder:D(48), rElbow:D(18),rHip:D(22), lHip:D(-8),rKnee:D(-14)},off:{x:16,y:9}},
+  {t:1, ang:{torso:D(10), rShoulder:D(75), rElbow:D(30),rHip:D(8),  lHip:D(-4)},off:{x:6,y:2}}];
 POSES.block=[
   {t:0,ang:{torso:D(4),lShoulder:D(70),rShoulder:D(80),lElbow:D(60),rElbow:D(55),lHip:D(6),rHip:D(-6)},off:{x:2,y:2}},
   {t:1,ang:{torso:D(4),lShoulder:D(75),rShoulder:D(85),lElbow:D(62),rElbow:D(58),lHip:D(6),rHip:D(-6)},off:{x:2,y:2}}];
@@ -425,20 +440,23 @@ POSES.win=[
 POSES.ko=[
   {t:0,ang:{torso:D(-72),head:D(10),lHip:D(-32),rHip:D(-38),lKnee:D(48),rKnee:D(52),lShoulder:D(20),rShoulder:D(-30)},off:{x:-10,y:22}},
   {t:1,ang:{torso:D(-92),head:D(6), lHip:D(-42),rHip:D(-48),lKnee:D(58),rKnee:D(62),lShoulder:D(10),rShoulder:D(-20)},off:{x:-14,y:26}}];
+preparePoses();
 
 // ---- looks: palette + proportions + props, per character id ----
 const LOOKS={
+  // Muscular build: shoulders wide relative to limb thickness (~2.2x), waist pinched in well below
+  // both shoulder and hip width for a V-taper, thick rounded limbs.
   carl:{skin:'#d9a066',hair:'#241610',primary:'#3a3226',secondary:'#c0392b',
-    limb:12,legLen:46,armLen:46,torsoLen:40,headR:13,shoulderW:24,hipW:16,earLen:0,
+    limb:18,legLen:46,armLen:48,torsoLen:44,headR:13,shoulderW:40,hipW:26,waistW:20,earLen:0,
     props:['boxers','vest','bandages']},
   katia:{skin:'#c98a5e',hair:'#171310',primary:'#232f2b',secondary:'#48594f',
     limb:8,legLen:48,armLen:44,torsoLen:38,headR:10,shoulderW:18,hipW:13,earLen:0,
     props:['gear']},
   goblin:{skin:'#5f8a3f',hair:null,primary:'#4a3b28',secondary:'#7a6248',
-    limb:8,legLen:34,armLen:34,torsoLen:28,headR:9,shoulderW:14,hipW:10,earLen:11,
+    limb:8,legLen:34,armLen:34,torsoLen:28,headR:9,shoulderW:16,hipW:10,earLen:14,
     props:['rags','dagger']},
   hobgoblin:{skin:'#5c6b52',hair:null,primary:'#3d3428',secondary:'#6b5c46',
-    limb:16,legLen:50,armLen:52,torsoLen:46,headR:15,shoulderW:30,hipW:20,earLen:8,
+    limb:18,legLen:50,armLen:54,torsoLen:48,headR:15,shoulderW:36,hipW:22,earLen:10,
     props:['rags','club']},
   // Placeholder human-rig look for the Phase 1 caster opponent; her bespoke non-humanoid rig is Phase 3.
   donut:{skin:'#f2cfe0',hair:'#ffe7f5',primary:'#e8a0d8',secondary:'#b565a0',
@@ -468,6 +486,7 @@ const Rig={
     const hip={x:(off.x||0)*face,y:-look.legLen+(off.y||0)};
     const torsoA=a('torso');
     const torso={x:hip.x+face*Math.sin(torsoA)*look.torsoLen*.6,y:hip.y-Math.cos(torsoA)*look.torsoLen*.6};
+    const waist={x:hip.x+face*Math.sin(torsoA)*look.torsoLen*.42,y:hip.y-Math.cos(torsoA)*look.torsoLen*.42};
     const neck={x:hip.x+face*Math.sin(torsoA)*look.torsoLen,y:hip.y-Math.cos(torsoA)*look.torsoLen};
     const headA=torsoA+a('head'),headNeckLen=look.headR*1.6;
     const head={x:neck.x+face*Math.sin(headA)*headNeckLen,y:neck.y-Math.cos(headA)*headNeckLen};
@@ -479,7 +498,7 @@ const Rig={
       const tot=hA+kA;return{knee:{x:kx,y:ky},foot:{x:kx+face*Math.sin(tot)*legL,y:ky+Math.cos(tot)*legL}}};
     const rArm=armFK(rShoulder,a('rShoulder'),a('rElbow')),lArm=armFK(lShoulder,a('lShoulder'),a('lElbow'));
     const rLeg=legFK(rHip,a('rHip'),a('rKnee')),lLeg=legFK(lHip,a('lHip'),a('lKnee'));
-    return{hip,torso,neck,head,
+    return{hip,torso,waist,neck,head,
       rShoulder,rElbow:rArm.elbow,rHand:rArm.hand,lShoulder,lElbow:lArm.elbow,lHand:lArm.hand,
       rHip,rKnee:rLeg.knee,rFoot:rLeg.foot,lHip,lKnee:lLeg.knee,lFoot:lLeg.foot}},
   draw(c,F,cam,frame){
@@ -491,25 +510,38 @@ const Rig={
       c.lineWidth=w+3;c.strokeStyle=skinDark;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke();
       c.lineWidth=w;c.strokeStyle=look.skin;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke()};
     // back limbs first (behind the torso), then torso/head, then front limbs, then props on top.
-    limb(j.lHip,j.lKnee,look.limb);limb(j.lKnee,j.lFoot,look.limb);
-    limb(j.lShoulder,j.lElbow,look.limb*.85);limb(j.lElbow,j.lHand,look.limb*.75);
-    c.beginPath();c.moveTo(j.lHip.x,j.lHip.y);c.lineTo(j.lShoulder.x,j.lShoulder.y);
-    c.lineTo(j.rShoulder.x,j.rShoulder.y);c.lineTo(j.rHip.x,j.rHip.y);c.closePath();
+    // Thighs/upper arms noticeably thicker than shins/forearms, per limb.
+    limb(j.lHip,j.lKnee,look.limb);limb(j.lKnee,j.lFoot,look.limb*.82);
+    limb(j.lShoulder,j.lElbow,look.limb*.85);limb(j.lElbow,j.lHand,look.limb*.68);
+    // Torso as a waist-tapered hexagon (hip -> waist -> shoulder, mirrored) for a real V-taper build,
+    // plus a chest highlight and ab-line shading for definition. Shading uses whatever the base torso
+    // fill color is, so it also enhances a bare-chested look like Carl's open vest.
+    const waistW=look.waistW!==undefined?look.waistW:(look.hipW+look.shoulderW)/2*.8;
+    const lWaist={x:j.waist.x-face*waistW/2,y:j.waist.y},rWaist={x:j.waist.x+face*waistW/2,y:j.waist.y};
+    c.beginPath();c.moveTo(j.lHip.x,j.lHip.y);c.lineTo(lWaist.x,lWaist.y);c.lineTo(j.lShoulder.x,j.lShoulder.y);
+    c.lineTo(j.rShoulder.x,j.rShoulder.y);c.lineTo(rWaist.x,rWaist.y);c.lineTo(j.rHip.x,j.rHip.y);c.closePath();
     c.fillStyle=look.skin;c.fill();c.lineWidth=2;c.strokeStyle=skinDark;c.stroke();
+    c.fillStyle=shade(look.skin,.2);c.beginPath();
+    c.ellipse((j.lShoulder.x+j.rShoulder.x)/2,(j.lShoulder.y+j.rShoulder.y)/2+look.torsoLen*.14,
+      look.shoulderW*.3,look.torsoLen*.15,0,0,Math.PI*2);c.fill();
+    c.strokeStyle=shade(look.skin,-.3);c.lineWidth=1.5;
+    c.beginPath();c.moveTo(j.waist.x-2,j.waist.y-2);c.lineTo(j.torso.x-2,j.torso.y+2);c.stroke();
+    c.beginPath();c.moveTo(j.waist.x+2,j.waist.y-2);c.lineTo(j.torso.x+2,j.torso.y+2);c.stroke();
     c.fillStyle=look.skin;c.beginPath();c.arc(j.head.x,j.head.y,look.headR,0,Math.PI*2);c.fill();
     c.lineWidth=1.5;c.strokeStyle=skinDark;c.stroke();
     if(look.hair){c.fillStyle=look.hair;c.beginPath();
       c.arc(j.head.x,j.head.y-look.headR*.3,look.headR*1.05,Math.PI*1.05,Math.PI*1.95);c.fill()}
-    if(look.earLen){c.fillStyle=look.skin;
-      c.beginPath();c.moveTo(j.head.x-look.headR*.8,j.head.y-2);
-      c.lineTo(j.head.x-look.headR*.8-look.earLen,j.head.y-look.earLen*.6);
-      c.lineTo(j.head.x-look.headR*.5,j.head.y+4);c.closePath();c.fill();
-      c.beginPath();c.moveTo(j.head.x+look.headR*.8,j.head.y-2);
-      c.lineTo(j.head.x+look.headR*.8+look.earLen,j.head.y-look.earLen*.6);
-      c.lineTo(j.head.x+look.headR*.5,j.head.y+4);c.closePath();c.fill()}
+    if(look.earLen){ // long pointed triangles angled up-back, outlined so they read against the head fill
+      const el=look.earLen;c.fillStyle=look.skin;c.strokeStyle=skinDark;c.lineWidth=1.5;
+      c.beginPath();c.moveTo(j.head.x-look.headR*.7,j.head.y-look.headR*.15);
+      c.lineTo(j.head.x-look.headR*.9-el*.9,j.head.y-el*.85);
+      c.lineTo(j.head.x-look.headR*.3,j.head.y+look.headR*.3);c.closePath();c.fill();c.stroke();
+      c.beginPath();c.moveTo(j.head.x+look.headR*.7,j.head.y-look.headR*.15);
+      c.lineTo(j.head.x+look.headR*.9+el*.9,j.head.y-el*.85);
+      c.lineTo(j.head.x+look.headR*.3,j.head.y+look.headR*.3);c.closePath();c.fill();c.stroke()}
     c.fillStyle='#141414';c.beginPath();c.arc(j.head.x+face*look.headR*.35,j.head.y-1,1.6,0,Math.PI*2);c.fill();
-    limb(j.rHip,j.rKnee,look.limb);limb(j.rKnee,j.rFoot,look.limb);
-    limb(j.rShoulder,j.rElbow,look.limb*.85);limb(j.rElbow,j.rHand,look.limb*.75);
+    limb(j.rHip,j.rKnee,look.limb);limb(j.rKnee,j.rFoot,look.limb*.82);
+    limb(j.rShoulder,j.rElbow,look.limb*.85);limb(j.rElbow,j.rHand,look.limb*.68);
     for(const p of look.props||[]){
       if(p==='vest'||p==='rags'){
         c.fillStyle=look.primary;
@@ -542,9 +574,18 @@ const Rig={
         sleeve(j.lKnee,j.lFoot,look.limb*.85);sleeve(j.rKnee,j.rFoot,look.limb*.85);
         c.strokeStyle=look.secondary;c.lineWidth=3;
         c.beginPath();c.moveTo(j.lHip.x,j.lHip.y-4);c.lineTo(j.rHip.x,j.rHip.y-4);c.stroke()}
-      if(p==='dagger'){const h=j.rHand;
-        c.strokeStyle='#b8b8b8';c.lineWidth=3;c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*14,h.y-6);c.stroke();
-        c.strokeStyle=look.secondary;c.lineWidth=4;c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x-face*4,h.y+3);c.stroke()}
+      if(p==='dagger'){ // a filled blade (not a thin stroke) with a crossguard and grip, ~45% of arm length
+        const h=j.rHand,len=look.armLen*.46,ux=face,uy=-.32,n=Math.hypot(ux,uy),dx=ux/n,dy=uy/n,px=-dy,py=dx;
+        const tipX=h.x+dx*len,tipY=h.y+dy*len,baseX=h.x+dx*3,baseY=h.y+dy*3,w=4.2;
+        c.fillStyle='#e4e4e4';
+        c.beginPath();c.moveTo(baseX+px*w,baseY+py*w);c.lineTo(tipX,tipY);c.lineTo(baseX-px*w,baseY-py*w);c.closePath();c.fill();
+        c.strokeStyle='#5a5a5a';c.lineWidth=1.3;c.stroke();
+        c.strokeStyle='#fbfbfb';c.lineWidth=1.2;
+        c.beginPath();c.moveTo(baseX+dx*2,baseY+dy*2);c.lineTo(tipX-dx*2,tipY-dy*2);c.stroke();
+        c.strokeStyle=look.secondary;c.lineWidth=3.6;
+        c.beginPath();c.moveTo(baseX+px*6,baseY+py*6);c.lineTo(baseX-px*6,baseY-py*6);c.stroke();
+        c.strokeStyle='#3a2f22';c.lineWidth=4;c.lineCap='round';
+        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(baseX,baseY);c.stroke()}
       if(p==='club'){const h=j.rHand;
         c.strokeStyle=look.secondary;c.lineWidth=10;c.lineCap='round';
         c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*10,h.y-30);c.stroke();
@@ -616,7 +657,7 @@ const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:
       light5:{state:'ATTACK',moveName:'light5',f:9},
       medium:{state:'ATTACK',moveName:'medium',f:12},
       heavyCharge:{state:'CHARGE',moveName:'heavy',f:12},
-      heavy:{state:'ATTACK',moveName:'heavy',f:10},
+      heavy:{state:'ATTACK',moveName:'heavy',f:4}, // still high in the overhead arc, well before medium's peak-lunge silhouette
       block:{state:'BLOCK',f:10},
       blockstun:{state:'BLOCKSTUN',f:5,stun:MOVES.medium.blockstun},
       hit:{state:'HITSTUN',f:8,stun:MOVES.medium.hitstun},

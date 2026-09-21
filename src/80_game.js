@@ -28,7 +28,7 @@ const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:
       light5:{state:'ATTACK',moveName:'light5',f:9},
       medium:{state:'ATTACK',moveName:'medium',f:12},
       heavyCharge:{state:'CHARGE',moveName:'heavy',f:12},
-      heavy:{state:'ATTACK',moveName:'heavy',f:10},
+      heavy:{state:'ATTACK',moveName:'heavy',f:4}, // still high in the overhead arc, well before medium's peak-lunge silhouette
       block:{state:'BLOCK',f:10},
       blockstun:{state:'BLOCKSTUN',f:5,stun:MOVES.medium.blockstun},
       hit:{state:'HITSTUN',f:8,stun:MOVES.medium.hitstun},
