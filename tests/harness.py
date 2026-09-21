@@ -51,10 +51,26 @@ def main():
                     % ('true' if a.sim else 'false', a.seed, a.p1, a.p2, a.ai, ctrl))
         probes = {e: [] for e in a.probe}
         if a.sim:
+            # G.state goes to RESULT on KO and stepFrame() is a no-op unless state is FIGHT, so a
+            # long soak that KOs early would otherwise spend the rest of its budget doing nothing.
+            # Keep restarting with a fresh seed and accumulate real simulated frames across fights.
+            seed = a.seed
+            fights = 1
+            frames_total = 0
             for _ in range(int(a.seconds)):
                 pg.evaluate('G.simFrames(60)')
                 for e in a.probe:
                     probes[e].append(pg.evaluate(e))
+                if pg.evaluate('G.state') == 'RESULT':
+                    frames_total += pg.evaluate('G.fight.frame')
+                    seed += 1
+                    fights += 1
+                    ctrl2 = 'Ctrl.random(%d)' % seed if a.bot == 'random' else 'Ctrl.idle()'
+                    pg.evaluate("G.startFight({seed:%d,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s})"
+                                % (seed, a.p1, a.p2, a.ai, ctrl2))
+            frames_total += pg.evaluate('G.fight.frame')
+            out['frames_total'] = frames_total
+            out['fights'] = fights
         else:
             t0 = time.time()
             while time.time() - t0 < a.seconds:
@@ -70,7 +86,8 @@ def main():
             pg.screenshot(path=a.shot)
         b.close()
     print(json.dumps(out, indent=1))
-    sys.exit(1 if errors or console or out['state'] == 'TITLE' else 0)
+    short_soak = a.sim and out.get('frames_total', 0) < a.seconds * 60 * 0.9
+    sys.exit(1 if errors or console or out['state'] == 'TITLE' or short_soak else 0)
 
 if __name__ == '__main__':
     main()
