@@ -40,6 +40,17 @@ const Audio={ac:null,muted:Save.data.mute,_t:0,
   parry(){this.tone(880,.08,'square',.05);this.tone(1320,.12,'square',.04,.06)},
   ko(){for(let i=0;i<6;i++)this.tone(300-40*i,.15,'sawtooth',.05,i*.07)}};
 
+const Ctrl={
+  EMPTY:()=>({light:false,medium:false,heavy:false,block:false,dashBack:false,special:0}),
+  idle:()=>({next:()=>Ctrl.EMPTY()}),
+  hold:intent=>({next:()=>Object.assign(Ctrl.EMPTY(),intent)}),
+  // steps: [{f, until?, intent}] in controller frames (frames where next() was called)
+  script:steps=>({f:0,next(){const it=Ctrl.EMPTY();for(const s of steps)if(this.f>=s.f&&this.f<=(s.until===undefined?s.f:s.until))Object.assign(it,s.intent);this.f++;return it}}),
+  // seeded chaos monkey: picks a plan, holds block/heavy plans for a while, taps others once
+  random:seed=>{const r=RNG(seed);let plan='',left=0;return{next(){
+    if(left--<=0){plan=r.pick(['','','light','light','medium','dashBack','block','block','heavy','special']);left=plan==='block'?10+r.int(30):plan==='heavy'?30:1}
+    const it=Ctrl.EMPTY();if(plan==='block')it.block=true;else if(plan==='heavy')it.heavy=true;else if(plan==='special')it.special=1;else if(plan)it[plan]=true;return it}}}};
+
 // All frame counts at 60 Hz. dash = px the attacker advances during startup. push = px the defender is shoved on hit.
 const MOVES={
   light1:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light2',dash:18},
@@ -58,6 +69,46 @@ const CHAMPS={
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
 const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,HITSTOP=4,POWER_MAX=300;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
+
+class Fighter{
+  constructor(def,side,ctrl){this.def=def;this.side=side;this.face=side;this.ctrl=ctrl;
+    this.x=side===1?W/2-160:W/2+160;this.width=48;this.hp=def.hp;this.maxHp=def.hp;this.power=0;
+    this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
+    this.combo=0;this.stun=0;this.inv=0;this.blockAge=0}
+  get front(){return this.x+this.face*this.width/2}
+  busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
+  setState(s,f=0){this.state=s;this.f=f}
+  startMove(name){this.move=MOVES[name];this.moveName=name;this.hits=new Set();this.landed=false;
+    if(this.move.cost)this.power-=this.move.cost;this.setState(this.move.charge?'CHARGE':'ATTACK')}
+  activeSpan(){const m=this.move,n=m.hits||1;return n*m.active+(n-1)*(m.gap||0)}
+  phase(){const m=this.move;if(!m||this.state!=='ATTACK')return null;const su=m.startup,act=this.activeSpan();
+    return this.f<su?'startup':this.f<su+act?'active':this.f<su+act+m.recovery?'recovery':'done'}
+  hitIndex(){const m=this.move,k=this.f-m.startup,span=m.active+(m.gap||0);if(k<0)return-1;const i=Math.floor(k/span);return(k%span)<m.active&&i<(m.hits||1)?i:-1}
+  hitbox(){if(this.phase()!=='active')return null;const a=this.front,b=this.front+this.face*this.move.range;return{x0:Math.min(a,b),x1:Math.max(a,b)}}
+  hurtbox(){return{x0:this.x-this.width/2,x1:this.x+this.width/2}}
+  // Consume one frame of intent. Called before tick().
+  act(intent){this.blockAge=intent.block?this.blockAge+1:0;const S=this.state;
+    if(S==='IDLE'||S==='BLOCK'){
+      if(intent.special&&this.power>=MOVES['s'+intent.special].cost)return this.startMove('s'+intent.special);
+      if(intent.dashBack){this.inv=DASH_BACK.inv;return this.setState('DASH')}
+      if(intent.medium)return this.startMove('medium');
+      if(intent.light)return this.startMove('light1');
+      if(intent.heavy)return this.startMove('heavy');
+      const want=intent.block?'BLOCK':'IDLE';if(want!==S)this.setState(want)}
+    else if(S==='ATTACK'&&this.phase()==='recovery'&&this.move.chain&&this.landed){
+      if(intent.light)return this.startMove(this.move.chain);
+      if(intent.medium&&this.moveName!=='medium')return this.startMove('medium')}
+    else if(S==='CHARGE'&&!intent.heavy){this.move=null;this.moveName=null;this.setState('IDLE')}}
+  // Advance one frame of the state machine.
+  tick(){this.f++;if(this.inv>0)this.inv--;
+    switch(this.state){
+      case'CHARGE':if(this.f>=this.move.charge)this.setState('ATTACK');break;
+      case'ATTACK':{const m=this.move;if(m.dash&&this.f<=m.startup)this.x+=this.face*m.dash/m.startup;
+        if(this.phase()==='done'){this.move=null;this.moveName=null;this.landed=false;this.setState('IDLE')}break}
+      case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
+      case'HITSTUN':case'BLOCKSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
+      case'KNOCKDOWN':if(this.f>=KNOCKDOWN.frames){this.inv=KNOCKDOWN.inv;this.setState('IDLE')}break}
+    this.x=clamp(this.x,this.width/2+8,W-this.width/2-8)}}
 
 const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,
   fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px'},
@@ -81,5 +132,27 @@ Test.add('move table is complete and sane',()=>{
   eq(MOVES.s1.cost,100);eq(MOVES.s2.cost,200);eq(MOVES.s3.cost,300);
   eq(CLASS_BEATS[CLASS_BEATS[CLASS_BEATS.brawler]],'brawler');eq(CLASS_BEATS[CLASS_BEATS[CLASS_BEATS.tank]],'tank');
   ok(CHAMPS.carl.hp>0&&CHAMPS.donut.atk>0)});
+function mkFighter(ctrl){return new Fighter(CHAMPS.carl,1,ctrl||Ctrl.idle())}
+Test.add('fighter light attack walks startup/active/recovery then idles',()=>{
+  const F=mkFighter();F.act(Object.assign(Ctrl.EMPTY(),{light:true}));eq(F.state,'ATTACK');eq(F.phase(),'startup');
+  for(let i=0;i<5;i++)F.tick();eq(F.phase(),'active');ok(F.hitbox(),'hitbox during active');
+  for(let i=0;i<3;i++)F.tick();eq(F.phase(),'recovery');eq(F.hitbox(),null);
+  for(let i=0;i<8;i++)F.tick();eq(F.state,'IDLE');eq(F.move,null)});
+Test.add('heavy charges while held and cancels when released early',()=>{
+  const F=mkFighter();const held=Object.assign(Ctrl.EMPTY(),{heavy:true});F.act(held);eq(F.state,'CHARGE');
+  for(let i=0;i<10;i++){F.act(held);F.tick()}eq(F.state,'CHARGE');
+  F.act(Ctrl.EMPTY());eq(F.state,'IDLE');
+  const G2=mkFighter();G2.act(held);for(let i=0;i<MOVES.heavy.charge;i++){G2.act(held);G2.tick()}eq(G2.state,'ATTACK')});
+Test.add('dash back grants invulnerable frames and moves away from facing',()=>{
+  const F=mkFighter();const x0=F.x;F.act(Object.assign(Ctrl.EMPTY(),{dashBack:true}));eq(F.state,'DASH');eq(F.inv,DASH_BACK.inv);
+  for(let i=0;i<DASH_BACK.frames;i++)F.tick();eq(F.state,'IDLE');ok(F.x<x0,'moved back')});
+Test.add('blockAge counts held frames and resets',()=>{
+  const F=mkFighter();const b=Object.assign(Ctrl.EMPTY(),{block:true});F.act(b);eq(F.state,'BLOCK');eq(F.blockAge,1);F.act(b);eq(F.blockAge,2);F.act(Ctrl.EMPTY());eq(F.blockAge,0);eq(F.state,'IDLE')});
+Test.add('special requires power and deducts it',()=>{
+  const F=mkFighter();F.act(Object.assign(Ctrl.EMPTY(),{special:1}));eq(F.state,'IDLE');F.power=250;F.act(Object.assign(Ctrl.EMPTY(),{special:2}));eq(F.state,'ATTACK');eq(F.power,50);eq(F.moveName,'s2')});
+Test.add('script controller fires at frames and holds through until',()=>{
+  const c=Ctrl.script([{f:0,intent:{light:true}},{f:2,until:4,intent:{block:true}}]);
+  eq(c.next().light,true);eq(c.next().block,false);eq(c.next().block,true);eq(c.next().block,true);eq(c.next().block,true);eq(c.next().block,false)});
+Test.add('random controller is deterministic per seed',()=>{const a=Ctrl.random(5),b=Ctrl.random(5);for(let i=0;i<50;i++)eq(JSON.stringify(a.next()),JSON.stringify(b.next()))});
 
 </script></body></html>
