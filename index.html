@@ -1,0 +1,18 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><title>Carl's Doorway Brawl</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;min-height:100%;background:#090b12;color:#fff;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;touch-action:none;user-select:none}
+#wrap{position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
+canvas{display:block;image-rendering:pixelated;background:#101422}
+.overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(9,11,18,.85)}.overlay.show{display:flex}
+.panel{text-align:center;padding:16px;max-width:520px}.panel h1{margin:0 0 8px;font-size:28px;letter-spacing:2px}.panel p{font-size:13px;line-height:1.5}.panel button{display:block;width:100%;margin:8px 0;padding:12px;font:inherit;font-size:16px;background:#f4c542;color:#111;border:0;border-radius:6px}
+#specials{position:absolute;right:12px;bottom:12px;display:none;flex-direction:column;gap:8px}#specials.show{display:flex}#specials button{width:64px;height:64px;border-radius:50%;border:3px solid #f4c542;background:#1a1f33;color:#f4c542;font:inherit;font-size:18px;opacity:.35}#specials button.ready{opacity:1;background:#f4c542;color:#111}
+#toast{position:absolute;left:50%;top:70px;transform:translateX(-50%);font-size:13px;color:#f4c542;pointer-events:none;text-shadow:0 1px 0 #000;white-space:nowrap}
+</style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
+<div id="specials"><button id="s3">S3</button><button id="s2">S2</button><button id="s1">S1</button></div>
+<div id="toast"></div>
+<div class="overlay show" id="title"><div class="panel"><h1>CARL'S DOORWAY BRAWL</h1><p>ONE THUMB. ONE DOORWAY. ONE CRAWLER LEAVES.<br>LEFT SIDE: HOLD = BLOCK, SWIPE LEFT = DODGE. RIGHT SIDE: TAP = LIGHT, SWIPE RIGHT = MEDIUM, HOLD = HEAVY.</p><button id="fightBtn">FIGHT</button><button id="titleMute">SOUND: ON</button></div></div>
+<div class="overlay" id="pauseMenu"><div class="panel"><h1>PAUSED</h1><button id="resume">RESUME</button><button id="quit">QUIT</button></div></div>
+<div class="overlay" id="result"><div class="panel"><h1 id="resultTitle">VICTORY</h1><p id="resultLine"></p><button id="again">FIGHT AGAIN</button><button id="resultTitleBtn">TITLE</button></div></div>
+</div><script>
+
+</script></body></html>
