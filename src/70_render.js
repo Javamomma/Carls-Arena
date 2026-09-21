@@ -15,6 +15,10 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='bold 20px ui-monospace,monospace';if(a.combo>1){c.textAlign='left';c.fillStyle='#f4c542';c.fillText(a.combo+' HITS',20,110)}
     if(b.combo>1){c.textAlign='right';c.fillStyle='#f66';c.fillText(b.combo+' HITS',W-20,110)}
     if(f.over){c.textAlign='center';c.fillStyle='#fff';c.font='bold 40px ui-monospace,monospace';c.fillText('K.O.',W/2,H/2)}},
-  frame(f){const c=this.ctx;c.clearRect(0,0,W,H);c.fillStyle='#1a1f33';c.fillRect(0,0,W,FLOOR);c.fillStyle='#2b2f45';c.fillRect(0,FLOOR,W,H-FLOOR);
-    c.fillStyle='#3a2a1a';c.fillRect(W/2-40,FLOOR-200,80,200);c.fillStyle='#090b12';c.fillRect(W/2-30,FLOOR-190,60,190); // the doorway
-    if(!f)return;this.fighter(c,f.p1);this.fighter(c,f.p2);this.hud(c,f)}};
+  frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1};
+    c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
+    Camera.apply(c,cam);
+    Stage.draw(c,cam,f?f.frame:0,Stage.build('depths'));
+    if(f){this.fighter(c,f.p1);this.fighter(c,f.p2)}
+    c.setTransform(1,0,0,1,0,0);
+    if(f)this.hud(c,f)}};

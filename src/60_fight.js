@@ -1,10 +1,13 @@
 class Fight{
   constructor(o){this.rng=RNG(o.seed||1);this.p1=new Fighter(o.p1,1,o.ctrl1);this.p2=new Fighter(o.p2,-1,o.ctrl2);
-    this.frame=0;this.clock=o.clock===undefined?120:o.clock;this.hitstop=0;this.over=false;this.winner=null;this.log=[];this.onEvent=o.onEvent||(()=>{})}
+    this.frame=0;this.clock=o.clock===undefined?120:o.clock;this.hitstop=0;this.over=false;this.winner=null;this.log=[];this.onEvent=o.onEvent||(()=>{});
+    this.updateCam()}
+  updateCam(){const dist=Math.abs(this.p2.x-this.p1.x);
+    this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.35-(dist-120)/380*0.35,1,1.35)}}
   step(){if(this.over)return;if(this.hitstop>0){this.hitstop--;return}
     this.frame++;this.clock-=STEP;
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);
-    this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();this.separate();
+    this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();this.separate();this.updateCam();
     // Detect both sides' hits against the pre-resolve state before applying either, so a true
     // mutual trade lands both instead of the first resolve knocking out the second's hitbox.
     const c1=this.detect(this.p1,this.p2),c2=this.detect(this.p2,this.p1);

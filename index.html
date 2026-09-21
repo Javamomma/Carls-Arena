@@ -99,10 +99,11 @@ const CHAMPS={
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
 const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,HITSTOP=4,POWER_MAX=300;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
+const STAGE_W=1400;
 
 class Fighter{
   constructor(def,side,ctrl){this.def=def;this.side=side;this.face=side;this.ctrl=ctrl;
-    this.x=side===1?W/2-160:W/2+160;this.width=48;this.hp=def.hp;this.maxHp=def.hp;this.power=0;
+    this.x=side===1?STAGE_W/2-160:STAGE_W/2+160;this.width=48;this.hp=def.hp;this.maxHp=def.hp;this.power=0;
     this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
     this.combo=0;this.stun=0;this.inv=0;this.blockAge=0}
   get front(){return this.x+this.face*this.width/2}
@@ -138,7 +139,7 @@ class Fighter{
       case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
       case'HITSTUN':case'BLOCKSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
       case'KNOCKDOWN':if(this.f>=KNOCKDOWN.frames){this.inv=KNOCKDOWN.inv;this.setState('IDLE')}break}
-    this.x=clamp(this.x,this.width/2+8,W-this.width/2-8)}}
+    this.x=clamp(this.x,this.width/2+8,STAGE_W-this.width/2-8)}}
 
 const AI={profiles:{
     dummy:{react:0, attack:0,  block:0,  parry:0, dash:0,  special:0},
@@ -162,11 +163,14 @@ const AI={profiles:{
 
 class Fight{
   constructor(o){this.rng=RNG(o.seed||1);this.p1=new Fighter(o.p1,1,o.ctrl1);this.p2=new Fighter(o.p2,-1,o.ctrl2);
-    this.frame=0;this.clock=o.clock===undefined?120:o.clock;this.hitstop=0;this.over=false;this.winner=null;this.log=[];this.onEvent=o.onEvent||(()=>{})}
+    this.frame=0;this.clock=o.clock===undefined?120:o.clock;this.hitstop=0;this.over=false;this.winner=null;this.log=[];this.onEvent=o.onEvent||(()=>{});
+    this.updateCam()}
+  updateCam(){const dist=Math.abs(this.p2.x-this.p1.x);
+    this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.35-(dist-120)/380*0.35,1,1.35)}}
   step(){if(this.over)return;if(this.hitstop>0){this.hitstop--;return}
     this.frame++;this.clock-=STEP;
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);
-    this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();this.separate();
+    this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();this.separate();this.updateCam();
     // Detect both sides' hits against the pre-resolve state before applying either, so a true
     // mutual trade lands both instead of the first resolve knocking out the second's hitbox.
     const c1=this.detect(this.p1,this.p2),c2=this.detect(this.p2,this.p1);
@@ -199,6 +203,119 @@ class Fight{
     a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');this.emit('ko',this.winner,null,0)}
   emit(type,a,b,val){this.log.push({f:this.frame,type,who:a?a.side:0,val});this.onEvent(type,a,b,val)}}
 
+// Parallax dungeon stage + follow camera. Pure presentation: reads Fight/Fighter state, never writes it.
+const Stage={cache:{},
+  build(themeId){
+    if(this.cache[themeId])return this.cache[themeId];
+    const r=RNG(0xd00d),H0=FLOOR+80,cx=STAGE_W/2;
+    const mk=()=>{const cv=document.createElement('canvas');cv.width=STAGE_W;cv.height=H0;return cv};
+    // torches kept close to center so they stay on screen across the camera's zoom range (1.0-1.35)
+    const torches=[{x:cx-150,y:225},{x:cx+150,y:225},{x:cx-255,y:235},{x:cx+255,y:235}];
+
+    // ---- layer 0: far fog + lit archway + distant stairs (parallax .2); shows through the wall's arch cutout ----
+    const far=mk(),fc=far.getContext('2d');
+    let g=fc.createLinearGradient(0,0,0,H0);g.addColorStop(0,'#04050a');g.addColorStop(.55,'#0b0f1c');g.addColorStop(1,'#141a2c');
+    fc.fillStyle=g;fc.fillRect(0,0,STAGE_W,H0);
+    g=fc.createRadialGradient(cx,FLOOR-60,10,cx,FLOOR-60,260);
+    g.addColorStop(0,'rgba(205,218,245,.75)');g.addColorStop(.4,'rgba(140,160,205,.4)');g.addColorStop(1,'rgba(140,160,205,0)');
+    fc.fillStyle=g;fc.fillRect(cx-260,FLOOR-320,520,340);
+    // distant stairs receding into the fog, alternating tread shade for readability
+    for(let i=0;i<8;i++){const w=150-i*15,y=FLOOR-10-i*13,shade=185+i*8;
+      fc.fillStyle=`rgba(${shade},${shade+6},${shade+20},${.6-i*.05})`;fc.fillRect(cx-w/2,y,w,9);
+      fc.fillStyle=`rgba(${shade-30},${shade-24},${shade-10},${.5-i*.05})`;fc.fillRect(cx-w/2,y+9,w,3)}
+    // faint distant pillars flanking the gate
+    for(const dx of[-180,180]){fc.fillStyle='rgba(15,18,30,.7)';fc.fillRect(cx+dx-12,FLOOR-220,24,220)}
+
+    // ---- layer 1: back wall, arches, chains, banners, torch sconces (parallax .45) ----
+    const wall=mk(),wc=wall.getContext('2d');
+    g=wc.createLinearGradient(0,0,0,H0);g.addColorStop(0,'#3a4258');g.addColorStop(1,'#181d2c');
+    wc.fillStyle=g;wc.fillRect(0,0,STAGE_W,H0);
+    // stone block coursing with mortar lines and slight per-block jitter
+    const bw=58,bh=34;
+    for(let y=0;y<H0;y+=bh){const rowOff=(Math.floor(y/bh)%2)*(bw/2);
+      for(let x=-bw;x<STAGE_W+bw;x+=bw){const bx=x+rowOff;
+        const j=r.int(14)-7;wc.fillStyle=`rgb(${58+j},${66+j},${86+j})`;
+        wc.fillRect(bx+1,y+1,bw-2,bh-2)}}
+    wc.strokeStyle='rgba(10,12,20,.45)';wc.lineWidth=2;
+    for(let y=0;y<=H0;y+=bh){wc.beginPath();wc.moveTo(0,y+.5);wc.lineTo(STAGE_W,y+.5);wc.stroke()}
+    // central lit archway: a real cutout so the fog+stairs layer behind shows through with true parallax depth
+    const aw=280,ah=220,ax=cx-aw/2,ay=FLOOR-ah+40;
+    const archPath=()=>{wc.beginPath();wc.moveTo(ax,FLOOR+20);wc.lineTo(ax,ay+70);wc.quadraticCurveTo(ax,ay,cx,ay);
+      wc.quadraticCurveTo(ax+aw,ay,ax+aw,ay+70);wc.lineTo(ax+aw,FLOOR+20);wc.closePath()};
+    wc.save();archPath();wc.clip();wc.clearRect(ax-4,ay-4,aw+8,FLOOR+24-ay+4);wc.restore();
+    wc.save();archPath();wc.strokeStyle='#0e1119';wc.lineWidth=12;wc.stroke();
+    wc.strokeStyle='#4a5470';wc.lineWidth=3;wc.stroke();wc.restore();
+    // flanking blind arches (recessed niches), tucked close to the main arch so they stay in frame
+    for(const dx of[-255,255]){const nx=cx+dx;
+      g=wc.createLinearGradient(nx-55,0,nx+55,0);g.addColorStop(0,'#0f121c');g.addColorStop(.5,'#1e2536');g.addColorStop(1,'#0f121c');
+      wc.fillStyle=g;wc.beginPath();wc.moveTo(nx-55,FLOOR+10);wc.lineTo(nx-55,FLOOR-130);wc.quadraticCurveTo(nx,FLOOR-180,nx+55,FLOOR-130);
+      wc.lineTo(nx+55,FLOOR+10);wc.closePath();wc.fill();
+      wc.strokeStyle='#0c0e16';wc.lineWidth=5;wc.stroke()}
+    // hanging chains, kept within the framed area around the arch
+    const chainXs=[cx-330,cx-190,cx+190,cx+330,cx-70,cx+70];
+    for(let ci=0;ci<chainXs.length;ci++){const cxs=chainXs[ci],len=80+r.int(60);
+      wc.strokeStyle='#12141c';wc.lineWidth=3;
+      for(let y=0;y<len;y+=14){wc.beginPath();wc.ellipse(cxs+((y/14)%2?3:-3),y,5,7,0,0,Math.PI*2);wc.stroke()}
+      wc.fillStyle='#1c2030';wc.beginPath();wc.arc(cxs,len,7,0,Math.PI*2);wc.fill()}
+    // banners with pale lettering, hung low enough on the wall to stay in frame across zoom levels
+    const banner=(bx,lines)=>{wc.save();wc.translate(bx,175);
+      g=wc.createLinearGradient(0,0,0,175);g.addColorStop(0,'#2a1420');g.addColorStop(1,'#170a12');
+      wc.fillStyle=g;wc.beginPath();wc.moveTo(-48,0);wc.lineTo(48,0);wc.lineTo(48,150);wc.lineTo(0,175);wc.lineTo(-48,150);wc.closePath();wc.fill();
+      wc.strokeStyle='rgba(0,0,0,.5)';wc.lineWidth=2;wc.stroke();
+      wc.fillStyle='rgba(216,201,163,.85)';wc.font='bold 13px ui-monospace,monospace';wc.textAlign='center';
+      lines.forEach((t,i)=>wc.fillText(t,0,26+i*24));
+      wc.restore()};
+    banner(cx-330,['DEEPER','STRONGER','SURVIVE']);
+    banner(cx+330,['ANOTHER','DAY','ANOTHER','FLOOR']);
+    // torch wall sconces (flames are drawn live in draw())
+    for(const t of torches){wc.fillStyle='#191b22';wc.fillRect(t.x-4,t.y-6,8,26);wc.fillStyle='#2a2d38';wc.fillRect(t.x-9,t.y+16,18,6)}
+
+    // ---- layer 2: mid props — barrels, crates, skull pile (parallax .75) ----
+    const props=mk(),pc=props.getContext('2d');
+    const barrel=(x,y,w,h)=>{const g2=pc.createLinearGradient(x-w/2,0,x+w/2,0);g2.addColorStop(0,'#3a2717');g2.addColorStop(.5,'#5c3d22');g2.addColorStop(1,'#2c1c0f');
+      pc.fillStyle=g2;pc.beginPath();pc.ellipse(x,y-h,w/2,w*.22,0,0,Math.PI*2);pc.fill();
+      pc.fillStyle=g2;pc.fillRect(x-w/2,y-h,w,h);
+      pc.beginPath();pc.ellipse(x,y,w/2,w*.22,0,0,Math.PI*2);pc.fill();
+      pc.strokeStyle='#171008';pc.lineWidth=3;
+      [h*.2,h*.5,h*.8].forEach(oy=>{pc.beginPath();pc.moveTo(x-w/2,y-oy);pc.lineTo(x+w/2,y-oy);pc.stroke()})};
+    const crate=(x,y,w,h)=>{const g2=pc.createLinearGradient(x-w/2,y-h,x+w/2,y);g2.addColorStop(0,'#4a3520');g2.addColorStop(1,'#2a1c10');
+      pc.fillStyle=g2;pc.fillRect(x-w/2,y-h,w,h);pc.strokeStyle='#18100a';pc.lineWidth=2;pc.strokeRect(x-w/2,y-h,w,h);
+      pc.beginPath();pc.moveTo(x-w/2,y-h);pc.lineTo(x+w/2,y);pc.moveTo(x+w/2,y-h);pc.lineTo(x-w/2,y);pc.stroke()};
+    const skull=(x,y,s)=>{pc.fillStyle='#d8cdb0';pc.beginPath();pc.ellipse(x,y,s,s*.8,0,0,Math.PI*2);pc.fill();
+      pc.fillStyle='#20140f';pc.beginPath();pc.ellipse(x-s*.35,y-s*.05,s*.22,s*.28,0,0,Math.PI*2);pc.ellipse(x+s*.35,y-s*.05,s*.22,s*.28,0,0,Math.PI*2);pc.fill()};
+    barrel(cx-430,FLOOR,52,70);barrel(cx-375,FLOOR,46,54);crate(cx-320,FLOOR,60,60);
+    barrel(cx+430,FLOOR,52,70);crate(cx+375,FLOOR,58,58);crate(cx+320,FLOOR-2,44,44);
+    const skullX=cx-445;for(let i=0;i<5;i++)skull(skullX+r.int(60)-30,FLOOR-4-r.int(10),9+r.int(6));
+
+    // ---- layer 3: floor tiles + wet reflective sheen (parallax 1) ----
+    const floor=mk(),flc=floor.getContext('2d');
+    g=flc.createLinearGradient(0,FLOOR,0,H0);g.addColorStop(0,'#232838');g.addColorStop(1,'#0c0e16');
+    flc.fillStyle=g;flc.fillRect(0,FLOOR,STAGE_W,H0-FLOOR);
+    flc.strokeStyle='rgba(8,10,16,.6)';flc.lineWidth=2;
+    for(let x=0;x<STAGE_W;x+=70){flc.beginPath();flc.moveTo(x,FLOOR);flc.lineTo(x,H0);flc.stroke()}
+    for(let y=FLOOR;y<H0;y+=26){flc.beginPath();flc.moveTo(0,y+.5);flc.lineTo(STAGE_W,y+.5);flc.stroke()}
+    g=flc.createLinearGradient(0,FLOOR,0,FLOOR+30);g.addColorStop(0,'rgba(150,175,210,.28)');g.addColorStop(1,'rgba(150,175,210,0)');
+    flc.fillStyle=g;flc.fillRect(0,FLOOR,STAGE_W,30);
+    for(let i=0;i<40;i++){flc.fillStyle=`rgba(0,0,0,${.15+r.next()*.15})`;flc.beginPath();
+      flc.arc(r.next()*STAGE_W,FLOOR+8+r.next()*(H0-FLOOR-8),2+r.next()*4,0,Math.PI*2);flc.fill()}
+
+    const st={layers:[{canvas:far,parallax:.2},{canvas:wall,parallax:.45},{canvas:props,parallax:.75},{canvas:floor,parallax:1}],
+      torches,floorY:FLOOR};
+    return this.cache[themeId]=st},
+  draw(c,cam,frame,st){
+    for(const L of st.layers){const off=(cam.x-STAGE_W/2)*(1-L.parallax);c.drawImage(L.canvas,off,0)}
+    for(let i=0;i<st.torches.length;i++){const t=st.torches[i],flick=((frame*7+i*13)%17)/17,rad=52+12*flick;
+      const g=c.createRadialGradient(t.x,t.y,0,t.x,t.y,rad);
+      g.addColorStop(0,`rgba(255,205,130,${.6+.25*flick})`);g.addColorStop(.45,`rgba(255,140,60,${.35+.15*flick})`);g.addColorStop(1,'rgba(255,120,40,0)');
+      c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
+      c.fillStyle=`rgba(255,${210+r_flame(flick)},150,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
+function r_flame(flick){return Math.floor(20*flick)}
+const Camera={
+  update(cam,f){const t=f.camTarget;cam.x+=(t.x-cam.x)*.12;cam.zoom+=(t.zoom-cam.zoom)*.12;
+    const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
+  apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.62);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
+  toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.62+(y-FLOOR)*cam.zoom}}};
+
 const Render={ctx:canvas.getContext('2d'),
   fighter(c,F){const w=F.width,down=F.state==='KNOCKDOWN'||F.state==='KO',h=down?30:(F.state==='BLOCK'||F.state==='BLOCKSTUN')?110:120,x=F.x-w/2,y=FLOOR-h;
     c.fillStyle=(F.state==='HITSTUN'||F.state==='STUNNED')?'#fff':F.def.color;c.fillRect(x,y,w,h);
@@ -216,16 +333,21 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='bold 20px ui-monospace,monospace';if(a.combo>1){c.textAlign='left';c.fillStyle='#f4c542';c.fillText(a.combo+' HITS',20,110)}
     if(b.combo>1){c.textAlign='right';c.fillStyle='#f66';c.fillText(b.combo+' HITS',W-20,110)}
     if(f.over){c.textAlign='center';c.fillStyle='#fff';c.font='bold 40px ui-monospace,monospace';c.fillText('K.O.',W/2,H/2)}},
-  frame(f){const c=this.ctx;c.clearRect(0,0,W,H);c.fillStyle='#1a1f33';c.fillRect(0,0,W,FLOOR);c.fillStyle='#2b2f45';c.fillRect(0,FLOOR,W,H-FLOOR);
-    c.fillStyle='#3a2a1a';c.fillRect(W/2-40,FLOOR-200,80,200);c.fillStyle='#090b12';c.fillRect(W/2-30,FLOOR-190,60,190); // the doorway
-    if(!f)return;this.fighter(c,f.p1);this.fighter(c,f.p2);this.hud(c,f)}};
+  frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1};
+    c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
+    Camera.apply(c,cam);
+    Stage.draw(c,cam,f?f.frame:0,Stage.build('depths'));
+    if(f){this.fighter(c,f.p1);this.fighter(c,f.p2)}
+    c.setTransform(1,0,0,1,0,0);
+    if(f)this.hud(c,f)}};
 
-const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,
+const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},
   fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   startFight(o={}){const seed=o.seed||this.seed;
     this.fight=new Fight({seed,p1:CHAMPS[o.p1||'carl'],p2:CHAMPS[o.p2||'donut'],clock:o.clock,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(o.ai||'basic',seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
+    this.cam={x:STAGE_W/2,zoom:1};
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('specials',true);Audio.say('FIGHT!')},
   onEvent(t,a){if(t==='hit')Audio.hit();if(t==='block')Audio.block();if(t==='parry'){Audio.parry();Audio.say('PARRY!')}if(t==='ko')Audio.ko();
@@ -239,6 +361,7 @@ const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,
   simFrames(n){for(let i=0;i<n;i++)this.stepFrame()},
   syncSpecials(){const p=this.fight.p1.power;for(const n of[1,2,3])document.getElementById('s'+n).classList.toggle('ready',p>=100*n)},
   loop(t){if(!this.sim){const dt=Math.min(.1,(t-this.last)/1000||0);this.last=t;this.acc+=dt;while(this.acc>=STEP){this.stepFrame();this.acc-=STEP}}
+    if(this.fight)Camera.update(this.cam,this.fight);
     Render.frame(this.fight);requestAnimationFrame(t=>this.loop(t))},
   init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
     document.getElementById('fightBtn').onclick=()=>{Audio.init();this.startFight()};
@@ -370,5 +493,9 @@ Test.add('two-thumb touch: right thumb lifting clears heavy even after a second 
     left.down();ok(Input.held.block,'left thumb also holds block');
     right.up();
     eq(Input.held.heavy,false,'heavy must clear: right thumb (its owner) lifted')})});
+Test.add('stage builds offscreen layers with parallax factors',()=>{const s=Stage.build('depths');ok(s.layers.length>=4,'>=4 layers');for(const L of s.layers){ok(L.canvas&&L.canvas.width>0);ok(L.parallax>=0&&L.parallax<=1)}ok(s.torches.length>=2)});
+Test.add('camera target sits at the fighters midpoint and zooms in when close',()=>{const f=mkFight();run(f,1);const mid=(f.p1.x+f.p2.x)/2;ok(Math.abs(f.camTarget.x-mid)<1);const far=f.camTarget.zoom;closeIn(f);run(f,1);ok(f.camTarget.zoom>far,'zoom increases when close');ok(f.camTarget.zoom<=1.35&&far>=1)});
+Test.add('camera lerps toward target and clamps to stage edges',()=>{const cam={x:0,zoom:1};const f=mkFight();run(f,1);Camera.update(cam,f);ok(cam.x>0&&cam.x<f.camTarget.x,'moved toward target');for(let i=0;i<200;i++)Camera.update(cam,f);ok(Math.abs(cam.x-f.camTarget.x)<0.5);cam.x=-999;f.camTarget.x=-999;Camera.update(cam,f);ok(cam.x>=W/2/cam.zoom-1,'clamped left')});
+Test.add('fighters clamp to STAGE_W not W',()=>{const F=mkFighter();F.x=STAGE_W+50;F.tick();ok(F.x<=STAGE_W-F.width/2-8&&F.x>W,'clamped to stage, beyond old W')});
 
 </script></body></html>
