@@ -28,6 +28,7 @@ def main():
     ap.add_argument('--eval', action='append', default=[])
     ap.add_argument('--probe', action='append', default=[], help='JS sampled once per sim second')
     ap.add_argument('--pre', default=None, help='JS run after load, before start')
+    ap.add_argument('--pose', default=None, help='freeze p1 in a named Rig pose (via G.debugPose) and screenshot')
     a = ap.parse_args()
     errors, console = [], []
     with sync_playwright() as p:
@@ -49,6 +50,15 @@ def main():
         ctrl = 'Ctrl.random(%d)' % a.seed if a.bot == 'random' else 'Ctrl.idle()'
         pg.evaluate("G.sim=%s;G.startFight({seed:%d,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s})"
                     % ('true' if a.sim else 'false', a.seed, a.p1, a.p2, a.ai, ctrl))
+        if a.pose:
+            pg.evaluate("G.debugPose('%s')" % a.pose)
+            out['state'] = pg.evaluate('G.state')
+            out['fight'] = pg.evaluate('G.fight&&{frame:G.fight.frame,p1state:G.fight.p1.state,p1move:G.fight.p1.moveName,p1f:G.fight.p1.f}')
+            if a.shot:
+                pg.screenshot(path=a.shot)
+            b.close()
+            print(json.dumps(out, indent=1))
+            sys.exit(1 if errors or console else 0)
         probes = {e: [] for e in a.probe}
         if a.sim:
             # G.state goes to RESULT on KO and stepFrame() is a no-op unless state is FIGHT, so a

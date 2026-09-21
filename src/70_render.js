@@ -1,12 +1,18 @@
 const Render={ctx:canvas.getContext('2d'),
-  fighter(c,F){const w=F.width,down=F.state==='KNOCKDOWN'||F.state==='KO',h=down?30:(F.state==='BLOCK'||F.state==='BLOCKSTUN')?110:120,x=F.x-w/2,y=FLOOR-h;
-    c.fillStyle=(F.state==='HITSTUN'||F.state==='STUNNED')?'#fff':F.def.color;c.fillRect(x,y,w,h);
-    c.fillStyle='#000';c.fillRect(F.x+F.face*10-3,y+18,6,6);
-    const hb=F.hitbox();if(hb){c.fillStyle=F.move.cost?'#7ff':'#f66';c.fillRect(hb.x0,FLOOR-90,hb.x1-hb.x0,14)}
-    if(F.state==='CHARGE'){c.fillStyle='#fa4';c.fillRect(x,y-10,w*Math.min(1,F.f/F.move.charge),6)}
-    if(F.state==='BLOCK'||F.state==='BLOCKSTUN'){c.fillStyle='#8cf';c.fillRect(F.front-(F.face===1?0:4),y,4,h)}
-    if(F.inv>0){c.strokeStyle='#fff';c.lineWidth=2;c.strokeRect(x-2,y-2,w+4,h+4)}
-    if(G.debug){c.strokeStyle='#0f0';c.strokeRect(x,y,w,h)}},
+  overlayY(F){const l=F.def.look;return FLOOR-(l.legLen+l.torsoLen+l.headR*2.4)*(F.def.scale||1)-14},
+  reflection(c,F,cam,frame){c.save();c.beginPath();c.rect(0,FLOOR,STAGE_W,90);c.clip();
+    c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.18;Rig.draw(c,F,cam,frame);c.restore()},
+  fighter(c,F,cam,frame){
+    const flash=F.state==='HITSTUN'&&F.f<3;
+    if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame);c.filter='none';c.restore()}
+    else{Rig.draw(c,F,cam,frame);
+      if(flash){c.save();c.globalAlpha=.45;c.fillStyle='#fff';
+        c.fillRect(F.x-F.width,FLOOR-140*(F.def.scale||1),F.width*2,140*(F.def.scale||1));c.restore()}}
+    if(F.state==='CHARGE'&&F.move){const y=this.overlayY(F);
+      c.fillStyle='#222';c.fillRect(F.x-20,y,40,6);
+      c.fillStyle='#fa4';c.fillRect(F.x-20,y,40*Math.min(1,F.f/F.move.charge),6)}
+    if(F.state==='BLOCK'||F.state==='BLOCKSTUN'){const y=this.overlayY(F);
+      c.fillStyle='#8cf';c.beginPath();c.arc(F.x,y+3,6,0,Math.PI*2);c.fill()}},
   bar(c,x,y,w,h,pct,col,right){c.fillStyle='#222';c.fillRect(x,y,w,h);c.fillStyle=col;const fw=w*clamp(pct,0,1);c.fillRect(right?x+w-fw:x,y,fw,h)},
   hud(c,f){const a=f.p1,b=f.p2;this.bar(c,20,16,340,18,a.hp/a.maxHp,'#4d4',false);this.bar(c,W-360,16,340,18,b.hp/b.maxHp,'#4d4',true);
     for(let i=0;i<3;i++){this.bar(c,20+i*116,40,108,8,clamp(a.power-100*i,0,100)/100,'#fc3',false);this.bar(c,W-360+i*116,40,108,8,clamp(b.power-100*i,0,100)/100,'#fc3',true)}
@@ -19,6 +25,8 @@ const Render={ctx:canvas.getContext('2d'),
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
     Camera.apply(c,cam);
     Stage.draw(c,cam,f?f.frame:0,Stage.build('depths'));
-    if(f){this.fighter(c,f.p1);this.fighter(c,f.p2)}
+    if(f){const fr=f.frame;
+      this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
+      this.fighter(c,f.p1,cam,fr);this.fighter(c,f.p2,cam,fr)}
     c.setTransform(1,0,0,1,0,0);
     if(f)this.hud(c,f)}};
