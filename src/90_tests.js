@@ -82,3 +82,21 @@ Test.add('Input.drain folds the action queue into one intent and clears it',()=>
   Input.q.push('light','special2','dashBack');Input.held.block=true;const it=Input.drain();
   eq(it.light,true);eq(it.special,2);eq(it.dashBack,true);eq(it.block,true);eq(Input.q.length,0);Input.held.block=false;
   const it2=Input.drain();eq(it2.light,false);eq(it2.special,0);eq(it2.block,false)});
+function withFight(fn){const prev=G.state;G.state='FIGHT';Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptrs.clear();
+  try{fn()}finally{Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptrs.clear();G.state=prev}}
+function tap(id,x){const r=canvas.getBoundingClientRect(),cx=r.left+x*r.width/W,cy=r.top+r.height/2;return{cx,cy,
+  down(){canvas.dispatchEvent(new PointerEvent('pointerdown',{pointerId:id,clientX:cx,clientY:cy,bubbles:true}))},
+  up(){canvas.dispatchEvent(new PointerEvent('pointerup',{pointerId:id,clientX:cx,clientY:cy,bubbles:true}))}}}
+Test.add('two-thumb touch: second thumb releasing does not clear the first thumb block',()=>{
+  withFight(()=>{
+    const left=tap(1,Input.DEF_ZONE/2),right=tap(2,Input.DEF_ZONE+50);
+    left.down();ok(Input.held.block,'left thumb holds block');
+    right.down();right.up();
+    eq(Input.held.block,true,'block must stay held: left thumb never lifted')})});
+Test.add('two-thumb touch: right thumb lifting clears heavy even after a second thumb touches',()=>{
+  withFight(()=>{
+    const right=tap(1,Input.DEF_ZONE+50),left=tap(2,Input.DEF_ZONE/2);
+    right.down();const rec=Input._ptrs.get(1);rec.holdFired=true;Input.held.heavy=true; // simulate the 180ms hold firing
+    left.down();ok(Input.held.block,'left thumb also holds block');
+    right.up();
+    eq(Input.held.heavy,false,'heavy must clear: right thumb (its owner) lifted')})});
