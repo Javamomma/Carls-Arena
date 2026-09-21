@@ -976,7 +976,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   say(text){if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
   // Per-move sound recipe dispatch + announcer hookup. `a`/`b`/`val` mirror Fight.emit's args.
   onEvent(t,a,b,val){
-    if(t==='hit'){(Audio.recipes[a.moveName]||Audio.recipes.lights)();
+    if(t==='hit'){const mv=MOVES[a.moveName];
+      // Multi-hit specials (s1/s2/s3) already got their one full recipe burst from checkSpecial on
+      // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
+      // not the whole recipe again (that would replay a 3-14 tone burst per sub-hit, overlapping).
+      (mv&&mv.hits>1?Audio.recipes.light1:(Audio.recipes[a.moveName]||Audio.recipes.lights))();
       if(a.combo===3||a.combo===5||a.combo===10)Audio.announce('streak'+a.combo,this.fight.rng)}
     else if(t==='block')Audio.recipes.block();
     else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.rng)}
@@ -1039,7 +1043,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   checkSpecial(fighter,prevMoveName){const mn=fighter.moveName;
     if(mn&&mn!==prevMoveName&&(mn==='s1'||mn==='s2'||mn==='s3')){
       (Audio.recipes[mn]||Audio.recipes.lights)();
-      Audio.announce('special',this.fight.rng)}},
+      // Recipe plays for either side (game feel); the announcer line is reserved for the human's
+      // own specials only, so it doesn't caption every mob/AI special too.
+      if(fighter===this.fight.p1)Audio.announce('special',this.fight.rng)}},
   stepFrame(){this.tick()},
   simFrames(n){for(let i=0;i<n;i++)this.stepFrame()},
   syncSpecials(){const p=this.fight.p1.power;
@@ -1198,5 +1204,14 @@ Test.add('encounter resolves floor, name and enemy def',()=>{const e=Encounter.r
 Test.add('startFight with an encounter sets p2 to the mob and scales hp',()=>{G.startFight({encounter:{floor:2,name:'T',enemy:'goblin',tier:'dummy',hpMul:2,atkMul:1},ctrl1:Ctrl.idle()});eq(G.fight.p2.def.id,'goblin');eq(G.fight.p2.maxHp,600);eq(G.encounter.floor,2);G.toTitle()});
 Test.add('every move has a sound recipe and announcer lines exist per kind',()=>{for(const k in MOVES)ok(typeof Audio.recipes[k]==='function',k);for(const k of ['start','streak3','streak5','streak10','parry','special','win','loss'])ok(Lines[k]&&Lines[k].length>=8,k)});
 Test.add('announce picks deterministically from the fight rng and throttles',()=>{const r1=RNG(5),r2=RNG(5);eq(Audio.pickLine('parry',r1),Audio.pickLine('parry',r2));G._sayAt=-999;G.frameNow=100;G.say('a');eq(document.getElementById('toast').textContent,'a');G.say('b');eq(document.getElementById('toast').textContent,'a');G.frameNow=200;G.say('b');eq(document.getElementById('toast').textContent,'b')});
+Test.add('a multi-hit special plays its recipe once and a light thud per landed sub-hit',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),onEvent:(t,a,b,v)=>G.onEvent(t,a,b,v)});
+  closeIn(f);f.p1.power=200;
+  G.fight=f;G.state='FIGHT';G._tickN=0;
+  const origS2=Audio.recipes.s2,origL1=Audio.recipes.light1;let s2n=0,l1n=0;
+  Audio.recipes.s2=()=>{s2n++};Audio.recipes.light1=()=>{l1n++};
+  try{for(let i=0;i<90;i++)G.tick()}
+  finally{Audio.recipes.s2=origS2;Audio.recipes.light1=origL1;G.fight=null;G.state='TITLE'}
+  eq(s2n,1,'s2 recipe fires once, on the moveName transition');eq(l1n,5,'one light thud per landed sub-hit')});
 
 </script></body></html>

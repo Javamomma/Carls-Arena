@@ -29,7 +29,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   say(text){if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
   // Per-move sound recipe dispatch + announcer hookup. `a`/`b`/`val` mirror Fight.emit's args.
   onEvent(t,a,b,val){
-    if(t==='hit'){(Audio.recipes[a.moveName]||Audio.recipes.lights)();
+    if(t==='hit'){const mv=MOVES[a.moveName];
+      // Multi-hit specials (s1/s2/s3) already got their one full recipe burst from checkSpecial on
+      // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
+      // not the whole recipe again (that would replay a 3-14 tone burst per sub-hit, overlapping).
+      (mv&&mv.hits>1?Audio.recipes.light1:(Audio.recipes[a.moveName]||Audio.recipes.lights))();
       if(a.combo===3||a.combo===5||a.combo===10)Audio.announce('streak'+a.combo,this.fight.rng)}
     else if(t==='block')Audio.recipes.block();
     else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.rng)}
@@ -92,7 +96,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   checkSpecial(fighter,prevMoveName){const mn=fighter.moveName;
     if(mn&&mn!==prevMoveName&&(mn==='s1'||mn==='s2'||mn==='s3')){
       (Audio.recipes[mn]||Audio.recipes.lights)();
-      Audio.announce('special',this.fight.rng)}},
+      // Recipe plays for either side (game feel); the announcer line is reserved for the human's
+      // own specials only, so it doesn't caption every mob/AI special too.
+      if(fighter===this.fight.p1)Audio.announce('special',this.fight.rng)}},
   stepFrame(){this.tick()},
   simFrames(n){for(let i=0;i<n;i++)this.stepFrame()},
   syncSpecials(){const p=this.fight.p1.power;
