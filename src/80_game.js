@@ -1,4 +1,5 @@
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
+  frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
   fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   // Canvas hit-test for the HUD's pause glyph (drawn by Render.hud at Render.pauseRect), consulted
@@ -18,8 +19,22 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
     this.cam={x:STAGE_W/2,zoom:1};FX.reset();
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
-    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.say('FIGHT!')},
-  onEvent(t,a){if(t==='hit')Audio.hit();if(t==='block')Audio.block();if(t==='parry'){Audio.parry();Audio.say('PARRY!')}if(t==='ko')Audio.ko();
+    // Fresh throttle window per fight so the opening announcer line always fires immediately,
+    // regardless of how recently the previous fight's last toast landed.
+    this.frameNow=0;this._sayAt=-999;
+    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.announce('start',this.fight.rng)},
+  // Throttled announcer display: only updates the toast if at least 90 frames (1.5s) have passed
+  // since the last line, so a burst of events can't stomp on each other mid-read. Audio.say remains
+  // the unthrottled display primitive this calls into.
+  say(text){if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
+  // Per-move sound recipe dispatch + announcer hookup. `a`/`b`/`val` mirror Fight.emit's args.
+  onEvent(t,a,b,val){
+    if(t==='hit'){(Audio.recipes[a.moveName]||Audio.recipes.lights)();
+      if(a.combo===3||a.combo===5||a.combo===10)Audio.announce('streak'+a.combo,this.fight.rng)}
+    else if(t==='block')Audio.recipes.block();
+    else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.rng)}
+    else if(t==='miss'){if(b&&b.state==='DASH')Audio.recipes.dash()}
+    else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.rng)}
     if(t!=='ko')return;
     this.state='RESULT';document.getElementById('resultTitle').textContent=a.side===1?'VICTORY':'DEFEATED';
     document.getElementById('resultLine').textContent=a.def.name+' wins with '+Math.round(100*a.hp/a.maxHp)+'% health.';
@@ -64,10 +79,20 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // draining fight.fx into FX after any step. No rAF/wall-clock dependency, so tests can call it
   // directly. G.loop drives this once per accumulated STEP; simFrames/stepFrame delegate to it too.
   tick(){if(this.state!=='FIGHT')return;const f=this.fight;
+    const pm1=f.p1.moveName,pm2=f.p2.moveName;
     if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
     else f.step();
+    this.frameNow=f.frame;
+    this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
     FX.pushAll(f.fx);f.fx.length=0;
     this.syncSpecials()},
+  // Detects a fighter's moveName transitioning into s1/s2/s3 this tick (the sim itself never
+  // references Audio/G, so this has to be watched from outside) and plays that special's recipe
+  // plus an announcer line.
+  checkSpecial(fighter,prevMoveName){const mn=fighter.moveName;
+    if(mn&&mn!==prevMoveName&&(mn==='s1'||mn==='s2'||mn==='s3')){
+      (Audio.recipes[mn]||Audio.recipes.lights)();
+      Audio.announce('special',this.fight.rng)}},
   stepFrame(){this.tick()},
   simFrames(n){for(let i=0;i<n;i++)this.stepFrame()},
   syncSpecials(){const p=this.fight.p1.power;

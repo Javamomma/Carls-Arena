@@ -107,9 +107,9 @@ Test.add('keyboard actions do not queue while paused',()=>{
 Test.add('Fight never calls Audio directly; G.onEvent dispatches sound per event',()=>{
   ok(!/Audio\./.test(Fight.prototype.resolve.toString()),'resolve must not call Audio');
   ok(!/Audio\./.test(Fight.prototype.finish.toString()),'finish must not call Audio');
-  const orig=Audio.hit;let called=false;Audio.hit=()=>{called=true};
-  try{G.onEvent('hit')}finally{Audio.hit=orig}
-  ok(called,'G.onEvent must dispatch hit to Audio.hit')});
+  const orig=Audio.recipes.light1;let called=false;Audio.recipes.light1=()=>{called=true};
+  try{G.onEvent('hit',{moveName:'light1',combo:1})}finally{Audio.recipes.light1=orig}
+  ok(called,'G.onEvent must dispatch hit to Audio.recipes[moveName]')});
 Test.add('two-thumb touch: right thumb lifting clears heavy even after a second thumb touches',()=>{
   withFight(()=>{
     const right=tap(1,Input.DEF_ZONE+50),left=tap(2,Input.DEF_ZONE/2);
@@ -134,3 +134,5 @@ Test.add('on-screen buttons map to intents',()=>{Input.q.length=0;const btn=id=>
 Test.add('POWER tap fires the highest affordable special',()=>{const f=mkFight();G.fight=f;f.p1.power=250;Input.q.push('powerAuto');eq(Input.drain().special,2);f.p1.power=50;Input.q.push('powerAuto');eq(Input.drain().special,0);G.fight=null});
 Test.add('encounter resolves floor, name and enemy def',()=>{const e=Encounter.resolve('f1_goblin');eq(e.floor,1);eq(e.name,'THE DEPTHS');eq(e.enemy.id,'goblin');const o=Encounter.resolve({floor:3,name:'X',enemy:'hobgoblin',tier:'brawl'});eq(o.enemy.hp,DEFS.hobgoblin.hp)});
 Test.add('startFight with an encounter sets p2 to the mob and scales hp',()=>{G.startFight({encounter:{floor:2,name:'T',enemy:'goblin',tier:'dummy',hpMul:2,atkMul:1},ctrl1:Ctrl.idle()});eq(G.fight.p2.def.id,'goblin');eq(G.fight.p2.maxHp,600);eq(G.encounter.floor,2);G.toTitle()});
+Test.add('every move has a sound recipe and announcer lines exist per kind',()=>{for(const k in MOVES)ok(typeof Audio.recipes[k]==='function',k);for(const k of ['start','streak3','streak5','streak10','parry','special','win','loss'])ok(Lines[k]&&Lines[k].length>=8,k)});
+Test.add('announce picks deterministically from the fight rng and throttles',()=>{const r1=RNG(5),r2=RNG(5);eq(Audio.pickLine('parry',r1),Audio.pickLine('parry',r2));G._sayAt=-999;G.frameNow=100;G.say('a');eq(document.getElementById('toast').textContent,'a');G.say('b');eq(document.getElementById('toast').textContent,'a');G.frameNow=200;G.say('b');eq(document.getElementById('toast').textContent,'b')});
