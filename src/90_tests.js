@@ -78,3 +78,7 @@ Test.add('AI vs random bot is deterministic',()=>{
 Test.add('brawl AI blocks a medium at least once in 20 seconds',()=>{
   const f=mkFight({ctrl1:Ctrl.script(Array.from({length:40},(_,i)=>({f:i*30,intent:{medium:true}}))),ctrl2:AI.make('brawl',11)});run(f,1200);
   ok(f.log.some(e=>e.type==='block'||e.type==='parry'))});
+Test.add('Input.drain folds the action queue into one intent and clears it',()=>{
+  Input.q.push('light','special2','dashBack');Input.held.block=true;const it=Input.drain();
+  eq(it.light,true);eq(it.special,2);eq(it.dashBack,true);eq(it.block,true);eq(Input.q.length,0);Input.held.block=false;
+  const it2=Input.drain();eq(it2.light,false);eq(it2.special,0);eq(it2.block,false)});
