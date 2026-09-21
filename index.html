@@ -144,7 +144,8 @@ const AI={profiles:{
     dummy:{react:0, attack:0,  block:0,  parry:0, dash:0,  special:0},
     basic:{react:14,attack:.04,block:.5, parry:.1,dash:.02,special:.6},
     brawl:{react:8, attack:.09,block:.65,parry:.3,dash:.04,special:.9}},
-  make(profile,seed){const p=AI.profiles[profile]||AI.profiles.basic,r=RNG(seed);let hold=0,cd=0,plan=null;
+  make(profile,seed){if(!AI.profiles[profile])throw new Error('unknown AI profile: '+profile);
+    const p=AI.profiles[profile],r=RNG(seed);let hold=0,cd=0,plan=null;
     return{next(fight,me,foe){const it=Ctrl.EMPTY();if(me.busy())return it;
       const dist=Math.abs(foe.x-me.x)-me.width;
       if(hold>0){hold--;it.block=true;return it}
@@ -255,6 +256,7 @@ const Test={cases:[],add(n,fn){this.cases.push({n,fn})},
     return{pass:out.filter(o=>o.ok).length,fail:out.filter(o=>!o.ok).length,results:out}}};
 const eq=(a,b,m)=>{if(a!==b)throw new Error((m||'')+' expected '+JSON.stringify(b)+' got '+JSON.stringify(a))};
 const ok=(v,m)=>{if(!v)throw new Error(m||'expected truthy')};
+const threw=fn=>{try{fn()}catch(e){return true}return false};
 Test.add('rng is deterministic per seed',()=>{const a=RNG(42),b=RNG(42);for(let i=0;i<5;i++)eq(a.next(),b.next());ok(RNG(1).next()!==RNG(2).next())});
 Test.add('move table is complete and sane',()=>{
   for(const k of ['light1','light2','light3','light4','light5','medium','heavy','s1','s2','s3']){const m=MOVES[k];ok(m,k+' missing');
@@ -331,6 +333,8 @@ Test.add('basic AI lands hits on an idle target within 10 seconds',()=>{const f=
 Test.add('AI vs random bot is deterministic',()=>{
   const a=mkFight({ctrl1:Ctrl.random(3),ctrl2:AI.make('basic',9)}),b=mkFight({ctrl1:Ctrl.random(3),ctrl2:AI.make('basic',9)});run(a,900);run(b,900);
   eq(a.p1.hp,b.p1.hp);eq(a.p2.hp,b.p2.hp);eq(a.log.length,b.log.length)});
+Test.add('an unknown AI profile throws instead of silently falling back to basic',()=>{
+  ok(threw(()=>AI.make('nope',1)))});
 Test.add('brawl AI blocks a medium at least once in 20 seconds',()=>{
   const f=mkFight({ctrl1:Ctrl.script(Array.from({length:40},(_,i)=>({f:i*30,intent:{medium:true}}))),ctrl2:AI.make('brawl',11)});run(f,1200);
   ok(f.log.some(e=>e.type==='block'||e.type==='parry'))});

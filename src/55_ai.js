@@ -2,7 +2,8 @@ const AI={profiles:{
     dummy:{react:0, attack:0,  block:0,  parry:0, dash:0,  special:0},
     basic:{react:14,attack:.04,block:.5, parry:.1,dash:.02,special:.6},
     brawl:{react:8, attack:.09,block:.65,parry:.3,dash:.04,special:.9}},
-  make(profile,seed){const p=AI.profiles[profile]||AI.profiles.basic,r=RNG(seed);let hold=0,cd=0,plan=null;
+  make(profile,seed){if(!AI.profiles[profile])throw new Error('unknown AI profile: '+profile);
+    const p=AI.profiles[profile],r=RNG(seed);let hold=0,cd=0,plan=null;
     return{next(fight,me,foe){const it=Ctrl.EMPTY();if(me.busy())return it;
       const dist=Math.abs(foe.x-me.x)-me.width;
       if(hold>0){hold--;it.block=true;return it}
