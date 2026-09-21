@@ -251,12 +251,14 @@ const Stage={cache:{},
       wc.fillStyle=g;wc.beginPath();wc.moveTo(nx-55,FLOOR+10);wc.lineTo(nx-55,FLOOR-130);wc.quadraticCurveTo(nx,FLOOR-180,nx+55,FLOOR-130);
       wc.lineTo(nx+55,FLOOR+10);wc.closePath();wc.fill();
       wc.strokeStyle='#0c0e16';wc.lineWidth=5;wc.stroke()}
-    // hanging chains, kept within the framed area around the arch
-    const chainXs=[cx-330,cx-190,cx+190,cx+330,cx-70,cx+70];
-    for(let ci=0;ci<chainXs.length;ci++){const cxs=chainXs[ci],len=80+r.int(60);
+    // hanging chains: start below the camera's visible-top edge at every zoom (worst case ~180 at zoom 1.35)
+    // so the links are always on screen, with a wall bracket marking the mount point.
+    const chainXs=[cx-330,cx-190,cx+190,cx+330,cx-70,cx+70],chainY0=200;
+    for(let ci=0;ci<chainXs.length;ci++){const cxs=chainXs[ci],len=90+r.int(60);
+      wc.fillStyle='#2a2d38';wc.fillRect(cxs-7,chainY0-9,14,9);
       wc.strokeStyle='#12141c';wc.lineWidth=3;
-      for(let y=0;y<len;y+=14){wc.beginPath();wc.ellipse(cxs+((y/14)%2?3:-3),y,5,7,0,0,Math.PI*2);wc.stroke()}
-      wc.fillStyle='#1c2030';wc.beginPath();wc.arc(cxs,len,7,0,Math.PI*2);wc.fill()}
+      for(let y=0;y<len;y+=14){wc.beginPath();wc.ellipse(cxs+((y/14)%2?3:-3),chainY0+y,5,7,0,0,Math.PI*2);wc.stroke()}
+      wc.fillStyle='#1c2030';wc.beginPath();wc.arc(cxs,chainY0+len,7,0,Math.PI*2);wc.fill()}
     // banners with pale lettering, hung low enough on the wall to stay in frame across zoom levels
     const banner=(bx,lines)=>{wc.save();wc.translate(bx,175);
       g=wc.createLinearGradient(0,0,0,175);g.addColorStop(0,'#2a1420');g.addColorStop(1,'#170a12');
@@ -308,8 +310,7 @@ const Stage={cache:{},
       const g=c.createRadialGradient(t.x,t.y,0,t.x,t.y,rad);
       g.addColorStop(0,`rgba(255,205,130,${.6+.25*flick})`);g.addColorStop(.45,`rgba(255,140,60,${.35+.15*flick})`);g.addColorStop(1,'rgba(255,120,40,0)');
       c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
-      c.fillStyle=`rgba(255,${210+r_flame(flick)},150,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
-function r_flame(flick){return Math.floor(20*flick)}
+      c.fillStyle=`rgba(255,${210+Math.floor(20*flick)},150,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
 const Camera={
   update(cam,f){const t=f.camTarget;cam.x+=(t.x-cam.x)*.12;cam.zoom+=(t.zoom-cam.zoom)*.12;
     const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
