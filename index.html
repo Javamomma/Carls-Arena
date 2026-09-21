@@ -182,19 +182,19 @@ class Fight{
     return{type:'hit',att,def,idx,m,last}}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
     if(type==='miss')return this.emit('miss',att,def,0);
-    if(type==='parry'){att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');Audio.parry();return this.emit('parry',def,att,0)}
+    if(type==='parry'){att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');return this.emit('parry',def,att,0)}
     if(type==='block'){const m=r.m;const chip=Math.round(att.def.atk*m.dmg*CHIP);def.hp=Math.max(0,def.hp-chip);def.stun=m.blockstun;def.setState('BLOCKSTUN');
-      def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;Audio.block();return this.emit('block',att,def,chip)}
+      def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;return this.emit('block',att,def,chip)}
     const m=r.m,last=r.last;
     const cls=CLASS_BEATS[att.def.cls]===def.def.cls?CLASS_BONUS:1;
     const dmg=Math.round(att.def.atk*m.dmg*cls*(1-def.def.armor));
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
     att.power=Math.min(POWER_MAX,att.power+m.powHit);def.power=Math.min(POWER_MAX,def.power+m.powTaken);
     def.move=null;def.moveName=null;if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
-    if(!m.hits||last)def.x+=att.face*m.push;this.hitstop=HITSTOP;Audio.hit();this.emit('hit',att,def,dmg)}
+    if(!m.hits||last)def.x+=att.face*m.push;this.hitstop=HITSTOP;this.emit('hit',att,def,dmg)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
     this.winner=a.hp<=0?b:b.hp<=0?a:(a.hp/a.maxHp>=b.hp/b.maxHp?a:b);
-    a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');Audio.ko();this.emit('ko',this.winner,null,0)}
+    a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');this.emit('ko',this.winner,null,0)}
   emit(type,a,b,val){this.log.push({f:this.frame,type,who:a?a.side:0,val});this.onEvent(type,a,b,val)}}
 
 const Render={ctx:canvas.getContext('2d'),
@@ -226,7 +226,8 @@ const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(o.ai||'basic',seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('specials',true);Audio.say('FIGHT!')},
-  onEvent(t,a){if(t==='parry')Audio.say('PARRY!');if(t!=='ko')return;
+  onEvent(t,a){if(t==='hit')Audio.hit();if(t==='block')Audio.block();if(t==='parry'){Audio.parry();Audio.say('PARRY!')}if(t==='ko')Audio.ko();
+    if(t!=='ko')return;
     this.state='RESULT';document.getElementById('resultTitle').textContent=a.side===1?'VICTORY':'DEFEATED';
     document.getElementById('resultLine').textContent=a.def.name+' wins with '+Math.round(100*a.hp/a.maxHp)+'% health.';
     this.show('result',true);this.show('specials',false)},
@@ -347,6 +348,12 @@ Test.add('two-thumb touch: second thumb releasing does not clear the first thumb
     left.down();ok(Input.held.block,'left thumb holds block');
     right.down();right.up();
     eq(Input.held.block,true,'block must stay held: left thumb never lifted')})});
+Test.add('Fight never calls Audio directly; G.onEvent dispatches sound per event',()=>{
+  ok(!/Audio\./.test(Fight.prototype.resolve.toString()),'resolve must not call Audio');
+  ok(!/Audio\./.test(Fight.prototype.finish.toString()),'finish must not call Audio');
+  const orig=Audio.hit;let called=false;Audio.hit=()=>{called=true};
+  try{G.onEvent('hit')}finally{Audio.hit=orig}
+  ok(called,'G.onEvent must dispatch hit to Audio.hit')});
 Test.add('two-thumb touch: right thumb lifting clears heavy even after a second thumb touches',()=>{
   withFight(()=>{
     const right=tap(1,Input.DEF_ZONE+50),left=tap(2,Input.DEF_ZONE/2);

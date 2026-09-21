@@ -22,17 +22,17 @@ class Fight{
     return{type:'hit',att,def,idx,m,last}}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
     if(type==='miss')return this.emit('miss',att,def,0);
-    if(type==='parry'){att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');Audio.parry();return this.emit('parry',def,att,0)}
+    if(type==='parry'){att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');return this.emit('parry',def,att,0)}
     if(type==='block'){const m=r.m;const chip=Math.round(att.def.atk*m.dmg*CHIP);def.hp=Math.max(0,def.hp-chip);def.stun=m.blockstun;def.setState('BLOCKSTUN');
-      def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;Audio.block();return this.emit('block',att,def,chip)}
+      def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;return this.emit('block',att,def,chip)}
     const m=r.m,last=r.last;
     const cls=CLASS_BEATS[att.def.cls]===def.def.cls?CLASS_BONUS:1;
     const dmg=Math.round(att.def.atk*m.dmg*cls*(1-def.def.armor));
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
     att.power=Math.min(POWER_MAX,att.power+m.powHit);def.power=Math.min(POWER_MAX,def.power+m.powTaken);
     def.move=null;def.moveName=null;if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
-    if(!m.hits||last)def.x+=att.face*m.push;this.hitstop=HITSTOP;Audio.hit();this.emit('hit',att,def,dmg)}
+    if(!m.hits||last)def.x+=att.face*m.push;this.hitstop=HITSTOP;this.emit('hit',att,def,dmg)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
     this.winner=a.hp<=0?b:b.hp<=0?a:(a.hp/a.maxHp>=b.hp/b.maxHp?a:b);
-    a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');Audio.ko();this.emit('ko',this.winner,null,0)}
+    a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');this.emit('ko',this.winner,null,0)}
   emit(type,a,b,val){this.log.push({f:this.frame,type,who:a?a.side:0,val});this.onEvent(type,a,b,val)}}

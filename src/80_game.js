@@ -6,7 +6,8 @@ const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(o.ai||'basic',seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('specials',true);Audio.say('FIGHT!')},
-  onEvent(t,a){if(t==='parry')Audio.say('PARRY!');if(t!=='ko')return;
+  onEvent(t,a){if(t==='hit')Audio.hit();if(t==='block')Audio.block();if(t==='parry'){Audio.parry();Audio.say('PARRY!')}if(t==='ko')Audio.ko();
+    if(t!=='ko')return;
     this.state='RESULT';document.getElementById('resultTitle').textContent=a.side===1?'VICTORY':'DEFEATED';
     document.getElementById('resultLine').textContent=a.def.name+' wins with '+Math.round(100*a.hp/a.maxHp)+'% health.';
     this.show('result',true);this.show('specials',false)},

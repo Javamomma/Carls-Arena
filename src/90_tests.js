@@ -97,6 +97,12 @@ Test.add('two-thumb touch: second thumb releasing does not clear the first thumb
     left.down();ok(Input.held.block,'left thumb holds block');
     right.down();right.up();
     eq(Input.held.block,true,'block must stay held: left thumb never lifted')})});
+Test.add('Fight never calls Audio directly; G.onEvent dispatches sound per event',()=>{
+  ok(!/Audio\./.test(Fight.prototype.resolve.toString()),'resolve must not call Audio');
+  ok(!/Audio\./.test(Fight.prototype.finish.toString()),'finish must not call Audio');
+  const orig=Audio.hit;let called=false;Audio.hit=()=>{called=true};
+  try{G.onEvent('hit')}finally{Audio.hit=orig}
+  ok(called,'G.onEvent must dispatch hit to Audio.hit')});
 Test.add('two-thumb touch: right thumb lifting clears heavy even after a second thumb touches',()=>{
   withFight(()=>{
     const right=tap(1,Input.DEF_ZONE+50),left=tap(2,Input.DEF_ZONE/2);
