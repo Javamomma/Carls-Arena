@@ -18,6 +18,7 @@ const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SW
     addEventListener('keydown',e=>{if(e.repeat)return;const k=e.key.toLowerCase();
       if(e.code==='Space'&&G.state==='TITLE'){e.preventDefault();return G.startFight()}
       if(k==='p')return G.togglePause();
+      if(G.state!=='FIGHT')return;
       if(k==='j')this.q.push('light');if(k==='k')this.q.push('medium');if(k==='a')this.q.push('dashBack');
       if(k==='l')this.held.heavy=true;if(k==='s')this.held.block=true;if(k==='1'||k==='2'||k==='3')this.q.push('special'+k)});
     addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k==='s')this.held.block=false;if(k==='l')this.held.heavy=false})},

@@ -60,6 +60,7 @@ const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SW
     addEventListener('keydown',e=>{if(e.repeat)return;const k=e.key.toLowerCase();
       if(e.code==='Space'&&G.state==='TITLE'){e.preventDefault();return G.startFight()}
       if(k==='p')return G.togglePause();
+      if(G.state!=='FIGHT')return;
       if(k==='j')this.q.push('light');if(k==='k')this.q.push('medium');if(k==='a')this.q.push('dashBack');
       if(k==='l')this.held.heavy=true;if(k==='s')this.held.block=true;if(k==='1'||k==='2'||k==='3')this.q.push('special'+k)});
     addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k==='s')this.held.block=false;if(k==='l')this.held.heavy=false})},
@@ -348,6 +349,10 @@ Test.add('two-thumb touch: second thumb releasing does not clear the first thumb
     left.down();ok(Input.held.block,'left thumb holds block');
     right.down();right.up();
     eq(Input.held.block,true,'block must stay held: left thumb never lifted')})});
+Test.add('keyboard actions do not queue while paused',()=>{
+  const prev=G.state;G.state='PAUSED';Input.q.length=0;
+  try{dispatchEvent(new KeyboardEvent('keydown',{key:'j'}));eq(Input.q.length,0,'light must not queue while paused')}
+  finally{Input.q.length=0;G.state=prev}});
 Test.add('Fight never calls Audio directly; G.onEvent dispatches sound per event',()=>{
   ok(!/Audio\./.test(Fight.prototype.resolve.toString()),'resolve must not call Audio');
   ok(!/Audio\./.test(Fight.prototype.finish.toString()),'finish must not call Audio');

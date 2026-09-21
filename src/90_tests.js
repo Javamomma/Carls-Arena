@@ -97,6 +97,10 @@ Test.add('two-thumb touch: second thumb releasing does not clear the first thumb
     left.down();ok(Input.held.block,'left thumb holds block');
     right.down();right.up();
     eq(Input.held.block,true,'block must stay held: left thumb never lifted')})});
+Test.add('keyboard actions do not queue while paused',()=>{
+  const prev=G.state;G.state='PAUSED';Input.q.length=0;
+  try{dispatchEvent(new KeyboardEvent('keydown',{key:'j'}));eq(Input.q.length,0,'light must not queue while paused')}
+  finally{Input.q.length=0;G.state=prev}});
 Test.add('Fight never calls Audio directly; G.onEvent dispatches sound per event',()=>{
   ok(!/Audio\./.test(Fight.prototype.resolve.toString()),'resolve must not call Audio');
   ok(!/Audio\./.test(Fight.prototype.finish.toString()),'finish must not call Audio');
