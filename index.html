@@ -15,4 +15,38 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 <div class="overlay" id="result"><div class="panel"><h1 id="resultTitle">VICTORY</h1><p id="resultLine"></p><button id="again">FIGHT AGAIN</button><button id="resultTitleBtn">TITLE</button></div></div>
 </div><script>
 
+'use strict';
+const W=854,H=480,FLOOR=400,STEP=1/60;
+const canvas=document.getElementById('game');
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+// xorshift32; deterministic per seed. Never use Math.random inside the sim.
+function RNG(seed){let s=(seed>>>0)||0x9e3779b9;return{
+  next(){s^=s<<13;s>>>=0;s^=s>>>17;s^=s<<5;s>>>=0;return s/4294967296},
+  int(n){return Math.floor(this.next()*n)},
+  pick(a){return a[this.int(a.length)]}}}
+
+const Save={key:'carlsArena.v1',data:null,
+  load(){try{this.data=JSON.parse(localStorage.getItem(this.key))||null}catch(e){this.data=null}
+    if(!this.data)this.data={v:1,gold:0,units:0,roster:{},mute:false,settings:{}}},
+  put(){try{localStorage.setItem(this.key,JSON.stringify(this.data))}catch(e){}}};
+Save.load();
+
+const Audio={ac:null,muted:Save.data.mute,_t:0,
+  init(){if(!this.ac){try{this.ac=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(this.ac&&this.ac.state==='suspended')this.ac.resume()},
+  tone(f,d=.08,type='square',v=.035,when=0){if(this.muted||!this.ac)return;const t=this.ac.currentTime+when,o=this.ac.createOscillator(),g=this.ac.createGain();o.type=type;o.frequency.setValueAtTime(f,t);g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.0001,t+d);o.connect(g).connect(this.ac.destination);o.start(t);o.stop(t+d+.02)},
+  say(line){const el=document.getElementById('toast');el.textContent=line;clearTimeout(this._t);this._t=setTimeout(()=>{el.textContent=''},2200)},
+  hit(){this.tone(180,.06,'square',.05);this.tone(90,.1,'sawtooth',.04,.02)},
+  block(){this.tone(420,.04,'triangle',.03)},
+  parry(){this.tone(880,.08,'square',.05);this.tone(1320,.12,'square',.04,.06)},
+  ko(){for(let i=0;i<6;i++)this.tone(300-40*i,.15,'sawtooth',.05,i*.07)}};
+
+const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,
+  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px'},
+  show(id,on){document.getElementById(id).classList.toggle('show',on)},
+  loop(t){const c=canvas.getContext('2d');c.fillStyle='#1a1f33';c.fillRect(0,0,W,FLOOR);c.fillStyle='#2b2f45';c.fillRect(0,FLOOR,W,H-FLOOR);requestAnimationFrame(t=>this.loop(t))},
+  init(){this.fit();addEventListener('resize',()=>this.fit());
+    document.getElementById('titleMute').onclick=e=>{Audio.muted=!Audio.muted;Save.data.mute=Audio.muted;Save.put();e.target.textContent='SOUND: '+(Audio.muted?'OFF':'ON')};
+    requestAnimationFrame(t=>{this.last=t;this.loop(t)})}};
+G.init();
+
 </script></body></html>
