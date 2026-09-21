@@ -21,12 +21,19 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='bold 20px ui-monospace,monospace';if(a.combo>1){c.textAlign='left';c.fillStyle='#f4c542';c.fillText(a.combo+' HITS',20,110)}
     if(b.combo>1){c.textAlign='right';c.fillStyle='#f66';c.fillText(b.combo+' HITS',W-20,110)}
     if(f.over){c.textAlign='center';c.fillStyle='#fff';c.font='bold 40px ui-monospace,monospace';c.fillText('K.O.',W/2,H/2)}},
-  frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1};
+  frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
     Camera.apply(c,cam);
-    Stage.draw(c,cam,f?f.frame:0,Stage.build('depths'));
-    if(f){const fr=f.frame;
+    // Shake offsets the already-applied camera transform: translate by (screen px)/zoom so the
+    // jitter reads as `FX.shake` screen pixels regardless of zoom level. Direction is seeded off
+    // the fight frame (never Math.random) so --sim screenshots stay reproducible.
+    if(FX.shake>0.05){const rng=RNG((fr*211+1)>>>0),ang=rng.next()*Math.PI*2;
+      c.translate(Math.cos(ang)*FX.shake/cam.zoom,Math.sin(ang)*FX.shake/cam.zoom)}
+    Stage.draw(c,cam,fr,Stage.build('depths'));
+    if(f){
       this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
       this.fighter(c,f.p1,cam,fr);this.fighter(c,f.p2,cam,fr)}
+    FX.draw(c,cam,fr);
     c.setTransform(1,0,0,1,0,0);
+    if(FX.flash>0){c.globalAlpha=Math.min(1,FX.flash/6);c.fillStyle='#fff';c.fillRect(0,0,W,H);c.globalAlpha=1}
     if(f)this.hud(c,f)}};

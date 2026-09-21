@@ -83,16 +83,16 @@ const Ctrl={
 
 // All frame counts at 60 Hz. dash = px the attacker advances during startup. push = px the defender is shoved on hit.
 const MOVES={
-  light1:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light2',dash:18},
-  light2:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light3',dash:18},
-  light3:{startup:5,active:3,recovery:9, dmg:1.05,range:75, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light4',dash:18},
-  light4:{startup:6,active:3,recovery:10,dmg:1.1, range:75, hitstun:15,blockstun:10,push:20,powHit:8, powTaken:4,chain:'light5',dash:20},
-  light5:{startup:7,active:4,recovery:16,dmg:1.4, range:80, hitstun:20,blockstun:12,push:60,powHit:10,powTaken:5,chain:null,dash:10,knockdown:true},
-  medium:{startup:10,active:4,recovery:14,dmg:1.6,range:120,hitstun:18,blockstun:11,push:24,powHit:12,powTaken:6,chain:'light1',dash:140},
-  heavy: {charge:22,startup:8,active:5,recovery:26,dmg:2.6,range:130,hitstun:26,blockstun:14,push:70,powHit:18,powTaken:9,chain:null,knockdown:true},
-  s1:{startup:8, active:4,recovery:22,dmg:1.5,hits:3,gap:6,range:130,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:100,chain:null,knockdown:true},
-  s2:{startup:10,active:4,recovery:28,dmg:1.6,hits:5,gap:6,range:150,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:200,chain:null,knockdown:true},
-  s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,chain:null,knockdown:true,unblockable:true}};
+  light1:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light2',dash:18,hitstop:3},
+  light2:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light3',dash:18,hitstop:3},
+  light3:{startup:5,active:3,recovery:9, dmg:1.05,range:75, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light4',dash:18,hitstop:3},
+  light4:{startup:6,active:3,recovery:10,dmg:1.1, range:75, hitstun:15,blockstun:10,push:20,powHit:8, powTaken:4,chain:'light5',dash:20,hitstop:3},
+  light5:{startup:7,active:4,recovery:16,dmg:1.4, range:80, hitstun:20,blockstun:12,push:60,powHit:10,powTaken:5,chain:null,dash:10,knockdown:true,hitstop:5},
+  medium:{startup:10,active:4,recovery:14,dmg:1.6,range:120,hitstun:18,blockstun:11,push:24,powHit:12,powTaken:6,chain:'light1',dash:140,hitstop:5},
+  heavy: {charge:22,startup:8,active:5,recovery:26,dmg:2.6,range:130,hitstun:26,blockstun:14,push:70,powHit:18,powTaken:9,chain:null,knockdown:true,hitstop:9},
+  s1:{startup:8, active:4,recovery:22,dmg:1.5,hits:3,gap:6,range:130,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:100,chain:null,knockdown:true,hitstop:6},
+  s2:{startup:10,active:4,recovery:28,dmg:1.6,hits:5,gap:6,range:150,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:200,chain:null,knockdown:true,hitstop:8},
+  s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,chain:null,knockdown:true,unblockable:true,hitstop:14}};
 const CHAMPS={
   carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human'},
   donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'human'},
@@ -169,6 +169,7 @@ const AI={profiles:{
 class Fight{
   constructor(o){this.rng=RNG(o.seed||1);this.p1=new Fighter(o.p1,1,o.ctrl1);this.p2=new Fighter(o.p2,-1,o.ctrl2);
     this.frame=0;this.clock=o.clock===undefined?120:o.clock;this.hitstop=0;this.over=false;this.winner=null;this.log=[];this.onEvent=o.onEvent||(()=>{});
+    this.fx=[];this.slowmo=0;this.cinematic=0; // fx: plain events drained by G into FX each tick; slowmo/cinematic: frame counters G steps around
     this.updateCam()}
   updateCam(){const dist=Math.abs(this.p2.x-this.p1.x);
     this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.35-(dist-120)/380*0.35,1,1.35)}}
@@ -193,19 +194,34 @@ class Fight{
     return{type:'hit',att,def,idx,m,last}}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
     if(type==='miss')return this.emit('miss',att,def,0);
-    if(type==='parry'){att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');return this.emit('parry',def,att,0)}
+    if(type==='parry'){att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');
+      this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
+      return this.emit('parry',def,att,0)}
     if(type==='block'){const m=r.m;const chip=Math.round(att.def.atk*m.dmg*CHIP);def.hp=Math.max(0,def.hp-chip);def.stun=m.blockstun;def.setState('BLOCKSTUN');
-      def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;return this.emit('block',att,def,chip)}
+      def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;
+      this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip)}
     const m=r.m,last=r.last;
     const cls=CLASS_BEATS[att.def.cls]===def.def.cls?CLASS_BONUS:1;
     const dmg=Math.round(att.def.atk*m.dmg*cls*(1-def.def.armor));
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
     att.power=Math.min(POWER_MAX,att.power+m.powHit);def.power=Math.min(POWER_MAX,def.power+m.powTaken);
     def.move=null;def.moveName=null;if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
-    if(!m.hits||last)def.x+=att.face*m.push;this.hitstop=HITSTOP;this.emit('hit',att,def,dmg)}
+    if(!m.hits||last)def.x+=att.face*m.push;
+    // Sim freeze only on a single-hit move or the last blow of a multi-hit special (mirrors the
+    // knockback gate above): a 4-hit S3 shouldn't stack four 14-frame freezes back to back. Every
+    // landed hit still shakes/sparks/pops for combo feedback; only the freeze itself is gated, and
+    // an intermediate multi-hit leaves any hitstop already armed by a same-frame mutual trade alone.
+    if(!m.hits||last)this.hitstop=m.hitstop;
+    // crit rolling (att.def.crit/critMul) lands in a later task; fx styling stays neutral until then.
+    this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:'#ffd86b'});
+    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:'#ffd86b',big:false});
+    this.fx.push({kind:'shake',amt:m.hitstop});
+    this.emit('hit',att,def,dmg)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
     this.winner=a.hp<=0?b:b.hp<=0?a:(a.hp/a.maxHp>=b.hp/b.maxHp?a:b);
-    a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');this.emit('ko',this.winner,null,0)}
+    a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');
+    this.slowmo=90;this.fx.push({kind:'flash',frames:6});
+    this.emit('ko',this.winner,null,0)}
   emit(type,a,b,val){this.log.push({f:this.frame,type,who:a?a.side:0,val});this.onEvent(type,a,b,val)}}
 
 // Parallax dungeon stage + follow camera. Pure presentation: reads Fight/Fighter state, never writes it.
@@ -617,23 +633,77 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='bold 20px ui-monospace,monospace';if(a.combo>1){c.textAlign='left';c.fillStyle='#f4c542';c.fillText(a.combo+' HITS',20,110)}
     if(b.combo>1){c.textAlign='right';c.fillStyle='#f66';c.fillText(b.combo+' HITS',W-20,110)}
     if(f.over){c.textAlign='center';c.fillStyle='#fff';c.font='bold 40px ui-monospace,monospace';c.fillText('K.O.',W/2,H/2)}},
-  frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1};
+  frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
     Camera.apply(c,cam);
-    Stage.draw(c,cam,f?f.frame:0,Stage.build('depths'));
-    if(f){const fr=f.frame;
+    // Shake offsets the already-applied camera transform: translate by (screen px)/zoom so the
+    // jitter reads as `FX.shake` screen pixels regardless of zoom level. Direction is seeded off
+    // the fight frame (never Math.random) so --sim screenshots stay reproducible.
+    if(FX.shake>0.05){const rng=RNG((fr*211+1)>>>0),ang=rng.next()*Math.PI*2;
+      c.translate(Math.cos(ang)*FX.shake/cam.zoom,Math.sin(ang)*FX.shake/cam.zoom)}
+    Stage.draw(c,cam,fr,Stage.build('depths'));
+    if(f){
       this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
       this.fighter(c,f.p1,cam,fr);this.fighter(c,f.p2,cam,fr)}
+    FX.draw(c,cam,fr);
     c.setTransform(1,0,0,1,0,0);
+    if(FX.flash>0){c.globalAlpha=Math.min(1,FX.flash/6);c.fillStyle='#fff';c.fillRect(0,0,W,H);c.globalAlpha=1}
     if(f)this.hud(c,f)}};
 
-const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},
+// Hit-feel FX: particles, damage popups, camera shake, hit-flash. Pure presentation — it only
+// reads the plain event objects Fight.resolve()/finish() queue into fight.fx (which G drains here
+// every sim tick via FX.pushAll) and never touches Fight/Fighter state. Spread uses its own seeded
+// RNG, keyed off the current fight frame and particle index, never Math.random, so --sim
+// screenshots reproduce identically frame for frame.
+const FX={list:[],shake:0,flash:0,
+  reset(){this.list.length=0;this.shake=0;this.flash=0},
+  _seed(i){const fr=(G.fight&&G.fight.frame)||0;return((fr*97+i*131+1)>>>0)||1},
+  push(ev){
+    switch(ev.kind){
+      case'spark':
+        for(let i=0;i<ev.n;i++){const rng=RNG(this._seed(i));const ang=rng.next()*Math.PI*2,spd=1.2+rng.next()*3.2;
+          this.list.push({kind:'spark',x:ev.x,y:ev.y,vx:Math.cos(ang)*spd,vy:Math.sin(ang)*spd-2.4,life:0,max:18,col:ev.col||'#fff'})}
+        break;
+      case'dust':
+        for(let i=0;i<5;i++){const rng=RNG(this._seed(i+50));const ang=Math.PI+(rng.next()-.5)*1.3,spd=.4+rng.next()*.9;
+          this.list.push({kind:'dust',x:ev.x,y:ev.y,vx:Math.cos(ang)*spd,vy:-Math.abs(Math.sin(ang))*spd-.2,life:0,max:24,col:'#cbb89a'})}
+        break;
+      case'popup':
+        this.list.push({kind:'popup',x:ev.x,y:ev.y,text:ev.text,col:ev.col||'#fff',big:!!ev.big,life:0,max:40});
+        break;
+      case'shake':
+        this.shake=Math.min(24,this.shake+(ev.amt||0));
+        break;
+      case'flash':
+        this.flash=Math.max(this.flash,ev.frames||0);
+        break;
+      // 'slowmo' is driven directly through fight.slowmo/G.tick; 'card' lands with the S3
+      // cinematic (a later task). Both are reserved kinds in the frozen interface but no-ops here.
+      default:break}
+    if(this.list.length>200)this.list.splice(0,this.list.length-200)},
+  pushAll(evs){for(const e of evs)this.push(e)},
+  update(){
+    for(let i=this.list.length-1;i>=0;i--){const p=this.list[i];p.life++;
+      if(p.kind==='spark'||p.kind==='dust'){p.x+=p.vx;p.y+=p.vy;p.vy+=0.15}
+      if(p.life>=p.max)this.list.splice(i,1)}
+    this.shake*=.85;if(this.shake<.05)this.shake=0;
+    if(this.flash>0)this.flash--},
+  draw(c,cam,frame){
+    for(const p of this.list){
+      if(p.kind==='spark'){c.globalAlpha=Math.max(0,1-p.life/p.max);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,2.5,0,Math.PI*2);c.fill()}
+      else if(p.kind==='dust'){c.globalAlpha=Math.max(0,(1-p.life/p.max)*.5);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,3+p.life*.12,0,Math.PI*2);c.fill()}
+      else if(p.kind==='popup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);c.fillStyle=p.col;
+        c.font=(p.big?'bold 26px ':'bold 16px ')+'ui-monospace,monospace';c.textAlign='center';
+        c.fillText(p.text,p.x,p.y-t*30)}}
+    c.globalAlpha=1}};
+
+const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   startFight(o={}){const seed=o.seed||this.seed;
     this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:DEFS[o.p2||'donut'],clock:o.clock,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(o.ai||'basic',seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
-    this.cam={x:STAGE_W/2,zoom:1};
+    this.cam={x:STAGE_W/2,zoom:1};FX.reset();
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('specials',true);Audio.say('FIGHT!')},
   onEvent(t,a){if(t==='hit')Audio.hit();if(t==='block')Audio.block();if(t==='parry'){Audio.parry();Audio.say('PARRY!')}if(t==='ko')Audio.ko();
@@ -677,11 +747,20 @@ const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:
     this.sim=true},
   togglePause(){if(this.state==='FIGHT'){this.state='PAUSED';this.show('pauseMenu',true)}else if(this.state==='PAUSED'){this.state='FIGHT';this.show('pauseMenu',false);this.acc=0}},
   toTitle(){this.state='TITLE';this.fight=null;this.show('pauseMenu',false);this.show('result',false);this.show('specials',false);this.show('title',true)},
-  stepFrame(){if(this.state!=='FIGHT')return;this.fight.step();this.syncSpecials()},
+  // Steps the sim one tick, handling KO slow-mo (step every 4th tick while fight.slowmo>0) and
+  // draining fight.fx into FX after any step. No rAF/wall-clock dependency, so tests can call it
+  // directly. G.loop drives this once per accumulated STEP; simFrames/stepFrame delegate to it too.
+  tick(){if(this.state!=='FIGHT')return;const f=this.fight;
+    if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
+    else f.step();
+    FX.pushAll(f.fx);f.fx.length=0;
+    this.syncSpecials()},
+  stepFrame(){this.tick()},
   simFrames(n){for(let i=0;i<n;i++)this.stepFrame()},
   syncSpecials(){const p=this.fight.p1.power;for(const n of[1,2,3])document.getElementById('s'+n).classList.toggle('ready',p>=100*n)},
-  loop(t){if(!this.sim){const dt=Math.min(.1,(t-this.last)/1000||0);this.last=t;this.acc+=dt;while(this.acc>=STEP){this.stepFrame();this.acc-=STEP}}
+  loop(t){if(!this.sim){const dt=Math.min(.1,(t-this.last)/1000||0);this.last=t;this.acc+=dt;while(this.acc>=STEP){this.tick();this.acc-=STEP}}
     if(this.fight)Camera.update(this.cam,this.fight);
+    FX.update();
     Render.frame(this.fight);requestAnimationFrame(t=>this.loop(t))},
   init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
     document.getElementById('fightBtn').onclick=()=>{Audio.init();this.startFight()};
@@ -735,7 +814,7 @@ function run(f,n){for(let i=0;i<n;i++)f.step()}
 function closeIn(f){f.p1.x=f.p2.x-f.p1.width-10}   // p1 within light range of p2
 const L=(f,until)=>({f,until,intent:{light:true}});
 Test.add('light connects on first active frame for atk*dmg',()=>{
-  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.p2.hp,940);eq(f.p2.state,'HITSTUN');eq(f.hitstop,HITSTOP);eq(f.p1.combo,1)});
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.p2.hp,940);eq(f.p2.state,'HITSTUN');eq(f.hitstop,MOVES.light1.hitstop);eq(f.p1.combo,1)});
 Test.add('held block takes chip and blockstun, attacker may chain',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(f);run(f,15);
   eq(f.p2.hp,995);eq(f.p2.state,'BLOCKSTUN');eq(f.p1.landed,true);eq(f.log.filter(e=>e.type==='block').length,1)});
@@ -822,5 +901,9 @@ Test.add('rig solve returns all joints with feet on the floor line',()=>{const j
 Test.add('poses differ: light1 active frame moves the lead hand forward of idle',()=>{const a=Rig.solve(LOOKS.carl,'idle',0,1),b=Rig.solve(LOOKS.carl,'light1',0.5,1);ok(b.rHand.x>a.rHand.x+20,'punch extends')});
 Test.add('poseFor maps fighter state to pose key and progress',()=>{const F=mkFighter();eq(Rig.poseFor(F).key,'idle');F.act(Object.assign(Ctrl.EMPTY(),{light:true}));for(let i=0;i<3;i++)F.tick();const p=Rig.poseFor(F);eq(p.key,'light1');ok(p.t01>0&&p.t01<1);F.setState('KNOCKDOWN');F.f=35;eq(Rig.poseFor(F).key,'getup')});
 Test.add('mob defs have hp/atk/scale and resolve through DEFS',()=>{ok(DEFS.goblin.hp<DEFS.carl.hp);ok(DEFS.hobgoblin.scale>1);eq(DEFS.katia.cls,'trickster');ok(DEFS.goblin.rig==='human')});
+Test.add('hitstop is per move',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.hitstop,MOVES.light1.hitstop);ok(MOVES.heavy.hitstop>MOVES.light1.hitstop&&MOVES.s3.hitstop>MOVES.heavy.hitstop)});
+Test.add('a hit queues spark, popup and shake fx; a block queues dust',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);const kinds=f.fx.map(e=>e.kind);ok(kinds.includes('spark')&&kinds.includes('popup')&&kinds.includes('shake'),kinds.join());const g=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(g);run(g,15);ok(g.fx.some(e=>e.kind==='dust'))});
+Test.add('KO starts slow-mo and G steps the sim every 4th tick during it',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);f.p2.hp=1;run(f,5);ok(f.over&&f.slowmo>0);const before=f.slowmo;G.fight=f;G.state='FIGHT';G._tickN=0;for(let i=0;i<8;i++)G.tick();eq(f.slowmo,before-2);G.fight=null;G.state='TITLE'});
+Test.add('FX updates and expires particles deterministically',()=>{FX.reset();FX.push({kind:'spark',x:0,y:0,n:6,col:'#fff'});eq(FX.list.length,6);for(let i=0;i<120;i++)FX.update();eq(FX.list.length,0);FX.push({kind:'shake',amt:8});FX.update();ok(FX.shake>0&&FX.shake<8)});
 
 </script></body></html>

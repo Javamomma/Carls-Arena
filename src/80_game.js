@@ -1,10 +1,10 @@
-const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},
+const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   startFight(o={}){const seed=o.seed||this.seed;
     this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:DEFS[o.p2||'donut'],clock:o.clock,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(o.ai||'basic',seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
-    this.cam={x:STAGE_W/2,zoom:1};
+    this.cam={x:STAGE_W/2,zoom:1};FX.reset();
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('specials',true);Audio.say('FIGHT!')},
   onEvent(t,a){if(t==='hit')Audio.hit();if(t==='block')Audio.block();if(t==='parry'){Audio.parry();Audio.say('PARRY!')}if(t==='ko')Audio.ko();
@@ -48,11 +48,20 @@ const G={state:'TITLE',fight:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:
     this.sim=true},
   togglePause(){if(this.state==='FIGHT'){this.state='PAUSED';this.show('pauseMenu',true)}else if(this.state==='PAUSED'){this.state='FIGHT';this.show('pauseMenu',false);this.acc=0}},
   toTitle(){this.state='TITLE';this.fight=null;this.show('pauseMenu',false);this.show('result',false);this.show('specials',false);this.show('title',true)},
-  stepFrame(){if(this.state!=='FIGHT')return;this.fight.step();this.syncSpecials()},
+  // Steps the sim one tick, handling KO slow-mo (step every 4th tick while fight.slowmo>0) and
+  // draining fight.fx into FX after any step. No rAF/wall-clock dependency, so tests can call it
+  // directly. G.loop drives this once per accumulated STEP; simFrames/stepFrame delegate to it too.
+  tick(){if(this.state!=='FIGHT')return;const f=this.fight;
+    if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
+    else f.step();
+    FX.pushAll(f.fx);f.fx.length=0;
+    this.syncSpecials()},
+  stepFrame(){this.tick()},
   simFrames(n){for(let i=0;i<n;i++)this.stepFrame()},
   syncSpecials(){const p=this.fight.p1.power;for(const n of[1,2,3])document.getElementById('s'+n).classList.toggle('ready',p>=100*n)},
-  loop(t){if(!this.sim){const dt=Math.min(.1,(t-this.last)/1000||0);this.last=t;this.acc+=dt;while(this.acc>=STEP){this.stepFrame();this.acc-=STEP}}
+  loop(t){if(!this.sim){const dt=Math.min(.1,(t-this.last)/1000||0);this.last=t;this.acc+=dt;while(this.acc>=STEP){this.tick();this.acc-=STEP}}
     if(this.fight)Camera.update(this.cam,this.fight);
+    FX.update();
     Render.frame(this.fight);requestAnimationFrame(t=>this.loop(t))},
   init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
     document.getElementById('fightBtn').onclick=()=>{Audio.init();this.startFight()};

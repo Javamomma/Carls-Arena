@@ -1,6 +1,7 @@
 class Fight{
   constructor(o){this.rng=RNG(o.seed||1);this.p1=new Fighter(o.p1,1,o.ctrl1);this.p2=new Fighter(o.p2,-1,o.ctrl2);
     this.frame=0;this.clock=o.clock===undefined?120:o.clock;this.hitstop=0;this.over=false;this.winner=null;this.log=[];this.onEvent=o.onEvent||(()=>{});
+    this.fx=[];this.slowmo=0;this.cinematic=0; // fx: plain events drained by G into FX each tick; slowmo/cinematic: frame counters G steps around
     this.updateCam()}
   updateCam(){const dist=Math.abs(this.p2.x-this.p1.x);
     this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.35-(dist-120)/380*0.35,1,1.35)}}
@@ -25,17 +26,32 @@ class Fight{
     return{type:'hit',att,def,idx,m,last}}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
     if(type==='miss')return this.emit('miss',att,def,0);
-    if(type==='parry'){att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');return this.emit('parry',def,att,0)}
+    if(type==='parry'){att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');
+      this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
+      return this.emit('parry',def,att,0)}
     if(type==='block'){const m=r.m;const chip=Math.round(att.def.atk*m.dmg*CHIP);def.hp=Math.max(0,def.hp-chip);def.stun=m.blockstun;def.setState('BLOCKSTUN');
-      def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;return this.emit('block',att,def,chip)}
+      def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;
+      this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip)}
     const m=r.m,last=r.last;
     const cls=CLASS_BEATS[att.def.cls]===def.def.cls?CLASS_BONUS:1;
     const dmg=Math.round(att.def.atk*m.dmg*cls*(1-def.def.armor));
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
     att.power=Math.min(POWER_MAX,att.power+m.powHit);def.power=Math.min(POWER_MAX,def.power+m.powTaken);
     def.move=null;def.moveName=null;if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
-    if(!m.hits||last)def.x+=att.face*m.push;this.hitstop=HITSTOP;this.emit('hit',att,def,dmg)}
+    if(!m.hits||last)def.x+=att.face*m.push;
+    // Sim freeze only on a single-hit move or the last blow of a multi-hit special (mirrors the
+    // knockback gate above): a 4-hit S3 shouldn't stack four 14-frame freezes back to back. Every
+    // landed hit still shakes/sparks/pops for combo feedback; only the freeze itself is gated, and
+    // an intermediate multi-hit leaves any hitstop already armed by a same-frame mutual trade alone.
+    if(!m.hits||last)this.hitstop=m.hitstop;
+    // crit rolling (att.def.crit/critMul) lands in a later task; fx styling stays neutral until then.
+    this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:'#ffd86b'});
+    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:'#ffd86b',big:false});
+    this.fx.push({kind:'shake',amt:m.hitstop});
+    this.emit('hit',att,def,dmg)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
     this.winner=a.hp<=0?b:b.hp<=0?a:(a.hp/a.maxHp>=b.hp/b.maxHp?a:b);
-    a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');this.emit('ko',this.winner,null,0)}
+    a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');
+    this.slowmo=90;this.fx.push({kind:'flash',frames:6});
+    this.emit('ko',this.winner,null,0)}
   emit(type,a,b,val){this.log.push({f:this.frame,type,who:a?a.side:0,val});this.onEvent(type,a,b,val)}}
