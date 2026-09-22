@@ -939,3 +939,12 @@ each with a command actually run today and its real result pasted — two items 
 (human hand-play from Phase 1, never done; the final whole-branch review and the push to `origin`,
 both explicitly this task's controller's job, not this implementer's) and are flagged as such rather
 than marked DONE. Unit tests: 298 passing, 0 failing. `git status` clean; no push performed.
+
+## Phase 5 execution rulings (2026-09-22, from the SDD ledger)
+Ruling: same execution shape as Phases 2-4; exact trailer verified before each package; no controller commits while an implementer runs.
+Ruling: the atlas hook (5.5) is optional and off by default; no asset is required to run; Pages deploy stays a single index.html plus optional assets/.
+Task 5.1: implementer DONE (92a0b10). Rulings: first blood = player's first landed hit; special bonus replaces that hit's base gain — accepted. Reviewer (sonnet) dispatched on review-5.1.diff
+Ruling: batch Tasks 5.2 + 5.4 into one dispatch (both small G+screens features with exact tests) — cost if wrong: one larger review.
+Task 5.3: review approved. Important (deferred to 5.6): BUFFS.tutorialGuard reads the global Tutorial inside an onHit hook — refactor to a holder flag and add BUFFS.* to the purity scan. Ruling: Ctrl.tutorialBot instead of Ctrl.competent for --tutorial (competent cannot parry on cue) — accepted.
+Rulings: tutorial row stays permanently visible on the map (recorded; the pre-flight note was superseded by 5.3's replayability requirement); POWER-step stall gets an auto-hint after 15 s and the special button pulses; the viewers ×N badge anchors to the counter; share card gets a framed layout — cost if wrong: cosmetic. Fix wave dispatched (sonnet) at FIX_BASE 0277ef9, brief task-fixwave-p5-brief.md
+Ruling: Phase 5 fix-wave commits carried 'Claude Sonnet 5' trailers; rewritten to Fable 5.1 via filter-branch (unpushed) — cost if wrong: none. Fix wave DONE (10 commits); scoped re-review (sonnet) dispatched on review-fixwave-p5.diff
