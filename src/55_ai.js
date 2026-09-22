@@ -37,17 +37,37 @@
 // flat light-only follow exactly as before (their own rng draw sequence is untouched either way, since
 // the follow phase never rolls rng regardless of which plan array it's holding -- this field only
 // changes WHICH strings sit in st.comboPlan, never whether/when r.next() gets called).
+//
+// Task 7.2 tier-gate retune (measured, see the task report's before/after tables): CHAIN.enders.light
+// being {} (no knockdown -- a frozen ruling, not a bug) removes the OLD ladder's forced ~50-frame
+// knockdown+getup pause every 5 light hits; Ctrl.competent (the fixed win-rate yardstick bot) now
+// chains back-to-back 5-node combos with only an ~8-frame recovery gap between them, roughly doubling
+// its own sustained DPS against an idle target (measured: 350 frames to KO a dummy before this task,
+// 197 after, same seed/script). That's a structural consequence of the frozen grammar, not tunable
+// away -- every tier needed real defense/offense buffs to keep pace, not just t5:
+// t2 block .5->.6/parry .1->.15; t3 attack .25->.5/block .65->.8/parry .3->.45/punish .5->.7/hold
+// 10->5; t4 attack .35->.65/block .75->.9/parry .45->.6/punish .8->1/hold 10->5; t5 react 2->1/
+// attack .65->.9/block .85->.95/parry .6->.8/intercept .7->.9/hold 8->4. `hold` dropping (not rising)
+// is deliberate: decideBlock's 'hold' phase re-presses block blindly every frame it's armed, skipping
+// the 'plan'/'react' phases that can actually line up a PARRY (the only defensive tool that resets the
+// attacker's own chainNode, via Fight.resolve's parry branch) -- a SHORTER hold re-opens that window
+// more often against a chain that keeps re-arming itself every ~16 frames. t1 is untouched (its own
+// attack/punish/block are all low/zero, so the chain-pressure change barely reaches it -- t1's win-rate
+// floor (100% in every table below) was never actually at risk). f1_grull/f2_mother (t4/t5 bosses)
+// still needed their own atk bumps on top (see CHAMPS/MOBS/BOSSES' own comments, same file) -- the AI
+// knobs above closed most of the gap but boss hp/atk is the more targeted lever for two specific
+// encounters once the general tier curve was already back in its band.
 const AI_TIERS={
   t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0, approach:90,hold:26,comboMix:false},
-  t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70,hold:16,comboMix:false},
-  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5,approach:50,hold:10,comboMix:true},
+  t2:{react:14,attack:.04,block:.6, parry:.15,dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70,hold:16,comboMix:false},
+  t3:{react:8, attack:.5, block:.8, parry:.45,dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.7,approach:50,hold:5, comboMix:true},
   // Fix-wave item 3 (measured fallback -- see docs/ARENA.md's fix-wave tier-gate table): the `hold`
   // decoupling alone (react/dash unchanged) passed n=30 but still broke t5<=30 at n=60 (31.7%). The
   // final review's own measured retune -- react 5->8 here (still the shared action cooldown, not
   // block-hold; hold above already carries that meaning) -- restores it.
-  t4:{react:8, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8,approach:40,hold:10,comboMix:true},
+  t4:{react:8, attack:.65,block:.9, parry:.6, dash:.06,special:1,   heavy:.3, intercept:.5, bait:.25,punish:1, approach:40,hold:5, comboMix:true},
   // Fix-wave item 3 (measured fallback): dash .08->.04, same reasoning/source as t4.react above.
-  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.04,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1, approach:30,hold:8,comboMix:true}};
+  t5:{react:1, attack:.9, block:.95,parry:.8, dash:.04,special:1,   heavy:.35,intercept:.9, bait:.4, punish:1, approach:30,hold:4, comboMix:true}};
 const AI={
   TIERS:AI_TIERS,
   // profiles IS the alias table (not a copy of it) so old direct reads like AI.profiles.brute and

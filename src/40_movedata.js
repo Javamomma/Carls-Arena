@@ -111,7 +111,12 @@ const BOSSES={
   // Task 4.6 re-check: `python3 tests/batch.py --n 30 --p1 carl --encounter f1_grull` still lands at
   // 13.3% (n=30) against the current Ctrl.competent/AI_TIERS — inside the 10-35% band, no retune
   // triggered (see docs/ARENA.md's Phase 4 exit table for the full command output).
-  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:42,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
+  // Task 7.2: atk 42->50. The combo grammar's own CHAIN.enders.light={} (no knockdown, frozen ruling)
+  // removes the old ladder's forced ~50-frame knockdown+getup pause every 5 light hits, so Ctrl.
+  // competent's own sustained DPS roughly doubled (see 55_ai.js's own tier-gate retune comment for the
+  // measured before/after) — the t4 AI_TIERS retune alone still left this boss at 40% (n=30), over the
+  // 10-35% band; the atk bump alone (hp untouched) brings it back to 26.7% (n=30).
+  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:50,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
     boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
@@ -129,7 +134,11 @@ const BOSSES={
   // Phase 6 fix-wave close-out: the RNG warm-up (10_util.js) shifted every AI stream and this boss
   // drifted to 46.7% (band 10-35%); hp 1100->1350, atk 35->36 measured at 23.3% (seed-base 1) and
   // 13.3% (seed-base 101), n=30 — chosen over atk-only bumps that fell under 10% on base 101.
-  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:36,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',
+  // Task 7.2: atk 36->46, same driver as grull's own comment above (Ctrl.competent's sustained DPS
+  // roughly doubled once CHAIN.enders.light stopped forcing a knockdown pause every 5 lights) — the t5
+  // AI_TIERS retune alone still left this boss at 53.3% (n=30), well over the 10-35% band; hp left
+  // untouched, atk-only brings it back to 23.3% (n=30).
+  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:46,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
