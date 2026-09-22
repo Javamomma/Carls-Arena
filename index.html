@@ -157,6 +157,10 @@ body.left-handed #powerPicker{right:auto;left:14px}
 .perkrow{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;
   padding:6px 12px;background:#181c2b;border:1px solid #444;border-radius:6px;text-align:left}
 .perkrow .pname{font-size:11px;color:#fff;font-weight:bold}
+/* Fix-wave item 3 (final review, Important): the perk's own effect line (Sponsors.DESC), between the
+   name and the gold cost -- a slightly brighter gold than .pcost so it reads as the informative line
+   it is, not filler. */
+.perkrow .pdesc{font-size:10px;color:#f4c542;margin-top:1px}
 .perkrow .pcost{font-size:10px;color:#999;margin-top:2px}
 .perkrow button{min-width:88px;min-height:36px;padding:6px 10px;font-size:11px;letter-spacing:.5px;
   border-radius:6px;background:#f4c542;color:#111;border:0;font-family:inherit}
@@ -753,6 +757,12 @@ const Sponsors={
   // so PERKS stays exactly the frozen {cost,effect} shape with nothing extra riding along on it.
   LABELS:{dashers:'SPONSOR: DOORWAY DASHERS',insurance:'PARRY INSURANCE',
     secondWind:'SECOND WIND',crowd:'CROWD FAVORITE'},
+  // Fix-wave item 3 (final review, Important): the kiosk used to render LABELS + a gold cost only --
+  // "CROWD FAVORITE — 1000 GOLD" tells a player nothing about what they're buying. Ruling #2's own
+  // wording for each effect, kept as one short line per perk (Screens.renderShop reads this by id,
+  // same "one table, no per-perk special-casing" pattern LABELS above already sets).
+  DESC:{dashers:'+5% attack',insurance:'+2 parry-window frames',
+    secondWind:'Heal 15% once at 20% hp',crowd:'×1.2 viewers'},
   // Save.data.perks isn't part of Meta.defaults()'s explicit shape (frozen before this task) --
   // lazily created here the first time anything actually buys or queries a perk, same pattern as
   // Save.data.pity being lazily created by Crystal.open (12_meta.js): a pre-5.2 v2 save picks it up
@@ -4734,7 +4744,10 @@ const Screens={
       const perk=Sponsors.PERKS[id],owned=Sponsors.owned().includes(id);
       const row=document.createElement('div');row.className='perkrow';
       const info=document.createElement('div');info.className='pinfo';
+      // Fix-wave item 3 (final review, Important): an effect line (Sponsors.DESC) between the name
+      // and the cost -- see its own comment (13_broadcast.js) for the exact wording per perk.
       info.innerHTML='<div class="pname">'+(Sponsors.LABELS[id]||id.toUpperCase())+'</div>'+
+        '<div class="pdesc">'+(Sponsors.DESC[id]||'')+'</div>'+
         '<div class="pcost">'+perk.cost+' GOLD</div>';
       const btn=document.createElement('button');
       btn.id='buyPerk'+id[0].toUpperCase()+id.slice(1);
@@ -6540,6 +6553,21 @@ Test.add('the kiosk renders a PERKS row per Sponsors.PERKS entry, showing OWNED 
   eq(dashersBtn.textContent,'OWNED');ok(dashersBtn.disabled,'an owned perk\'s button must be disabled');
   const insuranceBtn=document.getElementById('buyPerkInsurance');
   eq(insuranceBtn.textContent,'BUY');
+  Screens.title()});
+// Fix-wave item 3 (final review, Important): every kiosk perk row must show what it actually does,
+// not just its name and gold cost -- see Sponsors.DESC's own comment (13_broadcast.js) for the exact
+// wording ruling #2 specified per perk.
+Test.add('every kiosk PERKS row shows its Sponsors.DESC effect text',()=>{
+  Save.data=Meta.defaults();
+  Screens.shop();
+  const rows=[...document.querySelectorAll('#shopPerks .perkrow')];
+  eq(rows.length,Object.keys(Sponsors.PERKS).length);
+  for(const id in Sponsors.PERKS){
+    const row=[...document.querySelectorAll('#shopPerks .perkrow')]
+      .find(r=>r.textContent.includes(Sponsors.LABELS[id]||id.toUpperCase()));
+    ok(row,'a row for '+id+' must exist');
+    ok(row.textContent.includes(Sponsors.DESC[id]),
+      id+'\'s row ('+row.textContent+') must contain its DESC ('+Sponsors.DESC[id]+')')}
   Screens.title()});
 Test.add('clicking a kiosk PERKS BUY button purchases it and re-renders as OWNED',()=>{
   Save.data=Meta.defaults();Save.data.gold=Sponsors.PERKS.insurance.cost;

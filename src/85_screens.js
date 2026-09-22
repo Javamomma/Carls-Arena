@@ -337,7 +337,10 @@ const Screens={
       const perk=Sponsors.PERKS[id],owned=Sponsors.owned().includes(id);
       const row=document.createElement('div');row.className='perkrow';
       const info=document.createElement('div');info.className='pinfo';
+      // Fix-wave item 3 (final review, Important): an effect line (Sponsors.DESC) between the name
+      // and the cost -- see its own comment (13_broadcast.js) for the exact wording per perk.
       info.innerHTML='<div class="pname">'+(Sponsors.LABELS[id]||id.toUpperCase())+'</div>'+
+        '<div class="pdesc">'+(Sponsors.DESC[id]||'')+'</div>'+
         '<div class="pcost">'+perk.cost+' GOLD</div>';
       const btn=document.createElement('button');
       btn.id='buyPerk'+id[0].toUpperCase()+id.slice(1);

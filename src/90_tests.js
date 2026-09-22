@@ -1727,6 +1727,21 @@ Test.add('the kiosk renders a PERKS row per Sponsors.PERKS entry, showing OWNED 
   const insuranceBtn=document.getElementById('buyPerkInsurance');
   eq(insuranceBtn.textContent,'BUY');
   Screens.title()});
+// Fix-wave item 3 (final review, Important): every kiosk perk row must show what it actually does,
+// not just its name and gold cost -- see Sponsors.DESC's own comment (13_broadcast.js) for the exact
+// wording ruling #2 specified per perk.
+Test.add('every kiosk PERKS row shows its Sponsors.DESC effect text',()=>{
+  Save.data=Meta.defaults();
+  Screens.shop();
+  const rows=[...document.querySelectorAll('#shopPerks .perkrow')];
+  eq(rows.length,Object.keys(Sponsors.PERKS).length);
+  for(const id in Sponsors.PERKS){
+    const row=[...document.querySelectorAll('#shopPerks .perkrow')]
+      .find(r=>r.textContent.includes(Sponsors.LABELS[id]||id.toUpperCase()));
+    ok(row,'a row for '+id+' must exist');
+    ok(row.textContent.includes(Sponsors.DESC[id]),
+      id+'\'s row ('+row.textContent+') must contain its DESC ('+Sponsors.DESC[id]+')')}
+  Screens.title()});
 Test.add('clicking a kiosk PERKS BUY button purchases it and re-renders as OWNED',()=>{
   Save.data=Meta.defaults();Save.data.gold=Sponsors.PERKS.insurance.cost;
   Screens.shop();

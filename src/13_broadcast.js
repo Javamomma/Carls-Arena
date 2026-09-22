@@ -102,6 +102,12 @@ const Sponsors={
   // so PERKS stays exactly the frozen {cost,effect} shape with nothing extra riding along on it.
   LABELS:{dashers:'SPONSOR: DOORWAY DASHERS',insurance:'PARRY INSURANCE',
     secondWind:'SECOND WIND',crowd:'CROWD FAVORITE'},
+  // Fix-wave item 3 (final review, Important): the kiosk used to render LABELS + a gold cost only --
+  // "CROWD FAVORITE — 1000 GOLD" tells a player nothing about what they're buying. Ruling #2's own
+  // wording for each effect, kept as one short line per perk (Screens.renderShop reads this by id,
+  // same "one table, no per-perk special-casing" pattern LABELS above already sets).
+  DESC:{dashers:'+5% attack',insurance:'+2 parry-window frames',
+    secondWind:'Heal 15% once at 20% hp',crowd:'×1.2 viewers'},
   // Save.data.perks isn't part of Meta.defaults()'s explicit shape (frozen before this task) --
   // lazily created here the first time anything actually buys or queries a perk, same pattern as
   // Save.data.pity being lazily created by Crystal.open (12_meta.js): a pre-5.2 v2 save picks it up
