@@ -7,6 +7,9 @@
   python3 tests/harness.py --sim --seconds 30 --probe 'G.fight.p1.combo'
   python3 tests/harness.py --matrix                                  # AI/content soak matrix; exit 1 on any error
   python3 tests/harness.py --perf 600                                # ms/frame gate; exit 1 if >= 6
+      # prints {ms_per_frame, ms_step, ms_render, perf:{ms_per_frame, ms_step, ms_render}} -- the
+      # same three numbers both flat (unchanged, for any old reader) and nested under a top-level
+      # `perf` key (Task 4.6: the controller's gate read d.get('perf'), which was None before this).
 
 Exit 1 on any page error, console error, or if the game never left TITLE.
 """
@@ -192,7 +195,13 @@ def main():
                   ) % a.perf
             r = pg.evaluate(js)
             b.close()
-        print(json.dumps(r, indent=1))
+        # Task 4.6 fix: the controller's gate read d.get('perf') on this command's own JSON output
+        # and got None, because the three timing numbers were only ever printed flat. `perf` is now
+        # a real top-level key nesting the same {ms_per_frame, ms_step, ms_render} object; the flat
+        # keys are kept alongside it so nothing that already reads them breaks.
+        out = dict(r)
+        out['perf'] = r
+        print(json.dumps(out, indent=1))
         sys.exit(1 if perf_errors or r['ms_per_frame'] >= 6 else 0)
     errors, console = [], []
     with sync_playwright() as p:
