@@ -69,7 +69,7 @@ class Fight{
     return{type:'hit',att,def,idx,m,last}}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
     if(type==='miss')return this.emit('miss',att,def,0);
-    if(type==='parry'){def.parryLock=0;def._parried=true;att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');
+    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');
       this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
       return this.emit('parry',def,att,0)}
     if(type==='block'){const m=r.m;const chipRef={chip:Math.round(att.def.atk*m.dmg*CHIP*(1-(def.def.blockProf||0)))};
@@ -98,7 +98,7 @@ class Fight{
     const dmg=ref.dmg;
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
     att.power=Math.min(POWER_MAX,att.power+ref.powHit);def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
-    def.move=null;def.moveName=null;if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
+    def.clearMove();if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
     // Medium landed as a combo ender (3rd+ hit of the combo, counting this one) shoves the defender
     // out past light range instead of the move's normal push, so the follow-up can't just re-chain.
     const push=(att.moveName==='medium'&&att.combo>=3)?90:m.push;

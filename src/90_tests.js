@@ -613,6 +613,26 @@ Test.add('a medium started already within light range does not dash forward at a
     f.step();
     ok(f.p1.x<=f.p2.x-(f.p1.width/2+f.p2.width/2),'attacker must never cross into the foe\'s hurtbox')}
   eq(f.p1.x,x0,'no forward dash when the medium starts already in range')});
+// Fix round 1 (controller review): decideBlock's 'plan'/'react' phases used to read the static
+// foe.move.startup for timing -- against a far medium (whose real, tracked startup, foe.effStartup,
+// runs well past the base 10 frames) that dropped guard before the hit actually landed, or judged a
+// slow-looking swing as fast. Both now read foe.effStartup (see 55_ai.js's own comment). Regression:
+// a t4 AI defender must not block/parry a scripted far dash-in LESS often than the same scripted
+// medium thrown from already-in-range, aggregated over 20 seeds (a strict per-seed comparison would
+// be too noisy given t4's own rng-driven offense/movement; the aggregate is the meaningful signal).
+Test.add('t4 AI blocks/parries a far medium dash-in at least as often as a near one (effStartup fix)',()=>{
+  let farTotal=0,nearTotal=0;
+  const steps=Array.from({length:20},(_,i)=>({f:i*40,intent:{medium:true}}));
+  for(let seed=1;seed<=20;seed++){
+    const far=mkFight({ctrl1:Ctrl.script(steps),ctrl2:AI.make('t4',seed)});
+    far.p2.x=STAGE_W/2+200;far.p1.x=far.p2.x-300-48; // far: the dash-in extends effStartup past base
+    run(far,900);
+    farTotal+=far.log.filter(e=>e.type==='block'||e.type==='parry').length;
+    const near=mkFight({ctrl1:Ctrl.script(steps),ctrl2:AI.make('t4',seed)});
+    closeIn(near); // near: effStartup stays at the move's base, matches pre-task timing
+    run(near,900);
+    nearTotal+=near.log.filter(e=>e.type==='block'||e.type==='parry').length}
+  ok(farTotal>=nearTotal,'far-medium blocks/parries ('+farTotal+') must be at least as frequent as near-medium ('+nearTotal+')')});
 Test.add('AI approach field is present on every tier (dummy 0, t1..t5 shrinking) and aliases inherit it',()=>{
   eq(AI.profiles.dummy.approach,0);
   eq(AI.TIERS.t1.approach,90);eq(AI.TIERS.t2.approach,70);eq(AI.TIERS.t3.approach,50);eq(AI.TIERS.t4.approach,40);eq(AI.TIERS.t5.approach,30);

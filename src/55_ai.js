@@ -62,7 +62,10 @@ const AI={
     // spontaneous attack; see decidePunish/decideAttack).
     // farFrames/approachCd (Task 6.2): decideApproach's own state -- see its comment below. Kept
     // separate from the shared cd/react cooldown every other behaviour reuses, so a guaranteed
-    // approach press never blocks (or gets blocked by) an unrelated reactive block/attack/heavy roll.
+    // approach press never blocks (or gets blocked by) an unrelated reactive block/attack/heavy roll
+    // -- ruling (fix round 1): approach must never starve the AI's own offense/defense, only fill in
+    // when nothing else already claimed the frame (decideApproach is called last in the waterfall,
+    // below, and its own approachCd only gates itself, not st.cd).
     const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboFollow:0,farFrames:0,approachCd:0};
 
     // Heavy: charge-hold continuation (phase:'hold') has to run before the busy() gate in next()
@@ -146,6 +149,12 @@ const AI={
     // enough that an immediate hold is a block, not an accidental parry; punish-capable tiers
     // (p.punish>0 — t2 and up) also react to fast moves (lights included), since catching one of
     // those in the parry window is exactly what their punish behavior exists to capitalize on.
+    // Task 6.2 fix round 1: both reads below use foe.effStartup, not foe.move.startup -- a medium
+    // dash-in from far away runs its startup longer than the move's own base m.startup (see
+    // Fighter.setupDash, 50_fighter.js), and the AI must reason about when the hitbox actually goes
+    // active, not the move's static data. effStartup is always set once foe.state==='ATTACK' (it's
+    // computed by setupDash inside the same startMove() call that sets the state), so the ||
+    // fallback only matters for a hand-built ATTACK state that skipped startMove entirely.
     function decideBlock(it,foe,phase){
       if(phase==='hold'){
         if(st.hold>0){st.hold--;it.block=true;return true}
@@ -153,9 +162,11 @@ const AI={
       if(phase==='plan'){
         if(st.plan!=='parry')return false;
         if(foe.state!=='ATTACK'){st.plan=null;return false}
-        if(foe.f>=foe.move.startup-2){st.plan=null;st.hold=8+r.int(8);it.block=true;return true}
+        const su=foe.effStartup||foe.move.startup;
+        if(foe.f>=su-2){st.plan=null;st.hold=8+r.int(8);it.block=true;return true}
         return true} // still waiting for the foe's hit to close to 2 frames out — 'handled' (do nothing)
-      if(foe.state==='ATTACK'&&foe.f===1&&(foe.move.startup>PARRY_WINDOW+2||p.punish>0)&&r.next()<p.block){
+      const su=foe.state==='ATTACK'?(foe.effStartup||foe.move.startup):0;
+      if(foe.state==='ATTACK'&&foe.f===1&&(su>PARRY_WINDOW+2||p.punish>0)&&r.next()<p.block){
         if(r.next()<p.parry){st.plan='parry';return true}
         st.hold=p.react+r.int(10);it.block=true;return true}
       return false}
@@ -201,7 +212,11 @@ const AI={
       if(decideHeavy(it,me,0,0,0,'hold'))return it;
       if(decideBait(it,me,0,'hold'))return it;
       if(decidePunish(it,me,foe,justGotUp,'follow'))return it;
-      if(me.busy())return it;
+      // Task 6.2 fix round 1: farFrames resets (not just pauses) the instant `me` is busy -- covers
+      // every way that can happen (this fighter starting its own attack, taking a hit/block-stun/
+      // knockdown, or charging a heavy), so decideApproach never fires off a stale count carried over
+      // from before an interruption; a fresh 60-frame "stuck at range" window is required afterward.
+      if(me.busy()){st.farFrames=0;return it}
       // An established block hold takes priority over firing a pending bait dash.
       if(decideBlock(it,foe,'hold'))return it;
       if(decideBait(it,me,0,'dash'))return it;

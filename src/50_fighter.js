@@ -79,6 +79,13 @@ class Fighter{
       this.effStartup=m.startup} // stepIn/DASH_STEPIN_SPEED===m.startup by construction; never grows
     else if(m.dash){this.dashLeft=m.dash;this.dashRate=m.dash/m.startup;this.effStartup=m.startup}
     else{this.dashLeft=0;this.dashRate=0;this.effStartup=m.startup}}
+  // Task 6.2 fix round 1: dashLeft/dashRate/effStartup are only meaningful while a move (or its
+  // charge) is actually in flight -- clear them alongside move/moveName at every site a move ends
+  // or is cancelled (CHARGE cancelled, a move completes, a hit lands on this fighter, a parry stuns
+  // the attacker), so a stale plan from a finished/interrupted move can never leak into a later
+  // frame's checks (e.g. AI.make's decideBlock reading foe.effStartup on a fighter that's back to
+  // IDLE would otherwise see the last move's now-meaningless value instead of 0).
+  clearMove(){this.move=null;this.moveName=null;this.dashLeft=0;this.dashRate=0;this.effStartup=0}
   activeSpan(){const m=this.move,n=m.hits||1;return n*m.active+(n-1)*(m.gap||0)}
   phase(){const m=this.move;if(!m||this.state!=='ATTACK')return null;const su=this.effStartup,act=this.activeSpan();
     return this.f<su?'startup':this.f<su+act?'active':this.f<su+act+m.recovery?'recovery':'done'}
@@ -109,7 +116,7 @@ class Fighter{
     else if(S==='ATTACK'&&this.phase()==='recovery'&&this.move.chain&&this.landed){
       if(intent.light)return this.startMove(this.move.chain);
       if(intent.medium&&this.moveName!=='medium')return this.startMove('medium')}
-    else if(S==='CHARGE'&&!intent.heavy){this.move=null;this.moveName=null;this.setState('IDLE')}}
+    else if(S==='CHARGE'&&!intent.heavy){this.clearMove();this.setState('IDLE')}}
   // Advance one frame of the state machine.
   tick(){
     // Self-clear wasKnockedDown the tick after _kdCounter (armed to KNOCKDOWN.frames+KNOCKDOWN.inv
@@ -135,7 +142,7 @@ class Fighter{
       // DASH_STEPIN_SPEED divides unevenly.
       case'ATTACK':{const m=this.move;
         if(this.dashLeft>0&&this.f<=this.effStartup){const step=Math.min(this.dashRate,this.dashLeft);this.x+=this.face*step;this.dashLeft-=step}
-        if(this.phase()==='done'){this.move=null;this.moveName=null;this.landed=false;this.setState('IDLE')}break}
+        if(this.phase()==='done'){this.clearMove();this.landed=false;this.setState('IDLE')}break}
       case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
       case'HITSTUN':case'BLOCKSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
       case'KNOCKDOWN':if(this.f>=KNOCKDOWN.frames){this.inv=KNOCKDOWN.inv;this.setState('IDLE')}break}

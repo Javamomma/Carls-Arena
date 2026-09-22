@@ -1527,6 +1527,13 @@ class Fighter{
       this.effStartup=m.startup} // stepIn/DASH_STEPIN_SPEED===m.startup by construction; never grows
     else if(m.dash){this.dashLeft=m.dash;this.dashRate=m.dash/m.startup;this.effStartup=m.startup}
     else{this.dashLeft=0;this.dashRate=0;this.effStartup=m.startup}}
+  // Task 6.2 fix round 1: dashLeft/dashRate/effStartup are only meaningful while a move (or its
+  // charge) is actually in flight -- clear them alongside move/moveName at every site a move ends
+  // or is cancelled (CHARGE cancelled, a move completes, a hit lands on this fighter, a parry stuns
+  // the attacker), so a stale plan from a finished/interrupted move can never leak into a later
+  // frame's checks (e.g. AI.make's decideBlock reading foe.effStartup on a fighter that's back to
+  // IDLE would otherwise see the last move's now-meaningless value instead of 0).
+  clearMove(){this.move=null;this.moveName=null;this.dashLeft=0;this.dashRate=0;this.effStartup=0}
   activeSpan(){const m=this.move,n=m.hits||1;return n*m.active+(n-1)*(m.gap||0)}
   phase(){const m=this.move;if(!m||this.state!=='ATTACK')return null;const su=this.effStartup,act=this.activeSpan();
     return this.f<su?'startup':this.f<su+act?'active':this.f<su+act+m.recovery?'recovery':'done'}
@@ -1557,7 +1564,7 @@ class Fighter{
     else if(S==='ATTACK'&&this.phase()==='recovery'&&this.move.chain&&this.landed){
       if(intent.light)return this.startMove(this.move.chain);
       if(intent.medium&&this.moveName!=='medium')return this.startMove('medium')}
-    else if(S==='CHARGE'&&!intent.heavy){this.move=null;this.moveName=null;this.setState('IDLE')}}
+    else if(S==='CHARGE'&&!intent.heavy){this.clearMove();this.setState('IDLE')}}
   // Advance one frame of the state machine.
   tick(){
     // Self-clear wasKnockedDown the tick after _kdCounter (armed to KNOCKDOWN.frames+KNOCKDOWN.inv
@@ -1583,7 +1590,7 @@ class Fighter{
       // DASH_STEPIN_SPEED divides unevenly.
       case'ATTACK':{const m=this.move;
         if(this.dashLeft>0&&this.f<=this.effStartup){const step=Math.min(this.dashRate,this.dashLeft);this.x+=this.face*step;this.dashLeft-=step}
-        if(this.phase()==='done'){this.move=null;this.moveName=null;this.landed=false;this.setState('IDLE')}break}
+        if(this.phase()==='done'){this.clearMove();this.landed=false;this.setState('IDLE')}break}
       case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
       case'HITSTUN':case'BLOCKSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
       case'KNOCKDOWN':if(this.f>=KNOCKDOWN.frames){this.inv=KNOCKDOWN.inv;this.setState('IDLE')}break}
@@ -1654,7 +1661,10 @@ const AI={
     // spontaneous attack; see decidePunish/decideAttack).
     // farFrames/approachCd (Task 6.2): decideApproach's own state -- see its comment below. Kept
     // separate from the shared cd/react cooldown every other behaviour reuses, so a guaranteed
-    // approach press never blocks (or gets blocked by) an unrelated reactive block/attack/heavy roll.
+    // approach press never blocks (or gets blocked by) an unrelated reactive block/attack/heavy roll
+    // -- ruling (fix round 1): approach must never starve the AI's own offense/defense, only fill in
+    // when nothing else already claimed the frame (decideApproach is called last in the waterfall,
+    // below, and its own approachCd only gates itself, not st.cd).
     const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboFollow:0,farFrames:0,approachCd:0};
 
     // Heavy: charge-hold continuation (phase:'hold') has to run before the busy() gate in next()
@@ -1738,6 +1748,12 @@ const AI={
     // enough that an immediate hold is a block, not an accidental parry; punish-capable tiers
     // (p.punish>0 — t2 and up) also react to fast moves (lights included), since catching one of
     // those in the parry window is exactly what their punish behavior exists to capitalize on.
+    // Task 6.2 fix round 1: both reads below use foe.effStartup, not foe.move.startup -- a medium
+    // dash-in from far away runs its startup longer than the move's own base m.startup (see
+    // Fighter.setupDash, 50_fighter.js), and the AI must reason about when the hitbox actually goes
+    // active, not the move's static data. effStartup is always set once foe.state==='ATTACK' (it's
+    // computed by setupDash inside the same startMove() call that sets the state), so the ||
+    // fallback only matters for a hand-built ATTACK state that skipped startMove entirely.
     function decideBlock(it,foe,phase){
       if(phase==='hold'){
         if(st.hold>0){st.hold--;it.block=true;return true}
@@ -1745,9 +1761,11 @@ const AI={
       if(phase==='plan'){
         if(st.plan!=='parry')return false;
         if(foe.state!=='ATTACK'){st.plan=null;return false}
-        if(foe.f>=foe.move.startup-2){st.plan=null;st.hold=8+r.int(8);it.block=true;return true}
+        const su=foe.effStartup||foe.move.startup;
+        if(foe.f>=su-2){st.plan=null;st.hold=8+r.int(8);it.block=true;return true}
         return true} // still waiting for the foe's hit to close to 2 frames out — 'handled' (do nothing)
-      if(foe.state==='ATTACK'&&foe.f===1&&(foe.move.startup>PARRY_WINDOW+2||p.punish>0)&&r.next()<p.block){
+      const su=foe.state==='ATTACK'?(foe.effStartup||foe.move.startup):0;
+      if(foe.state==='ATTACK'&&foe.f===1&&(su>PARRY_WINDOW+2||p.punish>0)&&r.next()<p.block){
         if(r.next()<p.parry){st.plan='parry';return true}
         st.hold=p.react+r.int(10);it.block=true;return true}
       return false}
@@ -1793,7 +1811,11 @@ const AI={
       if(decideHeavy(it,me,0,0,0,'hold'))return it;
       if(decideBait(it,me,0,'hold'))return it;
       if(decidePunish(it,me,foe,justGotUp,'follow'))return it;
-      if(me.busy())return it;
+      // Task 6.2 fix round 1: farFrames resets (not just pauses) the instant `me` is busy -- covers
+      // every way that can happen (this fighter starting its own attack, taking a hit/block-stun/
+      // knockdown, or charging a heavy), so decideApproach never fires off a stale count carried over
+      // from before an interruption; a fresh 60-frame "stuck at range" window is required afterward.
+      if(me.busy()){st.farFrames=0;return it}
       // An established block hold takes priority over firing a pending bait dash.
       if(decideBlock(it,foe,'hold'))return it;
       if(decideBait(it,me,0,'dash'))return it;
@@ -1894,7 +1916,7 @@ class Fight{
     return{type:'hit',att,def,idx,m,last}}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
     if(type==='miss')return this.emit('miss',att,def,0);
-    if(type==='parry'){def.parryLock=0;def._parried=true;att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');
+    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');
       this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
       return this.emit('parry',def,att,0)}
     if(type==='block'){const m=r.m;const chipRef={chip:Math.round(att.def.atk*m.dmg*CHIP*(1-(def.def.blockProf||0)))};
@@ -1923,7 +1945,7 @@ class Fight{
     const dmg=ref.dmg;
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
     att.power=Math.min(POWER_MAX,att.power+ref.powHit);def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
-    def.move=null;def.moveName=null;if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
+    def.clearMove();if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
     // Medium landed as a combo ender (3rd+ hit of the combo, counting this one) shoves the defender
     // out past light range instead of the move's normal push, so the follow-up can't just re-chain.
     const push=(att.moveName==='medium'&&att.combo>=3)?90:m.push;
@@ -5694,6 +5716,26 @@ Test.add('a medium started already within light range does not dash forward at a
     f.step();
     ok(f.p1.x<=f.p2.x-(f.p1.width/2+f.p2.width/2),'attacker must never cross into the foe\'s hurtbox')}
   eq(f.p1.x,x0,'no forward dash when the medium starts already in range')});
+// Fix round 1 (controller review): decideBlock's 'plan'/'react' phases used to read the static
+// foe.move.startup for timing -- against a far medium (whose real, tracked startup, foe.effStartup,
+// runs well past the base 10 frames) that dropped guard before the hit actually landed, or judged a
+// slow-looking swing as fast. Both now read foe.effStartup (see 55_ai.js's own comment). Regression:
+// a t4 AI defender must not block/parry a scripted far dash-in LESS often than the same scripted
+// medium thrown from already-in-range, aggregated over 20 seeds (a strict per-seed comparison would
+// be too noisy given t4's own rng-driven offense/movement; the aggregate is the meaningful signal).
+Test.add('t4 AI blocks/parries a far medium dash-in at least as often as a near one (effStartup fix)',()=>{
+  let farTotal=0,nearTotal=0;
+  const steps=Array.from({length:20},(_,i)=>({f:i*40,intent:{medium:true}}));
+  for(let seed=1;seed<=20;seed++){
+    const far=mkFight({ctrl1:Ctrl.script(steps),ctrl2:AI.make('t4',seed)});
+    far.p2.x=STAGE_W/2+200;far.p1.x=far.p2.x-300-48; // far: the dash-in extends effStartup past base
+    run(far,900);
+    farTotal+=far.log.filter(e=>e.type==='block'||e.type==='parry').length;
+    const near=mkFight({ctrl1:Ctrl.script(steps),ctrl2:AI.make('t4',seed)});
+    closeIn(near); // near: effStartup stays at the move's base, matches pre-task timing
+    run(near,900);
+    nearTotal+=near.log.filter(e=>e.type==='block'||e.type==='parry').length}
+  ok(farTotal>=nearTotal,'far-medium blocks/parries ('+farTotal+') must be at least as frequent as near-medium ('+nearTotal+')')});
 Test.add('AI approach field is present on every tier (dummy 0, t1..t5 shrinking) and aliases inherit it',()=>{
   eq(AI.profiles.dummy.approach,0);
   eq(AI.TIERS.t1.approach,90);eq(AI.TIERS.t2.approach,70);eq(AI.TIERS.t3.approach,50);eq(AI.TIERS.t4.approach,40);eq(AI.TIERS.t5.approach,30);
