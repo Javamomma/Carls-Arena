@@ -113,8 +113,16 @@ const Effects={
   // move applies anything yet -- see the "bit-identical" test in 90_tests.js and the --matrix/tier
   // gates run alongside it). critDelta has no producer yet in this task -- Task 7.3's dexterity is the
   // first effect to set it -- but the field exists now so Fight.resolve can read it unconditionally.
+  // Task 8.0 (pre-art seam): pools into holder._mods (Fighter's own field, 50_fighter.js) instead of
+  // allocating a fresh object every call -- Fight.resolve calls this once per side, every landed hit,
+  // for the life of the fight, so a fresh {..} literal per call was a steady per-frame allocation.
+  // Overwritten in place on every call; safe here specifically because attacker and defender are
+  // always two DIFFERENT Fighter instances with their own separate _mods (Fight.resolve's own
+  // attMods/defMods never collide), and because every caller reads the returned fields immediately
+  // and never retains the object across frames -- the ruling this task's brief calls out explicitly.
   mods(holder){
-    const m={atkMul:1,armorDelta:0,critDelta:0};
+    const m=holder._mods||(holder._mods={atkMul:1,armorDelta:0,critDelta:0});
+    m.atkMul=1;m.armorDelta=0;m.critDelta=0;
     for(const e of holder.effects){const def=EFFECTS[e.id];if(def.mod)def.mod(e,m)}
     return m},
   // No id: drops every effect. With an id: drops just that one (a no-op if the holder doesn't hold

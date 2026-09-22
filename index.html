@@ -1991,8 +1991,16 @@ const Effects={
   // move applies anything yet -- see the "bit-identical" test in 90_tests.js and the --matrix/tier
   // gates run alongside it). critDelta has no producer yet in this task -- Task 7.3's dexterity is the
   // first effect to set it -- but the field exists now so Fight.resolve can read it unconditionally.
+  // Task 8.0 (pre-art seam): pools into holder._mods (Fighter's own field, 50_fighter.js) instead of
+  // allocating a fresh object every call -- Fight.resolve calls this once per side, every landed hit,
+  // for the life of the fight, so a fresh {..} literal per call was a steady per-frame allocation.
+  // Overwritten in place on every call; safe here specifically because attacker and defender are
+  // always two DIFFERENT Fighter instances with their own separate _mods (Fight.resolve's own
+  // attMods/defMods never collide), and because every caller reads the returned fields immediately
+  // and never retains the object across frames -- the ruling this task's brief calls out explicitly.
   mods(holder){
-    const m={atkMul:1,armorDelta:0,critDelta:0};
+    const m=holder._mods||(holder._mods={atkMul:1,armorDelta:0,critDelta:0});
+    m.atkMul=1;m.armorDelta=0;m.critDelta=0;
     for(const e of holder.effects){const def=EFFECTS[e.id];if(def.mod)def.mod(e,m)}
     return m},
   // No id: drops every effect. With an id: drops just that one (a no-op if the holder doesn't hold
@@ -2080,7 +2088,13 @@ class Fighter{
     // FRESH vulnerable dash-in before the special's later sub-hits land, would otherwise re-credit the
     // x1.5 dmg/+15 power/INTERCEPT! event a second time off what is, from the attacker's side, still
     // one single move activation. See Fight.resolve's own comment for exactly where this is read/set.
-    this.interceptedThisMove=false}
+    this.interceptedThisMove=false
+    // _mods (Task 8.0 pre-art seam): Effects.mods' own pooled result object for this fighter --
+    // allocated lazily on first use (Effects.mods, 48_effects.js) and overwritten in place on every
+    // call rather than a fresh {atkMul,armorDelta,critDelta} literal each time. Callers (Fight.resolve)
+    // must read it immediately and never retain it across frames -- the next Effects.mods(this) call,
+    // for either side of an exchange, mutates the same object.
+    this._mods=null}
   get front(){return this.x+this.face*this.width/2}
   busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
   setState(s,f=0){if(s==='KNOCKDOWN'){this.wasKnockedDown=true;this._kdCounter=KNOCKDOWN.frames+KNOCKDOWN.inv}this.state=s;this.f=f}
@@ -10969,6 +10983,21 @@ Test.add('Effects.mods always returns atkMul/armorDelta/critDelta, neutral when 
   Effects.apply(f,f.p1,'fury',{stacks:2});
   const mods=Effects.mods(f.p1);
   eq(mods.atkMul,1+0.12*2);eq(mods.armorDelta,0);eq(mods.critDelta,0,'no effect in this task sets critDelta yet')});
+// Task 8.0 (pre-art seam): Effects.mods pools one object per fighter (holder._mods) instead of
+// allocating fresh every call -- proves the pooling directly (same reference across two calls, values
+// correct and up to date on each), and that att/def never collide since they're different fighters.
+Test.add('Effects.mods pools one object per fighter (holder._mods), overwritten in place across calls',()=>{
+  const f=mkFight();
+  const m1=Effects.mods(f.p1);
+  eq(m1.atkMul,1);eq(f.p1._mods,m1,'the pooled object must be reachable at holder._mods');
+  Effects.apply(f,f.p1,'fury',{stacks:1});
+  const m2=Effects.mods(f.p1);
+  ok(m2===m1,'the SAME object must be returned/reused across two calls on the same holder');
+  eq(m2.atkMul,1+0.12,'the pooled object\'s own fields must be updated in place, not stale from the first call');
+  // A second fighter's own pool must be a distinct object with its own values -- no cross-fighter bleed.
+  const m3=Effects.mods(f.p2);
+  ok(m3!==m1,'a different holder must get its own distinct pooled object');
+  eq(m3.atkMul,1,'p2 must read neutral mods, unaffected by p1\'s own fury')});
 Test.add('a fight with no effects ever applied is bit-identical to the pre-Phase-7 damage formula (atkMul/armorDelta/critDelta default neutral)',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
   eq(f.p2.hp,940,'plain light damage must be unaffected by the new Effects.mods plumbing when nothing is active')});

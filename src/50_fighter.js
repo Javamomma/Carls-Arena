@@ -75,7 +75,13 @@ class Fighter{
     // FRESH vulnerable dash-in before the special's later sub-hits land, would otherwise re-credit the
     // x1.5 dmg/+15 power/INTERCEPT! event a second time off what is, from the attacker's side, still
     // one single move activation. See Fight.resolve's own comment for exactly where this is read/set.
-    this.interceptedThisMove=false}
+    this.interceptedThisMove=false
+    // _mods (Task 8.0 pre-art seam): Effects.mods' own pooled result object for this fighter --
+    // allocated lazily on first use (Effects.mods, 48_effects.js) and overwritten in place on every
+    // call rather than a fresh {atkMul,armorDelta,critDelta} literal each time. Callers (Fight.resolve)
+    // must read it immediately and never retain it across frames -- the next Effects.mods(this) call,
+    // for either side of an exchange, mutates the same object.
+    this._mods=null}
   get front(){return this.x+this.face*this.width/2}
   busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
   setState(s,f=0){if(s==='KNOCKDOWN'){this.wasKnockedDown=true;this._kdCounter=KNOCKDOWN.frames+KNOCKDOWN.inv}this.state=s;this.f=f}

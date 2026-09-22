@@ -4194,6 +4194,21 @@ Test.add('Effects.mods always returns atkMul/armorDelta/critDelta, neutral when 
   Effects.apply(f,f.p1,'fury',{stacks:2});
   const mods=Effects.mods(f.p1);
   eq(mods.atkMul,1+0.12*2);eq(mods.armorDelta,0);eq(mods.critDelta,0,'no effect in this task sets critDelta yet')});
+// Task 8.0 (pre-art seam): Effects.mods pools one object per fighter (holder._mods) instead of
+// allocating fresh every call -- proves the pooling directly (same reference across two calls, values
+// correct and up to date on each), and that att/def never collide since they're different fighters.
+Test.add('Effects.mods pools one object per fighter (holder._mods), overwritten in place across calls',()=>{
+  const f=mkFight();
+  const m1=Effects.mods(f.p1);
+  eq(m1.atkMul,1);eq(f.p1._mods,m1,'the pooled object must be reachable at holder._mods');
+  Effects.apply(f,f.p1,'fury',{stacks:1});
+  const m2=Effects.mods(f.p1);
+  ok(m2===m1,'the SAME object must be returned/reused across two calls on the same holder');
+  eq(m2.atkMul,1+0.12,'the pooled object\'s own fields must be updated in place, not stale from the first call');
+  // A second fighter's own pool must be a distinct object with its own values -- no cross-fighter bleed.
+  const m3=Effects.mods(f.p2);
+  ok(m3!==m1,'a different holder must get its own distinct pooled object');
+  eq(m3.atkMul,1,'p2 must read neutral mods, unaffected by p1\'s own fury')});
 Test.add('a fight with no effects ever applied is bit-identical to the pre-Phase-7 damage formula (atkMul/armorDelta/critDelta default neutral)',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
   eq(f.p2.hp,940,'plain light damage must be unaffected by the new Effects.mods plumbing when nothing is active')});
