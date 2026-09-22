@@ -19,7 +19,7 @@ class Fight{
   // cap G passes into Camera.update as capNow (80_game.js's zoomCap) is UNCHANGED at 1.12 (HUD
   // clearance still holds at that number, see 68_rig.js's own test), but this base target used to
   // already saturate at 1.12 for any real hit-landing distance, leaving the per-class camera punch
-  // percentage (HITFEEL.<class>.punch, composed by Camera.update as min(base*(1+punch), capNow))
+  // percentage (the per-class punch magnitude, composed by Camera.update as min(base*(1+punch), capNow))
   // nowhere to go -- punch was being composed against a base already sitting AT the cap. Lowering
   // the ramp's own ceiling to 1.06 gives the punch real headroom up to 1.12 at the distances hits
   // actually land (see the fix-wave I2 test just below the punch composition tests, 90_tests.js).
@@ -225,42 +225,40 @@ class Fight{
     // Task 7.4 (frozen interface, exact ruling): a per-class impact fx (dust ring/arc slash/caster
     // ring, keyed off the ATTACKER's own def.impact -- 40_movedata.js) layered on top of (never
     // instead of) the spark/dustArc burst just pushed above, same "data-only, never touches hitstop/
-    // shake" discipline the kick-fx swap comment above already spells out. att.def.impact is only
-    // ever 'blunt'|'blade'|'energy' today (every CHAMPS/MOBS/BOSSES entry carries one), so the
-    // ({...}[x]) lookup below is never undefined in practice; the guard is just cheap insurance for
-    // a future def that forgets to set one.
-    const impactKind={blunt:'impactBlunt',blade:'impactBlade',energy:'impactEnergy'}[att.def.impact];
-    if(impactKind)this.fx.push({kind:impactKind,x:def.x,y:FLOOR-80,face:att.face});
+    // shake" discipline the kick-fx swap comment above already spells out.
+    // Task 8.0 (pre-art seam): the IMPACTS registry itself -- including its blunt/blade/energy draw
+    // functions and its own unknown-id fallback to blunt -- lives entirely in 72_fx.js now. This sim
+    // file does no lookup of its own: it just passes att.def.impact's raw id string straight through
+    // the fx descriptor, whatever that string is (even undefined, for some future def that forgets to
+    // set one) -- the presentation-side FX object's own 'impact' push case is what resolves it,
+    // falling back to blunt there.
+    this.fx.push({kind:'impact',id:att.def.impact,x:def.x,y:FLOOR-80,face:att.face});
     // Task 6.4: BUFFS.tutorialGuard (47_buffs.js) sets ref.capped=true the instant it actually
     // clamped this hit's dmg -- forwarded onto the popup fx as `muted`, which FX/Render draw grey
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
     // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
     this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
-    // Task 7.4 fix round 1 (frozen ruling, exact table): HITFEEL[hfKey] (40_movedata.js) is the
-    // controller's own per-class shake/punch magnitudes -- intercept overrides the landed move's own
-    // class entirely (an intercepting hit always feels like an intercept, whatever move actually
-    // caught the foe); light carries shake:0/punch:0, so it pushes neither fx, matching the ruling
-    // "light: no shake/no punch". Gated by the exact same "single-hit move, or the LAST blow of a
-    // multi-hit special" condition (!m.hits||last) hitstop itself already uses just above -- a
-    // multi-hit special's own shake/punch fires once, off its final landed sub-hit, never per sub-hit
-    // (every sub-hit still gets its own popup/spark/impact fx just above, unaffected).
-    if(!m.hits||last){
-      const hfKey=intercept?'intercept':(HITFEEL[att.moveName]?att.moveName:null);
-      const hf=hfKey&&HITFEEL[hfKey];
-      if(hf){
-        // dir carries the attacker's own facing (att.face) so FX's own directional shake vector
-        // (72_fx.js) always kicks the camera the same way the exchange was actually facing.
-        if(hf.shake>0)this.fx.push({kind:'shake',amt:hf.shake,dir:att.face});
-        // hold/creep forward straight from the table -- the presentation side's own 'punch' push
-        // case (72_fx.js) reads both (hold overrides its own default per-push; creep eases the
-        // punch IN over that hold instead of snapping straight to it, the S1/S2 "final hit...
-        // creep" ruling).
-        if(hf.punch>0)this.fx.push({kind:'punch',pct:hf.punch,hold:hf.hold,creep:!!hf.creep})}}
+    // Task 8.0 (pre-art seam): the sim no longer knows any shake/punch magnitude, or even which
+    // classes get one -- it only reports the bare fact of what just landed. cls is the landed
+    // move's own moveName, or the fixed 'intercept' when this hit is itself an intercept (an
+    // intercepting hit always feels like an intercept, whatever move actually caught the foe,
+    // overriding the landing move's own class entirely, same override the old inline lookup gave).
+    // dir carries the attacker's own facing (att.face) so FX's own directional shake vector
+    // (72_fx.js) always kicks the camera the same way the exchange was actually facing. last is the
+    // same "single-hit move, or the LAST blow of a multi-hit special" flag hitstop's own `!m.hits||
+    // last` gate above reads -- carried here instead of used to gate the push itself (note: for any
+    // single-hit move m.hits is falsy and `last` is therefore always true too -- idx can only ever be
+    // 0 -- so `!m.hits||last` and plain `last` are exactly equivalent; this descriptor is pushed
+    // unconditionally, every landed sub-hit, and the presentation-side hitfeel resolver (72_fx.js,
+    // hung off the FX object) is the only place that reads
+    // `last` to decide whether a multi-hit special's own early sub-hit should stay silent).
+    const hfCls=intercept?'intercept':att.moveName;
+    this.fx.push({kind:'hitfeel',cls:hfCls,dir:att.face,last});
     // Task 7.3 (frozen interface, exact ruling): the intercept's own read/reward gets its own
     // INTERCEPT! callout, on top of (never instead of) the plain damage popup/spark just pushed
     // above -- and its own event, carrying {who,dir} (dir is att's own facing, per the ruling) so
     // Task 7.4's directional shake can tell which way to kick the camera. Its own shake/punch fx are
-    // pushed by the HITFEEL block just above (keyed off 'intercept'), not here.
+    // resolved from the hitfeel descriptor (cls:'intercept') pushed just above, not here.
     if(intercept){
       this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'INTERCEPT!',col:'#ff9d3b',big:true});
       this.emitTell('intercept',att,att.face)}

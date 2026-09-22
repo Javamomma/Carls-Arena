@@ -93,9 +93,20 @@ class Fighter{
   startMove(name,node,overrides){
     this.moveSeq++; // fix-wave item 3 (final review I3): once per move instance, see its own comment above
     this.move=overrides?Object.assign({},this.moveDef(name),overrides):this.moveDef(name);
-    this.moveName=name;this.hits=new Set();this.landed=false;this.chainNode=node===undefined?0:node;
-    this.interceptedThisMove=false;
+    this.moveName=name;this.chainNode=node===undefined?0:node;
+    this.resetPerMove();
     if(this.move.cost)this.power-=this.move.cost;this.setupDash();this.setState(this.move.charge?'CHARGE':'ATTACK')}
+  // Task 8.0 (pre-art seam): the exact by-hand reset startMove used to do inline, pulled into its own
+  // named method -- these three fields are unconditional resets to the same fixed value on every move
+  // (a fresh empty hits Set, landed false, interceptedThisMove false), unlike everything else
+  // startMove touches (move/moveName/chainNode carry the call's own arguments, not a fixed reset
+  // value; setupDash() is already its own separate per-instance computation). Deliberately does NOT
+  // touch: chainNode (the CHAIN grammar owns it -- startMove sets it explicitly from `node`, not a
+  // reset, and resetting it here would stomp the grammar's own in-progress count); guardActive/
+  // parryBonus (startMove never touched either -- they're tutorial/sponsor-perk state with their own
+  // owners, see the constructor's own comments); dashLeft/dashRate/effStartup (already owned and
+  // computed by setupDash(), called right after this, never by a fixed reset).
+  resetPerMove(){this.hits=new Set();this.landed=false;this.interceptedThisMove=false}
   // Movement inside moves (Task 6.2): computes dashLeft/dashRate/effStartup once, from the move's own
   // track/stepIn/dash fields and the this.foeDist snapshot Fight.step wrote before this frame's act()
   // (or null, see the constructor's own comment). Three shapes, checked in this order:

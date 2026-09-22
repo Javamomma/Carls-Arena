@@ -3,6 +3,54 @@
 // every sim tick via FX.pushAll) and never touches Fight/Fighter state. Spread uses its own seeded
 // RNG, keyed off the current fight frame and particle index, never Math.random, so --sim
 // screenshots reproduce identically frame for frame.
+// Task 8.0 (pre-art seam, moved verbatim from 40_movedata.js): per-class hit-feel magnitudes, read
+// only by FX.hitfeel below. Fight.resolve (60_fight.js) no longer knows any of these numbers -- it
+// only reports the bare fact of what class of hit just landed
+// ({kind:'hitfeel',cls,dir,last}); FX.hitfeel is the only place that turns that fact into an actual
+// shake/punch push. `stop` is NOT read by resolve() for hitstop itself -- MOVES.*.hitstop
+// (40_movedata.js) and the intercept's own hardcoded 10 (60_fight.js) stay the sim's only source for
+// that; `stop` is carried here purely so this table documents/cross-checks against those same
+// numbers in one place (every value below equals its matching MOVES.*.hitstop, and 10 equals the
+// intercept hitstop) -- a future hitstop retune that forgets to update this table alongside MOVES
+// would be a visible mismatch, not a silent drift (see the pinning test in 90_tests.js). `shake`/
+// `punch` are the actual px/pct magnitudes FX.hitfeel pushes; `hold` is the punch envelope's own
+// hold-frame count (FX.push's 'punch' case below falls back to its own PUNCH_HOLD when a push
+// carries none); `creep` (s1/s2 only) means the punch eases IN over `hold` instead of snapping
+// straight to its target. light's shake:0/punch:0 means neither fx is ever pushed for a plain light
+// (see FX.hitfeel's own `if(hf.shake>0)`/`if(hf.punch>0)` guards); s3's punch:0 means s3 never gets a
+// punch-in fx of its own (the existing S3 cinematic dolly/card already owns that beat).
+const HITFEEL={
+  light:{stop:3, shake:0, punch:0,   hold:0},
+  medium:{stop:5, shake:4, punch:.02,hold:6},
+  heavy:{stop:9, shake:8, punch:.04, hold:10},
+  s1:{stop:6, shake:6, punch:.03,    hold:6, creep:true},
+  s2:{stop:8, shake:6, punch:.03,    hold:6, creep:true},
+  s3:{stop:14,shake:6, punch:0,      hold:0},
+  intercept:{stop:10,shake:10,punch:.05,hold:6}};
+// Task 8.0 (pre-art seam): per-impact-class fx registry, keyed by att.def.impact's own raw id string
+// (blunt/blade/energy). Fight.resolve (60_fight.js) passes only that id straight through the fx
+// descriptor -- no lookup, no drawn-kind name -- so the registry itself, including the fallback to
+// blunt for an id it doesn't recognize, lives entirely here in presentation. Each entry's spawn()
+// builds the list particle (same shape/lifetimes as the old direct impactBlunt/impactBlade/
+// impactEnergy push cases this replaces); draw() renders it (same visuals, moved verbatim from
+// FX.draw's old per-kind branches) -- both push() and draw() below dispatch through this one table.
+const IMPACTS={
+  blunt:{
+    spawn(ev){return{kind:'impact',id:'blunt',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:16}},
+    draw(c,p){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
+      c.strokeStyle='#cbb89a';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,6+t*22,0,Math.PI*2);c.stroke()}},
+  blade:{
+    spawn(ev){return{kind:'impact',id:'blade',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:14}},
+    draw(c,p){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
+      c.strokeStyle='#e8f0ff';c.lineWidth=4;c.beginPath();
+      c.arc(p.x,p.y,14+t*10,-0.7*p.face,0.7*p.face,p.face<0);c.stroke()}},
+  energy:{
+    spawn(ev){return{kind:'impact',id:'energy',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:20}},
+    draw(c,p){const t=p.life/p.max;
+      c.globalAlpha=Math.max(0,(1-t)*.85);c.strokeStyle='#b388ff';c.lineWidth=3;
+      c.beginPath();c.arc(p.x,p.y,8+t*18,0,Math.PI*2);c.stroke();
+      c.globalAlpha=Math.max(0,(1-t)*.4);c.fillStyle='#b388ff';
+      c.beginPath();c.arc(p.x,p.y,4+t*6,0,Math.PI*2);c.fill()}}};
 const FX={list:[],
   // Task 7.4: FX.shake is now a decaying {x,y} vector (was a bare scalar) -- x kicks in the
   // attacker's own facing (ev.dir), y is a fixed small upward kick, both decaying together so the
@@ -74,14 +122,11 @@ const FX={list:[],
       // hobgoblin/grub/grull/mother_rat are blunt (a dust ring); katia/goblin/skeleton are blade
       // (an arc slash); donut/shaman are energy (a caster ring) -- see draw()'s own per-kind
       // rendering below.
-      case'impactBlunt':
-        this.list.push({kind:'impactBlunt',x:ev.x,y:ev.y,life:0,max:16});
-        break;
-      case'impactBlade':
-        this.list.push({kind:'impactBlade',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:14});
-        break;
-      case'impactEnergy':
-        this.list.push({kind:'impactEnergy',x:ev.x,y:ev.y,life:0,max:20});
+      // Task 8.0 (pre-art seam): the sim pushes only {kind:'impact',id,x,y,face} -- id is whatever
+      // raw string att.def.impact carried (or undefined, for a def that forgets to set one); the
+      // IMPACTS registry lookup and its own fallback to blunt live entirely here, never in the sim.
+      case'impact':
+        this.list.push((IMPACTS[ev.id]||IMPACTS.blunt).spawn(ev));
         break;
       // Task 7.1: turns a bare {id,stacks} effect descriptor into the same rendered 'popup' particle
       // kind hit/parry/thorns damage already uses (draw()'s 'popup' case below needs no change) --
@@ -144,9 +189,9 @@ const FX={list:[],
           const mag=Math.hypot(this.shake.x,this.shake.y);
           if(mag>24){const s=24/mag;this.shake.x*=s;this.shake.y*=s}}
         break;
-      // Task 7.4 (frozen interface): the camera's own additive zoom term -- pushed by Fight.resolve
-      // per HITFEEL[hfKey] (40_movedata.js) on any hit whose class carries a nonzero punch (medium/
-      // heavy/S1/S2's final hit/intercept; light and S3 never push one at all). ev.hold overrides
+      // Task 7.4 (frozen interface): the camera's own additive zoom term -- pushed by FX.hitfeel
+      // (below) per HITFEEL[cls] on any hit whose class carries a nonzero punch (medium/heavy/S1/
+      // S2's final hit/intercept; light and S3 never push one at all). ev.hold overrides
       // PUNCH_HOLD (fix round 1: heavy's own 10-frame hold vs. medium's 6 vs. the fallback 6), and
       // ev.creep (S1/S2 only) switches the envelope from "jump straight to pct" to "ease IN toward
       // pct over the hold window" -- see update()'s own comment for the two envelope shapes.
@@ -165,6 +210,11 @@ const FX={list:[],
           else{
             this.punchTarget=Math.max(this.punch,pct);this.punch=this.punchTarget;this.punchHold=hold;this.punchCreep=false}}
         break;
+      // Task 8.0 (pre-art seam): the sim's own bare {cls,dir,last} report of what just landed --
+      // hitfeel() below is the only place that turns it into the actual shake/punch pushes above.
+      case'hitfeel':
+        this.hitfeel(ev.cls,ev.dir,{last:ev.last});
+        break;
       case'flash':
         if(!Save.data.settings.reduceMotion)this.flash=Math.max(this.flash,ev.frames||0);
         break;
@@ -174,6 +224,18 @@ const FX={list:[],
         break;
       default:break}
     if(this.list.length>200)this.list.splice(0,this.list.length-200)},
+  // Task 8.0 (pre-art seam): resolves a bare hitfeel descriptor (Fight.resolve, 60_fight.js) into the
+  // real shake/punch pushes, via HITFEEL[cls] above -- the only place any of those magnitudes are
+  // read. opts.last mirrors the old `!m.hits||last` gate that used to live in Fight.resolve itself:
+  // a multi-hit special's own early sub-hit (last:false) is a full no-op here, exactly as it used to
+  // be a no-op at the push site -- only the final landed sub-hit (or any single-hit move, whose own
+  // `last` is always true) ever reaches the two pushes below. An unrecognized cls (defensive only --
+  // every real moveName has a HITFEEL entry) is also a no-op.
+  hitfeel(cls,dir,opts){
+    if(!(opts&&opts.last))return;
+    const hf=HITFEEL[cls];if(!hf)return;
+    if(hf.shake>0)this.push({kind:'shake',amt:hf.shake,dir});
+    if(hf.punch>0)this.push({kind:'punch',pct:hf.punch,hold:hf.hold,creep:!!hf.creep})},
   pushAll(evs){for(const e of evs)this.push(e)},
   update(){
     for(let i=this.list.length-1;i>=0;i--){const p=this.list[i];p.life++;
@@ -215,16 +277,9 @@ const FX={list:[],
       // Task 7.4: per-class impact fx -- a static-position expanding ring/arc (no vx/vy physics,
       // see update()'s own comment) layered on top of the existing spark/dustArc burst at the same
       // impact point, so a landed hit reads as its own champion class on top of the generic hit fx.
-      else if(p.kind==='impactBlunt'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
-        c.strokeStyle='#cbb89a';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,6+t*22,0,Math.PI*2);c.stroke()}
-      else if(p.kind==='impactBlade'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
-        c.strokeStyle='#e8f0ff';c.lineWidth=4;c.beginPath();
-        c.arc(p.x,p.y,14+t*10,-0.7*p.face,0.7*p.face,p.face<0);c.stroke()}
-      else if(p.kind==='impactEnergy'){const t=p.life/p.max;
-        c.globalAlpha=Math.max(0,(1-t)*.85);c.strokeStyle='#b388ff';c.lineWidth=3;
-        c.beginPath();c.arc(p.x,p.y,8+t*18,0,Math.PI*2);c.stroke();
-        c.globalAlpha=Math.max(0,(1-t)*.4);c.fillStyle='#b388ff';
-        c.beginPath();c.arc(p.x,p.y,4+t*6,0,Math.PI*2);c.fill()}
+      // Task 8.0 (pre-art seam): dispatches through the IMPACTS registry by the particle's own id
+      // (blunt/blade/energy, set by push()'s 'impact' case above), same fallback-to-blunt as push().
+      else if(p.kind==='impact'){(IMPACTS[p.id]||IMPACTS.blunt).draw(c,p)}
       // Task 7.3: a fading blue band trailing behind the dodge's own facing, a minimal placeholder
       // for the dexterity read -- see push()'s own comment on why this stays plain.
       else if(p.kind==='afterimage'){const t=p.life/p.max;c.globalAlpha=Math.max(0,(1-t)*.5);

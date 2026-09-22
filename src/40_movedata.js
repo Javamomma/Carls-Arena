@@ -16,30 +16,14 @@ const MOVES={
   s1:{startup:8, active:4,recovery:22,dmg:1.5,hits:3,gap:6,range:130,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:100,knockdown:true,hitstop:6},
   s2:{startup:10,active:4,recovery:28,dmg:1.6,hits:5,gap:6,range:150,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:200,knockdown:true,hitstop:8},
   s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,knockdown:true,unblockable:true,hitstop:14}};
-// Task 7.4 fix round 1 (frozen ruling, exact values): per-class hit-feel magnitudes, read by
-// Fight.resolve's shake/punch push sites (60_fight.js) keyed off the landed move's own moveName
-// ('light'/'medium'/'heavy'/'s1'/'s2'/'s3'), or 'intercept' when the landed hit is itself an
-// intercept (overriding whatever the landing move's own class would otherwise have been -- an
-// intercepting hit always feels like an intercept). `stop` is NOT read by resolve() for hitstop
-// itself -- MOVES.*.hitstop (above) and the intercept's own hardcoded 10 (60_fight.js) stay the
-// sim's only source for that; `stop` is carried here purely so this table documents/cross-checks
-// against those same numbers in one place (every value below equals its matching MOVES.*.hitstop,
-// and 10 equals the intercept hitstop) -- a future hitstop retune that forgets to update this table
-// alongside MOVES would be a visible mismatch, not a silent drift. `shake`/`punch` are the actual
-// px/pct magnitudes resolve() pushes; `hold` is the punch envelope's own hold-frame count (FX.push's
-// 'punch' case, 72_fx.js, falls back to its own PUNCH_HOLD when a push carries none); `creep` (s1/s2
-// only) means the punch eases IN over `hold` instead of snapping straight to its target. light's
-// shake:0/punch:0 means neither fx is ever pushed for a plain light (see resolve()'s own `if(hf.
-// shake>0)`/`if(hf.punch>0)` guards); s3's punch:0 means s3 never gets a punch-in fx of its own (the
-// existing S3 cinematic dolly/card already owns that beat).
-const HITFEEL={
-  light:{stop:3, shake:0, punch:0,   hold:0},
-  medium:{stop:5, shake:4, punch:.02,hold:6},
-  heavy:{stop:9, shake:8, punch:.04, hold:10},
-  s1:{stop:6, shake:6, punch:.03,    hold:6, creep:true},
-  s2:{stop:8, shake:6, punch:.03,    hold:6, creep:true},
-  s3:{stop:14,shake:6, punch:0,      hold:0},
-  intercept:{stop:10,shake:10,punch:.05,hold:6}};
+// Task 8.0 (pre-art seam): the old per-class shake/punch magnitude table moved verbatim to
+// src/72_fx.js -- this sim file no longer carries any shake/punch numbers at all. Fight.resolve
+// (60_fight.js) reports only the bare fact of what class of hit just landed
+// ({kind:'hitfeel',cls,dir,last}); the presentation-side resolver in 72_fx.js is the only place that
+// turns that fact into an actual camera-shake/punch-in magnitude. MOVES.*.hitstop (above) stays the
+// sim's own hitstop source, unchanged and untouched by this move -- see 72_fx.js's own header
+// comment on that table for the full "stop is documentation-only" cross-check note that used to
+// live here.
 // Task 7.2 (frozen interface, exact values): the five-node combo grammar. openers are the two moves
 // that can start a chain from IDLE/BLOCK; nodes is the chain's max length (Fighter.chainNode runs
 // 1..5); enders describes what the FINAL blow of the chain does, keyed by which move type actually

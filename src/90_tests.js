@@ -829,13 +829,15 @@ Test.add('mob defs have hp/atk/scale and resolve through DEFS',()=>{ok(DEFS.gobl
 Test.add('hitstop is per move',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.hitstop,MOVES.light.hitstop);ok(MOVES.heavy.hitstop>MOVES.light.hitstop&&MOVES.s3.hitstop>MOVES.heavy.hitstop)});
 // Task 7.4 fix round 1: a plain light no longer pushes shake (HITFEEL.light.shake===0, the frozen
 // "light: no shake/no punch" ruling) -- this test now checks spark+popup off a light (unaffected)
-// and shake off a medium (HITFEEL.medium.shake===4) instead, so it still proves "a landed hit queues
-// hit-feel fx" without asserting the one combination (light+shake) the ruling explicitly forbids.
-Test.add('a hit queues spark and popup fx; a medium also queues shake; a block queues dust',()=>{
+// and a medium's own hitfeel descriptor (HITFEEL.medium.shake===4) instead, so it still proves "a
+// landed hit queues hit-feel fx" without asserting the one combination (light+shake) the ruling
+// explicitly forbids. Task 8.0 (pre-art seam): the sim itself no longer pushes 'shake' directly --
+// see the dedicated hitfeel/HITFEEL test blocks below for the full sim+FX split.
+Test.add('a hit queues spark and popup fx; a medium also queues a hitfeel descriptor; a block queues dust',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);const kinds=f.fx.map(e=>e.kind);
   ok(kinds.includes('spark')&&kinds.includes('popup'),kinds.join());
   const m=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});closeIn(m);run(m,20);
-  ok(m.fx.some(e=>e.kind==='shake'),'a landed medium must queue shake: '+m.fx.map(e=>e.kind).join());
+  ok(m.fx.some(e=>e.kind==='hitfeel'&&e.cls==='medium'),'a landed medium must queue a hitfeel descriptor: '+m.fx.map(e=>e.kind).join());
   const g=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(g);run(g,15);ok(g.fx.some(e=>e.kind==='dust'))});
 Test.add('KO starts slow-mo and G steps the sim every 4th tick during it',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);f.p2.hp=1;run(f,5);ok(f.over&&f.slowmo>0);const before=f.slowmo;G.fight=f;G.state='FIGHT';G._tickN=0;for(let i=0;i<8;i++)G.tick();eq(f.slowmo,before-2);G.fight=null;G.state='TITLE'});
 Test.add('a parry works again after PARRY_LOCKOUT expires',()=>{
@@ -4057,7 +4059,9 @@ Test.add('a landed kick (medium) queues dustArc fx, not the gold spark burst; a 
   const kinds=f.fx.map(e=>e.kind);
   ok(kinds.includes('dustArc'),'a landed medium must push dustArc: '+kinds.join());
   ok(!kinds.includes('spark'),'a landed medium must NOT push the gold spark burst: '+kinds.join());
-  ok(kinds.includes('shake'),'hitstop/shake fx must be unaffected by the kick fx swap: '+kinds.join());
+  // Task 8.0 (pre-art seam): the sim no longer pushes 'shake' directly -- it pushes the bare
+  // {kind:'hitfeel',cls:'medium',...} descriptor; unaffected by the kick fx swap either way.
+  ok(kinds.includes('hitfeel'),'the hitfeel descriptor must be unaffected by the kick fx swap: '+kinds.join());
   const g=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(g);run(g,10);
   const gKinds=g.fx.map(e=>e.kind);
   ok(gKinds.includes('spark'),'a landed light1 must still push the ordinary spark: '+gKinds.join());
@@ -4276,7 +4280,10 @@ Test.add('a light landing on a foe mid-medium-startup intercepts: x1.5 damage, +
   ok(iv,'an intercept event must be logged');
   eq(iv.who,1,'p1 (the interceptor) is credited');
   eq(iv.dir,1,"dir is the attacker's (p1's) own facing");
-  ok(f.fx.some(x=>x.kind==='punch'&&x.pct===.05),'a punch fx descriptor must be queued');
+  // Task 8.0 (pre-art seam): the sim no longer knows the .05 punch pct itself -- it reports only
+  // cls:'intercept', and FX.hitfeel (72_fx.js) is what turns that into the .05 push; see the
+  // dedicated FX-level "FX.hitfeel: cls intercept" test below for that half of the proof.
+  ok(f.fx.some(x=>x.kind==='hitfeel'&&x.cls==='intercept'&&x.last===true),'a hitfeel descriptor with cls "intercept" must be queued');
   ok(f.fx.some(x=>x.kind==='popup'&&x.text==='INTERCEPT!'),'an INTERCEPT! popup must be queued')});
 Test.add('a hit landing on a foe already past medium startup (into recovery) is a plain hit, no intercept',()=>{
   // Hand-set p2 into a medium already in its own recovery window (f=startup+1=11, inside the
@@ -4370,73 +4377,146 @@ Test.add('an already-in-range medium keeps its old flat startup and speed (bit-i
   f.step();
   eq(f.p1.effStartup,MOVES.medium.startup,'no dash needed, base startup unchanged from before this task')});
 
+// --- Task 8.0: pre-art seams (resetPerMove, sim-purity scan for the relocated HITFEEL numbers) ---
+// resetPerMove() replaces the by-hand reset startMove used to do inline -- proves the exact before/
+// after set the controller's own ruling calls for: it clears hits/landed/interceptedThisMove (the
+// three fields startMove always reset to the same fixed value on every call), and touches NOTHING
+// else -- specifically not chainNode (the CHAIN grammar owns it; startMove sets it explicitly from
+// its own `node` argument, not via a fixed reset), not guardActive/parryBonus (startMove never
+// touched either one -- tutorial/sponsor-perk state with their own separate owners), and not
+// dashLeft/dashRate/effStartup (already owned and computed by setupDash(), a separate per-instance
+// method called right after resetPerMove in startMove, never by a fixed reset value).
+Test.add('resetPerMove clears exactly hits/landed/interceptedThisMove and touches nothing else',()=>{
+  const f=mkFighter();
+  f.hits=new Set([9]);f.landed=true;f.interceptedThisMove=true;
+  f.chainNode=3;f.guardActive=true;f.parryBonus=5;f.dashLeft=40;f.dashRate=7;f.effStartup=99;
+  f.resetPerMove();
+  eq(f.hits.size,0,'hits must reset to a fresh empty Set');
+  eq(f.landed,false,'landed must reset to false');
+  eq(f.interceptedThisMove,false,'interceptedThisMove must reset to false');
+  eq(f.chainNode,3,'resetPerMove must NOT touch chainNode -- the grammar owns it');
+  eq(f.guardActive,true,'resetPerMove must NOT touch guardActive -- startMove never did');
+  eq(f.parryBonus,5,'resetPerMove must NOT touch parryBonus -- startMove never did');
+  eq(f.dashLeft,40,'resetPerMove must NOT touch dashLeft -- owned by setupDash()');
+  eq(f.dashRate,7,'resetPerMove must NOT touch dashRate -- owned by setupDash()');
+  eq(f.effStartup,99,'resetPerMove must NOT touch effStartup -- owned by setupDash()')});
+Test.add('startMove still resets hits/landed/interceptedThisMove (via resetPerMove) and still sets chainNode from its own node arg',()=>{
+  const f=mkFighter();
+  f.hits=new Set([1,2]);f.landed=true;f.interceptedThisMove=true;f.chainNode=9;
+  f.startMove('light',3);
+  eq(f.hits.size,0);eq(f.landed,false);eq(f.interceptedThisMove,false);
+  eq(f.chainNode,3,'startMove itself still sets chainNode from its own node argument, unaffected by resetPerMove')});
+// Sim-purity scan (Task 8.0 ruling, exact ask): 40_movedata.js and 60_fight.js must carry no
+// shake/punch magnitudes anywhere after HITFEEL's move to 72_fx.js -- same document.scripts
+// slice-and-scan technique the Atlas/fetch purity test above already established for isolating one
+// concatenated src/NN_*.js file's own text out of the single built <script>.
+Test.add('sim purity: 40_movedata.js and 60_fight.js carry no HITFEEL/shake/punch magnitudes (moved to 72_fx.js)',()=>{
+  const full=[...document.scripts].map(s=>s.textContent||'').join('\n');
+  const mdStart=full.indexOf('// All frame counts at 60 Hz.');
+  const mdEnd=full.indexOf('// Dungeon encounters: a floor');
+  ok(mdStart>=0&&mdEnd>mdStart,'could not locate src/40_movedata.js in the built page');
+  const movedataSrc=full.slice(mdStart,mdEnd);
+  ok(!/HITFEEL/.test(movedataSrc),'40_movedata.js must not define or reference HITFEEL');
+  const fightStart=full.indexOf('class Fight{');
+  const fightEnd=full.indexOf('// Parallax dungeon stage');
+  ok(fightStart>=0&&fightEnd>fightStart,'could not locate src/60_fight.js in the built page');
+  const fightSrc=full.slice(fightStart,fightEnd);
+  ok(!/HITFEEL/.test(fightSrc),'60_fight.js must not reference HITFEEL');
+  ok(!/'shake'|'punch'/.test(fightSrc),'60_fight.js must not push shake/punch fx kinds directly anymore (only the bare hitfeel descriptor)')});
 // --- Task 7.4: hit-feel pass (directional shake, camera punch-in, per-class impact fx, intercept
 // time dilation, per-node hit audio) -----------------------------------------------------------
-// Task 7.4 fix round 1 (frozen ruling, exact HITFEEL table -- 40_movedata.js): per-class shake/punch
-// magnitudes, keyed off the landed move's own class (light/medium/heavy/s1/s2/s3), intercept
-// overriding whatever class the landing move actually was. p1 (carl) faces +1 in every mkFight/
-// closeIn fixture below; a second p2-attacks-p1 fixture (face -1) proves dir isn't hardcoded.
-Test.add('HITFEEL: a landed light pushes neither shake nor punch',()=>{
+// Task 8.0 (pre-art seam): HITFEEL's own magnitudes moved to 72_fx.js; Fight.resolve (60_fight.js)
+// now reports only the bare fact of what class of hit landed ({kind:'hitfeel',cls,dir,last}). Split
+// into two layers of tests below, each proving its own half of the seam: SIM (does resolve() push
+// the right bare descriptor, with no shake/punch numbers of its own) and FX (does FX.hitfeel turn
+// that descriptor into the exact same shake/punch magnitudes the frozen HITFEEL table always had).
+// p1 (carl) faces +1 in every mkFight/closeIn fixture below; a second p2-attacks-p1 fixture (face -1)
+// proves dir isn't hardcoded.
+// --- SIM layer: Fight.resolve pushes the bare {cls,dir,last} fact, nothing else -----------------
+Test.add('hitfeel (sim): a landed light pushes {kind:"hitfeel",cls:"light",last:true} and carries no shake/punch numbers',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
-  const kinds=f.fx.map(e=>e.kind);
-  ok(!kinds.includes('shake'),'a plain light must push no shake fx: '+kinds.join());
-  ok(!kinds.includes('punch'),'a plain light must push no punch fx: '+kinds.join())});
-Test.add('HITFEEL: a landed medium pushes shake 4 (dir = attacker facing, both facings) and punch .02 hold 6',()=>{
+  const hf=f.fx.find(e=>e.kind==='hitfeel');
+  ok(hf,'a landed light must queue a hitfeel descriptor: '+f.fx.map(e=>e.kind).join());
+  eq(hf.cls,'light');eq(hf.dir,f.p1.face);eq(hf.last,true);
+  ok(!('shake'in hf)&&!('amt'in hf)&&!('pct'in hf),'the sim-pushed descriptor must carry no shake/punch fields of its own')});
+Test.add('hitfeel (sim): a landed medium pushes cls "medium"; dir tracks the actual attacker\'s facing on either side',()=>{
   const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});closeIn(f);run(f,20);
-  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
-  ok(sh,'a landed medium must push shake: '+f.fx.map(e=>e.kind).join());
-  eq(sh.amt,4,'medium shake amt must be 4');eq(sh.dir,f.p1.face,"shake dir must equal the attacker's own facing (+1 here)");
-  ok(pu,'a landed medium must push punch: '+f.fx.map(e=>e.kind).join());
-  eq(pu.pct,.02,'medium punch pct must be .02');eq(pu.hold,6,'medium punch hold must be 6');ok(!pu.creep,'medium punch must not creep');
+  const hf=f.fx.find(e=>e.kind==='hitfeel');
+  ok(hf,'a landed medium must queue a hitfeel descriptor: '+f.fx.map(e=>e.kind).join());
+  eq(hf.cls,'medium');eq(hf.dir,f.p1.face,"dir must equal the attacker's own facing (+1 here)");eq(hf.last,true);
   // Flip who's attacking (p2 attacks p1, face -1) to prove dir tracks the actual attacker, not a
   // hardcoded sign -- p2.face is always -1 (Fighter's own side-2 constructor convention).
   const g=mkFight({ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});g.p1.x=500;g.p2.x=560;run(g,20);
-  const sh2=g.fx.find(e=>e.kind==='shake');
-  ok(sh2,'a landed medium (p2 attacking) must push shake: '+g.fx.map(e=>e.kind).join());
-  eq(sh2.dir,g.p2.face,"shake dir must equal p2's own facing (-1) when p2 is the attacker")});
-Test.add('HITFEEL: a landed heavy pushes shake 8 and punch .04 hold 10',()=>{
+  const hf2=g.fx.find(e=>e.kind==='hitfeel');
+  ok(hf2,'a landed medium (p2 attacking) must queue a hitfeel descriptor');
+  eq(hf2.dir,g.p2.face,"dir must equal p2's own facing (-1) when p2 is the attacker")});
+Test.add('hitfeel (sim): a landed heavy pushes cls "heavy"',()=>{
   // A full continuous hold auto-fires once MOVES.heavy.charge frames elapse (same as the pre-
   // existing "a full hold through the move's own charge frames must still auto-fire" test above).
   const f=mkFight({ctrl1:Ctrl.hold({heavy:true})});closeIn(f);
-  for(let i=0;i<MOVES.heavy.charge+40&&!f.fx.some(e=>e.kind==='shake');i++)f.step();
-  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
-  ok(sh,'a landed heavy must push shake: '+f.fx.map(e=>e.kind).join());
-  eq(sh.amt,8,'heavy shake amt must be 8');eq(sh.dir,f.p1.face);
-  ok(pu,'a landed heavy must push punch: '+f.fx.map(e=>e.kind).join());
-  eq(pu.pct,.04,'heavy punch pct must be .04');eq(pu.hold,10,'heavy punch hold must be 10');ok(!pu.creep,'heavy punch must not creep')});
-Test.add('HITFEEL: a multi-hit S1 pushes shake/punch only on its final sub-hit, and the punch descriptor carries creep',()=>{
+  for(let i=0;i<MOVES.heavy.charge+40&&!f.fx.some(e=>e.kind==='hitfeel');i++)f.step();
+  const hf=f.fx.find(e=>e.kind==='hitfeel');
+  ok(hf,'a landed heavy must queue a hitfeel descriptor: '+f.fx.map(e=>e.kind).join());
+  eq(hf.cls,'heavy');eq(hf.dir,f.p1.face);eq(hf.last,true)});
+Test.add('hitfeel (sim): a multi-hit S1 pushes one descriptor per sub-hit, last:true only on the final one',()=>{
   const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:1}}])});closeIn(f);f.p1.power=100;
   const hitsSoFar=()=>f.log.filter(e=>e.type==='hit').length;
-  let sawShakeEarly=false,sawPunchEarly=false;
+  const lastFlags=[];
   for(let i=0;i<40;i++){
     f.fx.length=0; // isolate exactly what THIS tick's step pushed
     const before=hitsSoFar();f.step();const after=hitsSoFar();
-    if(after>before&&after<MOVES.s1.hits){ // a sub-hit landed that is NOT the final one
-      if(f.fx.some(e=>e.kind==='shake'))sawShakeEarly=true;
-      if(f.fx.some(e=>e.kind==='punch'))sawPunchEarly=true}
+    if(after>before){
+      const hf=f.fx.find(e=>e.kind==='hitfeel');
+      ok(hf,'every landed sub-hit must queue its own hitfeel descriptor');
+      eq(hf.cls,'s1');lastFlags.push(hf.last)}
     if(after===MOVES.s1.hits)break}
-  ok(!sawShakeEarly,'an S1 sub-hit before the final one must never push shake');
-  ok(!sawPunchEarly,'an S1 sub-hit before the final one must never push punch');
-  eq(hitsSoFar(),MOVES.s1.hits,'sanity: all of S1\'s hits must have landed');
-  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
-  ok(sh,'the final S1 sub-hit must push shake: '+f.fx.map(e=>e.kind).join());
-  eq(sh.amt,6,'S1 shake amt must be 6');
-  ok(pu,'the final S1 sub-hit must push punch: '+f.fx.map(e=>e.kind).join());
-  eq(pu.pct,.03,'S1 punch pct must be .03');eq(pu.hold,6,'S1 punch hold must be 6');
-  ok(pu.creep,'S1\'s punch descriptor must carry creep:true')});
-Test.add('HITFEEL: intercept pushes shake 10 and punch .05 regardless of the intercepting move (overrides its own class)',()=>{
+  eq(lastFlags.length,MOVES.s1.hits,'sanity: one hitfeel descriptor per landed sub-hit');
+  ok(lastFlags.slice(0,-1).every(l=>l===false),'every sub-hit before the final one must carry last:false');
+  eq(lastFlags[lastFlags.length-1],true,'the final sub-hit must carry last:true')});
+Test.add('hitfeel (sim): intercept overrides the landed move\'s own class to cls "intercept"',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});
   closeIn(f);run(f,5);
   ok(f.log.some(e=>e.type==='intercept'),'sanity: this must actually be an intercept');
-  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
-  ok(sh,'an intercept must push shake: '+f.fx.map(e=>e.kind).join());
-  eq(sh.amt,10,'intercept shake amt must be the fixed 10, not the intercepting light\'s own (0) HITFEEL.light.shake');
-  ok(pu,'an intercept must push punch: '+f.fx.map(e=>e.kind).join());
-  eq(pu.pct,.05,'intercept punch pct must be .05');eq(pu.hold,6,'intercept punch hold must be 6')});
-// Task 7.5 (7.4 review follow-up): HITFEEL.<class>.stop is documentation-only (resolve() never reads
-// it for hitstop itself -- see HITFEEL's own header comment, 40_movedata.js) and must equal its
-// matching MOVES.*.hitstop so a future hitstop retune that forgets to update this table is a visible
-// mismatch, not a silent drift.
+  const hf=f.fx.find(e=>e.kind==='hitfeel');
+  ok(hf,'an intercept must queue a hitfeel descriptor');
+  eq(hf.cls,'intercept','cls must be the fixed "intercept", not the intercepting light\'s own "light"');
+  eq(hf.last,true)});
+// --- FX layer: FX.hitfeel turns the bare descriptor into the exact frozen HITFEEL magnitudes ----
+Test.add('FX.hitfeel: cls "light" pushes neither shake nor punch (HITFEEL.light.shake/punch are both 0)',()=>{
+  FX.reset();FX.push({kind:'hitfeel',cls:'light',dir:1,last:true});
+  eq(FX.shake.x,0);eq(FX.shake.y,0);eq(FX.punch,0);
+  FX.reset()});
+Test.add('FX.hitfeel: cls "medium" pushes shake 4 (directional) and punch .02 hold 6, no creep',()=>{
+  FX.reset();FX.push({kind:'hitfeel',cls:'medium',dir:1,last:true});
+  ok(FX.shake.x>0,'dir:1 must kick a positive shake.x');
+  eq(FX.punch,.02,'medium punch must jump straight to its target (no creep)');
+  eq(FX.punchHold,6,'medium punch hold must be 6');ok(!FX.punchCreep,'medium punch must not creep');
+  FX.reset();FX.push({kind:'hitfeel',cls:'medium',dir:-1,last:true});
+  ok(FX.shake.x<0,'dir:-1 must kick a negative shake.x');
+  FX.reset()});
+Test.add('FX.hitfeel: cls "heavy" pushes shake 8 and punch .04 hold 10, no creep',()=>{
+  FX.reset();FX.push({kind:'hitfeel',cls:'heavy',dir:1,last:true});
+  ok(FX.shake.x>0);eq(FX.punch,.04);eq(FX.punchHold,10);ok(!FX.punchCreep);
+  FX.reset()});
+Test.add('FX.hitfeel: cls "s1" pushes punch .03 hold 6 with creep:true (eases in rather than snapping)',()=>{
+  FX.reset();FX.push({kind:'hitfeel',cls:'s1',dir:1,last:true});
+  eq(FX.punch,0,'a creep push must not snap punch to its target on the push itself -- update() ramps it');
+  eq(FX.punchTarget,.03);eq(FX.punchHoldTotal,6);ok(FX.punchCreep);
+  FX.update();
+  ok(FX.punch>0&&FX.punch<.03,'after one update() the creep must have started easing toward (not snapped to) its target: got '+FX.punch);
+  FX.reset()});
+Test.add('FX.hitfeel: cls "intercept" pushes shake 10 and punch .05 hold 6, regardless of the intercepting move',()=>{
+  FX.reset();FX.push({kind:'hitfeel',cls:'intercept',dir:1,last:true});
+  ok(FX.shake.x>0);eq(FX.punch,.05);eq(FX.punchHold,6);
+  FX.reset()});
+Test.add('FX.hitfeel: last:false (a non-final multi-hit sub-hit) is a full no-op, even for a class that otherwise pushes both',()=>{
+  FX.reset();FX.push({kind:'hitfeel',cls:'heavy',dir:1,last:false});
+  eq(FX.shake.x,0);eq(FX.shake.y,0);eq(FX.punch,0);
+  FX.reset()});
+// Task 7.5 (7.4 review follow-up): HITFEEL.<class>.stop is documentation-only (FX.hitfeel never
+// reads it for hitstop -- MOVES.*.hitstop, still sim-side, is the only source for that) and must
+// equal its matching MOVES.*.hitstop so a future hitstop retune that forgets to update this table
+// (now in 72_fx.js, moved there in Task 8.0) is a visible mismatch, not a silent drift.
 Test.add('HITFEEL.<class>.stop equals its matching MOVES.*.hitstop for light/medium/heavy/s1/s2/s3',()=>{
   for(const k of['light','medium','heavy','s1','s2','s3'])
     eq(HITFEEL[k].stop,MOVES[k].hitstop,'HITFEEL.'+k+'.stop must equal MOVES.'+k+'.hitstop');
@@ -4526,19 +4606,26 @@ Test.add('def.impact: per-champion/mob/boss impact class matches the frozen ruli
     goblin:'blade',skeleton:'blade',shaman:'energy',hobgoblin:'blunt',grub:'blunt',
     grull:'blunt',mother_rat:'blunt'};
   for(const id in want)eq(DEFS[id].impact,want[id],id+'.impact')});
-Test.add('a landed hit queues a per-class impact fx keyed off the attacker\'s own def.impact',()=>{
+// Task 8.0 (pre-art seam): the sim pushes only {kind:'impact',id,...} -- id is att.def.impact's own
+// raw string, no lookup done here (see the dedicated IMPACTS-registry test block below for the FX
+// side, including the unknown-id fallback to blunt).
+Test.add('a landed hit queues {kind:"impact",id} keyed off the attacker\'s own def.impact, unresolved',()=>{
   const bluntF=mkFight({p1:CHAMPS.carl,ctrl1:Ctrl.script([L(0)])});closeIn(bluntF);run(bluntF,5);
-  ok(bluntF.fx.some(e=>e.kind==='impactBlunt'),'carl (blunt) must push impactBlunt: '+bluntF.fx.map(e=>e.kind).join());
+  ok(bluntF.fx.some(e=>e.kind==='impact'&&e.id==='blunt'),'carl (blunt) must push {kind:"impact",id:"blunt"}: '+bluntF.fx.map(e=>e.kind+'/'+e.id).join());
   const bladeF=mkFight({p1:CHAMPS.katia,ctrl1:Ctrl.script([L(0)])});closeIn(bladeF);run(bladeF,5);
-  ok(bladeF.fx.some(e=>e.kind==='impactBlade'),'katia (blade) must push impactBlade: '+bladeF.fx.map(e=>e.kind).join());
+  ok(bladeF.fx.some(e=>e.kind==='impact'&&e.id==='blade'),'katia (blade) must push {kind:"impact",id:"blade"}: '+bladeF.fx.map(e=>e.kind+'/'+e.id).join());
   const energyF=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([L(0)])});closeIn(energyF);run(energyF,5);
-  ok(energyF.fx.some(e=>e.kind==='impactEnergy'),'donut (energy) must push impactEnergy: '+energyF.fx.map(e=>e.kind).join())});
-Test.add('impactBlunt/impactBlade/impactEnergy fx push and expire deterministically',()=>{
-  for(const kind of['impactBlunt','impactBlade','impactEnergy']){
-    FX.reset();FX.push({kind,x:0,y:0,face:1});
-    ok(FX.list.some(p=>p.kind===kind),kind+' must push a particle');
+  ok(energyF.fx.some(e=>e.kind==='impact'&&e.id==='energy'),'donut (energy) must push {kind:"impact",id:"energy"}: '+energyF.fx.map(e=>e.kind+'/'+e.id).join())});
+Test.add('IMPACTS (FX): blunt/blade/energy fx push and expire deterministically; an unknown id falls back to blunt',()=>{
+  for(const id of['blunt','blade','energy']){
+    FX.reset();FX.push({kind:'impact',id,x:0,y:0,face:1});
+    ok(FX.list.some(p=>p.kind==='impact'&&p.id===id),id+' must push a particle');
     for(let i=0;i<60;i++)FX.update();
-    eq(FX.list.length,0,kind+' must expire within 60 frames')}
+    eq(FX.list.length,0,id+' must expire within 60 frames')}
+  FX.reset();FX.push({kind:'impact',id:'nonexistent',x:0,y:0,face:1});
+  ok(FX.list.some(p=>p.kind==='impact'&&p.id==='blunt'),'an unrecognized id must fall back to the blunt entry, got '+FX.list.map(p=>p.id).join());
+  FX.reset();FX.push({kind:'impact',id:undefined,x:0,y:0,face:1});
+  ok(FX.list.some(p=>p.kind==='impact'&&p.id==='blunt'),'a missing id (undefined) must also fall back to blunt');
   FX.reset()});
 // Task 7.4 (frozen ruling): per-node hit audio, restored via fighter.chainNode -- Task 7.2 collapsed
 // light1..light5 into the single moveName 'light', which left Audio.recipes.light2..light5
