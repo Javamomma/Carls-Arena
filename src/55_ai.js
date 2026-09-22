@@ -177,7 +177,14 @@ const AI={
       if(decideIntercept(it,foe))return it;
       if(decideBlock(it,foe,'react'))return it;
       if(decidePunish(it,me,foe,justGotUp,'trigger'))return it;
-      if(st.cd===0&&me.power>=100&&r.next()<p.special*STEP){it.special=me.power>=300?3:me.power>=200?2:1;st.cd=20;return it}
+      // Fix wave item 1: p.special is a per-frame probability, same scale as p.attack just below (and
+      // every other AI_TIERS roll) — the frozen plan table put it on a per-second scale without saying
+      // so (a plan defect: see the final review), and multiplying by STEP here silently made it ~39:1
+      // less likely to fire than attack once 3.6 raised attack to .35/.65, so a t4+ boss's S3 override
+      // almost never shipped (1 special in 8806 held-power frames over 10 Grull fights). Checked ahead
+      // of decideHeavy/decideAttack (both below) so a boss with power banked always gets first crack at
+      // its signature special before spending the same cd window on a lesser move.
+      if(st.cd===0&&me.power>=100&&r.next()<p.special){it.special=me.power>=300?3:me.power>=200?2:1;st.cd=20;return it}
       if(decideHeavy(it,me,dist,lightRange,heavyRange,'trigger'))return it;
       if(decideBait(it,me,dist,'trigger'))return it;
       if(decideAttack(it,dist,lightRange,'attack'))return it;

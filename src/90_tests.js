@@ -92,6 +92,11 @@ Test.add('brawl AI blocks a medium at least once in 20 seconds',()=>{
 Test.add('tiers t1..t5 exist, aliases resolve, dummy stays inert',()=>{for(const t of ['t1','t2','t3','t4','t5'])ok(AI.TIERS[t]);eq(AI.resolveProfile('basic'),AI.TIERS.t2);eq(AI.resolveProfile('brawl'),AI.TIERS.t3);ok(AI.resolveProfile('brute').heavy>=.5);const f=mkFight({ctrl2:AI.make('dummy',3)});run(f,600);eq(f.log.filter(e=>e.type==='hit'&&e.who===-1).length,0)});
 Test.add('t5 intercepts a dash-in medium with a light',()=>{const f=mkFight({ctrl1:Ctrl.script(Array.from({length:20},(_,i)=>({f:i*40,intent:{medium:true}}))),ctrl2:AI.make('t5',4)});f.p1.x=f.p2.x-260;run(f,800);const ai=f.log.filter(e=>e.type==='hit'&&e.who===-1);ok(ai.length>0,'ai landed');ok(f.log.some(e=>e.type==='hit'&&e.who===-1&&e.move==='light1'),'a light interrupted')});
 Test.add('t4 punishes a parried (stunned) player',()=>{const f=mkFight({ctrl1:Ctrl.script([{f:0,until:600,intent:{light:true}}]),ctrl2:AI.make('t4',5)});closeIn(f);run(f,900);ok(f.log.some((e,i)=>e.type==='parry'&&f.log.slice(i+1,i+30).some(h=>h.type==='hit'&&h.who===-1)),'hit within 30 frames after a parry')});
+// Fix wave item 1: a t4 boss with power banked must actually throw its S3 (the *STEP per-second
+// scaling bug made this ~1-in-880-held-power-frames before the fix — see 55_ai.js's special check).
+Test.add('a t4 boss with power fires a special within 300 frames',()=>{
+  const f=mkFight({p2:DEFS.grull,ctrl2:AI.make('t4',9)});closeIn(f);f.p2.power=300;run(f,300);
+  ok(f.log.some(e=>e.type==='hit'&&e.who===-1&&e.move==='s3'),'grull should have landed an s3 within 300 frames')});
 // --- Task 3.6 refactor: Fighter.wasKnockedDown ---
 Test.add('wasKnockedDown is set on KNOCKDOWN and self-clears exactly one tick after i-frames expire',()=>{
   const F=mkFighter();F.setState('KNOCKDOWN');eq(F.wasKnockedDown,true);
