@@ -1245,3 +1245,44 @@ Floor-1 doors/bosses re-run at `--n 30` after this retune: doors 1-3 (`f1_goblin
 `f1_goblin2`) all still 100% (≥85% target); `f1_grull` (floor 1 boss) 30.0% and `f2_mother` (floor 2
 boss) 30.0% (both inside the 10-35% band). `f1_hob` (door 5) moved 70.0%→53.3% (still inside its own
 40-70% band). `f1_shaman` (door 4, informational only per Task 6.1's ruling) 93.3% unchanged.
+
+## Fix-wave DOM screen clipping (2026-09-22, item 8)
+
+`.scr`'s `max-height` was a flat `456px`, unrelated to the actual viewport -- at 844×390 that let it
+render up to 456px tall regardless of the real 390px available, overflowing a centered `.overlay`
+symmetrically top/bottom and pushing each screen's BACK button off the bottom edge (measured: title's
+SETTINGS bottom 399, map/shop/settings BACK bottom 413, against `innerHeight` 390). Fixed at the root:
+`max-height:min(456px,calc(100vh - 24px))` (byte-identical at 844×480: `100vh-24=456` there), `.path`
+(map)/`.setrows` (settings)/`#shopBody` (shop) all already used `overflow-y:auto`/now do, so a screen
+whose content doesn't fit a short viewport scrolls that one region internally instead of pushing its
+BACK button (or anything below it) out of view. `.panel` (title/pauseMenu/result) got the same
+treatment via smaller margins/padding rather than a scroll region (three buttons never need one).
+`.node` (map doors) and `.perkrow button` (kiosk perks) both got real 44px `min-height` (were 40/36px)
+to match the touch-target bar used everywhere else in the game, now that `--phone-check` actually
+checks every DOM screen's buttons and would otherwise catch them.
+
+`python3 tests/harness.py --phone-check` (844×390, extended to visit title/map/roster/crystal/shop/
+arena/settings, not just the in-fight canvas/4 `.cbtn` buttons):
+
+```
+errors: []
+screenErrors: []
+wiring_ok: True
+attackButtonsHidden.aspect_ok/fits_ok/no_hscroll/bad_btns: True True True []
+attackButtonsShown.aspect_ok/fits_ok/no_hscroll/bad_btns: True True True []
+title: 6 buttons, 0 scrolled-out (skipped), bad=[]
+map: 10 buttons, 2 scrolled-out (skipped), bad=[]
+roster: 4 buttons, 0 scrolled-out (skipped), bad=[]
+crystal: 3 buttons, 0 scrolled-out (skipped), bad=[]
+shop: 8 buttons, 2 scrolled-out (skipped), bad=[]
+arena: 2 buttons, 0 scrolled-out (skipped), bad=[]
+settings: 9 buttons, 2 scrolled-out (skipped), bad=[]
+```
+
+Exit 0. Every VISIBLE (not currently scrolled out of its own `.path`/`.setrows`/`#shopBody` region --
+skipped, not failed, matching that region's own pre-existing scrollable design) button on all seven
+screens is now a real ≥44px target fully inside the 844×390 viewport; the in-fight canvas/BLOCK/PUNCH/
+KICK/POWER check (Task 5.6, unchanged) still passes both the attack-buttons-hidden and -shown states.
+The pre-existing 854×480 "map path fits a full floor with no scroll" unit test (Task 6.1's own fix-wave
+item 3) still passes -- `.scr` padding and `.energy`'s own margin were trimmed a further few px to
+reclaim the headroom `.node`'s 40→44px bump used up at that size.

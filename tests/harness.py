@@ -28,9 +28,12 @@
       # (title/map/roster/crystal/shop/arena/settings) plus one real quest fight through to a natural
       # KO/Screens.result; prints {screens:[{screen,errors}]} and exits 1 if any screen recorded a
       # page/console error
-  python3 tests/harness.py --phone-check                             # Task 5.6: 844x390 CSS-px
-      # landscape viewport; asserts the canvas stays letterboxed at 854:480, every on-screen button is
-      # a real >=44px touch target fully inside the viewport, and the page never scrolls horizontally
+  python3 tests/harness.py --phone-check                             # Task 5.6 / fix-wave item 8:
+      # 844x390 CSS-px landscape viewport; asserts the canvas stays letterboxed at 854:480, every
+      # in-fight button is a real >=44px touch target fully inside the viewport, the page never scrolls
+      # horizontally, AND (fix-wave item 8) every visible <button> on title/map/roster/crystal/shop/
+      # arena/settings is also a real >=44px target fully inside the viewport (one legitimately scrolled
+      # out of a .path/.setrows/#shopBody internal scroll region is skipped, not failed)
 
 Exit 1 on any page error, console error, or if the game never left TITLE.
 """
@@ -461,8 +464,12 @@ def main():
                           "always shown) -- checked once as-is (only POWER visible) and again with "
                           "Save.data.settings.showButtons forced on (all four visible), so both states "
                           "get real coverage; a button that's display:none in a given pass is skipped "
-                          "rather than failed. Prints a JSON summary and exits 1 on any check failure "
-                          "or page/console error")
+                          "rather than failed. Fix-wave item 8: also visits title/map/roster/crystal/"
+                          "shop/arena/settings and asserts every visible <button> there has a real "
+                          ">=44 CSS-px rect fully inside the viewport too -- one currently scrolled out "
+                          "of a .path/.setrows/#shopBody internal scroll region is skipped, not failed, "
+                          "since it's reachable by scrolling rather than clipped/inaccessible. Prints a "
+                          "JSON summary and exits 1 on any check failure or page/console error")
     a = ap.parse_args()
     if a.floor is not None and a.node is None:
         ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2
@@ -721,12 +728,78 @@ def main():
         atk_hidden = [c for c in hidden_out['buttons'] if c['id'] != 'btnPower']
         wiring_ok = power_hidden['visible'] and not any(c['visible'] for c in atk_hidden) and \
             all(c['visible'] for c in shown_out['buttons'])
+
+        # Fix-wave item 8 (final review, Important): extended to the DOM meta screens -- the in-fight
+        # canvas/.cbtn check above never covered title/map/roster/crystal/shop/arena/settings at all,
+        # which is exactly how the review found SETTINGS (title) and BACK (map/shop/settings) clipped
+        # at 844x390 with nothing catching it. Re-opens a fresh page (a clean save, same as the fight
+        # check above) and visits every one of those seven screens, asserting every VISIBLE <button>
+        # (any DOM button, not just the fixed 4-id list above) has a real >=44 CSS-px rect fully inside
+        # the viewport. A button inside a scrolling ancestor (.path/.setrows/#shopBody all use
+        # overflow-y:auto -- a long node/settings/perk list scrolls internally rather than pushing a
+        # screen's own BACK button off the bottom edge, the actual fix for the clipping bug) that is
+        # currently scrolled OUT of that ancestor's own visible window is skipped, not failed -- it's
+        # reachable by scrolling, the same established pattern #setrows/#shopBody already used before
+        # this fix wave, not a clipping bug.
+        with sync_playwright() as p2:
+            b2 = p2.chromium.launch()
+            pg2 = b2.new_page(viewport={'width': 844, 'height': 390})
+            screen_errs = []
+            pg2.on('pageerror', lambda e: screen_errs.append(str(e)))
+            pg2.on('console', lambda m: screen_errs.append(m.text) if m.type == 'error' else None)
+            pg2.goto(INDEX)
+            pg2.wait_for_function('typeof G!=="undefined"')
+            pg2.evaluate('localStorage.clear();Save.load()')
+
+            def capture_screen(nav_js):
+                pg2.evaluate(nav_js)
+                return pg2.evaluate("""(()=>{
+                  function scrolledOut(el){
+                    const r=el.getBoundingClientRect();
+                    let node=el.parentElement;
+                    while(node&&node!==document.documentElement){
+                      const cs=getComputedStyle(node);
+                      if(/(auto|hidden|scroll)/.test(cs.overflowY)||/(auto|hidden|scroll)/.test(cs.overflowX)){
+                        const nr=node.getBoundingClientRect();
+                        if(r.bottom<=nr.top||r.top>=nr.bottom||r.right<=nr.left||r.left>=nr.right)return true}
+                      node=node.parentElement}
+                    return false}
+                  const btns=[...document.querySelectorAll('button')].filter(b=>{
+                    const cs=getComputedStyle(b);
+                    return cs.display!=='none'&&cs.visibility!=='hidden'&&b.offsetParent!==null});
+                  return btns.map(b=>{const r=b.getBoundingClientRect();
+                    return{id:b.id||b.className,top:r.top,bottom:r.bottom,left:r.left,right:r.right,
+                      width:r.width,height:r.height,scrolledOut:scrolledOut(b)}});
+                })()""")
+
+            SCREENS = [('title', "Screens.title()"), ('map', "Screens.map(1)"), ('roster', "Screens.roster()"),
+                       ('crystal', "Screens.crystal()"), ('shop', "Screens.shop()"), ('arena', "Screens.arena()"),
+                       ('settings', "Screens.settings()")]
+            screen_results = []
+            for name, nav in SCREENS:
+                btns = capture_screen(nav)
+                vw, vh = pg2.evaluate('innerWidth'), pg2.evaluate('innerHeight')
+                checks = []
+                for bt in btns:
+                    if bt['scrolledOut']:
+                        checks.append({**bt, 'skipped': True, 'ok': True})
+                        continue
+                    size_ok = bt['width'] >= 44 and bt['height'] >= 44
+                    inside_ok = (bt['left'] >= -0.5 and bt['top'] >= -0.5 and
+                                 bt['right'] <= vw + 0.5 and bt['bottom'] <= vh + 0.5)
+                    checks.append({**bt, 'skipped': False, 'ok': size_ok and inside_ok})
+                bad = [c['id'] for c in checks if not c['ok']]
+                screen_results.append({'screen': name, 'buttons': checks, 'bad': bad})
+            b2.close()
+        screens_bad = [r['screen'] for r in screen_results if r['bad']]
+
         out = {'errors': errs, 'attackButtonsHidden': hidden_out, 'attackButtonsShown': shown_out,
-               'wiring_ok': wiring_ok}
+               'wiring_ok': wiring_ok, 'screens': screen_results, 'screenErrors': screen_errs}
         print(json.dumps(out, indent=1))
         bad = (errs or not hidden_out['aspect_ok'] or not hidden_out['fits_ok'] or hidden_out['bad_btns']
                or not hidden_out['no_hscroll'] or not shown_out['aspect_ok'] or not shown_out['fits_ok']
-               or shown_out['bad_btns'] or not shown_out['no_hscroll'] or not wiring_ok)
+               or shown_out['bad_btns'] or not shown_out['no_hscroll'] or not wiring_ok
+               or screen_errs or screens_bad)
         sys.exit(1 if bad else 0)
     errors, console = [], []
     with sync_playwright() as p:

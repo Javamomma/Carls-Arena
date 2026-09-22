@@ -4,14 +4,19 @@
 #wrap{position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
 canvas{display:block;image-rendering:pixelated;background:#101422}
 .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(9,11,18,.85)}.overlay.show{display:flex}
-.panel{text-align:center;padding:16px;max-width:520px}.panel h1{margin:0 0 8px;font-size:28px;letter-spacing:2px}.panel p{font-size:13px;line-height:1.5}.panel button{display:block;width:100%;margin:8px 0;padding:12px;font:inherit;font-size:16px;background:#f4c542;color:#111;border:0;border-radius:6px;min-height:44px}
+/* Fix-wave item 8 (final review, Important): margin trimmed 8px 0 -> 4px 0 (button/panel padding
+   also trimmed below) so the title screen's SETTINGS row clears 844x390 -- see --phone-check's own
+   extended coverage (tests/harness.py) and docs/ARENA.md's fix-wave phone-check section for the
+   before/after numbers. Every button here keeps its real 44px min-height touch target; only the
+   GAPS between them shrank. */
+.panel{text-align:center;padding:10px 16px;max-width:520px}.panel h1{margin:0 0 5px;font-size:28px;letter-spacing:2px}.panel p{font-size:13px;line-height:1.4;margin:0 0 6px}.panel button{display:block;width:100%;margin:4px 0;padding:12px;font:inherit;font-size:16px;background:#f4c542;color:#111;border:0;border-radius:6px;min-height:44px}
 /* Fix-wave item 10: title screen hierarchy -- CAMPAIGN is the one button a player needs to find
    immediately (bigger, brighter, glowing); ARENA/ROSTER/KIOSK/EXHIBITION are equal secondary
    options in the same gold-outline style the .backbtn/.kcard buttons already use elsewhere; SOUND
    is a settings toggle, not gameplay, so it drops into its own small row below everything else. */
-.panel button.primary{font-size:20px;padding:16px;box-shadow:0 0 16px 3px rgba(244,197,66,.55)}
-.panel button.secondary{background:#1a1f33;color:#f4c542;border:2px solid #f4c542;font-size:13px;padding:10px}
-.settingsrow{margin-top:10px}
+.panel button.primary{font-size:19px;padding:13px;box-shadow:0 0 16px 3px rgba(244,197,66,.55)}
+.panel button.secondary{background:#1a1f33;color:#f4c542;border:2px solid #f4c542;font-size:13px;padding:9px}
+.settingsrow{margin-top:5px}
 /* min-height set explicitly (not inherited from .panel button) -- Task 5.4 moved #titleMute out of
    #title's .panel and into #settings' .scr, which has no such default, and this button still needs
    to stay a real 44px+ touch target wherever it lives. */
@@ -67,19 +72,32 @@ body.left-handed #powerPicker{right:auto;left:14px}
    uses so it can hold cards/paths/tabs at 854x480 without scrolling. */
 #titleLogo{font-size:26px;letter-spacing:1px;transform:scaleX(.88);transform-origin:center;font-weight:900;line-height:1.15}
 .sub{font-size:11px;color:#999;margin:0 0 10px}
-.scr{box-sizing:border-box;text-align:center;padding:10px 14px;width:820px;max-width:96vw;max-height:456px;overflow:hidden;display:flex;flex-direction:column}
-.scr h2{margin:0 0 8px;font-size:17px;letter-spacing:3px;color:#f4c542;text-transform:uppercase;transform:scaleX(.92)}
-.backbtn{margin-top:8px;width:180px;min-height:44px;align-self:center;padding:10px;font-size:13px;letter-spacing:1px;background:#1a1f33;color:#f4c542;border:2px solid #f4c542;border-radius:6px;flex:none}
-.curstrip{display:flex;gap:14px;justify-content:center;font-size:12px;color:#f4c542;margin:0 0 10px;flex-wrap:wrap}
+/* Fix-wave item 8 (final review, Important): max-height is now viewport-relative (was a flat 456px,
+   unrelated to the ACTUAL viewport -- at 844x390 that let .scr render up to 456px tall regardless of
+   the real 390px available, overflowing a centered .overlay symmetrically top/bottom and pushing
+   .backbtn right off the bottom edge). min(456px, ...) keeps 844x480 byte-identical (100vh-24=456
+   there) while actually shrinking at a shorter viewport; .path's own flex:1+overflow (below) is what
+   absorbs the shrink -- a long node list scrolls internally rather than pushing BACK out of view. */
+.scr{box-sizing:border-box;text-align:center;padding:5px 14px;width:820px;max-width:96vw;
+  max-height:min(456px,calc(100vh - 24px));overflow:hidden;display:flex;flex-direction:column}
+.scr h2{margin:0 0 5px;font-size:17px;letter-spacing:3px;color:#f4c542;text-transform:uppercase;transform:scaleX(.92)}
+.backbtn{margin-top:4px;width:180px;min-height:44px;align-self:center;padding:10px;font-size:13px;letter-spacing:1px;background:#1a1f33;color:#f4c542;border:2px solid #f4c542;border-radius:6px;flex:none}
+.curstrip{display:flex;gap:14px;justify-content:center;font-size:12px;color:#f4c542;margin:0 0 6px;flex-wrap:wrap}
 /* Fix-wave item 10: a compact variant for the map screen, which is already tight on vertical space
    (see the item 3 fix) -- smaller font, no bottom margin (the .energy row right after it already
    carries its own top margin). */
 .curstrip.small{font-size:10px;gap:10px;margin:0}
-.ftabs{display:flex;gap:6px;justify-content:center;margin-bottom:4px}
-.ftab{min-height:44px;padding:6px 16px;font-size:12px;letter-spacing:1px;background:#1a1f33;color:#999;border:1px solid #444;border-radius:4px}
+.ftabs{display:flex;gap:6px;justify-content:center;margin-bottom:3px}
+.ftab{min-height:44px;padding:5px 16px;font-size:12px;letter-spacing:1px;background:#1a1f33;color:#999;border:1px solid #444;border-radius:4px}
 .ftab.active{color:#f4c542;border-color:#f4c542}
-.path{display:flex;flex-direction:column-reverse;align-items:center;gap:4px;overflow:hidden;flex:1;justify-content:center}
-.node{width:320px;max-width:84%;min-height:40px;display:flex;align-items:center;justify-content:center;gap:6px;
+/* Fix-wave item 8: overflow:hidden -> auto -- once .scr itself is capped to the real viewport height
+   (above), a floor with more doors than fit (e.g. a full 5-node-+-boss floor at 844x390) now scrolls
+   inside .path instead of silently clipping a door off the bottom with no way to reach it. */
+.path{display:flex;flex-direction:column-reverse;align-items:center;gap:3px;overflow-y:auto;flex:1;justify-content:center}
+/* Fix-wave item 8: min-height 40px->44px -- a real touch target, matching every other button in the
+   game; .path's own overflow-y:auto (above) means a floor with more doors than fit at a given
+   viewport height now scrolls to reach the rest instead of rendering them under-target-sized. */
+.node{width:320px;max-width:84%;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;
   font-size:12px;letter-spacing:2px;border-radius:6px;border:2px solid #3a3a3a;background:#181c2b;color:#666}
 .node:disabled{cursor:default}
 .node.open{border-color:#f4c542;color:#f4c542;background:#20263d}
@@ -115,7 +133,7 @@ body.left-handed #powerPicker{right:auto;left:14px}
 .node.next{animation:doorPulse 1s ease-out 1}
 @media (prefers-reduced-motion:reduce){.node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,66,.7)}}
 body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,66,.7)}
-.energy{display:flex;gap:4px;justify-content:center;margin:3px 0}
+.energy{display:flex;gap:4px;justify-content:center;margin:2px 0}
 .pip{width:14px;height:14px;border-radius:3px;background:#2a2a2a;border:1px solid #555}
 .pip.full{background:#f4c542;border-color:#f4c542}
 /* Fix-wave item 6: the refusal line for a locked/energy-less node click -- inside the map panel
@@ -195,7 +213,9 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
    it is, not filler. */
 .perkrow .pdesc{font-size:10px;color:#f4c542;margin-top:1px}
 .perkrow .pcost{font-size:10px;color:#999;margin-top:2px}
-.perkrow button{min-width:88px;min-height:36px;padding:6px 10px;font-size:11px;letter-spacing:.5px;
+/* Fix-wave item 8: min-height 36px->44px, a real touch target -- #shopBody's own overflow-y:auto
+   already scrolls the perk list under a short viewport, same pattern as .path above. */
+.perkrow button{min-width:88px;min-height:44px;padding:6px 10px;font-size:11px;letter-spacing:.5px;
   border-radius:6px;background:#f4c542;color:#111;border:0;font-family:inherit}
 .perkrow button:disabled{opacity:.35;background:#555;color:#999}
 .perkrow button.owned{background:transparent;color:#7fd18a;border:1px solid #7fd18a;opacity:1}
