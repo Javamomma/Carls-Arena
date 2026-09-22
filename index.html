@@ -3627,21 +3627,49 @@ const LOOKS={
   // Note: G.debugPose (used for every docs/shots/p2-<pose>.png except p2-goblin/p2-card) never
   // calls G.tick(), so G.cam.zoom sits at its initial 1.0 for those shots — proportions below target
   // ~55-65% of frame height at zoom 1.0 exactly, not at the fight camera's usual ~1.1-1.35.
+  // Task 8.1: every human look also carries a `.body` block — the layered-vector spec BodyStyle
+  // reads (outline color, the two skin shade stops, the cloth kinds worn on torso/legs, and the
+  // face module's eyes/brow/mouth/hair/ears/horns). It is PURELY additive: no proportion, palette
+  // or prop field above it changed, so Rig.solve/Rig.extent/Rig.topAt (and therefore every
+  // HUD-clearance, reach and zoom-cap number the earlier phases pinned) are bit-identical to
+  // before the body layer existed. See the 'human-look extent snapshot' test (90_tests.js) for the
+  // table that holds that claim.
   carl:{skin:'#d9a066',hair:'#241610',primary:'#3a3226',secondary:'#c0392b',
     limb:20,legLen:114,armLen:101,torsoLen:91,headR:25,shoulderW:83,hipW:53,waistW:40,earLen:0,bareFeet:true,
-    props:['boxers','vest','bandages']},
+    props:['boxers','vest','bandages'],
+    // Torn open vest over a bare, defined chest; red heart boxers; wrapped hands; bare feet; a dark
+    // messy crop and a blue-grey iris — the rendition's own Carl (docs/reference/rendition.jpg).
+    body:{outline:'#1c120a',skinShade:[-0.34,0.20],
+      cloth:{torso:'vest',legs:'shorts',primary:'#3a3226',secondary:'#c0392b'},
+      face:{eyes:'human',iris:'#5b7c93',brow:true,mouth:'human',hair:'crop',ears:'human',horns:false}}},
   katia:{skin:'#c98a5e',hair:'#171310',primary:'#232f2b',secondary:'#48594f',
     limb:12,legLen:117,armLen:91,torsoLen:78,headR:20,shoulderW:38,hipW:28,earLen:0,
-    props:['gear']},
+    props:['gear'],
+    // Full-coverage practical gear (the 'gear' prop's intent, now drawn as real cloth): a dark
+    // green tunic with a belt, matching trousers, long black hair.
+    body:{outline:'#100d0b',skinShade:[-0.30,0.17],
+      cloth:{torso:'shirt',legs:'pants',primary:'#232f2b',secondary:'#48594f'},
+      face:{eyes:'human',iris:'#7fa98c',brow:true,mouth:'human',hair:'long',ears:'human',horns:false}}},
   goblin:{skin:'#5f8a3f',hair:null,primary:'#4a3b28',secondary:'#7a6248',
     limb:13,legLen:82,armLen:72,torsoLen:58,headR:18,shoulderW:33,hipW:21,earLen:29,
-    props:['rags','dagger']},
+    props:['rags','dagger'],
+    // Scavenger rags over a scrawny green frame, long pointed ears (earLen still drives their
+    // size), a jutting nose, a yellow slit eye and a lower fang — the rendition's scavenger.
+    body:{outline:'#16240d',skinShade:[-0.36,0.24],
+      cloth:{torso:'vest',legs:'shorts',primary:'#4a3b28',secondary:'#7a6248'},
+      face:{eyes:'goblin',iris:'#e3c74a',brow:true,mouth:'fangs',hair:'none',ears:'pointed',horns:false}}},
   // Fix round 2: trimmed back from the round-1 numbers, which combined with def.scale=1.2 (a
   // second, canvas-level multiplier on top of these) made the hobgoblin's overhead reach the worst
   // case in the whole roster by a wide margin at max zoom — see EDGE_PAD and the HUD-safety test.
   hobgoblin:{skin:'#5c6b52',hair:null,primary:'#3d3428',secondary:'#6b5c46',
     limb:23,legLen:106,armLen:99,torsoLen:86,headR:25,shoulderW:65,hipW:40,earLen:18,
-    props:['rags','club']},
+    props:['rags','club'],
+    // The goblin's bigger cousin: same rag/fang/pointed-ear language, heavier build, plus a pair of
+    // small stub horns. horns:'small' is a FACE-module decoration, not the 'horns' PROP grull wears
+    // (propExtra), so it is drawn well inside the head circle's own bound and adds no extent.
+    body:{outline:'#141a10',skinShade:[-0.33,0.21],
+      cloth:{torso:'vest',legs:'pants',primary:'#3d3428',secondary:'#6b5c46'},
+      face:{eyes:'goblin',iris:'#d8913a',brow:true,mouth:'fangs',hair:'none',ears:'pointed',horns:'small'}}},
   // Princess Donut: a real cat (Task 3.4's RigQuad quadruped bone set — see Rig.solve's 'quad'
   // branch below). Cream/white fur, a long expressive tail (tailLen well beyond the body-length
   // proportions grub/mother_rat use), pink inner ears, blue eyes, and a small gold tiara prop drawn
@@ -3711,12 +3739,24 @@ const LOOKS={
   // rig:'human' set explicitly.
   skeleton:{skin:'#d8d0c0',hair:null,primary:'#2a2a2a',secondary:'#555555',
     limb:12,legLen:117,armLen:91,torsoLen:78,headR:20,shoulderW:38,hipW:28,earLen:0,rig:'human',
-    props:['rags','dagger']},
+    props:['rags','dagger'],
+    // cloth 'bone' is not an overlay at all — it swaps the limb tube for a shaft-and-knob bone and
+    // the torso for a rib cage over a dark void, so the skeleton reads as bone rather than a
+    // bone-COLORED body. eyes:'skull' is the dark socket with an ember (Phase 8 ruling).
+    body:{outline:'#4a4131',skinShade:[-0.24,0.15],
+      cloth:{torso:'bone',legs:'bone',primary:'#2a2a2a',secondary:'#555555'},
+      face:{eyes:'skull',iris:'#ff8a2a',brow:false,mouth:'none',hair:'none',ears:'none',horns:false}}},
   // PLACEHOLDER (Task 3.4/3.5): a copy of Donut's proportions with a mystic-purple palette and
   // rig:'human' set explicitly.
   shaman:{skin:'#8a6aa8',hair:'#2a1a3a',primary:'#4a2f6a',secondary:'#8a4fae',
     limb:14,legLen:107,armLen:88,torsoLen:74,headR:23,shoulderW:39,hipW:29,earLen:0,rig:'human',
-    props:['gear']},
+    props:['gear'],
+    // cloth.torso:'robe' is what carries the hood (Phase 8 ruling: "the shaman keeps its hood
+    // shape") — the frozen face schema has no hood field, so BodyStyle.head draws the cowl for any
+    // look whose TORSO cloth is 'robe', keeping the hood and the robe a single wardrobe decision.
+    body:{outline:'#1a1026',skinShade:[-0.32,0.22],
+      cloth:{torso:'robe',legs:'robe',primary:'#4a2f6a',secondary:'#8a4fae'},
+      face:{eyes:'human',iris:'#e0c84a',brow:true,mouth:'human',hair:'none',ears:'human',horns:false}}},
   // Grub: Task 3.4's RigQuad bone set reused for a segmented larva — same four-legged FK, drawn with
   // stubby leg nubs (legW/legLen both small relative to bodyLen) and a distinct dark head capsule
   // (headFill, separate from the pale body skin) instead of a cat/rat face. No ears.
@@ -3776,6 +3816,10 @@ const LOOKS={
     hipH:65,legLen:65,bodyLen:125,neckLen:42,headR:26,tailLen:170,
     frontW:22,backW:26,legW:20,
     props:['teeth']}};
+// Task 8.1: every look learns its own key, so BodyStyle's offscreen cache can name its entries
+// (`look|bone|face|zoomBucket`) without every call site threading an id down. Assigned here rather
+// than written into each literal above so it can never drift from the key it is filed under.
+for(const id in LOOKS)LOOKS[id].id=id;
 
 // Resolves a def's look, falling back to LOOKS.carl (once, with a console.warn) for a Phase-3-added
 // def that ships without one, instead of every reader (Rig.draw, Render.overlayY/shadow) crashing on
@@ -11529,5 +11573,93 @@ Test.add('a fight driven only through Fight.step (no G/FX involvement) is unaffe
   run(b,600);
   eq(b.p1.hp,a.p1.hp);eq(b.p2.hp,a.p2.hp);eq(b.log.length,a.log.length);
   eq(JSON.stringify(b.log),JSON.stringify(a.log),'two runs of the exact same script/seed must log bit-identically')});
+
+// --- Task 8.1: layered vector bodies and faces for the human rig --------------------------------
+// The six looks that use the human bone set (Rig.solve's default branch). Every one of them must
+// carry a complete `.body` block; everything else in LOOKS (the quad/big rigs) is another task's.
+const HUMAN_LOOK_IDS=['carl','katia','goblin','hobgoblin','skeleton','shaman'];
+Test.add('every human look carries a complete .body block with only schema-legal values',()=>{
+  // The Phase 8 frozen interface, spelled out as the enumerations it names. A typo'd cloth or face
+  // token would otherwise fail silently -- BodyStyle's own switches fall through to "draw nothing",
+  // so a look could lose its shirt (or its eyes) with no error anywhere.
+  const TORSO=['shirt','vest','bare','robe','chitin','fur','bone','plate'];
+  const LEGS=['pants','shorts','bare','robe','fur','bone'];
+  const EYES=['human','cat','rat','skull','goblin','none'];
+  const MOUTH=['human','fangs','snout','none'];
+  const HAIR=['crop','long','bald','mohawk','none'];
+  const EARS=['human','pointed','cat','rat','none'];
+  const HORNS=[false,'small','big'];
+  const hex=v=>typeof v==='string'&&/^#[0-9a-fA-F]{6}$/.test(v);
+  for(const id of HUMAN_LOOK_IDS){
+    const look=LOOKS[id];ok(look,'LOOKS.'+id+' must exist');
+    ok(!look.rig||look.rig==='human',id+' must use the human bone set');
+    const b=look.body;ok(b,id+'.body must exist');
+    ok(hex(b.outline),id+'.body.outline must be a #rrggbb hex, got '+b.outline);
+    ok(Array.isArray(b.skinShade)&&b.skinShade.length===2,id+'.body.skinShade must be a 2-entry array');
+    ok(b.skinShade[0]<0&&b.skinShade[0]>=-1,id+'.body.skinShade[0] must darken (in [-1,0)), got '+b.skinShade[0]);
+    ok(b.skinShade[1]>0&&b.skinShade[1]<=1,id+'.body.skinShade[1] must lighten (in (0,1]), got '+b.skinShade[1]);
+    const cl=b.cloth;ok(cl,id+'.body.cloth must exist');
+    ok(TORSO.includes(cl.torso),id+'.body.cloth.torso "'+cl.torso+'" is not one of '+TORSO.join('/'));
+    ok(LEGS.includes(cl.legs),id+'.body.cloth.legs "'+cl.legs+'" is not one of '+LEGS.join('/'));
+    ok(hex(cl.primary),id+'.body.cloth.primary must be a #rrggbb hex, got '+cl.primary);
+    ok(hex(cl.secondary),id+'.body.cloth.secondary must be a #rrggbb hex, got '+cl.secondary);
+    const fa=b.face;ok(fa,id+'.body.face must exist');
+    ok(EYES.includes(fa.eyes),id+'.body.face.eyes "'+fa.eyes+'" is not one of '+EYES.join('/'));
+    ok(hex(fa.iris),id+'.body.face.iris must be a #rrggbb hex, got '+fa.iris);
+    eq(typeof fa.brow,'boolean',id+'.body.face.brow must be a boolean');
+    ok(MOUTH.includes(fa.mouth),id+'.body.face.mouth "'+fa.mouth+'" is not one of '+MOUTH.join('/'));
+    ok(HAIR.includes(fa.hair),id+'.body.face.hair "'+fa.hair+'" is not one of '+HAIR.join('/'));
+    ok(EARS.includes(fa.ears),id+'.body.face.ears "'+fa.ears+'" is not one of '+EARS.join('/'));
+    ok(HORNS.includes(fa.horns),id+'.body.face.horns "'+fa.horns+'" is not one of false/small/big');
+    eq(look.id,id,id+'.id must be wired to its own LOOKS key (BodyStyle cache keys read it)')}});
+// Controller ruling, Task 8.1: "Before any drawing change, snapshot Rig.extent for every look at
+// scale 1 and face +1 (idle, light1, medium, heavy, s3) into a test table; the table must hold to
+// +/-0.5 px after the change."
+//
+// Captured off commit 59ee492 (the pre-body-layer tree) with the SAME fold Rig.extent itself uses --
+// every joint, the drawn head circle's two top bounding corners, and every prop's propExtra geometry,
+// with each sample's own off.x subtracted before folding reach -- restricted to one pose key at a
+// time. `all` is the whole-pose-set Rig.extent(look,1) the camera zoom cap and the EDGE_PAD reach
+// test actually consume.
+//
+// This is the load-bearing guarantee of the task: a body layer is DRAWING, so it must not move a
+// single joint. Everything downstream of these numbers (per-frame zoom cap, cinematic cap, the
+// wall-clamp reach budget, the HUD-clearance test) was tuned against them across Phases 2-6.
+const HUMAN_EXTENT_SNAPSHOT={
+  carl:{all:[299.7881,181.7856],idle:[269.9202,108.5606],light1:[269.6809,151.0527],
+        medium:[269.7251,139.5993],heavy:[292.7322,165.0546],s3:[269.9202,181.7856]},
+  katia:{all:[280.6036,143.1647],idle:[246.9330,79.0038],light1:[246.7320,117.2888],
+        medium:[246.9295,130.0756],heavy:[273.4491,128.5724],s3:[246.9330,143.1647]},
+  goblin:{all:[218.2444,144.2075],idle:[186.7471,95.1316],light1:[186.5886,125.4230],
+        medium:[186.9553,91.8521],heavy:[210.6752,133.4937],s3:[186.7471,144.2075]},
+  hobgoblin:{all:[314.9527,180.2194],idle:[256.9232,109.8984],light1:[256.6931,151.5491],
+        medium:[256.7738,125.1625],heavy:[307.9931,164.2061],s3:[256.9232,180.2194]},
+  skeleton:{all:[293.3615,183.0332],idle:[246.9330,118.8723],light1:[246.7320,157.1573],
+        medium:[246.9295,130.0756],heavy:[286.2070,168.4408],s3:[246.9330,183.0332]},
+  shaman:{all:[263.8483,138.7725],idle:[240.7325,77.3764],light1:[240.5301,114.3992],
+        medium:[240.7217,120.6546],heavy:[256.6690,124.8996],s3:[240.7325,138.7725]}};
+Test.add('human-look extent snapshot (per pose and whole-set) is unchanged by the body layer, to +/-0.5px',()=>{
+  const posesOf=(look,key)=>{
+    const kf=POSES[key];let minY=0,maxReach=0;
+    for(let i=0;i<kf.length-1;i++){
+      const ta=kf[i].t,tb=kf[i+1].t;
+      for(const t of[ta,(ta+tb)/2,tb]){
+        const offX=samplePose(POSES,key,t).off.x||0;
+        const j=Rig.solve(look,key,t,1);
+        const fold=(x,y)=>{if(y<minY)minY=y;const rx=Math.abs(x-offX);if(rx>maxReach)maxReach=rx};
+        for(const b in j)fold(j[b].x,j[b].y);
+        fold(j.head.x-look.headR,j.head.y-look.headR);
+        fold(j.head.x+look.headR,j.head.y-look.headR);
+        for(const pid of look.props||[])for(const ep of Rig.propExtra(pid,look,j,1))fold(ep.x,ep.y)}}
+    return[-minY,maxReach]};
+  const near=(a,b,what)=>ok(Math.abs(a-b)<=0.5,what+': expected '+b.toFixed(4)+' +/-0.5, got '+a.toFixed(4));
+  for(const id of HUMAN_LOOK_IDS){
+    const look=LOOKS[id],snap=HUMAN_EXTENT_SNAPSHOT[id];
+    ok(snap,'no snapshot row for '+id);
+    const e=Rig.extent(look,1);
+    near(e.top,snap.all[0],id+'/extent.top');near(e.reach,snap.all[1],id+'/extent.reach');
+    for(const key of['idle','light1','medium','heavy','s3']){
+      const[top,reach]=posesOf(look,key);
+      near(top,snap[key][0],id+'/'+key+'.top');near(reach,snap[key][1],id+'/'+key+'.reach')}}});
 
 </script></body></html>

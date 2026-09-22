@@ -4740,3 +4740,91 @@ Test.add('a fight driven only through Fight.step (no G/FX involvement) is unaffe
   run(b,600);
   eq(b.p1.hp,a.p1.hp);eq(b.p2.hp,a.p2.hp);eq(b.log.length,a.log.length);
   eq(JSON.stringify(b.log),JSON.stringify(a.log),'two runs of the exact same script/seed must log bit-identically')});
+
+// --- Task 8.1: layered vector bodies and faces for the human rig --------------------------------
+// The six looks that use the human bone set (Rig.solve's default branch). Every one of them must
+// carry a complete `.body` block; everything else in LOOKS (the quad/big rigs) is another task's.
+const HUMAN_LOOK_IDS=['carl','katia','goblin','hobgoblin','skeleton','shaman'];
+Test.add('every human look carries a complete .body block with only schema-legal values',()=>{
+  // The Phase 8 frozen interface, spelled out as the enumerations it names. A typo'd cloth or face
+  // token would otherwise fail silently -- BodyStyle's own switches fall through to "draw nothing",
+  // so a look could lose its shirt (or its eyes) with no error anywhere.
+  const TORSO=['shirt','vest','bare','robe','chitin','fur','bone','plate'];
+  const LEGS=['pants','shorts','bare','robe','fur','bone'];
+  const EYES=['human','cat','rat','skull','goblin','none'];
+  const MOUTH=['human','fangs','snout','none'];
+  const HAIR=['crop','long','bald','mohawk','none'];
+  const EARS=['human','pointed','cat','rat','none'];
+  const HORNS=[false,'small','big'];
+  const hex=v=>typeof v==='string'&&/^#[0-9a-fA-F]{6}$/.test(v);
+  for(const id of HUMAN_LOOK_IDS){
+    const look=LOOKS[id];ok(look,'LOOKS.'+id+' must exist');
+    ok(!look.rig||look.rig==='human',id+' must use the human bone set');
+    const b=look.body;ok(b,id+'.body must exist');
+    ok(hex(b.outline),id+'.body.outline must be a #rrggbb hex, got '+b.outline);
+    ok(Array.isArray(b.skinShade)&&b.skinShade.length===2,id+'.body.skinShade must be a 2-entry array');
+    ok(b.skinShade[0]<0&&b.skinShade[0]>=-1,id+'.body.skinShade[0] must darken (in [-1,0)), got '+b.skinShade[0]);
+    ok(b.skinShade[1]>0&&b.skinShade[1]<=1,id+'.body.skinShade[1] must lighten (in (0,1]), got '+b.skinShade[1]);
+    const cl=b.cloth;ok(cl,id+'.body.cloth must exist');
+    ok(TORSO.includes(cl.torso),id+'.body.cloth.torso "'+cl.torso+'" is not one of '+TORSO.join('/'));
+    ok(LEGS.includes(cl.legs),id+'.body.cloth.legs "'+cl.legs+'" is not one of '+LEGS.join('/'));
+    ok(hex(cl.primary),id+'.body.cloth.primary must be a #rrggbb hex, got '+cl.primary);
+    ok(hex(cl.secondary),id+'.body.cloth.secondary must be a #rrggbb hex, got '+cl.secondary);
+    const fa=b.face;ok(fa,id+'.body.face must exist');
+    ok(EYES.includes(fa.eyes),id+'.body.face.eyes "'+fa.eyes+'" is not one of '+EYES.join('/'));
+    ok(hex(fa.iris),id+'.body.face.iris must be a #rrggbb hex, got '+fa.iris);
+    eq(typeof fa.brow,'boolean',id+'.body.face.brow must be a boolean');
+    ok(MOUTH.includes(fa.mouth),id+'.body.face.mouth "'+fa.mouth+'" is not one of '+MOUTH.join('/'));
+    ok(HAIR.includes(fa.hair),id+'.body.face.hair "'+fa.hair+'" is not one of '+HAIR.join('/'));
+    ok(EARS.includes(fa.ears),id+'.body.face.ears "'+fa.ears+'" is not one of '+EARS.join('/'));
+    ok(HORNS.includes(fa.horns),id+'.body.face.horns "'+fa.horns+'" is not one of false/small/big');
+    eq(look.id,id,id+'.id must be wired to its own LOOKS key (BodyStyle cache keys read it)')}});
+// Controller ruling, Task 8.1: "Before any drawing change, snapshot Rig.extent for every look at
+// scale 1 and face +1 (idle, light1, medium, heavy, s3) into a test table; the table must hold to
+// +/-0.5 px after the change."
+//
+// Captured off commit 59ee492 (the pre-body-layer tree) with the SAME fold Rig.extent itself uses --
+// every joint, the drawn head circle's two top bounding corners, and every prop's propExtra geometry,
+// with each sample's own off.x subtracted before folding reach -- restricted to one pose key at a
+// time. `all` is the whole-pose-set Rig.extent(look,1) the camera zoom cap and the EDGE_PAD reach
+// test actually consume.
+//
+// This is the load-bearing guarantee of the task: a body layer is DRAWING, so it must not move a
+// single joint. Everything downstream of these numbers (per-frame zoom cap, cinematic cap, the
+// wall-clamp reach budget, the HUD-clearance test) was tuned against them across Phases 2-6.
+const HUMAN_EXTENT_SNAPSHOT={
+  carl:{all:[299.7881,181.7856],idle:[269.9202,108.5606],light1:[269.6809,151.0527],
+        medium:[269.7251,139.5993],heavy:[292.7322,165.0546],s3:[269.9202,181.7856]},
+  katia:{all:[280.6036,143.1647],idle:[246.9330,79.0038],light1:[246.7320,117.2888],
+        medium:[246.9295,130.0756],heavy:[273.4491,128.5724],s3:[246.9330,143.1647]},
+  goblin:{all:[218.2444,144.2075],idle:[186.7471,95.1316],light1:[186.5886,125.4230],
+        medium:[186.9553,91.8521],heavy:[210.6752,133.4937],s3:[186.7471,144.2075]},
+  hobgoblin:{all:[314.9527,180.2194],idle:[256.9232,109.8984],light1:[256.6931,151.5491],
+        medium:[256.7738,125.1625],heavy:[307.9931,164.2061],s3:[256.9232,180.2194]},
+  skeleton:{all:[293.3615,183.0332],idle:[246.9330,118.8723],light1:[246.7320,157.1573],
+        medium:[246.9295,130.0756],heavy:[286.2070,168.4408],s3:[246.9330,183.0332]},
+  shaman:{all:[263.8483,138.7725],idle:[240.7325,77.3764],light1:[240.5301,114.3992],
+        medium:[240.7217,120.6546],heavy:[256.6690,124.8996],s3:[240.7325,138.7725]}};
+Test.add('human-look extent snapshot (per pose and whole-set) is unchanged by the body layer, to +/-0.5px',()=>{
+  const posesOf=(look,key)=>{
+    const kf=POSES[key];let minY=0,maxReach=0;
+    for(let i=0;i<kf.length-1;i++){
+      const ta=kf[i].t,tb=kf[i+1].t;
+      for(const t of[ta,(ta+tb)/2,tb]){
+        const offX=samplePose(POSES,key,t).off.x||0;
+        const j=Rig.solve(look,key,t,1);
+        const fold=(x,y)=>{if(y<minY)minY=y;const rx=Math.abs(x-offX);if(rx>maxReach)maxReach=rx};
+        for(const b in j)fold(j[b].x,j[b].y);
+        fold(j.head.x-look.headR,j.head.y-look.headR);
+        fold(j.head.x+look.headR,j.head.y-look.headR);
+        for(const pid of look.props||[])for(const ep of Rig.propExtra(pid,look,j,1))fold(ep.x,ep.y)}}
+    return[-minY,maxReach]};
+  const near=(a,b,what)=>ok(Math.abs(a-b)<=0.5,what+': expected '+b.toFixed(4)+' +/-0.5, got '+a.toFixed(4));
+  for(const id of HUMAN_LOOK_IDS){
+    const look=LOOKS[id],snap=HUMAN_EXTENT_SNAPSHOT[id];
+    ok(snap,'no snapshot row for '+id);
+    const e=Rig.extent(look,1);
+    near(e.top,snap.all[0],id+'/extent.top');near(e.reach,snap.all[1],id+'/extent.reach');
+    for(const key of['idle','light1','medium','heavy','s3']){
+      const[top,reach]=posesOf(look,key);
+      near(top,snap[key][0],id+'/'+key+'.top');near(reach,snap[key][1],id+'/'+key+'.reach')}}});

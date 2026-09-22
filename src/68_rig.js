@@ -539,21 +539,49 @@ const LOOKS={
   // Note: G.debugPose (used for every docs/shots/p2-<pose>.png except p2-goblin/p2-card) never
   // calls G.tick(), so G.cam.zoom sits at its initial 1.0 for those shots — proportions below target
   // ~55-65% of frame height at zoom 1.0 exactly, not at the fight camera's usual ~1.1-1.35.
+  // Task 8.1: every human look also carries a `.body` block — the layered-vector spec BodyStyle
+  // reads (outline color, the two skin shade stops, the cloth kinds worn on torso/legs, and the
+  // face module's eyes/brow/mouth/hair/ears/horns). It is PURELY additive: no proportion, palette
+  // or prop field above it changed, so Rig.solve/Rig.extent/Rig.topAt (and therefore every
+  // HUD-clearance, reach and zoom-cap number the earlier phases pinned) are bit-identical to
+  // before the body layer existed. See the 'human-look extent snapshot' test (90_tests.js) for the
+  // table that holds that claim.
   carl:{skin:'#d9a066',hair:'#241610',primary:'#3a3226',secondary:'#c0392b',
     limb:20,legLen:114,armLen:101,torsoLen:91,headR:25,shoulderW:83,hipW:53,waistW:40,earLen:0,bareFeet:true,
-    props:['boxers','vest','bandages']},
+    props:['boxers','vest','bandages'],
+    // Torn open vest over a bare, defined chest; red heart boxers; wrapped hands; bare feet; a dark
+    // messy crop and a blue-grey iris — the rendition's own Carl (docs/reference/rendition.jpg).
+    body:{outline:'#1c120a',skinShade:[-0.34,0.20],
+      cloth:{torso:'vest',legs:'shorts',primary:'#3a3226',secondary:'#c0392b'},
+      face:{eyes:'human',iris:'#5b7c93',brow:true,mouth:'human',hair:'crop',ears:'human',horns:false}}},
   katia:{skin:'#c98a5e',hair:'#171310',primary:'#232f2b',secondary:'#48594f',
     limb:12,legLen:117,armLen:91,torsoLen:78,headR:20,shoulderW:38,hipW:28,earLen:0,
-    props:['gear']},
+    props:['gear'],
+    // Full-coverage practical gear (the 'gear' prop's intent, now drawn as real cloth): a dark
+    // green tunic with a belt, matching trousers, long black hair.
+    body:{outline:'#100d0b',skinShade:[-0.30,0.17],
+      cloth:{torso:'shirt',legs:'pants',primary:'#232f2b',secondary:'#48594f'},
+      face:{eyes:'human',iris:'#7fa98c',brow:true,mouth:'human',hair:'long',ears:'human',horns:false}}},
   goblin:{skin:'#5f8a3f',hair:null,primary:'#4a3b28',secondary:'#7a6248',
     limb:13,legLen:82,armLen:72,torsoLen:58,headR:18,shoulderW:33,hipW:21,earLen:29,
-    props:['rags','dagger']},
+    props:['rags','dagger'],
+    // Scavenger rags over a scrawny green frame, long pointed ears (earLen still drives their
+    // size), a jutting nose, a yellow slit eye and a lower fang — the rendition's scavenger.
+    body:{outline:'#16240d',skinShade:[-0.36,0.24],
+      cloth:{torso:'vest',legs:'shorts',primary:'#4a3b28',secondary:'#7a6248'},
+      face:{eyes:'goblin',iris:'#e3c74a',brow:true,mouth:'fangs',hair:'none',ears:'pointed',horns:false}}},
   // Fix round 2: trimmed back from the round-1 numbers, which combined with def.scale=1.2 (a
   // second, canvas-level multiplier on top of these) made the hobgoblin's overhead reach the worst
   // case in the whole roster by a wide margin at max zoom — see EDGE_PAD and the HUD-safety test.
   hobgoblin:{skin:'#5c6b52',hair:null,primary:'#3d3428',secondary:'#6b5c46',
     limb:23,legLen:106,armLen:99,torsoLen:86,headR:25,shoulderW:65,hipW:40,earLen:18,
-    props:['rags','club']},
+    props:['rags','club'],
+    // The goblin's bigger cousin: same rag/fang/pointed-ear language, heavier build, plus a pair of
+    // small stub horns. horns:'small' is a FACE-module decoration, not the 'horns' PROP grull wears
+    // (propExtra), so it is drawn well inside the head circle's own bound and adds no extent.
+    body:{outline:'#141a10',skinShade:[-0.33,0.21],
+      cloth:{torso:'vest',legs:'pants',primary:'#3d3428',secondary:'#6b5c46'},
+      face:{eyes:'goblin',iris:'#d8913a',brow:true,mouth:'fangs',hair:'none',ears:'pointed',horns:'small'}}},
   // Princess Donut: a real cat (Task 3.4's RigQuad quadruped bone set — see Rig.solve's 'quad'
   // branch below). Cream/white fur, a long expressive tail (tailLen well beyond the body-length
   // proportions grub/mother_rat use), pink inner ears, blue eyes, and a small gold tiara prop drawn
@@ -623,12 +651,24 @@ const LOOKS={
   // rig:'human' set explicitly.
   skeleton:{skin:'#d8d0c0',hair:null,primary:'#2a2a2a',secondary:'#555555',
     limb:12,legLen:117,armLen:91,torsoLen:78,headR:20,shoulderW:38,hipW:28,earLen:0,rig:'human',
-    props:['rags','dagger']},
+    props:['rags','dagger'],
+    // cloth 'bone' is not an overlay at all — it swaps the limb tube for a shaft-and-knob bone and
+    // the torso for a rib cage over a dark void, so the skeleton reads as bone rather than a
+    // bone-COLORED body. eyes:'skull' is the dark socket with an ember (Phase 8 ruling).
+    body:{outline:'#4a4131',skinShade:[-0.24,0.15],
+      cloth:{torso:'bone',legs:'bone',primary:'#2a2a2a',secondary:'#555555'},
+      face:{eyes:'skull',iris:'#ff8a2a',brow:false,mouth:'none',hair:'none',ears:'none',horns:false}}},
   // PLACEHOLDER (Task 3.4/3.5): a copy of Donut's proportions with a mystic-purple palette and
   // rig:'human' set explicitly.
   shaman:{skin:'#8a6aa8',hair:'#2a1a3a',primary:'#4a2f6a',secondary:'#8a4fae',
     limb:14,legLen:107,armLen:88,torsoLen:74,headR:23,shoulderW:39,hipW:29,earLen:0,rig:'human',
-    props:['gear']},
+    props:['gear'],
+    // cloth.torso:'robe' is what carries the hood (Phase 8 ruling: "the shaman keeps its hood
+    // shape") — the frozen face schema has no hood field, so BodyStyle.head draws the cowl for any
+    // look whose TORSO cloth is 'robe', keeping the hood and the robe a single wardrobe decision.
+    body:{outline:'#1a1026',skinShade:[-0.32,0.22],
+      cloth:{torso:'robe',legs:'robe',primary:'#4a2f6a',secondary:'#8a4fae'},
+      face:{eyes:'human',iris:'#e0c84a',brow:true,mouth:'human',hair:'none',ears:'human',horns:false}}},
   // Grub: Task 3.4's RigQuad bone set reused for a segmented larva — same four-legged FK, drawn with
   // stubby leg nubs (legW/legLen both small relative to bodyLen) and a distinct dark head capsule
   // (headFill, separate from the pale body skin) instead of a cat/rat face. No ears.
@@ -688,6 +728,10 @@ const LOOKS={
     hipH:65,legLen:65,bodyLen:125,neckLen:42,headR:26,tailLen:170,
     frontW:22,backW:26,legW:20,
     props:['teeth']}};
+// Task 8.1: every look learns its own key, so BodyStyle's offscreen cache can name its entries
+// (`look|bone|face|zoomBucket`) without every call site threading an id down. Assigned here rather
+// than written into each literal above so it can never drift from the key it is filed under.
+for(const id in LOOKS)LOOKS[id].id=id;
 
 // Resolves a def's look, falling back to LOOKS.carl (once, with a console.warn) for a Phase-3-added
 // def that ships without one, instead of every reader (Rig.draw, Render.overlayY/shadow) crashing on
