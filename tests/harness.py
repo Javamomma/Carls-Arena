@@ -390,6 +390,22 @@ def main():
                           "exact shape) and exits 1 on any assertion/page/console error; combine with "
                           "--shot for an early (step 1, before any light lands) screenshot of a live "
                           "fight frame with #tutorialPrompt visible")
+    ap.add_argument('--screens-smoke', action='store_true',
+                     help="Task 5.6: reset the save, visit every screen in turn (title, map, roster, "
+                          "crystal, shop, arena, settings), then play one real quest fight through to "
+                          "a natural KO (floor 1 node 0, Ctrl.script light-chain vs Ctrl.competent, "
+                          "closeIn to skip the walk-up) so Screens.result renders too; each screen's "
+                          "own pageerror/console-error delta is recorded separately; prints a JSON "
+                          "{screens:[{screen,errors}]} and exits 1 if any screen recorded errors")
+    ap.add_argument('--phone-check', action='store_true',
+                     help="Task 5.6: sets an 844x390 CSS-px landscape viewport (iPhone SE/8-class "
+                          "phone rotated), starts a real fight, and asserts: the canvas is letterboxed "
+                          "(its displayed box preserves the game's 854:480 aspect ratio and fits "
+                          "inside the viewport on both axes), every .cbtn on-screen button (BLOCK/ "
+                          "PUNCH/KICK/POWER) has a real >=44 CSS-px rect fully inside the viewport, "
+                          "and the page never grows a horizontal scrollbar "
+                          "(document.documentElement.scrollWidth<=viewport width); prints a JSON "
+                          "summary and exits 1 on any check failure or page/console error")
     a = ap.parse_args()
     if a.floor is not None and a.node is None:
         ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2
@@ -516,6 +532,97 @@ def main():
         out = {'page_errors': tut_errors, 'summary': r}
         print(json.dumps(out, indent=1))
         sys.exit(1 if tut_errors or r.get('errors') else 0)
+    if a.screens_smoke:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page(viewport={'width': 854, 'height': 480})
+            errs = []
+            pg.on('pageerror', lambda e: errs.append(str(e)))
+            pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
+            pg.goto(INDEX)
+            pg.wait_for_function('typeof G!=="undefined"')
+            pg.evaluate('localStorage.clear();Save.load()')
+            results = []
+            def visit(name, js):
+                before = len(errs)
+                pg.evaluate(js)
+                results.append({'screen': name, 'errors': list(errs[before:])})
+            visit('title', "Screens.title()")
+            visit('map', "Screens.map(1)")
+            visit('roster', "Screens.roster()")
+            visit('crystal', "Screens.crystal()")
+            visit('shop', "Screens.shop()")
+            visit('arena', "Screens.arena()")
+            visit('settings', "Screens.settings()")
+            # A real quest fight (floor 1 node 0), same {floor,node} sugar --floor/--node use below,
+            # topped up on energy the same way build_soak_js's own --floor/--node soak path does;
+            # p1 chains lights until the mob (a goblin, low hp on node 0) drops, closeIn(f) skips the
+            # walk-up, and a real Render.frame(G.fight) call exercises the canvas path mid-fight (
+            # G.tick() alone never renders -- only G.loop()'s rAF cadence does, which this harness
+            # never drives).
+            visit('fight',
+                  "G.sim=true;G.debugEnergy(999);"
+                  "G.startFight({seed:1,floor:1,node:0,ctrl1:Ctrl.script([{f:0,until:1800,intent:{light:true}}])});"
+                  "closeIn(G.fight);"
+                  "for(let i=0;i<30;i++)G.tick();"
+                  "Render.frame(G.fight);")
+            # Continue the same fight to its natural KO, which flips G.state to RESULT and fires
+            # Screens.result (G.onFightEnd) -- this is the screen this visit's errors are attributed to.
+            visit('result', "for(let i=0;i<1800&&G.state!=='RESULT';i++)G.tick();")
+            state = pg.evaluate('G.state')
+            b.close()
+        bad_screens = [r['screen'] for r in results if r['errors']]
+        out = {'screens': results, 'final_state': state}
+        print(json.dumps(out, indent=1))
+        sys.exit(1 if bad_screens or state != 'RESULT' else 0)
+    if a.phone_check:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            # 844x390: an iPhone (SE/8-class) 375x667 or 390x844 CSS-px screen rotated to landscape --
+            # the frozen interface's own wording ("844x390 CSS-px viewport (iPhone SE/8-class")) --
+            # the narrowest realistic landscape phone width, so it's the tightest-fit check available.
+            pg = b.new_page(viewport={'width': 844, 'height': 390})
+            errs = []
+            pg.on('pageerror', lambda e: errs.append(str(e)))
+            pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
+            pg.goto(INDEX)
+            pg.wait_for_function('typeof G!=="undefined"')
+            pg.evaluate('localStorage.clear();Save.load()')
+            pg.evaluate("G.startFight({seed:1,p1:'carl',p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()})")
+            r = pg.evaluate("""(()=>{
+              const cr=canvas.getBoundingClientRect();
+              const btnIds=['btnBlock','btnPunch','btnKick','btnPower'];
+              const btns=btnIds.map(id=>{
+                const el=document.getElementById(id),rc=el.getBoundingClientRect();
+                return{id,left:rc.left,top:rc.top,width:rc.width,height:rc.height,
+                  right:rc.right,bottom:rc.bottom};});
+              return{canvas:{left:cr.left,top:cr.top,width:cr.width,height:cr.height},
+                btns,
+                scrollWidth:document.documentElement.scrollWidth,
+                innerWidth:innerWidth,innerHeight:innerHeight};
+            })()""")
+            b.close()
+        vw, vh = r['innerWidth'], r['innerHeight']
+        cv = r['canvas']
+        # Letterboxed: the displayed canvas box must preserve the game's own 854:480 aspect ratio
+        # (within float rounding) and fit entirely inside the viewport on both axes -- that's what
+        # "letterboxed" means here (bars on whichever axis has slack), not any particular bar size.
+        aspect_game = 854 / 480
+        aspect_shown = cv['width'] / cv['height'] if cv['height'] else 0
+        aspect_ok = abs(aspect_shown - aspect_game) < 0.01
+        fits_ok = cv['width'] <= vw + 0.5 and cv['height'] <= vh + 0.5
+        btn_checks = []
+        for bt in r['btns']:
+            ok_size = bt['width'] >= 44 and bt['height'] >= 44
+            ok_inside = bt['left'] >= 0 and bt['top'] >= 0 and bt['right'] <= vw + 0.5 and bt['bottom'] <= vh + 0.5
+            btn_checks.append({'id': bt['id'], 'width': bt['width'], 'height': bt['height'],
+                                'size_ok': ok_size, 'inside_ok': ok_inside})
+        no_hscroll = r['scrollWidth'] <= vw + 1  # +1: sub-pixel layout rounding
+        bad_btns = [c['id'] for c in btn_checks if not (c['size_ok'] and c['inside_ok'])]
+        out = {'errors': errs, 'canvas': cv, 'aspect_ok': aspect_ok, 'fits_ok': fits_ok,
+               'buttons': btn_checks, 'no_hscroll': no_hscroll, 'viewport': {'w': vw, 'h': vh}}
+        print(json.dumps(out, indent=1))
+        sys.exit(1 if errs or not aspect_ok or not fits_ok or bad_btns or not no_hscroll else 0)
     errors, console = [], []
     with sync_playwright() as p:
         b = p.chromium.launch()
