@@ -90,16 +90,21 @@ const Screens={
       tabs.appendChild(b)}
     const path=document.getElementById('mapPath');path.innerHTML='';
     if(f){
+      // Fix-wave item 6: a non-'open' node is disabled -- it used to be a live button that looked
+      // and clicked exactly like an open one, silently refusing (via a toast an overlay painted
+      // over) instead of visibly blocking the click in the first place.
       f.nodes.forEach((node,i)=>{
         const b=document.createElement('button');
         b.className='node '+node.state;
         b.textContent='DOOR '+(i+1);
+        b.disabled=node.state!=='open';
         b.onclick=()=>{Screens._origin={name:'map',args:[n]};
           G.startFight({floor:n,node:i,champ:Save.data.active})};
         path.appendChild(b)});
       const boss=document.createElement('button');
       boss.className='node boss '+f.boss.state;
       boss.textContent='BOSS';
+      boss.disabled=f.boss.state!=='open';
       boss.onclick=()=>{Screens._origin={name:'map',args:[n]};
         G.startFight({floor:n,node:'boss',champ:Save.data.active})};
       path.appendChild(boss)}
@@ -107,6 +112,10 @@ const Screens={
     const e=Save.data.energy;
     for(let i=0;i<e.max;i++){
       const p=document.createElement('div');p.className='pip'+(i<e.n?' full':'');erow.appendChild(p)}
+    // Fix-wave item 6: clear any refusal message left over from a previous click every time the map
+    // re-renders (floor switch, refresh, or a fresh Screens.map) -- G.refuseQuest is the only other
+    // writer, and only ever sets it, never clears it.
+    document.getElementById('mapMsg').textContent='';
     document.getElementById('mapBack').onclick=()=>Screens.title()},
   // ---- roster --------------------------------------------------------------------------------
   // Fix round 1 (controller review, Important): cards are a single-column, full-width row --

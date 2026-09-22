@@ -1325,6 +1325,31 @@ Test.add('the map path fits a full floor with no clipping/scroll at 854x480 (fix
   ok(path.scrollHeight<=path.clientHeight,
     '#mapPath must not overflow: scrollHeight '+path.scrollHeight+' > clientHeight '+path.clientHeight);
   Screens.title()});
+// Fix-wave item 6 (Important): a refused node gave no visible feedback -- map buttons were never
+// `disabled`, so a locked door looked and clicked exactly like an open one, and G.refuseQuest's
+// message went to #toast, which sat BEFORE every overlay in the DOM (00_head.html), so the map
+// overlay's opaque background painted over it -- set and never seen (final-review-verdict.md issue
+// 6). Fix: map node buttons are disabled when not 'open'; the refusal renders in #mapMsg (inside the
+// map panel itself, bypassing G.say's frame-throttle entirely, which was separately broken while
+// browsing since G.frameNow never advances outside a fight); #toast moved after every overlay in the
+// DOM so it still paints on top during a fight.
+Test.add('a locked map node is disabled (cannot be clicked to start a fight); an open node with no energy shows the refusal in #mapMsg (fix-wave item 6)',()=>{
+  Save.data=Meta.defaults();
+  Screens.map(1);
+  const nodes=[...document.querySelectorAll('#map .node:not(.boss)')];
+  eq(nodes[0].disabled,false,'node 0 starts open, must be clickable');
+  eq(nodes[1].disabled,true,'node 1 starts locked, must be disabled');
+  const origNow=Energy.now;
+  try{
+    let t=5000000;Energy.now=()=>t;
+    Save.data.energy.n=0;Save.data.energy.ts=t; // no regen pending: exactly 6:00 to the next point
+    Screens.map(1);
+    eq(document.getElementById('mapMsg').textContent,'','no stale refusal text before any click');
+    document.querySelectorAll('#map .node:not(.boss)')[0].click();
+    eq(G.state,'TITLE','a refused start must not have begun a fight');
+    eq(document.getElementById('mapMsg').textContent,'NOT ENOUGH ENERGY — next in 6:00')
+  }finally{Energy.now=origNow}
+  Screens.title()});
 Test.add('a map node click starts the quest fight via G.startFight and records the map screen (with its floor) as the fight\'s origin',()=>{
   Save.data=Meta.defaults();
   Screens.map(1);

@@ -183,13 +183,27 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // Arena sugar: draws the next Arena.start() encounter for the current streak and starts it with
   // mode:'arena' (never gated by Quest.start/energy -- Phase 4 ruling 4, "arena costs no energy").
   startArena(o={}){return this.startFight(Object.assign({},o,{encounter:Arena.start(),mode:'arena'}))},
-  // A refused Quest.start (energy empty, or the node isn't 'open') toasts why instead of silently
-  // doing nothing -- reads Quest.floor directly rather than trusting Quest.canStart's single boolean
-  // so the message can tell the two refusal reasons apart.
+  // A refused Quest.start (energy empty, or the node isn't 'open') writes why into #mapMsg, inside
+  // the map panel itself, instead of the old toast-only message -- #toast sat before every overlay
+  // in the DOM (fixed in the same item, see 00_head.html) and G.say's 90-frame throttle never
+  // advances while browsing (G.frameNow only moves during an active fight), so a second refusal
+  // would have been silently swallowed even with the toast visible. Writing #mapMsg directly
+  // bypasses both problems: no throttle, and nothing else paints over the map panel while it's up.
+  // Reads Quest.floor directly rather than trusting Quest.canStart's single boolean so the message
+  // can tell the two refusal reasons apart, and computes the exact time to the next energy point
+  // off Energy.now()/e.ts for the "NOT ENOUGH ENERGY" case.
   refuseQuest(floor,node){
     const f=Quest.floor(floor);
     const n=f&&(node==='boss'?f.boss:f.nodes[node]);
-    this.say(!n||n.state!=='open'?'That node is locked.':'Not enough energy.')},
+    let msg;
+    if(!n||n.state!=='open')msg='LOCKED';
+    else{
+      const e=Save.data.energy;
+      const remainMs=Math.max(0,360000-(Energy.now()-e.ts));
+      const mm=Math.floor(remainMs/60000),ss=Math.floor((remainMs%60000)/1000);
+      msg='NOT ENOUGH ENERGY — next in '+mm+':'+(ss<10?'0':'')+ss}
+    const el=document.getElementById('mapMsg');
+    if(el)el.textContent=msg},
   // Debug/test-only energy override (mirrors debugPose/debugCinematic's role): lets a harness soak
   // loop that restarts many quest fights in a row (tests/harness.py --sim --floor/--node) top energy
   // up once instead of hitting Quest.start's refusal mid-run. Never called from real gameplay code.
