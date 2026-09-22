@@ -20,7 +20,9 @@ class Fight{
   step(){if(this.over)return;if(this.cinematic>0)return;if(this.hitstop>0){this.hitstop--;return}
     this.frame++;this.clock-=STEP;
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);
-    this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();this.separate();this.updateCam();
+    this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();
+    this.buffFrame(this.p1,this.p2);this.buffFrame(this.p2,this.p1);
+    this.separate();this.updateCam();
     this.checkCinematic(this.p1);this.checkCinematic(this.p2);
     // Detect both sides' hits against the pre-resolve state before applying either, so a true
     // mutual trade lands both instead of the first resolve knocking out the second's hitbox.
@@ -29,6 +31,12 @@ class Fight{
     if(this.p2.state==='IDLE'&&this.p2.f>20)this.p1.combo=0;if(this.p1.state==='IDLE'&&this.p1.f>20)this.p2.combo=0;
     if(this.p1.hp<=0||this.p2.hp<=0||this.clock<=0)this.finish()}
   separate(){const a=this.p1,b=this.p2,min=a.width/2+b.width/2+4,d=b.x-a.x;if(d<min){const p=(min-d)/2;a.x-=p;b.x+=p}}
+  // holder.buffs is resolved once by Buffs.apply, never re-resolved here — just iterated.
+  buffFrame(holder,foe){if(!holder.buffs)return;for(const b of holder.buffs)if(b.onFrame)b.onFrame(this,holder,foe)}
+  // Calls kind ('onHit'|'onBlock') on each of holder's buffs, passing holder as a 5th arg so a buff
+  // that only makes sense on one side of an exchange (e.g. armorUp only for the defender) can tell
+  // which side it's being resolved for by comparing holder against att/def.
+  buffHook(kind,holder,att,def,ref){if(!holder.buffs)return;for(const b of holder.buffs)if(b[kind])b[kind](this,att,def,ref,holder)}
   // Fires exactly once, on the single frame an s3 leaves startup for the first time (att.f lands
   // on att.move.startup right after tick()). Arms the 72-frame cinematic freeze and queues the card
   // FX; guarded by this.cinematic===0 so a same-frame double-trigger (both sides popping s3 at once)
@@ -42,7 +50,10 @@ class Fight{
     const hu=def.hurtbox();if(hb.x1<hu.x0||hb.x0>hu.x1)return null;const m=att.move,last=idx===(m.hits||1)-1;
     if(def.inv>0||def.state==='KNOCKDOWN'||def.state==='KO'||def.state==='WIN')return{type:'miss',att,def,idx};
     const blocking=def.state==='BLOCK'||def.state==='BLOCKSTUN';
-    if(blocking&&!m.unblockable){
+    // unblockableSpecials: the attacker's special (m.cost is only set on s1/s2/s3) ignores block if
+    // the attacker holds the buff, same treatment as MOVES.s3's own m.unblockable flag.
+    const unblockable=m.unblockable||(m.cost&&att.buffs&&att.buffs.some(b=>b.id==='unblockableSpecials'));
+    if(blocking&&!unblockable){
       if(def.blockAge<=PARRY_WINDOW&&def.parryLock===0&&!m.cost)return{type:'parry',att,def,idx};
       return{type:'block',att,def,idx,m}}
     return{type:'hit',att,def,idx,m,last}}
@@ -51,7 +62,11 @@ class Fight{
     if(type==='parry'){def.parryLock=0;def._parried=true;att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');
       this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
       return this.emit('parry',def,att,0)}
-    if(type==='block'){const m=r.m;const chip=Math.round(att.def.atk*m.dmg*CHIP*(1-(def.def.blockProf||0)));def.hp=Math.max(0,def.hp-chip);def.stun=m.blockstun;def.setState('BLOCKSTUN');
+    if(type==='block'){const m=r.m;const chipRef={chip:Math.round(att.def.atk*m.dmg*CHIP*(1-(def.def.blockProf||0)))};
+      // thorns lives here: the defender (the blocker) is the only side with an onBlock call.
+      this.buffHook('onBlock',def,att,def,chipRef);
+      const chip=chipRef.chip;
+      def.hp=Math.max(0,def.hp-chip);def.stun=m.blockstun;def.setState('BLOCKSTUN');
       def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;
       this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip,att.moveName)}
     const m=r.m,last=r.last;
@@ -59,9 +74,13 @@ class Fight{
     // Crit rolls once per landed hit, after the class bonus and before armor.
     const crit=!this.noCrit&&this.rng.next()<att.def.crit;
     const critMul=crit?(att.def.critMul||CRIT_MUL_DEFAULT):1;
-    const dmg=Math.round(att.def.atk*m.dmg*cls*critMul*(1-def.def.armor));
+    // ref carries dmg plus the two power deltas so armorUp/powerGain can adjust them before either
+    // is applied; defender-side hooks run first, then attacker-side, both against the same ref.
+    const ref={dmg:Math.round(att.def.atk*m.dmg*cls*critMul*(1-def.def.armor)),powHit:m.powHit,powTaken:m.powTaken};
+    this.buffHook('onHit',def,att,def,ref);this.buffHook('onHit',att,att,def,ref);
+    const dmg=ref.dmg;
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
-    att.power=Math.min(POWER_MAX,att.power+m.powHit);def.power=Math.min(POWER_MAX,def.power+m.powTaken);
+    att.power=Math.min(POWER_MAX,att.power+ref.powHit);def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
     def.move=null;def.moveName=null;if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
     // Medium landed as a combo ender (3rd+ hit of the combo, counting this one) shoves the defender
     // out past light range instead of the move's normal push, so the follow-up can't just re-chain.

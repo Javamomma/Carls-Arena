@@ -48,6 +48,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       ai=enc.tier}
     this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:p2def,clock:o.clock,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
+    // ids, not enc.buffs' resolved objects, so the sim's Buffs.apply does its own resolution instead
+    // of trusting a reference that passed through the encounter/presentation layer.
+    if(this.encounter&&this.encounter.buffIds&&this.encounter.buffIds.length)Buffs.apply(this.fight,this.fight.p2,this.encounter.buffIds);
     this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     // Fresh throttle window per fight so the opening announcer line always fires immediately,

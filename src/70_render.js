@@ -71,6 +71,19 @@ const Render={ctx:canvas.getContext('2d'),
     if(fw>0){const g=c.createLinearGradient(fx,0,fx+fw,0);g.addColorStop(0,'#c62828');g.addColorStop(1,'#ffa726');
       c.fillStyle=g;c.fillRect(fx,y,fw,h)}
     c.strokeStyle='#000';c.lineWidth=1.5;c.strokeRect(x+.75,y+.75,w-1.5,h-1.5)},
+  // 1-letter code per buff id, for the small gold badge squares under the enemy hp bar.
+  BUFF_CODES:{regen:'R',armorUp:'A',powerGain:'P',unblockableSpecials:'U',degen:'D',thorns:'T'},
+  // buffs is an array of resolved BUFFS objects (from G.encounter.buffs — presentation reads the
+  // encounter, never the fight/fighter). Right-aligned under the enemy hp bar, one 12px gold square
+  // per buff, stacking leftward so it never grows off the bar's left edge.
+  buffBadges(c,barX,barY,barW,buffs){
+    const size=12,gap=4,y=barY+4;
+    c.textAlign='center';c.textBaseline='middle';c.font='bold 8px ui-monospace,monospace';
+    buffs.forEach((b,i)=>{
+      const bx=barX+barW-size-i*(size+gap);
+      c.fillStyle='#f4c542';c.fillRect(bx,y,size,size);
+      c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(bx+.5,y+.5,size-1,size-1);
+      c.fillStyle='#000';c.fillText(this.BUFF_CODES[b.id]||'?',bx+size/2,y+size/2+1)})},
   pauseGlyph(c){const r=this.pauseRect,rr=6;
     c.fillStyle='rgba(0,0,0,.4)';c.strokeStyle='#f4c542';c.lineWidth=1.5;
     c.beginPath();c.moveTo(r.x+rr,r.y);c.lineTo(r.x+r.w-rr,r.y);c.arcTo(r.x+r.w,r.y,r.x+r.w,r.y+rr,rr);
@@ -101,6 +114,7 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39);
     this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22');
     this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp);
+    if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);
     c.font='bold 12px ui-monospace,monospace';c.fillStyle='#fff';c.textAlign='center';
     c.fillText(Math.max(0,Math.round(a.hp))+' / '+a.maxHp,p1barX+barW/2,48+barH-4);
     c.fillText(Math.max(0,Math.round(b.hp))+' / '+b.maxHp,p2barX+barW/2,48+barH-4);

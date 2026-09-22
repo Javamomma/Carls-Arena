@@ -3,7 +3,8 @@ class Fighter{
     this.x=side===1?STAGE_W/2-160:STAGE_W/2+160;this.width=48;this.hp=def.hp;this.maxHp=def.hp;this.power=0;
     this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
     this.combo=0;this.stun=0;this.inv=0;this.blockAge=0;this.dx=0; // last tick's x delta; Rig.poseFor reads it to pick idle vs walk
-    this.parryLock=0;this.blockPressedAt=0;this.pressTick=0;this._parried=false;this._mdCache=null}
+    this.parryLock=0;this.blockPressedAt=0;this.pressTick=0;this._parried=false;this._mdCache=null;
+    this.buffs=[]} // resolved BUFFS objects (Buffs.apply sets this once; Fight never re-resolves ids per frame)
   get front(){return this.x+this.face*this.width/2}
   busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
   setState(s,f=0){this.state=s;this.f=f}

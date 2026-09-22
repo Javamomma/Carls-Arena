@@ -326,3 +326,69 @@ Test.add('toast never overlaps the BLOCK/PUNCH button labels',()=>{
   ok(!intersects(t,block),'toast rect '+JSON.stringify(t)+' must not intersect BLOCK+label '+JSON.stringify(block));
   ok(!intersects(t,punch),'toast rect '+JSON.stringify(t)+' must not intersect PUNCH+label '+JSON.stringify(punch));
   G.toTitle()});
+
+// --- Task 3.2: buffs framework ---
+Test.add('regen heals the holder 0.05% maxHp per frame, capped at maxHp',()=>{
+  const f=mkFight();Buffs.apply(f,f.p2,['regen']);
+  f.p2.hp=f.p2.maxHp*0.5;
+  let hp=f.p2.hp;for(let i=0;i<600;i++)hp=Math.min(f.p2.maxHp,hp+f.p2.maxHp*0.0005);
+  run(f,600);
+  eq(f.p2.hp,hp);ok(f.p2.hp>f.p2.maxHp*0.5,'holder healed');
+  f.p2.hp=f.p2.maxHp-1;run(f,20);eq(f.p2.hp,f.p2.maxHp,'capped at maxHp')});
+Test.add('armorUp multiplies incoming damage by .7 when the holder defends',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);Buffs.apply(f,f.p2,['armorUp']);
+  run(f,5);
+  eq(f.p2.hp,1000-42,'a 60-damage light must land for 42')});
+Test.add('powerGain scales the holder power delta by 1.5x, on its own hits and on being hit',()=>{
+  const a=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(a);Buffs.apply(a,a.p1,['powerGain']);
+  run(a,5);
+  eq(a.p1.power,Math.round(MOVES.light1.powHit*1.5),'attacker with the buff gains 1.5x powHit');
+  const b=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(b);Buffs.apply(b,b.p2,['powerGain']);
+  run(b,5);
+  eq(b.p2.power,Math.round(MOVES.light1.powTaken*1.5),'defender with the buff gains 1.5x powTaken')});
+Test.add('unblockableSpecials makes a blocked special land as a hit',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:1}}]),ctrl2:Ctrl.hold({block:true})});
+  closeIn(f);f.p1.power=100;Buffs.apply(f,f.p1,['unblockableSpecials']);
+  run(f,40);
+  ok(f.log.some(e=>e.type==='hit'&&e.move==='s1'),'s1 landed as a hit despite the hold-block');
+  eq(f.log.filter(e=>e.type==='block').length,0,'no block event fired');
+  ok(f.p2.hp<f.p2.maxHp,'p2 actually took damage')});
+Test.add('degen drains the foe 0.03% maxHp per frame while the holder is alive',()=>{
+  const f=mkFight();Buffs.apply(f,f.p2,['degen']);
+  let hp=f.p1.hp;for(let i=0;i<100;i++)hp=Math.max(0,hp-f.p1.maxHp*0.0003);
+  run(f,100);
+  eq(f.p1.hp,hp)});
+Test.add('thorns returns 20% of block chip to the attacker',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});
+  closeIn(f);Buffs.apply(f,f.p2,['thorns']);
+  run(f,15);
+  eq(f.p2.hp,995,'chip itself is unchanged by thorns');
+  eq(f.p1.hp,1000-Math.round(5*0.2),'attacker takes 20% of the chip back')});
+Test.add('Buffs.apply resolves ids to BUFFS objects on holder.buffs, and throws on an unknown id',()=>{
+  const f=mkFight();
+  Buffs.apply(f,f.p2,['regen','armorUp']);
+  eq(f.p2.buffs.length,2);ok(f.p2.buffs[0]===BUFFS.regen);ok(f.p2.buffs[1]===BUFFS.armorUp);
+  Buffs.apply(f,f.p1,[]);
+  eq(f.p1.buffs.length,0);
+  ok(threw(()=>Buffs.apply(f,f.p2,['nope'])),'unknown buff id must throw')});
+Test.add('Encounter.resolve maps buff ids to BUFFS objects, defaults to none, and throws on an unknown id',()=>{
+  const enc=Encounter.resolve({floor:1,name:'X',enemy:'goblin',buffs:['regen','thorns']});
+  eq(enc.buffs.length,2);ok(enc.buffs[0]===BUFFS.regen);ok(enc.buffs[1]===BUFFS.thorns);
+  eq(enc.buffIds.length,2);eq(enc.buffIds[0],'regen');
+  const noBuffs=Encounter.resolve({floor:1,name:'X',enemy:'goblin'});
+  eq(noBuffs.buffs.length,0);eq(noBuffs.buffIds.length,0);
+  ok(threw(()=>Encounter.resolve({floor:1,name:'X',enemy:'goblin',buffs:['nope']})),'unknown buff id must throw')});
+Test.add('a fight is bit-identical whether or not Buffs.apply is called with an empty list',()=>{
+  const mkScript=()=>Ctrl.script([L(0,600)]);
+  const a=mkFight({ctrl1:mkScript(),ctrl2:AI.make('basic',3),noCrit:false,seed:7});
+  run(a,600);
+  const b=mkFight({ctrl1:mkScript(),ctrl2:AI.make('basic',3),noCrit:false,seed:7});
+  Buffs.apply(b,b.p2,[]);
+  run(b,600);
+  eq(b.p1.hp,a.p1.hp,'p1 hp must match with an empty buff list applied');
+  eq(b.p2.hp,a.p2.hp,'p2 hp must match with an empty buff list applied');
+  eq(JSON.stringify(b.log),JSON.stringify(a.log),'log must match with an empty buff list applied')});
+Test.add('buff badges: one 12px gold square with a 1-letter code per encounter buff, never throws',()=>{
+  eq(Render.BUFF_CODES.regen,'R');eq(Render.BUFF_CODES.armorUp,'A');eq(Render.BUFF_CODES.powerGain,'P');
+  eq(Render.BUFF_CODES.unblockableSpecials,'U');eq(Render.BUFF_CODES.degen,'D');eq(Render.BUFF_CODES.thorns,'T');
+  ok(!threw(()=>Render.buffBadges(Render.ctx,0,0,300,[BUFFS.regen,BUFFS.thorns])),'buffBadges must not throw')});
