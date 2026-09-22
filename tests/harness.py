@@ -99,11 +99,23 @@ try{
   G.debugGrant({gold:1200});
   for(let i=0;i<2;i++)summary.crystals.push(Crystal.open('basic'));
   Roster.setActive('carl');
-  const runNode=(floor,node)=>{
+  // Fix-wave item 7: the old runNode called G.debugEnergy(999) on every single attempt, then compared
+  // energyBefore (998) against energy after (997 or whatever) -- always true, so the "energy did not
+  // decrease" assertion could never fail even against fix-wave item 1's bug (energy never regenerating)
+  // or against the whole energy system being deleted. `noTopUp` skips the top-up on ONLY the very
+  // first attempt of ONE node (floor 1's node 0, called right after a fresh reset -- Save.data.energy
+  // is genuinely untouched, full at 10, so no top-up is needed for the fight to be attemptable), and
+  // asserts the real, un-inflated delta: exactly -1 (Quest.start spends exactly 1 energy per attempt,
+  // win or lose), then, with Energy.now() pushed 5 simulated minutes forward, that it's STILL not
+  // regenerated (5 min < the 6-minute regen interval). Every other attempt/node/the boss keeps the
+  // topped-up retry behavior unchanged.
+  const runNode=(floor,node,opts)=>{
+    opts=opts||{};
     let attempts=0,won=false;
     while(attempts<5&&!won){
       attempts++;
-      G.debugEnergy(999);
+      const skipTopUp=!!(opts.noTopUp&&attempts===1);
+      if(!skipTopUp)G.debugEnergy(999);
       const energyBefore=Save.data.energy.n;
       const goldBefore=Save.data.gold||0,isoBefore=Save.data.iso||0;
       const active=Save.data.active,entryBefore=Save.data.roster[active];
@@ -111,6 +123,20 @@ try{
       const fseed=%d*100+floor*20+(node==='boss'?19:node)*5+attempts;
       const ok=G.startFight({seed:fseed,floor,node,ctrl1:Ctrl.competent(fseed)});
       if(ok===false){push('quest refused floor '+floor+' node '+node+' attempt '+attempts);break}
+      if(skipTopUp){
+        // Quest.start already spent the energy by the time startFight returns, regardless of the
+        // fight's eventual outcome, so this checks right away rather than gating on `won`.
+        if(Save.data.energy.n!==energyBefore-1)
+          push('un-topped-up energy delta at '+floor+'/'+node+' expected exactly -1, got '+(Save.data.energy.n-energyBefore));
+        const origNow=Energy.now;
+        try{
+          const n0=Save.data.energy.n;
+          let t=Energy.now()+5*60*1000; // +5 simulated minutes: under the 6-minute regen interval
+          Energy.now=()=>t;
+          Energy.tick();
+          if(Save.data.energy.n!==n0)
+            push('energy regenerated within 5 minutes at '+floor+'/'+node+' ('+n0+' -> '+Save.data.energy.n+')')
+        }finally{Energy.now=origNow}}
       runTo(9000);
       won=!!(G.fight.winner&&G.fight.winner.side===1);
       if(won){
@@ -130,7 +156,7 @@ try{
     summary.nodes.push({id:floor+'/'+node,attempts,won});
     return won};
   const fl=FLOORS[0];
-  for(let i=0;i<fl.nodes.length;i++)runNode(1,i);
+  for(let i=0;i<fl.nodes.length;i++)runNode(1,i,i===0?{noTopUp:true}:null);
   runNode(1,'boss');
   const activeId=Save.data.active;
   if(!Roster.levelUp(activeId))push('Roster.levelUp refused');
