@@ -11,6 +11,14 @@ const AI={profiles:{
       // returned an empty intent while charging, Fighter.act's CHARGE branch would read intent.heavy
       // as false on the next frame and cancel the charge. Mirrors the block `hold` pattern below,
       // just ahead of the short-circuit that pattern relies on BLOCK not being "busy".
+      // This countdown is blind to interruption: once armed it decrements and keeps pressing heavy
+      // for its full charge+1 span even if `me` gets hit, parried, or knocked down mid-charge and
+      // never actually reaches CHARGE/ATTACK. That's fine today because Fighter.act only reads
+      // intent.heavy while in IDLE/BLOCK (to start the charge) or CHARGE (to sustain it); in every
+      // other state (HITSTUN, KNOCKDOWN, STUNNED, ...) the intent bit is simply ignored, so a stale
+      // hHold countdown wastes a few frames of "would-be" input rather than corrupting behavior. It
+      // would need to actually reset on interruption before an AI tier that reacts mid-swing (Phase 3)
+      // could rely on hHold reflecting "still trying to land this heavy".
       if(hHold>0){hHold--;it.heavy=true;return it}
       if(me.busy())return it;
       const dist=Math.abs(foe.x-me.x)-me.width;

@@ -262,7 +262,7 @@ const MOBS={
     moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
-const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,HITSTOP=4,POWER_MAX=300,PARRY_LOCKOUT=20,CRIT_MUL_DEFAULT=1.6;
+const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,POWER_MAX=300,PARRY_LOCKOUT=20,CRIT_MUL_DEFAULT=1.6;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
 const STAGE_W=1400;
 
@@ -346,6 +346,14 @@ const AI={profiles:{
       // returned an empty intent while charging, Fighter.act's CHARGE branch would read intent.heavy
       // as false on the next frame and cancel the charge. Mirrors the block `hold` pattern below,
       // just ahead of the short-circuit that pattern relies on BLOCK not being "busy".
+      // This countdown is blind to interruption: once armed it decrements and keeps pressing heavy
+      // for its full charge+1 span even if `me` gets hit, parried, or knocked down mid-charge and
+      // never actually reaches CHARGE/ATTACK. That's fine today because Fighter.act only reads
+      // intent.heavy while in IDLE/BLOCK (to start the charge) or CHARGE (to sustain it); in every
+      // other state (HITSTUN, KNOCKDOWN, STUNNED, ...) the intent bit is simply ignored, so a stale
+      // hHold countdown wastes a few frames of "would-be" input rather than corrupting behavior. It
+      // would need to actually reset on interruption before an AI tier that reacts mid-swing (Phase 3)
+      // could rely on hHold reflecting "still trying to land this heavy".
       if(hHold>0){hHold--;it.heavy=true;return it}
       if(me.busy())return it;
       const dist=Math.abs(foe.x-me.x)-me.width;
@@ -944,7 +952,7 @@ const Render={ctx:canvas.getContext('2d'),
   hud(c,f){const a=f.p1,b=f.p2;
     // Portraits + numeric hp bars: p1 left (green), p2 right (red->orange, drains from the right).
     const p1x=18,p2x=W-74,barW=300,barH=18,p1barX=84,p2barX=W-74-10-barW;
-    try{c.drawImage(Rig.portrait(a.def.look),p1x,14,56,56);c.drawImage(Rig.portrait(b.def.look),p2x,14,56,56)}catch(e){}
+    c.drawImage(Rig.portrait(a.def.look),p1x,14,56,56);c.drawImage(Rig.portrait(b.def.look),p2x,14,56,56);
     c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(p1x+1,15,54,54);c.strokeRect(p2x+1,15,54,54);
     c.textBaseline='alphabetic';
     c.font='bold 14px ui-monospace,monospace';c.textAlign='left';c.fillStyle='#fff';c.fillText(a.def.name,p1barX,25);

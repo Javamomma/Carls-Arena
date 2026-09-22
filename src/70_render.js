@@ -85,7 +85,7 @@ const Render={ctx:canvas.getContext('2d'),
   hud(c,f){const a=f.p1,b=f.p2;
     // Portraits + numeric hp bars: p1 left (green), p2 right (red->orange, drains from the right).
     const p1x=18,p2x=W-74,barW=300,barH=18,p1barX=84,p2barX=W-74-10-barW;
-    try{c.drawImage(Rig.portrait(a.def.look),p1x,14,56,56);c.drawImage(Rig.portrait(b.def.look),p2x,14,56,56)}catch(e){}
+    c.drawImage(Rig.portrait(a.def.look),p1x,14,56,56);c.drawImage(Rig.portrait(b.def.look),p2x,14,56,56);
     c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(p1x+1,15,54,54);c.strokeRect(p2x+1,15,54,54);
     c.textBaseline='alphabetic';
     c.font='bold 14px ui-monospace,monospace';c.textAlign='left';c.fillStyle='#fff';c.fillText(a.def.name,p1barX,25);
