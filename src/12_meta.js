@@ -67,14 +67,23 @@ const Stats={
 const Energy={
   now:()=>Date.now(),
   max:10,
+  // Fix-wave item 1 (Critical): e.ts defaulted to 0 (Meta.defaults) and was only ever advanced by
+  // regen*360000 -- never anchored to a real Energy.now() timestamp -- so now-ts was always ~57
+  // real years and tick() refilled to max on the very first call, making the energy gate inert.
+  // tick() now re-anchors e.ts=Energy.now() whenever n is already at/over max (both "never spent
+  // yet" and "just regenerated back to max"), so the NEXT spend-from-full has an honest starting
+  // point; spend() (below) anchors it directly at the moment of the transition out of full, which
+  // is the actual event regen should be measured from.
   tick(){
     const e=Save.data.energy;
     const regen=Math.min(Math.floor((Energy.now()-e.ts)/360000),Energy.max-e.n);
     if(regen>0){e.n+=regen;e.ts+=regen*360000}
+    if(e.n>=Energy.max)e.ts=Energy.now();
     return e.n},
   spend(n){
     const e=Save.data.energy;
     if(e.n<n)return false;
+    if(e.n===Energy.max)e.ts=Energy.now();
     e.n-=n;return true}};
 // Crystal.KINDS/open reference CHAMPS (40_movedata.js), which the build concatenates AFTER this
 // file — safe because these are only read inside a function body, called well after the whole

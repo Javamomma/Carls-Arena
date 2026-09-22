@@ -769,6 +769,31 @@ Test.add('Energy.tick regens over injected time, leaves partial progress, and ca
     Energy.tick();
     eq(Save.data.energy.n,10)
   }finally{Energy.now=origNow}});
+// Fix-wave item 1 (Critical): e.ts defaulted to 0 and was only ever advanced by regen*360000, never
+// anchored to Energy.now() -- so now-ts was always ~57 real years and every tick() refilled to max
+// instantly, making the energy gate inert. Fix: Energy.spend anchors e.ts=Energy.now() the instant
+// it spends FROM full (the transition out of "already regenerated"); Energy.tick() re-anchors
+// e.ts=Energy.now() whenever e.n is already at/over max (both the "never spent" and "just regenerated
+// back to max" cases). Regen math itself (floor((now-ts)/360000)) is unchanged.
+Test.add('Energy regenerates against the wall clock (fix-wave item 1): spend anchors ts, tick regens at 5/12/60 minutes',()=>{
+  const origNow=Energy.now;
+  try{
+    let t=1000000;Energy.now=()=>t;
+    Save.data=Meta.defaults(); // energy.n=10 (full), ts=0 -- must not matter once a real spend anchors it
+    ok(Energy.spend(3),'spend from full must succeed');
+    eq(Save.data.energy.n,7);
+    eq(Save.data.energy.ts,t,'spending from full must anchor ts to now, not leave it at the stale default');
+    t+=5*60*1000; // T+5min since the spend
+    Energy.tick();
+    eq(Save.data.energy.n,7,'no regen yet -- under the 6-minute interval');
+    t=1000000+12*60*1000; // T+12min since the spend
+    Energy.tick();
+    eq(Save.data.energy.n,9,'2 full 6-minute intervals since the spend => +2');
+    t=1000000+60*60*1000; // T+60min since the spend
+    Energy.tick();
+    eq(Save.data.energy.n,10,'caps at max');
+    eq(Save.data.energy.ts,t,'ts is pinned to now once full, so a later real spend anchors correctly again')
+  }finally{Energy.now=origNow}});
 Test.add('Energy.spend fails and changes nothing when short, succeeds when enough',()=>{
   Save.data.energy={n:0,ts:0,max:10};
   eq(Energy.spend(1),false);eq(Save.data.energy.n,0);

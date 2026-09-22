@@ -226,14 +226,23 @@ const Stats={
 const Energy={
   now:()=>Date.now(),
   max:10,
+  // Fix-wave item 1 (Critical): e.ts defaulted to 0 (Meta.defaults) and was only ever advanced by
+  // regen*360000 -- never anchored to a real Energy.now() timestamp -- so now-ts was always ~57
+  // real years and tick() refilled to max on the very first call, making the energy gate inert.
+  // tick() now re-anchors e.ts=Energy.now() whenever n is already at/over max (both "never spent
+  // yet" and "just regenerated back to max"), so the NEXT spend-from-full has an honest starting
+  // point; spend() (below) anchors it directly at the moment of the transition out of full, which
+  // is the actual event regen should be measured from.
   tick(){
     const e=Save.data.energy;
     const regen=Math.min(Math.floor((Energy.now()-e.ts)/360000),Energy.max-e.n);
     if(regen>0){e.n+=regen;e.ts+=regen*360000}
+    if(e.n>=Energy.max)e.ts=Energy.now();
     return e.n},
   spend(n){
     const e=Save.data.energy;
     if(e.n<n)return false;
+    if(e.n===Energy.max)e.ts=Energy.now();
     e.n-=n;return true}};
 // Crystal.KINDS/open reference CHAMPS (40_movedata.js), which the build concatenates AFTER this
 // file — safe because these are only read inside a function body, called well after the whole
@@ -4403,6 +4412,31 @@ Test.add('Energy.tick regens over injected time, leaves partial progress, and ca
     Energy.now=()=>60*60*1000; // would be 10 intervals; only 1 needed to hit max
     Energy.tick();
     eq(Save.data.energy.n,10)
+  }finally{Energy.now=origNow}});
+// Fix-wave item 1 (Critical): e.ts defaulted to 0 and was only ever advanced by regen*360000, never
+// anchored to Energy.now() -- so now-ts was always ~57 real years and every tick() refilled to max
+// instantly, making the energy gate inert. Fix: Energy.spend anchors e.ts=Energy.now() the instant
+// it spends FROM full (the transition out of "already regenerated"); Energy.tick() re-anchors
+// e.ts=Energy.now() whenever e.n is already at/over max (both the "never spent" and "just regenerated
+// back to max" cases). Regen math itself (floor((now-ts)/360000)) is unchanged.
+Test.add('Energy regenerates against the wall clock (fix-wave item 1): spend anchors ts, tick regens at 5/12/60 minutes',()=>{
+  const origNow=Energy.now;
+  try{
+    let t=1000000;Energy.now=()=>t;
+    Save.data=Meta.defaults(); // energy.n=10 (full), ts=0 -- must not matter once a real spend anchors it
+    ok(Energy.spend(3),'spend from full must succeed');
+    eq(Save.data.energy.n,7);
+    eq(Save.data.energy.ts,t,'spending from full must anchor ts to now, not leave it at the stale default');
+    t+=5*60*1000; // T+5min since the spend
+    Energy.tick();
+    eq(Save.data.energy.n,7,'no regen yet -- under the 6-minute interval');
+    t=1000000+12*60*1000; // T+12min since the spend
+    Energy.tick();
+    eq(Save.data.energy.n,9,'2 full 6-minute intervals since the spend => +2');
+    t=1000000+60*60*1000; // T+60min since the spend
+    Energy.tick();
+    eq(Save.data.energy.n,10,'caps at max');
+    eq(Save.data.energy.ts,t,'ts is pinned to now once full, so a later real spend anchors correctly again')
   }finally{Energy.now=origNow}});
 Test.add('Energy.spend fails and changes nothing when short, succeeds when enough',()=>{
   Save.data.energy={n:0,ts:0,max:10};
