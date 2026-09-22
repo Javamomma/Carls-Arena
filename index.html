@@ -2453,40 +2453,44 @@ POSES_QUAD.light2=pawSwipe('fr',{peakU:80,peakOffX:14});
 POSES_QUAD.light3=pawSwipe('fl',{peakU:86,peakOffX:17,spinePeak:9});
 POSES_QUAD.light4=pawSwipe('fr',{peakU:92,peakOffX:20,spinePeak:11});
 POSES_QUAD.light5=pawSwipe('fl',{peakU:104,peakL:-20,peakOffX:28,spinePeak:16,startL:18});
-// Medium (Task 6.5 / Phase 6 ruling 4: KICK is a leg strike in every rig): a hind-leg buck, not the
-// old full-body pounce. Front paws stay planted near their own idle position throughout (they're the
-// "lead hand" side of this pose contract, see the pose test below) while both HIND legs do the work:
-// anticipation (t:0) coils them up and well back — as if the hips were winding up to spin toward the
-// foe, though this 2D side-view FK has no real whole-body yaw to animate, so the "spin" is entirely
-// sold by the big swing (roughly 110-130deg of blU/brU travel from this coiled-back anticipation to
-// the strike keyframe below) rather than an actual hip rotation — then strike (t:.43, chosen so it
-// lands inside the move's own active window exactly like the human/big rigs above — see POSES.medium's
-// own comment for the frame math, identical here since MOVES.medium is shared by every rig) snaps both
-// hind paws forward at the foe (not backward — a literal "buck" kicks away from an opponent standing
-// behind, but this move has to reach the foe standing in FRONT); recovery (t:1) returns to an
-// idle-like stance facing forward. See the 'kick: medium's active-phase pose...' test (90_tests.js)
-// for the frozen "hind paw >=60px forward of idle, front paw within 20px of idle" contract this
-// satisfies for all three rig kinds — donut/mother_rat's reach budget (EDGE_PAD, see their own LOOKS
-// comments) is already close to its ceiling from OTHER poses (light5/s2/s3), so this kick was tuned to
-// land well inside that existing budget rather than becoming the new worst case.
-// Fix round 1 (controller review): the first pass tuned blU/blL down (76/14 -> 60/0) purely to keep
-// the strike paw's own y from disappearing under the body capsule's painted footprint, since drawQuad
-// used to draw the hind legs BEFORE that capsule (i.e. behind/under it) regardless of pose — the kick
-// passed the numeric pose test with room to spare but was nearly invisible in a real screenshot.
-// drawQuad now draws the striking hind legs AFTER the capsule during this pose specifically (see its
-// own comment), which removes the occlusion problem entirely — so the angles are back to the original,
-// more dramatic 76/14 (blU/blL) for a clearer, further-reaching kick silhouette now that nothing hides
-// it. The strike keyframe's off.y:6 (new) is the "slight hip drop" the review asked for: it lowers the
-// whole rear during the kick, which costs nothing in reach (Rig.extent's reach formula excludes off.y
-// entirely, see its own comment) and keeps the front paws planted almost exactly at their idle y
-// (verified: -1.0 vs idle's own -3.6 for donut) despite the hip itself sitting lower.
+// Medium (Task 6.5 / Phase 6 ruling 4, quad carve-out — Fix round 2, controller ruling): a rearing
+// double-front-paw slam, not the hind-leg buck this pose started as. Round 1's hind-leg buck (kept
+// only in this comment's own git history, not below) numerically satisfied "leg travels forward
+// >=60px" but the striking leg swung AWAY from the foe (behind the body, toward the tail side) once
+// actually viewed in a screenshot — a hind leg attached at the REAR of a quadruped simply cannot kick
+// something standing in FRONT without an impossible whole-body spin, which the frozen ruling's own
+// "KICK is a leg strike in every rig" language didn't anticipate for a quadruped's proportions. The
+// controller ruling carves the quad rig out of "leg" specifically and into "front paws, with visible
+// claws/pads" instead — still reads as a strike that isn't the arm-equivalent (front paws are what
+// pawSwipe()/light1-5 already use, but this move's rearing wind-up and both-paws-at-once strike read
+// nothing like a single light swipe's small flick, matching "a leg strike, not an arm move" in spirit
+// even though the striking limb is anatomically a foreleg here).
+// anticipation (t:0): the cat rocks BACK onto its hind legs — hips drop (off.y:10, cheap in reach, see
+// Rig.extent's own comment on off.y) while the front half rears up (spine+chest pitch to a combined
+// ~40deg, the literal "chest rises ~40deg" ask — solveQuad's chain accumulates pitch, chestA=spineA+
+// a('chest'), so spine:20+chest:20 gets there) — front paws lift off the ground, hind legs bend to
+// bear the shifted weight. strike (t:.43, chosen so it lands inside the move's own active window
+// exactly like the human/big rigs above — see POSES.medium's own comment for the frame math, identical
+// here since MOVES.medium is shared by every rig) drives both front paws forward and down from that
+// reared height toward the foe — they land partway down (fl2.y roughly -70 to -75 for donut, well
+// above true floor y=0, reading as "chest height" rather than a full ground slam) while the chest/
+// spine ease back off their anticipation peak (a slam descending into the strike, not still rising)
+// and the neck pitches up (neck:36, "head thrust forward"). recovery (t:1) drops back to an ordinary
+// all-fours idle-like stance. See the 'kick: medium's active-phase pose...' test (90_tests.js) for the
+// frozen ">=60px forward of idle, front paw driven" contract this satisfies for the quad rig (checked
+// via fl2, the same joint the pre-existing 'quad light1...' test already uses as its representative
+// paw) — donut/mother_rat's reach budget (EDGE_PAD, see their own LOOKS comments) is already close to
+// its ceiling from OTHER poses (light5/s2/s3), so this slam was tuned (flU/flL, off.x) to land inside
+// that existing budget with real margin (reach 253.7/250.8 vs the 260 ceiling) rather than becoming
+// the new worst case; `top` is unaffected (210.0/234.5, matching every pre-existing pose's own ceiling)
+// — the rear-up's own peak height never exceeds each look's already-tallest pose (s3/knockdown/win).
 POSES_QUAD.medium=[
-  {t:0, ang:{spine:D(2),chest:D(2),neck:D(30),tail1:D(34),tail2:D(-20),
-             flU:D(-4),flL:D(5),frU:D(6),frL:D(-6),
-             blU:D(-66),blL:D(50),brU:D(-58),brL:D(44)},off:{x:-4,y:2}},
-  {t:.43,ang:{spine:D(2),chest:D(2),neck:D(28),tail1:D(18),tail2:D(-8),
-             flU:D(2),flL:D(-2),frU:D(4),frL:D(-4),
-             blU:D(76),blL:D(14),brU:D(70),brL:D(18)},off:{x:6,y:6}},
+  {t:0, ang:{spine:D(20),chest:D(20),neck:D(20),tail1:D(10),tail2:D(-4),
+             flU:D(-40),flL:D(30),frU:D(-36),frL:D(28),
+             blU:D(20),blL:D(-14),brU:D(18),brL:D(-12)},off:{x:-6,y:10}},
+  {t:.43,ang:{spine:D(8),chest:D(10),neck:D(36),tail1:D(4),tail2:D(2),
+             flU:D(78),flL:D(-26),frU:D(74),frL:D(-24),
+             blU:D(16),blL:D(-10),brU:D(14),brL:D(-8)},off:{x:12,y:0}},
   {t:1, ang:{spine:D(2),chest:D(2),neck:D(32),tail1:D(10),tail2:D(-4),
              flU:D(-2),flL:D(4),frU:D(2),frL:D(-2),
              blU:D(-4),blL:D(5),brU:D(6),brL:D(-6)},off:{x:0,y:0}}];
@@ -3434,37 +3438,33 @@ const Rig={
     const scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solveQuad(look,key,t01,face);
     const skinDark=shade(look.skin,-.35);
-    // Fix round 1 (controller review, Task 6.5): the medium kick's hind legs used to be drawn in the
-    // same fixed spot as every other pose -- BEHIND the body capsule below, since that's simply the
-    // order this function always drew in -- so no pose data could ever make the kick clear the body's
-    // own paint; it read as invisible in a real screenshot despite passing the numeric pose test with
-    // room to spare. `kicking` gates a second, later draw of the hind legs (after the body/front legs,
-    // see below) specifically for this one pose, instead of reordering the whole function for every
-    // pose (which would put the hind legs in front of the body during idle/walk/light1/etc too, where
-    // nothing asked for that and it would read as a rendering regression, not a fix).
-    const kicking=key==='medium';
+    // Fix round 2 (controller review, Task 6.5): the medium kick is now a rearing double-front-paw
+    // slam (see POSES_QUAD.medium's own comment) — the striking limbs are the FRONT legs, which this
+    // function already draws last (in front of the body), so unlike fix round 1's now-reverted
+    // hind-leg-specific draw-order hack, no reordering is needed here at all; `slamming` only gates the
+    // front paws' own look (a darker tint + a visible pad, see paw() below), not layering.
+    const slamming=key==='medium';
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
     const limb=(p,q,w,col)=>{c.lineCap='round';
       c.lineWidth=w+3;c.strokeStyle=shade(col||look.skin,-.35);c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke();
       c.lineWidth=w;c.strokeStyle=col||look.skin;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke()};
-    // pad (Fix round 1): an optional second arg draws a bigger, tinted "kick paw" -- a visible paw pad
-    // (a smaller lighter oval set into the fill, the same "shade a highlight into a flat fill" trick
+    // pad: an optional second/third arg draws a bigger, tinted "slam paw" -- a visible paw pad (a
+    // smaller lighter oval set into the fill, the same "shade a highlight into a flat fill" trick
     // drawBig's own scars/brow-ridge props already use) instead of the ordinary flat ellipse, so the
-    // striking paw itself reads as a deliberate foot, not just a leg-end. col overrides the fill/
-    // stroke entirely (the kicking limbs' own darker tint, see below); undefined keeps the ordinary look.
+    // striking paw itself reads as a deliberate foot with claws/pad, not just a leg-end. col overrides
+    // the fill/stroke entirely (the slamming front paws' own darker tint, see below); undefined keeps
+    // the ordinary look every non-kick pose still uses.
     const paw=(p,col,pad)=>{const r=look.legW*(pad?.68:.58);
       c.fillStyle=col||look.skin;c.strokeStyle=shade(col||look.skin,-.35);c.lineWidth=1.2;
       c.beginPath();c.ellipse(p.x,p.y,r,r*.72,0,0,Math.PI*2);c.fill();c.stroke();
       if(pad){c.fillStyle=look.earInner||shade(col||look.skin,.32);
         c.beginPath();c.ellipse(p.x,p.y+r*.06,r*.46,r*.32,0,0,Math.PI*2);c.fill()}};
-    // back legs first (behind the body), then the tail (base tucks under the hip), UNLESS this is the
-    // kick (see `kicking` above) -- then they're skipped here and drawn again, in front, after the
-    // body/front legs below. Upper legs noticeably thicker than lower (.55 taper, was .78 in round 1 —
-    // art review called the whole rig "wire-bodied" and this taper is part of giving it real limb
-    // volume, matching the human rig's own thigh/shin taper).
-    if(!kicking){
-      limb(j.blHip,j.bl1,look.legW);limb(j.bl1,j.bl2,look.legW*.55);paw(j.bl2);
-      limb(j.brHip,j.br1,look.legW);limb(j.br1,j.br2,look.legW*.55);paw(j.br2)}
+    // back legs first (behind the body), then the tail (base tucks under the hip). Upper legs
+    // noticeably thicker than lower (.55 taper, was .78 in round 1 — art review called the whole rig
+    // "wire-bodied" and this taper is part of giving it real limb volume, matching the human rig's
+    // own thigh/shin taper).
+    limb(j.blHip,j.bl1,look.legW);limb(j.bl1,j.bl2,look.legW*.55);paw(j.bl2);
+    limb(j.brHip,j.br1,look.legW);limb(j.br1,j.br2,look.legW*.55);paw(j.br2);
     limb(j.hip,j.tail1,look.legW*.6,look.tailTint);limb(j.tail1,j.tail2,look.legW*.42,look.tailTint);
     c.fillStyle=look.tailTint||look.skin;c.beginPath();c.arc(j.tail2.x,j.tail2.y,look.legW*.26,0,Math.PI*2);c.fill();
     // Filled body: art review (Fix round 1) called the original hip->chest stroke (width
@@ -3507,18 +3507,16 @@ const Rig={
           c.fill()}}}
     c.fillStyle=look.eye||'#141414';
     c.beginPath();c.arc(j.head.x+face*look.headR*.45,j.head.y-look.headR*.05,look.headR*.14,0,Math.PI*2);c.fill();
-    // front legs, drawn last of the limbs so they sit in front of the body
-    limb(j.flHip,j.fl1,look.legW);limb(j.fl1,j.fl2,look.legW*.55);paw(j.fl2);
-    limb(j.frHip,j.fr1,look.legW);limb(j.fr1,j.fr2,look.legW*.55);paw(j.fr2);
-    // Fix round 1 (controller review, Task 6.5): the kick's hind legs, drawn here instead of their
-    // usual spot above (see `kicking`'s own comment) so the body capsule and front legs can never hide
-    // them -- a shade darker than the body fill (kickCol) so the striking limb visually separates from
-    // the body even where it overlaps it, plus the bigger, pad-marked paw() variant, both per the
-    // review's "make the strike more legible" ask.
-    if(kicking){
-      const kickCol=shade(look.skin,-.22);
-      limb(j.blHip,j.bl1,look.legW,kickCol);limb(j.bl1,j.bl2,look.legW*.55,kickCol);paw(j.bl2,kickCol,true);
-      limb(j.brHip,j.br1,look.legW,kickCol);limb(j.br1,j.br2,look.legW*.55,kickCol);paw(j.br2,kickCol,true)}
+    // front legs, drawn last of the limbs so they sit in front of the body -- which is exactly why the
+    // medium slam (Fix round 2) needs no special draw-order handling at all, unlike fix round 1's now-
+    // reverted hind-leg version: the striking limbs are already the last (frontmost) thing drawn here.
+    // `slamming` only swaps in the tinted, pad-marked paw() variant for legibility ("claws/paw pads
+    // visible" per the review) -- a shade darker than the body fill so the striking paws separate from
+    // it even where they overlap it, matching Fix round 1's own paw-pad treatment, just correctly
+    // applied to the limb that's actually doing the striking this round.
+    const slamCol=slamming?shade(look.skin,-.22):undefined;
+    limb(j.flHip,j.fl1,look.legW,slamCol);limb(j.fl1,j.fl2,look.legW*.55,slamCol);paw(j.fl2,slamCol,slamming);
+    limb(j.frHip,j.fr1,look.legW,slamCol);limb(j.fr1,j.fr2,look.legW*.55,slamCol);paw(j.fr2,slamCol,slamming);
     for(const p of look.props||[]){
       if(p==='tiara'){ // a small gold crown resting between the ears
         const w=look.headR*.7,h=look.headR*.42,cx=j.head.x,cy=j.head.y-look.headR*.9;
@@ -8640,7 +8638,7 @@ function activeMidT01(name){const m=MOVES[name],act=(m.hits||1)*m.active+((m.hit
 // which similarly check one look each rather than every look in LOOKS) -- the separate 'every look\'s
 // reach fits inside EDGE_PAD' and 'every look renders every pose without throwing' tests already cover
 // every look in the roster for the concerns that actually vary per-look (reach budget, finite FK).
-Test.add('kick: medium\'s active-phase pose snaps a leg forward in every rig while the lead hand/paw stays near idle',()=>{
+Test.add('kick: medium\'s active-phase pose drives a striking limb >=60px forward in every rig (human/big: a leg, lead hand stays near idle; quad: a front-paw slam)',()=>{
   const T=activeMidT01('medium');
   // human (Carl): the rear leg (rFoot) kicks forward; the lead (left) hand counterbalances but stays
   // close to its own idle x (see POSES.medium's own comment for why the torso's back-lean would
@@ -8655,12 +8653,17 @@ Test.add('kick: medium\'s active-phase pose snaps a leg forward in every rig whi
     const footFwd=strike.rFoot.x-idle.rFoot.x,handDrift=Math.abs(strike.lHand.x-idle.lHand.x);
     ok(footFwd>=60,'big kicking foot must be >=60px forward of idle: '+footFwd.toFixed(1));
     ok(handDrift<=20,'big guard fist must stay within 20px of idle: '+handDrift.toFixed(1))}
-  // quad (Donut): both hind paws kick forward at the foe -- checked via bl2 -- while the front paws
-  // stay planted near idle (the quad rig's own "lead hand" equivalent) -- checked via fl2.
+  // quad (Donut): Fix round 2 (controller ruling) -- a hind-leg kick numerically satisfied ">=60px
+  // forward" but swung AWAY from the foe (a hind leg physically can't reach something in front without
+  // an impossible whole-body spin), so the quad rig is carved out of "leg" specifically: a rearing
+  // double-front-paw slam instead, striking via the SAME front paws pawSwipe()/light1-5 already use
+  // (checked via fl2, the same joint the pre-existing 'quad light1...' test above already treats as
+  // the representative paw) -- no "stays near idle" counterpart is checked for this rig the way the
+  // human/big lead-hand checks are: this design deliberately moves the whole body (a rear-up, not one
+  // limb striking while another holds guard), so there's no passive limb left to assert against.
   {const idle=Rig.solve(LOOKS.donut,'idle',0,1),strike=Rig.solve(LOOKS.donut,'medium',T,1);
-    const pawFwd=strike.bl2.x-idle.bl2.x,frontDrift=Math.abs(strike.fl2.x-idle.fl2.x);
-    ok(pawFwd>=60,'quad hind paw must be >=60px forward of idle: '+pawFwd.toFixed(1));
-    ok(frontDrift<=20,'quad front paw must stay within 20px of idle: '+frontDrift.toFixed(1))}});
+    const pawFwd=strike.fl2.x-idle.fl2.x;
+    ok(pawFwd>=60,'quad striking front paw must be >=60px forward of idle: '+pawFwd.toFixed(1))}});
 // The contrasting half of the same frozen contract ("so punch vs kick are distinguishable by data"):
 // light1 (the arm jab every rig keeps unchanged, per Phase 6 ruling 4) must NOT move the legs/hind
 // paws the way the new kick does -- human (Carl, both feet) and quad (Donut, both hind paws, since

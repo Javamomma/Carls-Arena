@@ -3146,7 +3146,7 @@ function activeMidT01(name){const m=MOVES[name],act=(m.hits||1)*m.active+((m.hit
 // which similarly check one look each rather than every look in LOOKS) -- the separate 'every look\'s
 // reach fits inside EDGE_PAD' and 'every look renders every pose without throwing' tests already cover
 // every look in the roster for the concerns that actually vary per-look (reach budget, finite FK).
-Test.add('kick: medium\'s active-phase pose snaps a leg forward in every rig while the lead hand/paw stays near idle',()=>{
+Test.add('kick: medium\'s active-phase pose drives a striking limb >=60px forward in every rig (human/big: a leg, lead hand stays near idle; quad: a front-paw slam)',()=>{
   const T=activeMidT01('medium');
   // human (Carl): the rear leg (rFoot) kicks forward; the lead (left) hand counterbalances but stays
   // close to its own idle x (see POSES.medium's own comment for why the torso's back-lean would
@@ -3161,12 +3161,17 @@ Test.add('kick: medium\'s active-phase pose snaps a leg forward in every rig whi
     const footFwd=strike.rFoot.x-idle.rFoot.x,handDrift=Math.abs(strike.lHand.x-idle.lHand.x);
     ok(footFwd>=60,'big kicking foot must be >=60px forward of idle: '+footFwd.toFixed(1));
     ok(handDrift<=20,'big guard fist must stay within 20px of idle: '+handDrift.toFixed(1))}
-  // quad (Donut): both hind paws kick forward at the foe -- checked via bl2 -- while the front paws
-  // stay planted near idle (the quad rig's own "lead hand" equivalent) -- checked via fl2.
+  // quad (Donut): Fix round 2 (controller ruling) -- a hind-leg kick numerically satisfied ">=60px
+  // forward" but swung AWAY from the foe (a hind leg physically can't reach something in front without
+  // an impossible whole-body spin), so the quad rig is carved out of "leg" specifically: a rearing
+  // double-front-paw slam instead, striking via the SAME front paws pawSwipe()/light1-5 already use
+  // (checked via fl2, the same joint the pre-existing 'quad light1...' test above already treats as
+  // the representative paw) -- no "stays near idle" counterpart is checked for this rig the way the
+  // human/big lead-hand checks are: this design deliberately moves the whole body (a rear-up, not one
+  // limb striking while another holds guard), so there's no passive limb left to assert against.
   {const idle=Rig.solve(LOOKS.donut,'idle',0,1),strike=Rig.solve(LOOKS.donut,'medium',T,1);
-    const pawFwd=strike.bl2.x-idle.bl2.x,frontDrift=Math.abs(strike.fl2.x-idle.fl2.x);
-    ok(pawFwd>=60,'quad hind paw must be >=60px forward of idle: '+pawFwd.toFixed(1));
-    ok(frontDrift<=20,'quad front paw must stay within 20px of idle: '+frontDrift.toFixed(1))}});
+    const pawFwd=strike.fl2.x-idle.fl2.x;
+    ok(pawFwd>=60,'quad striking front paw must be >=60px forward of idle: '+pawFwd.toFixed(1))}});
 // The contrasting half of the same frozen contract ("so punch vs kick are distinguishable by data"):
 // light1 (the arm jab every rig keeps unchanged, per Phase 6 ruling 4) must NOT move the legs/hind
 // paws the way the new kick does -- human (Carl, both feet) and quad (Donut, both hind paws, since
