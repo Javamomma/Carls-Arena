@@ -1924,3 +1924,177 @@ Test.add('title screen: CAMPAIGN is the primary button, others secondary, SOUND 
   ok(parseFloat(cs.fontSize)>parseFloat(rs.fontSize),'CAMPAIGN must read visually larger than a secondary button');
   ok(document.getElementById('titleMute').closest('.settingsrow'),'SOUND must be moved into its own small settings row');
   Screens.title()});
+// --- Task 5.4: settings, orientation guard, haptics, audio unlock, share card -------------------
+Test.add('Meta.defaults().settings has the frozen Phase 5 shape',()=>{
+  const s=Meta.defaults().settings;
+  eq(s.reduceMotion,false);eq(s.haptics,true);eq(s.leftHanded,false);
+  eq(s.useAtlas,false);eq(s.sfx,true);eq(s.announcer,true)});
+Test.add('Meta.migrate (v2) backfills a missing settings key without discarding an already-present one',()=>{
+  const d=Meta.migrate({v:2,settings:{sfx:false}});
+  eq(d.settings.sfx,false,'an existing key must survive migration');
+  eq(d.settings.haptics,true,'a missing key must be backfilled to its default');
+  eq(d.settings.reduceMotion,false,'another missing key must also be backfilled')});
+Test.add('Meta.migrate (v1) merges the old settings object onto the new defaults instead of replacing them',()=>{
+  const d=Meta.migrate({v:1,gold:10,settings:{mute:true}});
+  eq(d.settings.mute,true,'an old v1 settings field must be preserved');
+  eq(d.settings.haptics,true,'a new Phase 5 default must still be present, not lost to a v1 replace')});
+Test.add('Screens.settings() renders one 44px+ toggle row per Screens.SETTINGS_ROWS entry, reflecting Save.data.settings',()=>{
+  Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
+  Screens.settings();
+  const rows=[...document.querySelectorAll('#settingsRows .setrow')];
+  eq(rows.length,Screens.SETTINGS_ROWS.length);
+  for(const el of rows)ok(parseFloat(getComputedStyle(el).minHeight)>=44,el.id+' must be a real touch target');
+  ok(document.getElementById('set_reduceMotion').textContent.includes('ON'),'reduceMotion true must render ON');
+  ok(document.getElementById('set_haptics').textContent.includes('ON'),'haptics defaults true');
+  Screens.title()});
+Test.add('clicking a settings toggle row flips and persists Save.data.settings, then re-renders the label',()=>{
+  Save.data=Meta.defaults();
+  Screens.settings();
+  eq(Save.data.settings.sfx,true);
+  document.getElementById('set_sfx').click();
+  eq(Save.data.settings.sfx,false);
+  ok(document.getElementById('set_sfx').textContent.includes('OFF'));
+  document.getElementById('set_sfx').click();
+  eq(Save.data.settings.sfx,true);
+  ok(document.getElementById('set_sfx').textContent.includes('ON'));
+  Screens.title()});
+Test.add('Screens.settings() BACK returns to the title screen; the title screen\'s SETTINGS button opens it',()=>{
+  Screens.title();
+  document.getElementById('btnSettings').click();
+  eq(Screens._current,'settings');
+  document.getElementById('settingsBack').click();
+  eq(Screens._current,'title')});
+Test.add('G.applySettings toggles the left-handed body class from Save.data.settings.leftHanded',()=>{
+  Save.data=Meta.defaults();
+  Save.data.settings.leftHanded=true;G.applySettings();
+  ok(document.body.classList.contains('left-handed'));
+  Save.data.settings.leftHanded=false;G.applySettings();
+  ok(!document.body.classList.contains('left-handed'))});
+Test.add('leftHanded mirrors the on-screen button layout: #btnBlock ends up right of #btnPunch/#btnKick/#btnPower',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()}); // shows #btns (collapses to a
+  // zero rect while hidden pre-fight -- see G.positionToast's own comment)
+  document.body.classList.remove('left-handed');
+  const block=document.getElementById('btnBlock'),punch=document.getElementById('btnPunch'),
+        kick=document.getElementById('btnKick'),power=document.getElementById('btnPower');
+  ok(block.getBoundingClientRect().left<punch.getBoundingClientRect().left,'normal layout: BLOCK left of PUNCH');
+  document.body.classList.add('left-handed');
+  ok(block.getBoundingClientRect().left>punch.getBoundingClientRect().left,'left-handed: BLOCK right of PUNCH');
+  ok(block.getBoundingClientRect().left>kick.getBoundingClientRect().left,'left-handed: BLOCK right of KICK');
+  ok(block.getBoundingClientRect().left>power.getBoundingClientRect().left,'left-handed: BLOCK right of POWER');
+  document.body.classList.remove('left-handed');
+  G.toTitle()});
+Test.add('reduceMotion zeroes camera shake and screen flash but leaves popups untouched',()=>{
+  Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
+  FX.reset();
+  FX.push({kind:'shake',amt:10});FX.push({kind:'flash',frames:6});
+  FX.push({kind:'popup',x:0,y:0,text:'5',col:'#fff'});
+  eq(FX.shake,0,'shake must stay 0 under reduceMotion');
+  eq(FX.flash,0,'flash must stay 0 under reduceMotion');
+  eq(FX.list.length,1,'a popup must still be queued under reduceMotion');
+  Save.data.settings.reduceMotion=false;
+  FX.reset();
+  FX.push({kind:'shake',amt:10});FX.push({kind:'flash',frames:6});
+  ok(FX.shake>0,'shake must accumulate normally once reduceMotion is off');
+  ok(FX.flash>0,'flash must accumulate normally once reduceMotion is off')});
+Test.add('settings.sfx===false makes G.playRecipe (every Audio.recipes.* call site) a no-op, even against a stubbed recipe',()=>{
+  Save.data=Meta.defaults();Save.data.settings.sfx=false;
+  let called=false;const stub=()=>{called=true};
+  G.playRecipe(stub);
+  eq(called,false,'a stubbed recipe must not be called when sfx is off');
+  Save.data.settings.sfx=true;
+  G.playRecipe(stub);
+  eq(called,true,'the same stub must be called once sfx is back on')});
+Test.add('a landed hit does not call Audio.recipes.light1 when settings.sfx is off',()=>{
+  Save.data=Meta.defaults();Save.data.settings.sfx=false;
+  const orig=Audio.recipes.light1;let called=false;
+  Audio.recipes.light1=()=>{called=true};
+  try{
+    G.startFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+    closeIn(G.fight);G.sim=true;
+    for(let i=0;i<8;i++)G.tick();
+    eq(called,false,'Audio.recipes.light1 must not be called with sfx off')
+  }finally{Audio.recipes.light1=orig;Save.data.settings.sfx=true;G.toTitle();G.sim=false}});
+Test.add('settings.announcer===false makes G.say a no-op (the toast stays empty)',()=>{
+  Save.data=Meta.defaults();Save.data.settings.announcer=false;
+  const el=document.getElementById('toast');el.textContent='';
+  G.fight=null;G.frameNow=1000;G._sayAt=-999; // clear the throttle so a call would otherwise definitely show
+  G.say('should not appear');
+  eq(el.textContent,'','the toast must stay empty when announcer is off');
+  Save.data.settings.announcer=true;
+  G.say('should appear');
+  eq(el.textContent,'should appear');
+  el.textContent=''});
+Test.add('haptics: navigator.vibrate(12) fires when the PLAYER takes a hit, guarded by the setting and by vibrate existing',()=>{
+  Save.data=Meta.defaults();
+  const hadOwn=Object.prototype.hasOwnProperty.call(navigator,'vibrate'),orig=navigator.vibrate;
+  let calls=[];
+  navigator.vibrate=(...a)=>{calls.push(a)};
+  try{
+    G.startFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.script([L(0)]),seed:1}); // p2 (enemy) hits p1 (player)
+    closeIn(G.fight);G.sim=true;
+    for(let i=0;i<8;i++)G.tick();
+    eq(calls.length,1,'exactly one vibrate call for the one hit the player took');
+    eq(calls[0][0],12);
+    G.toTitle();
+    Save.data.settings.haptics=false;calls=[];
+    G.startFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.script([L(0)]),seed:1});
+    closeIn(G.fight);
+    for(let i=0;i<8;i++)G.tick();
+    eq(calls.length,0,'haptics off must suppress the vibrate call');
+  }finally{
+    if(hadOwn)navigator.vibrate=orig;else delete navigator.vibrate;
+    G.toTitle();G.sim=false}});
+Test.add('G.needsRotate is a pure function of (w,h,touch): portrait AND a touch device must both hold',()=>{
+  eq(G.needsRotate(480,854,true),true,'portrait + touch must need rotate');
+  eq(G.needsRotate(854,480,true),false,'landscape + touch must not need rotate');
+  eq(G.needsRotate(480,854,false),false,'portrait on a non-touch device must not need rotate');
+  eq(G.needsRotate(854,480,false),false,'landscape + non-touch must not need rotate');
+  eq(G.needsRotate(480,480,true),false,'a square viewport (h not > w) must not need rotate')});
+Test.add('G.checkOrientation shows/hides #rotate based on G.needsRotate\'s result',()=>{
+  const origNeeds=G.needsRotate;
+  try{
+    G.needsRotate=()=>true;G.checkOrientation();
+    ok(document.getElementById('rotate').classList.contains('show'),'#rotate must show when needsRotate is true');
+    G.needsRotate=()=>false;G.checkOrientation();
+    ok(!document.getElementById('rotate').classList.contains('show'),'#rotate must hide when needsRotate is false')
+  }finally{G.needsRotate=origNeeds}});
+Test.add('G.initTapLayer(true) shows #tap and hides it (unlocking audio) on the first pointerdown; initTapLayer(false) hides it immediately',()=>{
+  const tap=document.getElementById('tap');
+  tap.classList.remove('show');
+  const origInit=Audio.init;let audioInitCalled=false;
+  Audio.init=()=>{audioInitCalled=true};
+  try{
+    G.initTapLayer(true);
+    ok(tap.classList.contains('show'),'a touch device must show #tap');
+    tap.dispatchEvent(new Event('pointerdown'));
+    ok(!tap.classList.contains('show'),'#tap must hide after a pointerdown');
+    ok(audioInitCalled,'the first pointerdown must call Audio.init()')
+  }finally{Audio.init=origInit}
+  tap.classList.add('show');
+  G.initTapLayer(false);
+  ok(!tap.classList.contains('show'),'a non-touch device must hide #tap immediately, no gesture needed')});
+Test.add('G.shareCard returns an 854x480 PNG data URL, decoded via the raw PNG IHDR bytes (no DOM/Image needed)',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p1:'carl',p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
+  const url=G.shareCard();
+  ok(url.startsWith('data:image/png;base64,'),'must be a PNG data URL: '+url.slice(0,40));
+  const bytes=atob(url.slice('data:image/png;base64,'.length));
+  const byteAt=i=>bytes.charCodeAt(i);
+  // PNG: an 8-byte signature, then the IHDR chunk (4-byte length, 'IHDR', 4-byte width, 4-byte
+  // height, big-endian) starting at byte 12 -- decoded here by hand (Test.run() is synchronous, so
+  // an async Image-element decode isn't available in-page); tests/harness.py's --share does the
+  // equivalent decode in Python against the same bytes.
+  eq(bytes.slice(12,16),'IHDR','bytes 12..16 must be the IHDR chunk tag');
+  const u32=off=>(byteAt(off)<<24|byteAt(off+1)<<16|byteAt(off+2)<<8|byteAt(off+3))>>>0;
+  eq(u32(16),854,'PNG width must be 854');
+  eq(u32(20),480,'PNG height must be 480');
+  G.toTitle()});
+Test.add('G.shareCard works with no live fight (falls back to Save.data.active) and never throws',()=>{
+  Save.data=Meta.defaults();G.toTitle();
+  ok(!threw(()=>G.shareCard()),'shareCard must not throw with G.fight null')});
+Test.add('a SHARE button exists on the result screen and calls G.share on click',()=>{
+  ok(document.getElementById('shareBtn'),'#shareBtn must exist');
+  const orig=G.share;let called=false;G.share=()=>{called=true};
+  try{document.getElementById('shareBtn').click();eq(called,true,'clicking SHARE must call G.share')}
+  finally{G.share=orig}});

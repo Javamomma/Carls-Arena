@@ -22,7 +22,13 @@ const Meta={
       // pity was designed), added here so migrate()'s generic top-level fill loop below covers
       // pre-4.2 v2 saves for free.
       pity:{},
-      mute:false,settings:{},stats:{fights:0,wins:0}}},
+      // Task 5.4: the frozen settings shape. A plain top-level default key (same free-ride-through-
+      // migrate() story as leaderboard/pity above for a pre-5.4 v2 save that already has a `settings`
+      // key of some shape) -- see migrate()'s own v2 branch below for the explicit per-key backfill
+      // this one DOES need (unlike leaderboard/pity, `settings` already existed as `{}` before this
+      // task, so the generic "fill anything TOP-LEVEL missing" loop below would never touch it).
+      settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true},
+      mute:false,stats:{fights:0,wins:0}}},
   // v1 -> v2: keep gold/units/mute/settings, everything else starts fresh (including roster, which
   // v1 saves never meaningfully populated). v2 -> v2: fill in any keys/sub-keys a save from an
   // earlier Phase 4 build is missing, in place, without discarding what's already there. Anything
@@ -32,7 +38,11 @@ const Meta={
     if(data.v===1){
       const d=Meta.defaults();
       d.gold=data.gold||0;d.units=data.units||0;d.mute=!!data.mute;
-      d.settings=data.settings&&typeof data.settings==='object'?data.settings:{};
+      // Task 5.4: merge (not replace) onto d.settings' fresh defaults -- a plain replace here used to
+      // mean a v1 save with its own (pre-5.4, necessarily settings-shape-less) settings object would
+      // completely discard the new reduceMotion/haptics/leftHanded/useAtlas/sfx/announcer defaults,
+      // leaving e.g. haptics undefined (falsy) instead of its intended default true.
+      d.settings=Object.assign({},d.settings,data.settings&&typeof data.settings==='object'?data.settings:{});
       return d}
     if(data.v===2){
       const d=Meta.defaults();
@@ -41,6 +51,11 @@ const Meta={
       for(const k in d.energy)if(!(k in data.energy))data.energy[k]=d.energy[k];
       for(const k in d.arena)if(!(k in data.arena))data.arena[k]=d.arena[k];
       for(const k in d.stats)if(!(k in data.stats))data.stats[k]=d.stats[k];
+      // Task 5.4: `settings` already existed (as `{}`) before this task, so the generic top-level
+      // loop above never repopulates it for an old save -- explicit per-key backfill, same pattern as
+      // cats/energy/arena/stats just above.
+      if(!data.settings||typeof data.settings!=='object')data.settings=d.settings;
+      else for(const k in d.settings)if(!(k in data.settings))data.settings[k]=d.settings[k];
       if(!data.roster||typeof data.roster!=='object'||!Object.keys(data.roster).length)data.roster=d.roster;
       // Fix-wave item 10 (minor): migrate could reset `roster` (right above) without repointing a
       // stale `active` that named a champion the reset just dropped -- Rewards.grant's xp path reads

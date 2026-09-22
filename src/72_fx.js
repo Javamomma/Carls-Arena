@@ -19,11 +19,16 @@ const FX={list:[],shake:0,flash:0,card:null,
       case'popup':
         this.list.push({kind:'popup',x:ev.x,y:ev.y,text:ev.text,col:ev.col||'#fff',big:!!ev.big,life:0,max:40});
         break;
+      // Task 5.4: Save.data.settings.reduceMotion zeroes camera shake and screen flash (the two
+      // motion-heavy FX) while leaving every other kind — sparks, dust, damage popups, the S3 card —
+      // untouched, per the frozen interface ("shake/flash amounts 0, popups stay"). Checked here, at
+      // the single place both ever accumulate, rather than at each of Fight.resolve's several push
+      // call sites.
       case'shake':
-        this.shake=Math.min(24,this.shake+(ev.amt||0));
+        if(!Save.data.settings.reduceMotion)this.shake=Math.min(24,this.shake+(ev.amt||0));
         break;
       case'flash':
-        this.flash=Math.max(this.flash,ev.frames||0);
+        if(!Save.data.settings.reduceMotion)this.flash=Math.max(this.flash,ev.frames||0);
         break;
       // 'slowmo' is driven directly through fight.slowmo/G.tick, still a no-op here.
       case'card':

@@ -16,7 +16,7 @@ const Screens={
   // Fixed table of what each name shows/renders; kept as one object so show()/refresh() share it
   // instead of a chain of if/else per screen name.
   RENDER:{title:'renderTitle',map:'renderMap',roster:'renderRoster',crystal:'renderCrystal',
-    shop:'renderShop',arena:'renderArena',result:'renderResult'},
+    shop:'renderShop',arena:'renderArena',result:'renderResult',settings:'renderSettings'},
   // Hides every Phase 4 overlay (plus pauseMenu, so the pause menu's QUIT and the result screen's
   // CONTINUE -- both of which land here through backToOrigin -- never leave it stuck on screen
   // over a browsing screen) and the touch buttons, shows exactly `name`, then renders it. The
@@ -24,7 +24,7 @@ const Screens={
   // visible) -- so show() both toggles AND renders, and Screens.map/roster/... below are thin
   // wrappers that stash their arg (if any) and call this.
   show(name){
-    for(const id of['title','map','roster','crystal','shop','arena','result','pauseMenu'])G.show(id,id===name);
+    for(const id of['title','map','roster','crystal','shop','arena','result','pauseMenu','settings'])G.show(id,id===name);
     G.show('btns',false);
     this._current=name;
     const fn=this.RENDER[name];
@@ -44,11 +44,14 @@ const Screens={
   // no other caller in the codebase passes it (G's own no-Screens fallback in onFightEnd builds its
   // #resultLine text directly instead), but every real click-through path (Screens.show->this) does.
   result(rewards,won,peakViewers){this._rewards=rewards;this._won=won;this._peakViewers=peakViewers;this.show('result')},
+  // Task 5.4: not a fight-launching screen, so BACK just goes straight to the title (same pattern as
+  // map/roster/crystal/shop/arena's own BACK -- none of them route through toOrigin()/_origin either).
+  settings(){this.show('settings')},
   // Called from G.startFight the instant a fight actually begins (title/result/pauseMenu are
   // already hidden there directly) -- a fight can be launched from any browsing screen (a map
   // node, arena's FIGHT, exhibition off the title screen), so whichever one is still up needs
   // hiding too, or it would linger visually over the fight underneath.
-  hideAll(){for(const id of['title','map','roster','crystal','shop','arena'])G.show(id,false);this._current=null},
+  hideAll(){for(const id of['title','map','roster','crystal','shop','arena','settings'])G.show(id,false);this._current=null},
   // Re-renders whatever screen is currently up (no visibility change) -- called after any Meta
   // mutation a button on that screen just made, so costs/affordability/counts reflect it
   // immediately without a full show() (which would also re-toggle overlay classes for no reason).
@@ -65,10 +68,11 @@ const Screens={
   lastFloor(){const ks=Object.keys(Save.data.floors).map(Number);return ks.length?Math.max.apply(null,ks):1},
   // ---- title -------------------------------------------------------------------------------
   renderTitle(){
-    // The SOUND button's click handler (the one place that actually flips Audio.muted/Save.data.mute)
-    // stays bound in G.init() (80_game.js), unchanged from before Task 4.5 -- Screens only syncs the
-    // label text here (read-only) so it reflects the persisted mute state whenever title is shown.
-    document.getElementById('titleMute').textContent='SOUND: '+(Audio.muted?'OFF':'ON');
+    // Task 5.4: the title screen's old bare SOUND toggle became a SETTINGS button -- SOUND itself
+    // (#titleMute, still the one place Audio.muted/Save.data.mute actually flip -- see G.init())
+    // moved into the new #settings overlay as one more toggle row; renderSettings() below is what
+    // syncs its label text now, since that's the screen it actually lives on.
+    document.getElementById('btnSettings').onclick=()=>Screens.settings();
     document.getElementById('btnCampaign').onclick=()=>{const n=Screens.lastFloor();
       Screens._origin={name:'map',args:[n]};Screens.map(n)};
     document.getElementById('btnArenaMenu').onclick=()=>{Screens._origin={name:'arena'};Screens.arena()};
@@ -79,6 +83,35 @@ const Screens={
     // same as the old fightBtn did.
     document.getElementById('btnExhibition').onclick=()=>{Screens._origin={name:'title'};
       Audio.init();G.startFight()}},
+  // ---- settings ------------------------------------------------------------------------------
+  // Task 5.4: one row per Save.data.settings key, 44px-tall toggle buttons (the frozen interface's
+  // own wording) rendered from this table instead of six hand-copied blocks -- same "render from a
+  // table" pattern Meta.SHOP_ITEMS/Sponsors.PERKS above already use for the kiosk. useAtlas ships
+  // here (a real, persisted toggle) even though nothing reads it yet outside this screen -- its
+  // consumer (Rig.draw's atlas short-circuit) is a different task; the settings SHAPE is frozen for
+  // all of Phase 5, not just this one.
+  SETTINGS_ROWS:[
+    {key:'reduceMotion',label:'REDUCE MOTION'},
+    {key:'haptics',label:'HAPTICS'},
+    {key:'leftHanded',label:'LEFT-HANDED CONTROLS'},
+    {key:'useAtlas',label:'USE SPRITE ATLAS'},
+    {key:'sfx',label:'SOUND EFFECTS'},
+    {key:'announcer',label:'ANNOUNCER TEXT'}],
+  renderSettings(){
+    // SOUND (#titleMute) lives as static markup inside #settings now (00_head.html) -- its click
+    // handler stays bound once in G.init() (unchanged since before Task 4.5); this just syncs its
+    // label text every time the settings screen renders, same as renderTitle() used to.
+    document.getElementById('titleMute').textContent='SOUND: '+(Audio.muted?'OFF':'ON');
+    const wrap=document.getElementById('settingsRows');wrap.innerHTML='';
+    for(const row of Screens.SETTINGS_ROWS){
+      const on=!!Save.data.settings[row.key];
+      const btn=document.createElement('button');
+      btn.className='setrow';btn.id='set_'+row.key;
+      btn.textContent=row.label+': '+(on?'ON':'OFF');
+      btn.onclick=()=>{Save.data.settings[row.key]=!Save.data.settings[row.key];Save.put();
+        G.applySettings();Screens.refresh()};
+      wrap.appendChild(btn)}
+    document.getElementById('settingsBack').onclick=()=>Screens.title()},
   // Fix-wave item 10: a gold/units/iso strip, shared by the map and crystal screens (the kiosk
   // already had its own, richer one -- shopCurrency -- with class catalysts too, since rankUp spends
   // those there; map/crystal never spend catalysts, so this stays to the three main currencies).

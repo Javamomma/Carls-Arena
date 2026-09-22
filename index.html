@@ -12,7 +12,10 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .panel button.primary{font-size:20px;padding:16px;box-shadow:0 0 16px 3px rgba(244,197,66,.55)}
 .panel button.secondary{background:#1a1f33;color:#f4c542;border:2px solid #f4c542;font-size:13px;padding:10px}
 .settingsrow{margin-top:10px}
-.settingsrow button{width:auto;min-width:150px;font-size:11px;padding:8px 14px;background:transparent;color:#999;border:1px solid #444}
+/* min-height set explicitly (not inherited from .panel button) -- Task 5.4 moved #titleMute out of
+   #title's .panel and into #settings' .scr, which has no such default, and this button still needs
+   to stay a real 44px+ touch target wherever it lives. */
+.settingsrow button{width:auto;min-width:150px;min-height:44px;font-size:11px;padding:8px 14px;background:transparent;color:#999;border:1px solid #444}
 #btns{display:none}#btns.show{display:block}
 .cbtn{position:absolute;width:76px;height:76px;border-radius:50%;border:3px solid #f4c542;background:rgba(26,31,51,.8);color:#f4c542;font:inherit;font-size:26px;display:flex;align-items:center;justify-content:center;line-height:1}
 .cbtn::after{content:attr(data-label);position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:4px;font-size:10px;letter-spacing:1px;color:#f4c542;white-space:nowrap}
@@ -25,6 +28,16 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 #powerPicker.show{display:flex}
 #powerPicker button{width:52px;height:52px;border-radius:50%;border:2px solid #f4c542;background:#1a1f33;color:#f4c542;font:inherit;font-size:13px;font-weight:bold}
 #powerPicker button:disabled{opacity:.3}
+/* Task 5.4 (leftHanded): body.left-handed (toggled by G.applySettings from Save.data.settings.
+   leftHanded) mirrors the whole #btns cluster -- BLOCK moves to the right, PUNCH/KICK/POWER move to
+   the left, at the exact same offsets each already uses on its normal side, so the layout reads as a
+   true horizontal mirror. G.positionToast (80_game.js) computes the toast's gap from these same
+   mirrored offsets. */
+body.left-handed #btnBlock{left:auto;right:22px}
+body.left-handed #btnPower{right:auto;left:22px}
+body.left-handed #btnKick{right:auto;left:110px}
+body.left-handed #btnPunch{right:auto;left:198px}
+body.left-handed #powerPicker{right:auto;left:14px}
 /* Positioned in JS (G.positionToast, called from G.fit on load/resize) off canvas.getBoundingClientRect()
    so it tracks the canvas box exactly (not #wrap, which can letterbox at other aspect ratios); left/top/
    max-width are set inline per call. */
@@ -118,6 +131,12 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .leaderboard h3{margin:0 0 4px;font-size:11px;color:#f4c542;letter-spacing:1px}
 .leaderboard .lbrow{display:flex;justify-content:space-between;gap:8px;padding:3px 6px;border-bottom:1px solid #222}
 .leaderboard .lbrow span:first-child{color:#f4c542;min-width:14px;text-align:left}
+/* Task 5.4: the settings screen's toggle rows -- 44px-tall, full-width, left-aligned buttons (one
+   per Screens.SETTINGS_ROWS entry), stacked in a scrollable column so a future settings row never
+   forces horizontal scroll or clips off 854x480. */
+.setrows{display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:1}
+.setrow{width:100%;min-height:44px;padding:10px 14px;font-size:12px;letter-spacing:.5px;text-align:left;
+  background:#181c2b;color:#f4c542;border:1px solid #444;border-radius:6px;font-family:inherit}
 /* Task 5.2: the kiosk's PERKS section -- compact list rows (not another row of big .kcard tiles) so
    the consumable-item cards above and every perk both fit 854x480 without scrolling in the common
    case; #shopBody wraps both and scrolls on its own if they don't. #shopCards keeps its .kcards
@@ -135,6 +154,11 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
   border-radius:6px;background:#f4c542;color:#111;border:0;font-family:inherit}
 .perkrow button:disabled{opacity:.35;background:#555;color:#999}
 .perkrow button.owned{background:transparent;color:#7fd18a;border:1px solid #7fd18a;opacity:1}
+/* Task 5.4: #tap (first-load audio-unlock layer, touch devices only) and #rotate (portrait-on-touch
+   guard) both reuse .overlay/.panel -- G.show(id,on) (the same toggle every other overlay-ish element
+   uses) controls both; neither is part of Screens' own show()/hideAll() screen list, since they layer
+   on top of whichever screen (or fight) is already showing, not in place of it. */
+#tap .panel h1,#rotate .panel h1{font-size:22px}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
 <button id="btnBlock" class="cbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
@@ -151,10 +175,15 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 <button id="btnRoster" class="secondary">ROSTER</button>
 <button id="btnKiosk" class="secondary">KIOSK</button>
 <button id="btnExhibition" class="secondary">EXHIBITION</button>
-<div class="settingsrow"><button id="titleMute">SOUND: ON</button></div>
+<div class="settingsrow"><button id="btnSettings">SETTINGS</button></div>
 </div></div>
+<!-- Task 5.4: first-load audio-unlock layer (G.initTapLayer, 80_game.js) -- shown over the title on a
+     touch device until the first pointerdown (which also calls Audio.init()); hidden immediately on
+     a non-touch device. Not part of Screens' show()/hideAll() list -- it layers on top of whichever
+     screen is already showing, controlled purely by G, not by which screen is "current". -->
+<div class="overlay" id="tap"><div class="panel"><h1>TAP TO<br>START</h1><p class="sub">Tap anywhere to enable sound.</p></div></div>
 <div class="overlay" id="pauseMenu"><div class="panel"><h1>PAUSED</h1><button id="resume">RESUME</button><button id="quit">QUIT</button></div></div>
-<div class="overlay" id="result"><div class="panel"><h1 id="resultTitle">VICTORY</h1><p id="resultLine"></p><button id="again">FIGHT AGAIN</button><button id="resultTitleBtn">CONTINUE</button></div></div>
+<div class="overlay" id="result"><div class="panel"><h1 id="resultTitle">VICTORY</h1><p id="resultLine"></p><button id="shareBtn">SHARE</button><button id="again">FIGHT AGAIN</button><button id="resultTitleBtn">CONTINUE</button></div></div>
 <div class="overlay" id="map"><div class="scr">
 <h2>CAMPAIGN</h2>
 <div class="ftabs" id="mapTabs"></div>
@@ -185,6 +214,12 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 </div>
 <button class="backbtn" id="shopBack">BACK</button>
 </div></div>
+<div class="overlay" id="settings"><div class="scr">
+<h2>SETTINGS</h2>
+<div class="setrows" id="settingsRows"></div>
+<div class="settingsrow"><button id="titleMute">SOUND: ON</button></div>
+<button class="backbtn" id="settingsBack">BACK</button>
+</div></div>
 <div class="overlay" id="arena"><div class="scr">
 <h2>ARENA</h2>
 <div class="arenabox">
@@ -201,6 +236,10 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
      order) -- it used to sit before #title, so any overlay painted over it and a fight-time toast
      shown while a screen briefly lingered (or a refusal message, pre-#mapMsg) was set and never
      seen. Still the last element painted during a fight too, since no overlay is .show then. -->
+<!-- Task 5.4: portrait-on-touch guard (G.checkOrientation, driven off G.needsRotate) -- placed as the
+     LAST overlay in DOM order (same "later = on top" stacking #toast's own comment above relies on)
+     so it sits above every screen/menu/#tap when it's up, not just the title. -->
+<div class="overlay" id="rotate"><div class="panel"><h1>ROTATE YOUR<br>DEVICE</h1><p class="sub">This dungeon plays best in landscape.</p></div></div>
 <div id="toast"></div>
 </div><script>
 
@@ -242,7 +281,13 @@ const Meta={
       // pity was designed), added here so migrate()'s generic top-level fill loop below covers
       // pre-4.2 v2 saves for free.
       pity:{},
-      mute:false,settings:{},stats:{fights:0,wins:0}}},
+      // Task 5.4: the frozen settings shape. A plain top-level default key (same free-ride-through-
+      // migrate() story as leaderboard/pity above for a pre-5.4 v2 save that already has a `settings`
+      // key of some shape) -- see migrate()'s own v2 branch below for the explicit per-key backfill
+      // this one DOES need (unlike leaderboard/pity, `settings` already existed as `{}` before this
+      // task, so the generic "fill anything TOP-LEVEL missing" loop below would never touch it).
+      settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true},
+      mute:false,stats:{fights:0,wins:0}}},
   // v1 -> v2: keep gold/units/mute/settings, everything else starts fresh (including roster, which
   // v1 saves never meaningfully populated). v2 -> v2: fill in any keys/sub-keys a save from an
   // earlier Phase 4 build is missing, in place, without discarding what's already there. Anything
@@ -252,7 +297,11 @@ const Meta={
     if(data.v===1){
       const d=Meta.defaults();
       d.gold=data.gold||0;d.units=data.units||0;d.mute=!!data.mute;
-      d.settings=data.settings&&typeof data.settings==='object'?data.settings:{};
+      // Task 5.4: merge (not replace) onto d.settings' fresh defaults -- a plain replace here used to
+      // mean a v1 save with its own (pre-5.4, necessarily settings-shape-less) settings object would
+      // completely discard the new reduceMotion/haptics/leftHanded/useAtlas/sfx/announcer defaults,
+      // leaving e.g. haptics undefined (falsy) instead of its intended default true.
+      d.settings=Object.assign({},d.settings,data.settings&&typeof data.settings==='object'?data.settings:{});
       return d}
     if(data.v===2){
       const d=Meta.defaults();
@@ -261,6 +310,11 @@ const Meta={
       for(const k in d.energy)if(!(k in data.energy))data.energy[k]=d.energy[k];
       for(const k in d.arena)if(!(k in data.arena))data.arena[k]=d.arena[k];
       for(const k in d.stats)if(!(k in data.stats))data.stats[k]=d.stats[k];
+      // Task 5.4: `settings` already existed (as `{}`) before this task, so the generic top-level
+      // loop above never repopulates it for an old save -- explicit per-key backfill, same pattern as
+      // cats/energy/arena/stats just above.
+      if(!data.settings||typeof data.settings!=='object')data.settings=d.settings;
+      else for(const k in d.settings)if(!(k in data.settings))data.settings[k]=d.settings[k];
       if(!data.roster||typeof data.roster!=='object'||!Object.keys(data.roster).length)data.roster=d.roster;
       // Fix-wave item 10 (minor): migrate could reset `roster` (right above) without repointing a
       // stale `active` that named a champion the reset just dropped -- Rewards.grant's xp path reads
@@ -3209,11 +3263,16 @@ const FX={list:[],shake:0,flash:0,card:null,
       case'popup':
         this.list.push({kind:'popup',x:ev.x,y:ev.y,text:ev.text,col:ev.col||'#fff',big:!!ev.big,life:0,max:40});
         break;
+      // Task 5.4: Save.data.settings.reduceMotion zeroes camera shake and screen flash (the two
+      // motion-heavy FX) while leaving every other kind — sparks, dust, damage popups, the S3 card —
+      // untouched, per the frozen interface ("shake/flash amounts 0, popups stay"). Checked here, at
+      // the single place both ever accumulate, rather than at each of Fight.resolve's several push
+      // call sites.
       case'shake':
-        this.shake=Math.min(24,this.shake+(ev.amt||0));
+        if(!Save.data.settings.reduceMotion)this.shake=Math.min(24,this.shake+(ev.amt||0));
         break;
       case'flash':
-        this.flash=Math.max(this.flash,ev.frames||0);
+        if(!Save.data.settings.reduceMotion)this.flash=Math.max(this.flash,ev.frames||0);
         break;
       // 'slowmo' is driven directly through fight.slowmo/G.tick, still a no-op here.
       case'card':
@@ -3277,7 +3336,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // already caps gameplay at 1.12; 1.28 is the S3 cinematic punch-in) so a Camera.update before any
   // startFight (shouldn't happen, but tests instantiate G without always calling it) behaves exactly
   // as it did before this existed.
-  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast()},
+  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast();this.checkOrientation()},
   // Positions #toast off the canvas's own box (canvas.getBoundingClientRect()), not #wrap, so it
   // tracks the actual displayed game area exactly even when #wrap letterboxes the canvas at an
   // aspect ratio other than W/H. Fix round 2: moved from just under the HUD's floor-line text to
@@ -3294,8 +3353,19 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // The toast is centered in that gap, capped at 88% of its width, so it can never reach either
   // button's label regardless of content.
   TOAST_BOTTOM_GAP:32,BLOCK_RIGHT:22+76,PUNCH_LEFT:W-(198+76),
+  // Task 5.4 (leftHanded): BLOCK_RIGHT/PUNCH_LEFT above are canvas-local x's for the NORMAL layout's
+  // gap (BLOCK's right edge .. PUNCH's left edge) -- see their own original comment for why this is
+  // computed off fixed numbers instead of the buttons' own getBoundingClientRect (they collapse to
+  // zero pre-fight). document.body's 'left-handed' class (G.applySettings) mirrors the whole #btns
+  // layout in CSS (00_head.html: BLOCK moves to the right, PUNCH/KICK/POWER to the left) around the
+  // canvas's own horizontal center, so the mirrored gap's local x's are exactly W minus the normal
+  // ones, swapped (mirroring PUNCH_LEFT gives the new left edge, mirroring BLOCK_RIGHT gives the new
+  // right edge) -- no separate constants needed, and it stays correct if BLOCK_RIGHT/PUNCH_LEFT above
+  // are ever retuned.
   positionToast(){const r=canvas.getBoundingClientRect(),el=document.getElementById('toast'),sx=r.width/W;
-    const gapL=r.left+this.BLOCK_RIGHT*sx,gapR=r.left+this.PUNCH_LEFT*sx;
+    const lh=document.body.classList.contains('left-handed');
+    const gapLc=lh?(W-this.PUNCH_LEFT):this.BLOCK_RIGHT,gapRc=lh?(W-this.BLOCK_RIGHT):this.PUNCH_LEFT;
+    const gapL=r.left+gapLc*sx,gapR=r.left+gapRc*sx;
     el.style.left=((gapL+gapR)/2)+'px';
     el.style.bottom=(innerHeight-r.bottom+this.TOAST_BOTTOM_GAP/H*r.height)+'px';
     el.style.maxWidth=Math.round((gapR-gapL)*.88)+'px'},
@@ -3308,6 +3378,38 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     const lh=parseFloat(getComputedStyle(el).lineHeight)||1;
     if(Math.round(el.scrollHeight/lh)>2)el.style.fontSize='12px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
+  // Task 5.4: settings whose effect is a standing DOM/layout state (not read live each time, unlike
+  // reduceMotion/sfx/announcer/haptics, which are checked directly off Save.data.settings at their
+  // own call sites) get applied here -- called once at boot (before the first fit(), since
+  // positionToast below reads the class it sets) and again from Screens.renderSettings() every time a
+  // toggle button is clicked.
+  applySettings(){
+    document.body.classList.toggle('left-handed',!!Save.data.settings.leftHanded);
+    this.positionToast()},
+  // Pure function of (viewport w/h, is-a-touch-device) — no window/navigator read of its own — so
+  // tests can drive every truth-table cell directly, per the frozen interface. Portrait AND a touch
+  // device both have to hold; a desktop window that happens to be taller than it is wide (an odd but
+  // legal browser window shape) must never trip the rotate overlay.
+  needsRotate(w,h,touch){return !!touch&&h>w},
+  // Real touch-device detection, factored out of checkOrientation/initTapLayer so both share one
+  // definition of "touch device" and a test can still force either branch via initTapLayer's own
+  // optional `touch` param below.
+  tapLayerTouch(){return('ontouchstart' in window)||navigator.maxTouchPoints>0},
+  // Called from fit() (so both the initial load and every resize re-check) — toggles #rotate via the
+  // same G.show(id,on) every other overlay-ish element uses.
+  checkOrientation(){this.show('rotate',this.needsRotate(innerWidth,innerHeight,this.tapLayerTouch()))},
+  // First-load "TAP TO START" layer over the title (00_head.html's #tap): on a touch device it stays
+  // up until the first pointerdown, which both unlocks audio (the same Audio.init() every other
+  // first-gesture call site already uses) and hides the layer; on a non-touch device it hides
+  // immediately, no gesture required. `touch` is an optional override (auto-detected via
+  // tapLayerTouch() when omitted) purely so a test can drive both branches deterministically without
+  // needing real touch-event emulation.
+  initTapLayer(touch){
+    if(touch===undefined)touch=this.tapLayerTouch();
+    const tap=document.getElementById('tap');
+    if(!touch){tap.classList.remove('show');return}
+    tap.classList.add('show');
+    tap.addEventListener('pointerdown',()=>{Audio.init();tap.classList.remove('show')},{once:true})},
   // Canvas hit-test for the HUD's pause glyph (drawn by Render.hud at Render.pauseRect), consulted
   // by Input's pointerdown handler before it does any zone/gesture handling.
   hitPause(x,y){const r=Render.pauseRect;return x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h},
@@ -3447,7 +3549,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // the unthrottled display primitive this calls into. A no-op while the S3 cinematic is up — the
   // card already reads SPECIAL 3 on-canvas, and the toast element is hidden for the duration anyway
   // (see hideToast/showToast), so there is nothing useful for a line to update.
-  say(text){if(this.fight&&this.fight.cinematic>0)return;if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
+  // Task 5.4: settings.announcer===false makes every announcer line a no-op -- gated here, the one
+  // place Audio.announce (20_audio.js) and G's own direct #toast fallback both already route through,
+  // rather than at each Audio.announce call site.
+  say(text){if(this.fight&&this.fight.cinematic>0)return;if(!Save.data.settings.announcer)return;
+    if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
   // Hides the DOM #toast announcer (an absolutely-positioned element outside the canvas, so nothing
   // drawn on-canvas can cover it) for the duration of the S3 cinematic, and cancels Audio.say's
   // pending fade-out timeout so a stale line already on screen (e.g. the opening announcer, whose
@@ -3461,6 +3567,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // multiplier window just starting (Broadcast.state.lastPop) into an actual gold FX popup, pushed
   // into the live fight's own fx queue (drained by G.tick -> FX.pushAll, same pipe every hit/parry/
   // combo popup already uses) and immediately cleared so it never re-pops for the rest of that window.
+  // Task 5.4: settings.sfx===false makes every sound-effect recipe a no-op. Gated at the CALL SITE
+  // (here, checkSpecial, checkCinematicFx) rather than inside Audio.recipes itself (20_audio.js) so a
+  // test can stub an individual Audio.recipes.* function and assert it was never invoked when sfx is
+  // off -- gating inside the recipe's own body would still call whatever function Audio.recipes.X
+  // currently points to (the stub), defeating that kind of test.
+  playRecipe(fn){if(Save.data.settings.sfx&&fn)fn()},
   onEvent(t,a,b,val){
     if(this.fight)Broadcast.onEvent(t,a,b,val,this.fight);
     if(Broadcast.state.lastPop){
@@ -3471,14 +3583,19 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // Multi-hit specials (s1/s2/s3) already got their one full recipe burst from checkSpecial on
       // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
       // not the whole recipe again (that would replay a 3-14 tone burst per sub-hit, overlapping).
-      (mv&&mv.hits>1?Audio.recipes.light1:(Audio.recipes[a.moveName]||Audio.recipes.lights))();
+      this.playRecipe(mv&&mv.hits>1?Audio.recipes.light1:(Audio.recipes[a.moveName]||Audio.recipes.lights));
       // Streak lines are in the player's own voice ("Carl's fan club just doubled in size"), so they
       // only fire for p1's combos, not a mob/AI p2's.
-      if(this.fight&&a===this.fight.p1&&(a.combo===3||a.combo===5||a.combo===10))Audio.announce('streak'+a.combo,this.fight.presRng)}
-    else if(t==='block')Audio.recipes.block();
-    else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.presRng)}
-    else if(t==='miss'){if(b&&b.state==='DASH')Audio.recipes.dash()}
-    else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}},
+      if(this.fight&&a===this.fight.p1&&(a.combo===3||a.combo===5||a.combo===10))Audio.announce('streak'+a.combo,this.fight.presRng);
+      // Task 5.4: haptics — a short vibration on the frame the PLAYER (p1) is the one who took the
+      // hit (b===p1, not a===p1). Guarded by both the settings toggle and navigator.vibrate actually
+      // existing (no Vibration API at all on iOS Safari; an unguarded call would throw and take the
+      // rest of this handler down with it).
+      if(this.fight&&b===this.fight.p1&&Save.data.settings.haptics&&typeof navigator.vibrate==='function')navigator.vibrate(12)}
+    else if(t==='block')this.playRecipe(Audio.recipes.block);
+    else if(t==='parry'){this.playRecipe(Audio.recipes.parry);Audio.announce('parry',this.fight.presRng)}
+    else if(t==='miss'){if(b&&b.state==='DASH')this.playRecipe(Audio.recipes.dash)}
+    else if(t==='ko'){this.playRecipe(Audio.recipes.ko);Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}},
   // Arena sugar: draws the next Arena.start() encounter for the current streak and starts it with
   // mode:'arena' (never gated by Quest.start/energy -- Phase 4 ruling 4, "arena costs no energy").
   startArena(o={}){return this.startFight(Object.assign({},o,{encounter:Arena.start(),mode:'arena'}))},
@@ -3526,6 +3643,52 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(r.xp)parts.push('+'+r.xp+' XP');
     if(r.units)parts.push('+'+r.units+' UNITS');
     return parts.join('  ')},
+  // Task 5.4: an 854x480 offscreen canvas (never attached to the DOM — a share card renders exactly
+  // like a screenshot, with no live #wrap/#btns/overlay chrome in it) summarizing the just-finished
+  // (or in-progress; nothing here requires f.over) fight: champion portrait, name, PEAK VIEWERS,
+  // floor/boss-or-streak, and today's date via Meta.today() (never a raw Date/performance.now() —
+  // same injectable-clock rule Meta.today() itself already enforces). Returns a PNG data URL;
+  // G.share() (below) is the one real caller, tests/harness.py's --share calls this directly.
+  shareCard(){
+    const cv=document.createElement('canvas');cv.width=854;cv.height=480;
+    const c=cv.getContext('2d');
+    c.fillStyle='#090b12';c.fillRect(0,0,cv.width,cv.height);
+    const champId=this.champ||Save.data.active,def=DEFS[champId];
+    if(def){
+      const portrait=Rig.portrait(lookFor(def)),pw=140,ph=140,px=cv.width/2-pw/2,py=48;
+      c.drawImage(portrait,px,py,pw,ph);
+      c.strokeStyle='#f4c542';c.lineWidth=3;c.strokeRect(px+1.5,py+1.5,pw-3,ph-3)}
+    c.textAlign='center';c.fillStyle='#fff';c.font='900 30px ui-monospace,monospace';
+    c.fillText(def?def.name:'CHAMPION',cv.width/2,232);
+    c.fillStyle='#f4c542';c.font='bold 24px ui-monospace,monospace';
+    c.fillText('PEAK VIEWERS '+Render.fmtViewers(Broadcast.state.peak||0),cv.width/2,276);
+    // floor/boss for a quest fight, streak for an arena one, nothing for a bare exhibition -- mirrors
+    // onFightEnd's own mode/questTarget reads just below.
+    let prog='';
+    if(this.mode==='quest'&&this.questTarget)prog='FLOOR '+this.questTarget.floor+(this.questTarget.node==='boss'?' — BOSS':'');
+    else if(this.mode==='arena')prog='STREAK '+(Save.data.arena.streak||0);
+    if(prog){c.font='16px ui-monospace,monospace';c.fillStyle='#ccc';c.fillText(prog,cv.width/2,308)}
+    c.font='12px ui-monospace,monospace';c.fillStyle='#888';
+    c.fillText(Meta.today(),cv.width/2,336);
+    c.font='bold 12px ui-monospace,monospace';c.fillStyle='#555';
+    c.fillText("CARL'S DOORWAY BRAWL",cv.width/2,440);
+    return cv.toDataURL('image/png')},
+  // navigator.share({files:[...]}) when the platform supports sharing an actual file (most mobile
+  // browsers); otherwise falls back to downloadShareCard's plain <a download> link, which every
+  // browser supports unconditionally. Best-effort: any failure along the navigator.share path
+  // (including the user cancelling the native share sheet, which rejects the promise) falls back to
+  // the download link rather than leaving the player with nothing.
+  share(){
+    const dataUrl=this.shareCard();
+    if(!navigator.share){this.downloadShareCard(dataUrl);return}
+    fetch(dataUrl).then(r=>r.blob()).then(blob=>{
+      const file=new File([blob],'carls-doorway-brawl.png',{type:'image/png'});
+      const shareData={files:[file],title:"CARL'S DOORWAY BRAWL",text:'My run in the dungeon.'};
+      if(navigator.canShare&&!navigator.canShare(shareData))return this.downloadShareCard(dataUrl);
+      return navigator.share(shareData)}).catch(()=>this.downloadShareCard(dataUrl))},
+  downloadShareCard(dataUrl){
+    const a=document.createElement('a');a.href=dataUrl;a.download='carls-doorway-brawl.png';
+    document.body.appendChild(a);a.click();a.remove()},
   // Called from tick() once the KO slow-mo has fully counted down (fight.slowmo hits 0). Split out
   // of onEvent('ko',...) because the KO event fires synchronously inside the same f.step() that ends
   // the fight, well before slow-mo has had a chance to play; flipping state here on the frame it
@@ -3689,7 +3852,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // both fire on the exact same tick, so doing it in both places would double-play the sound.
   checkSpecial(fighter,prevMoveName){const mn=fighter.moveName;
     if(mn&&mn!==prevMoveName&&(mn==='s1'||mn==='s2')){
-      (Audio.recipes[mn]||Audio.recipes.lights)();
+      this.playRecipe(Audio.recipes[mn]||Audio.recipes.lights);
       // Recipe plays for either side (game feel); the announcer line is reserved for the human's
       // own specials only, so it doesn't caption every mob/AI special too.
       if(fighter===this.fight.p1)Audio.announce('special',this.fight.presRng)}},
@@ -3704,7 +3867,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     const att=(f.p1.state==='ATTACK'&&f.p1.moveName==='s3')?f.p1:f.p2;
     this.cinemFocus=att;
     this.hideToast();
-    Audio.recipes.s3();
+    this.playRecipe(Audio.recipes.s3);
     if(att===f.p1)Audio.announce('special',f.presRng)},
   // Test/debug helper (also used by tests/harness.py --cinematic): starts a fight, arms p1 with a
   // scripted s3, sim-steps until the cinematic is up, then advances FX so a screenshot shows the
@@ -3736,7 +3899,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // only Screens (loaded after this file) knows how to resolve -- safe to reference here because
   // these callbacks only run on a later click, well after the whole script (including
   // 85_screens.js) has parsed.
-  init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
+  init(){
+    // Task 5.4: applySettings() must run BEFORE the first fit() call below — it sets the
+    // 'left-handed' body class fit()'s own positionToast() reads to compute the toast's gap.
+    this.applySettings();
+    this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
+    // Task 5.4: the first-load "TAP TO START" audio-unlock layer — synchronous (not deferred to the
+    // rAF below) so a touch device shows it immediately, with no first-frame flicker of the layer
+    // being absent then popping in.
+    this.initTapLayer();
     // Reuses the previous fight's full options (p1/p2/ai/ctrl1/ctrl2/encounter/clock), overriding only
     // the seed — previously this passed just {seed,encounter}, silently dropping a custom p2/ai back
     // to the startFight defaults (donut/basic) on every rematch.
@@ -3757,6 +3928,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       const opts=Object.assign({},this.lastFightOpts,{seed:this.fight?this.fight.rng.int(1e9)+1:this.seed});
       if(this.mode==='arena')this.startArena(opts);else this.startFight(opts)};
     document.getElementById('resultTitleBtn').onclick=()=>this.backToOrigin();
+    // Task 5.4: SHARE (result overlay, static markup, bound once here — same pattern as 'again'/
+    // 'resultTitleBtn' above, not re-bound per Screens.renderResult() call).
+    document.getElementById('shareBtn').onclick=()=>this.share();
     document.getElementById('resume').onclick=()=>this.togglePause();
     document.getElementById('quit').onclick=()=>this.backToOrigin();
     // Unchanged from before Task 4.5 (still the only place that mutates Audio.muted/Save.data.mute);
@@ -3792,7 +3966,7 @@ const Screens={
   // Fixed table of what each name shows/renders; kept as one object so show()/refresh() share it
   // instead of a chain of if/else per screen name.
   RENDER:{title:'renderTitle',map:'renderMap',roster:'renderRoster',crystal:'renderCrystal',
-    shop:'renderShop',arena:'renderArena',result:'renderResult'},
+    shop:'renderShop',arena:'renderArena',result:'renderResult',settings:'renderSettings'},
   // Hides every Phase 4 overlay (plus pauseMenu, so the pause menu's QUIT and the result screen's
   // CONTINUE -- both of which land here through backToOrigin -- never leave it stuck on screen
   // over a browsing screen) and the touch buttons, shows exactly `name`, then renders it. The
@@ -3800,7 +3974,7 @@ const Screens={
   // visible) -- so show() both toggles AND renders, and Screens.map/roster/... below are thin
   // wrappers that stash their arg (if any) and call this.
   show(name){
-    for(const id of['title','map','roster','crystal','shop','arena','result','pauseMenu'])G.show(id,id===name);
+    for(const id of['title','map','roster','crystal','shop','arena','result','pauseMenu','settings'])G.show(id,id===name);
     G.show('btns',false);
     this._current=name;
     const fn=this.RENDER[name];
@@ -3820,11 +3994,14 @@ const Screens={
   // no other caller in the codebase passes it (G's own no-Screens fallback in onFightEnd builds its
   // #resultLine text directly instead), but every real click-through path (Screens.show->this) does.
   result(rewards,won,peakViewers){this._rewards=rewards;this._won=won;this._peakViewers=peakViewers;this.show('result')},
+  // Task 5.4: not a fight-launching screen, so BACK just goes straight to the title (same pattern as
+  // map/roster/crystal/shop/arena's own BACK -- none of them route through toOrigin()/_origin either).
+  settings(){this.show('settings')},
   // Called from G.startFight the instant a fight actually begins (title/result/pauseMenu are
   // already hidden there directly) -- a fight can be launched from any browsing screen (a map
   // node, arena's FIGHT, exhibition off the title screen), so whichever one is still up needs
   // hiding too, or it would linger visually over the fight underneath.
-  hideAll(){for(const id of['title','map','roster','crystal','shop','arena'])G.show(id,false);this._current=null},
+  hideAll(){for(const id of['title','map','roster','crystal','shop','arena','settings'])G.show(id,false);this._current=null},
   // Re-renders whatever screen is currently up (no visibility change) -- called after any Meta
   // mutation a button on that screen just made, so costs/affordability/counts reflect it
   // immediately without a full show() (which would also re-toggle overlay classes for no reason).
@@ -3841,10 +4018,11 @@ const Screens={
   lastFloor(){const ks=Object.keys(Save.data.floors).map(Number);return ks.length?Math.max.apply(null,ks):1},
   // ---- title -------------------------------------------------------------------------------
   renderTitle(){
-    // The SOUND button's click handler (the one place that actually flips Audio.muted/Save.data.mute)
-    // stays bound in G.init() (80_game.js), unchanged from before Task 4.5 -- Screens only syncs the
-    // label text here (read-only) so it reflects the persisted mute state whenever title is shown.
-    document.getElementById('titleMute').textContent='SOUND: '+(Audio.muted?'OFF':'ON');
+    // Task 5.4: the title screen's old bare SOUND toggle became a SETTINGS button -- SOUND itself
+    // (#titleMute, still the one place Audio.muted/Save.data.mute actually flip -- see G.init())
+    // moved into the new #settings overlay as one more toggle row; renderSettings() below is what
+    // syncs its label text now, since that's the screen it actually lives on.
+    document.getElementById('btnSettings').onclick=()=>Screens.settings();
     document.getElementById('btnCampaign').onclick=()=>{const n=Screens.lastFloor();
       Screens._origin={name:'map',args:[n]};Screens.map(n)};
     document.getElementById('btnArenaMenu').onclick=()=>{Screens._origin={name:'arena'};Screens.arena()};
@@ -3855,6 +4033,35 @@ const Screens={
     // same as the old fightBtn did.
     document.getElementById('btnExhibition').onclick=()=>{Screens._origin={name:'title'};
       Audio.init();G.startFight()}},
+  // ---- settings ------------------------------------------------------------------------------
+  // Task 5.4: one row per Save.data.settings key, 44px-tall toggle buttons (the frozen interface's
+  // own wording) rendered from this table instead of six hand-copied blocks -- same "render from a
+  // table" pattern Meta.SHOP_ITEMS/Sponsors.PERKS above already use for the kiosk. useAtlas ships
+  // here (a real, persisted toggle) even though nothing reads it yet outside this screen -- its
+  // consumer (Rig.draw's atlas short-circuit) is a different task; the settings SHAPE is frozen for
+  // all of Phase 5, not just this one.
+  SETTINGS_ROWS:[
+    {key:'reduceMotion',label:'REDUCE MOTION'},
+    {key:'haptics',label:'HAPTICS'},
+    {key:'leftHanded',label:'LEFT-HANDED CONTROLS'},
+    {key:'useAtlas',label:'USE SPRITE ATLAS'},
+    {key:'sfx',label:'SOUND EFFECTS'},
+    {key:'announcer',label:'ANNOUNCER TEXT'}],
+  renderSettings(){
+    // SOUND (#titleMute) lives as static markup inside #settings now (00_head.html) -- its click
+    // handler stays bound once in G.init() (unchanged since before Task 4.5); this just syncs its
+    // label text every time the settings screen renders, same as renderTitle() used to.
+    document.getElementById('titleMute').textContent='SOUND: '+(Audio.muted?'OFF':'ON');
+    const wrap=document.getElementById('settingsRows');wrap.innerHTML='';
+    for(const row of Screens.SETTINGS_ROWS){
+      const on=!!Save.data.settings[row.key];
+      const btn=document.createElement('button');
+      btn.className='setrow';btn.id='set_'+row.key;
+      btn.textContent=row.label+': '+(on?'ON':'OFF');
+      btn.onclick=()=>{Save.data.settings[row.key]=!Save.data.settings[row.key];Save.put();
+        G.applySettings();Screens.refresh()};
+      wrap.appendChild(btn)}
+    document.getElementById('settingsBack').onclick=()=>Screens.title()},
   // Fix-wave item 10: a gold/units/iso strip, shared by the map and crystal screens (the kiosk
   // already had its own, richer one -- shopCurrency -- with class catalysts too, since rankUp spends
   // those there; map/crystal never spend catalysts, so this stays to the three main currencies).
@@ -6051,5 +6258,179 @@ Test.add('title screen: CAMPAIGN is the primary button, others secondary, SOUND 
   ok(parseFloat(cs.fontSize)>parseFloat(rs.fontSize),'CAMPAIGN must read visually larger than a secondary button');
   ok(document.getElementById('titleMute').closest('.settingsrow'),'SOUND must be moved into its own small settings row');
   Screens.title()});
+// --- Task 5.4: settings, orientation guard, haptics, audio unlock, share card -------------------
+Test.add('Meta.defaults().settings has the frozen Phase 5 shape',()=>{
+  const s=Meta.defaults().settings;
+  eq(s.reduceMotion,false);eq(s.haptics,true);eq(s.leftHanded,false);
+  eq(s.useAtlas,false);eq(s.sfx,true);eq(s.announcer,true)});
+Test.add('Meta.migrate (v2) backfills a missing settings key without discarding an already-present one',()=>{
+  const d=Meta.migrate({v:2,settings:{sfx:false}});
+  eq(d.settings.sfx,false,'an existing key must survive migration');
+  eq(d.settings.haptics,true,'a missing key must be backfilled to its default');
+  eq(d.settings.reduceMotion,false,'another missing key must also be backfilled')});
+Test.add('Meta.migrate (v1) merges the old settings object onto the new defaults instead of replacing them',()=>{
+  const d=Meta.migrate({v:1,gold:10,settings:{mute:true}});
+  eq(d.settings.mute,true,'an old v1 settings field must be preserved');
+  eq(d.settings.haptics,true,'a new Phase 5 default must still be present, not lost to a v1 replace')});
+Test.add('Screens.settings() renders one 44px+ toggle row per Screens.SETTINGS_ROWS entry, reflecting Save.data.settings',()=>{
+  Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
+  Screens.settings();
+  const rows=[...document.querySelectorAll('#settingsRows .setrow')];
+  eq(rows.length,Screens.SETTINGS_ROWS.length);
+  for(const el of rows)ok(parseFloat(getComputedStyle(el).minHeight)>=44,el.id+' must be a real touch target');
+  ok(document.getElementById('set_reduceMotion').textContent.includes('ON'),'reduceMotion true must render ON');
+  ok(document.getElementById('set_haptics').textContent.includes('ON'),'haptics defaults true');
+  Screens.title()});
+Test.add('clicking a settings toggle row flips and persists Save.data.settings, then re-renders the label',()=>{
+  Save.data=Meta.defaults();
+  Screens.settings();
+  eq(Save.data.settings.sfx,true);
+  document.getElementById('set_sfx').click();
+  eq(Save.data.settings.sfx,false);
+  ok(document.getElementById('set_sfx').textContent.includes('OFF'));
+  document.getElementById('set_sfx').click();
+  eq(Save.data.settings.sfx,true);
+  ok(document.getElementById('set_sfx').textContent.includes('ON'));
+  Screens.title()});
+Test.add('Screens.settings() BACK returns to the title screen; the title screen\'s SETTINGS button opens it',()=>{
+  Screens.title();
+  document.getElementById('btnSettings').click();
+  eq(Screens._current,'settings');
+  document.getElementById('settingsBack').click();
+  eq(Screens._current,'title')});
+Test.add('G.applySettings toggles the left-handed body class from Save.data.settings.leftHanded',()=>{
+  Save.data=Meta.defaults();
+  Save.data.settings.leftHanded=true;G.applySettings();
+  ok(document.body.classList.contains('left-handed'));
+  Save.data.settings.leftHanded=false;G.applySettings();
+  ok(!document.body.classList.contains('left-handed'))});
+Test.add('leftHanded mirrors the on-screen button layout: #btnBlock ends up right of #btnPunch/#btnKick/#btnPower',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()}); // shows #btns (collapses to a
+  // zero rect while hidden pre-fight -- see G.positionToast's own comment)
+  document.body.classList.remove('left-handed');
+  const block=document.getElementById('btnBlock'),punch=document.getElementById('btnPunch'),
+        kick=document.getElementById('btnKick'),power=document.getElementById('btnPower');
+  ok(block.getBoundingClientRect().left<punch.getBoundingClientRect().left,'normal layout: BLOCK left of PUNCH');
+  document.body.classList.add('left-handed');
+  ok(block.getBoundingClientRect().left>punch.getBoundingClientRect().left,'left-handed: BLOCK right of PUNCH');
+  ok(block.getBoundingClientRect().left>kick.getBoundingClientRect().left,'left-handed: BLOCK right of KICK');
+  ok(block.getBoundingClientRect().left>power.getBoundingClientRect().left,'left-handed: BLOCK right of POWER');
+  document.body.classList.remove('left-handed');
+  G.toTitle()});
+Test.add('reduceMotion zeroes camera shake and screen flash but leaves popups untouched',()=>{
+  Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
+  FX.reset();
+  FX.push({kind:'shake',amt:10});FX.push({kind:'flash',frames:6});
+  FX.push({kind:'popup',x:0,y:0,text:'5',col:'#fff'});
+  eq(FX.shake,0,'shake must stay 0 under reduceMotion');
+  eq(FX.flash,0,'flash must stay 0 under reduceMotion');
+  eq(FX.list.length,1,'a popup must still be queued under reduceMotion');
+  Save.data.settings.reduceMotion=false;
+  FX.reset();
+  FX.push({kind:'shake',amt:10});FX.push({kind:'flash',frames:6});
+  ok(FX.shake>0,'shake must accumulate normally once reduceMotion is off');
+  ok(FX.flash>0,'flash must accumulate normally once reduceMotion is off')});
+Test.add('settings.sfx===false makes G.playRecipe (every Audio.recipes.* call site) a no-op, even against a stubbed recipe',()=>{
+  Save.data=Meta.defaults();Save.data.settings.sfx=false;
+  let called=false;const stub=()=>{called=true};
+  G.playRecipe(stub);
+  eq(called,false,'a stubbed recipe must not be called when sfx is off');
+  Save.data.settings.sfx=true;
+  G.playRecipe(stub);
+  eq(called,true,'the same stub must be called once sfx is back on')});
+Test.add('a landed hit does not call Audio.recipes.light1 when settings.sfx is off',()=>{
+  Save.data=Meta.defaults();Save.data.settings.sfx=false;
+  const orig=Audio.recipes.light1;let called=false;
+  Audio.recipes.light1=()=>{called=true};
+  try{
+    G.startFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+    closeIn(G.fight);G.sim=true;
+    for(let i=0;i<8;i++)G.tick();
+    eq(called,false,'Audio.recipes.light1 must not be called with sfx off')
+  }finally{Audio.recipes.light1=orig;Save.data.settings.sfx=true;G.toTitle();G.sim=false}});
+Test.add('settings.announcer===false makes G.say a no-op (the toast stays empty)',()=>{
+  Save.data=Meta.defaults();Save.data.settings.announcer=false;
+  const el=document.getElementById('toast');el.textContent='';
+  G.fight=null;G.frameNow=1000;G._sayAt=-999; // clear the throttle so a call would otherwise definitely show
+  G.say('should not appear');
+  eq(el.textContent,'','the toast must stay empty when announcer is off');
+  Save.data.settings.announcer=true;
+  G.say('should appear');
+  eq(el.textContent,'should appear');
+  el.textContent=''});
+Test.add('haptics: navigator.vibrate(12) fires when the PLAYER takes a hit, guarded by the setting and by vibrate existing',()=>{
+  Save.data=Meta.defaults();
+  const hadOwn=Object.prototype.hasOwnProperty.call(navigator,'vibrate'),orig=navigator.vibrate;
+  let calls=[];
+  navigator.vibrate=(...a)=>{calls.push(a)};
+  try{
+    G.startFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.script([L(0)]),seed:1}); // p2 (enemy) hits p1 (player)
+    closeIn(G.fight);G.sim=true;
+    for(let i=0;i<8;i++)G.tick();
+    eq(calls.length,1,'exactly one vibrate call for the one hit the player took');
+    eq(calls[0][0],12);
+    G.toTitle();
+    Save.data.settings.haptics=false;calls=[];
+    G.startFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.script([L(0)]),seed:1});
+    closeIn(G.fight);
+    for(let i=0;i<8;i++)G.tick();
+    eq(calls.length,0,'haptics off must suppress the vibrate call');
+  }finally{
+    if(hadOwn)navigator.vibrate=orig;else delete navigator.vibrate;
+    G.toTitle();G.sim=false}});
+Test.add('G.needsRotate is a pure function of (w,h,touch): portrait AND a touch device must both hold',()=>{
+  eq(G.needsRotate(480,854,true),true,'portrait + touch must need rotate');
+  eq(G.needsRotate(854,480,true),false,'landscape + touch must not need rotate');
+  eq(G.needsRotate(480,854,false),false,'portrait on a non-touch device must not need rotate');
+  eq(G.needsRotate(854,480,false),false,'landscape + non-touch must not need rotate');
+  eq(G.needsRotate(480,480,true),false,'a square viewport (h not > w) must not need rotate')});
+Test.add('G.checkOrientation shows/hides #rotate based on G.needsRotate\'s result',()=>{
+  const origNeeds=G.needsRotate;
+  try{
+    G.needsRotate=()=>true;G.checkOrientation();
+    ok(document.getElementById('rotate').classList.contains('show'),'#rotate must show when needsRotate is true');
+    G.needsRotate=()=>false;G.checkOrientation();
+    ok(!document.getElementById('rotate').classList.contains('show'),'#rotate must hide when needsRotate is false')
+  }finally{G.needsRotate=origNeeds}});
+Test.add('G.initTapLayer(true) shows #tap and hides it (unlocking audio) on the first pointerdown; initTapLayer(false) hides it immediately',()=>{
+  const tap=document.getElementById('tap');
+  tap.classList.remove('show');
+  const origInit=Audio.init;let audioInitCalled=false;
+  Audio.init=()=>{audioInitCalled=true};
+  try{
+    G.initTapLayer(true);
+    ok(tap.classList.contains('show'),'a touch device must show #tap');
+    tap.dispatchEvent(new Event('pointerdown'));
+    ok(!tap.classList.contains('show'),'#tap must hide after a pointerdown');
+    ok(audioInitCalled,'the first pointerdown must call Audio.init()')
+  }finally{Audio.init=origInit}
+  tap.classList.add('show');
+  G.initTapLayer(false);
+  ok(!tap.classList.contains('show'),'a non-touch device must hide #tap immediately, no gesture needed')});
+Test.add('G.shareCard returns an 854x480 PNG data URL, decoded via the raw PNG IHDR bytes (no DOM/Image needed)',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p1:'carl',p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
+  const url=G.shareCard();
+  ok(url.startsWith('data:image/png;base64,'),'must be a PNG data URL: '+url.slice(0,40));
+  const bytes=atob(url.slice('data:image/png;base64,'.length));
+  const byteAt=i=>bytes.charCodeAt(i);
+  // PNG: an 8-byte signature, then the IHDR chunk (4-byte length, 'IHDR', 4-byte width, 4-byte
+  // height, big-endian) starting at byte 12 -- decoded here by hand (Test.run() is synchronous, so
+  // an async Image-element decode isn't available in-page); tests/harness.py's --share does the
+  // equivalent decode in Python against the same bytes.
+  eq(bytes.slice(12,16),'IHDR','bytes 12..16 must be the IHDR chunk tag');
+  const u32=off=>(byteAt(off)<<24|byteAt(off+1)<<16|byteAt(off+2)<<8|byteAt(off+3))>>>0;
+  eq(u32(16),854,'PNG width must be 854');
+  eq(u32(20),480,'PNG height must be 480');
+  G.toTitle()});
+Test.add('G.shareCard works with no live fight (falls back to Save.data.active) and never throws',()=>{
+  Save.data=Meta.defaults();G.toTitle();
+  ok(!threw(()=>G.shareCard()),'shareCard must not throw with G.fight null')});
+Test.add('a SHARE button exists on the result screen and calls G.share on click',()=>{
+  ok(document.getElementById('shareBtn'),'#shareBtn must exist');
+  const orig=G.share;let called=false;G.share=()=>{called=true};
+  try{document.getElementById('shareBtn').click();eq(called,true,'clicking SHARE must call G.share')}
+  finally{G.share=orig}});
 
 </script></body></html>

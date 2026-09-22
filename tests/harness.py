@@ -14,10 +14,13 @@
       # quest->rewards->level-up->arena loop, headless; exit 1 on any assertion/page/console error
   python3 tests/harness.py --e2e --seed 1 --loops 20                 # --e2e plus a menu+fight soak:
       # N extra cycles of Screens renders + one quest-node fight + one arena fight
+  python3 tests/harness.py --screen settings --shot /tmp/settings.png  # Task 5.4: screenshot a Screens.<name>()
+  python3 tests/harness.py --share --shot /tmp/share.png             # Task 5.4: G.shareCard() PNG data-URL
+      # check (prefix + IHDR-decoded 854x480 dims); --shot writes the decoded PNG bytes to disk
 
 Exit 1 on any page error, console error, or if the game never left TITLE.
 """
-import argparse, json, os, sys, time
+import argparse, base64, json, os, struct, sys, time
 from playwright.sync_api import sync_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -323,6 +326,15 @@ def main():
                           "capture page/console errors -- they do NOT re-run the main pass's "
                           "gold/iso/xp/energy delta assertions per fight; treat --loops as a soak, "
                           "not an itemized-assertion run")
+    ap.add_argument('--share', action='store_true',
+                     help="Task 5.4: start a fight, end it via the debug low-hp+scripted-hit pattern "
+                          "(same technique every other e2e-style test in this file already uses, not "
+                          "a dedicated debug hook), call G.shareCard(), and assert the returned string "
+                          "is a data:image/png;base64,... PNG whose IHDR chunk decodes to exactly "
+                          "854x480 (checked directly against the raw PNG bytes, not via an Image "
+                          "element); prints {state, prefix_ok, dims_ok, width, height} and exits 1 on "
+                          "any page/console error or a failed check; combine with --shot to also write "
+                          "the decoded PNG bytes to disk for a manual look")
     a = ap.parse_args()
     if a.floor is not None and a.node is None:
         ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2
@@ -380,6 +392,47 @@ def main():
         out = {'page_errors': e2e_errors, 'summary': r}
         print(json.dumps(out, indent=1))
         sys.exit(1 if e2e_errors or r.get('errors') else 0)
+    if a.share:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page(viewport={'width': 854, 'height': 480})
+            share_errors = []
+            pg.on('pageerror', lambda e: share_errors.append(str(e)))
+            pg.on('console', lambda m: share_errors.append(m.text) if m.type == 'error' else None)
+            pg.goto(INDEX)
+            pg.wait_for_function('typeof G!=="undefined"')
+            # Same "end a fight via a scripted low-hp hit, then step ticks until RESULT" technique
+            # every other e2e-style test in this file already uses (no dedicated debug-KO hook exists,
+            # or is needed) -- p1 (carl) lands one scripted light on p2 (donut) whose hp is pinned to 1
+            # first, so it's a guaranteed one-hit KO.
+            js = ("(()=>{G.sim=true;"
+                  "G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',"
+                  "ctrl1:Ctrl.script([{f:0,until:600,intent:{light:true}}]),ctrl2:Ctrl.idle()});"
+                  "G.fight.p1.x=G.fight.p2.x-G.fight.p1.width-10;G.fight.p2.hp=1;"
+                  "for(let i=0;i<600&&G.state!=='RESULT';i++)G.tick();"
+                  "return{state:G.state,dataUrl:G.shareCard()}})()")
+            r = pg.evaluate(js)
+            b.close()
+        data_url = r.get('dataUrl') or ''
+        prefix_ok = isinstance(data_url, str) and data_url.startswith('data:image/png;base64,')
+        width = height = None
+        dims_ok = False
+        raw = b''
+        if prefix_ok:
+            raw = base64.b64decode(data_url.split(',', 1)[1])
+            # PNG: an 8-byte signature, then the IHDR chunk (4-byte length, 'IHDR', 4-byte width,
+            # 4-byte height, big-endian) starting at byte 12 -- same byte offsets the in-page unit
+            # test (90_tests.js) decodes by hand, checked here independently in Python.
+            if raw[12:16] == b'IHDR':
+                width, height = struct.unpack('>II', raw[16:24])
+                dims_ok = (width == 854 and height == 480)
+        if a.shot and raw:
+            with open(a.shot, 'wb') as f:
+                f.write(raw)
+        out = {'errors': share_errors, 'state': r.get('state'),
+               'prefix_ok': prefix_ok, 'dims_ok': dims_ok, 'width': width, 'height': height}
+        print(json.dumps(out, indent=1))
+        sys.exit(1 if share_errors or not prefix_ok or not dims_ok or r.get('state') != 'RESULT' else 0)
     errors, console = [], []
     with sync_playwright() as p:
         b = p.chromium.launch()

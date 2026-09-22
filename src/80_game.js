@@ -7,7 +7,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // already caps gameplay at 1.12; 1.28 is the S3 cinematic punch-in) so a Camera.update before any
   // startFight (shouldn't happen, but tests instantiate G without always calling it) behaves exactly
   // as it did before this existed.
-  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast()},
+  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast();this.checkOrientation()},
   // Positions #toast off the canvas's own box (canvas.getBoundingClientRect()), not #wrap, so it
   // tracks the actual displayed game area exactly even when #wrap letterboxes the canvas at an
   // aspect ratio other than W/H. Fix round 2: moved from just under the HUD's floor-line text to
@@ -24,8 +24,19 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // The toast is centered in that gap, capped at 88% of its width, so it can never reach either
   // button's label regardless of content.
   TOAST_BOTTOM_GAP:32,BLOCK_RIGHT:22+76,PUNCH_LEFT:W-(198+76),
+  // Task 5.4 (leftHanded): BLOCK_RIGHT/PUNCH_LEFT above are canvas-local x's for the NORMAL layout's
+  // gap (BLOCK's right edge .. PUNCH's left edge) -- see their own original comment for why this is
+  // computed off fixed numbers instead of the buttons' own getBoundingClientRect (they collapse to
+  // zero pre-fight). document.body's 'left-handed' class (G.applySettings) mirrors the whole #btns
+  // layout in CSS (00_head.html: BLOCK moves to the right, PUNCH/KICK/POWER to the left) around the
+  // canvas's own horizontal center, so the mirrored gap's local x's are exactly W minus the normal
+  // ones, swapped (mirroring PUNCH_LEFT gives the new left edge, mirroring BLOCK_RIGHT gives the new
+  // right edge) -- no separate constants needed, and it stays correct if BLOCK_RIGHT/PUNCH_LEFT above
+  // are ever retuned.
   positionToast(){const r=canvas.getBoundingClientRect(),el=document.getElementById('toast'),sx=r.width/W;
-    const gapL=r.left+this.BLOCK_RIGHT*sx,gapR=r.left+this.PUNCH_LEFT*sx;
+    const lh=document.body.classList.contains('left-handed');
+    const gapLc=lh?(W-this.PUNCH_LEFT):this.BLOCK_RIGHT,gapRc=lh?(W-this.BLOCK_RIGHT):this.PUNCH_LEFT;
+    const gapL=r.left+gapLc*sx,gapR=r.left+gapRc*sx;
     el.style.left=((gapL+gapR)/2)+'px';
     el.style.bottom=(innerHeight-r.bottom+this.TOAST_BOTTOM_GAP/H*r.height)+'px';
     el.style.maxWidth=Math.round((gapR-gapL)*.88)+'px'},
@@ -38,6 +49,38 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     const lh=parseFloat(getComputedStyle(el).lineHeight)||1;
     if(Math.round(el.scrollHeight/lh)>2)el.style.fontSize='12px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
+  // Task 5.4: settings whose effect is a standing DOM/layout state (not read live each time, unlike
+  // reduceMotion/sfx/announcer/haptics, which are checked directly off Save.data.settings at their
+  // own call sites) get applied here -- called once at boot (before the first fit(), since
+  // positionToast below reads the class it sets) and again from Screens.renderSettings() every time a
+  // toggle button is clicked.
+  applySettings(){
+    document.body.classList.toggle('left-handed',!!Save.data.settings.leftHanded);
+    this.positionToast()},
+  // Pure function of (viewport w/h, is-a-touch-device) — no window/navigator read of its own — so
+  // tests can drive every truth-table cell directly, per the frozen interface. Portrait AND a touch
+  // device both have to hold; a desktop window that happens to be taller than it is wide (an odd but
+  // legal browser window shape) must never trip the rotate overlay.
+  needsRotate(w,h,touch){return !!touch&&h>w},
+  // Real touch-device detection, factored out of checkOrientation/initTapLayer so both share one
+  // definition of "touch device" and a test can still force either branch via initTapLayer's own
+  // optional `touch` param below.
+  tapLayerTouch(){return('ontouchstart' in window)||navigator.maxTouchPoints>0},
+  // Called from fit() (so both the initial load and every resize re-check) — toggles #rotate via the
+  // same G.show(id,on) every other overlay-ish element uses.
+  checkOrientation(){this.show('rotate',this.needsRotate(innerWidth,innerHeight,this.tapLayerTouch()))},
+  // First-load "TAP TO START" layer over the title (00_head.html's #tap): on a touch device it stays
+  // up until the first pointerdown, which both unlocks audio (the same Audio.init() every other
+  // first-gesture call site already uses) and hides the layer; on a non-touch device it hides
+  // immediately, no gesture required. `touch` is an optional override (auto-detected via
+  // tapLayerTouch() when omitted) purely so a test can drive both branches deterministically without
+  // needing real touch-event emulation.
+  initTapLayer(touch){
+    if(touch===undefined)touch=this.tapLayerTouch();
+    const tap=document.getElementById('tap');
+    if(!touch){tap.classList.remove('show');return}
+    tap.classList.add('show');
+    tap.addEventListener('pointerdown',()=>{Audio.init();tap.classList.remove('show')},{once:true})},
   // Canvas hit-test for the HUD's pause glyph (drawn by Render.hud at Render.pauseRect), consulted
   // by Input's pointerdown handler before it does any zone/gesture handling.
   hitPause(x,y){const r=Render.pauseRect;return x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h},
@@ -177,7 +220,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // the unthrottled display primitive this calls into. A no-op while the S3 cinematic is up — the
   // card already reads SPECIAL 3 on-canvas, and the toast element is hidden for the duration anyway
   // (see hideToast/showToast), so there is nothing useful for a line to update.
-  say(text){if(this.fight&&this.fight.cinematic>0)return;if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
+  // Task 5.4: settings.announcer===false makes every announcer line a no-op -- gated here, the one
+  // place Audio.announce (20_audio.js) and G's own direct #toast fallback both already route through,
+  // rather than at each Audio.announce call site.
+  say(text){if(this.fight&&this.fight.cinematic>0)return;if(!Save.data.settings.announcer)return;
+    if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
   // Hides the DOM #toast announcer (an absolutely-positioned element outside the canvas, so nothing
   // drawn on-canvas can cover it) for the duration of the S3 cinematic, and cancels Audio.say's
   // pending fade-out timeout so a stale line already on screen (e.g. the opening announcer, whose
@@ -191,6 +238,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // multiplier window just starting (Broadcast.state.lastPop) into an actual gold FX popup, pushed
   // into the live fight's own fx queue (drained by G.tick -> FX.pushAll, same pipe every hit/parry/
   // combo popup already uses) and immediately cleared so it never re-pops for the rest of that window.
+  // Task 5.4: settings.sfx===false makes every sound-effect recipe a no-op. Gated at the CALL SITE
+  // (here, checkSpecial, checkCinematicFx) rather than inside Audio.recipes itself (20_audio.js) so a
+  // test can stub an individual Audio.recipes.* function and assert it was never invoked when sfx is
+  // off -- gating inside the recipe's own body would still call whatever function Audio.recipes.X
+  // currently points to (the stub), defeating that kind of test.
+  playRecipe(fn){if(Save.data.settings.sfx&&fn)fn()},
   onEvent(t,a,b,val){
     if(this.fight)Broadcast.onEvent(t,a,b,val,this.fight);
     if(Broadcast.state.lastPop){
@@ -201,14 +254,19 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // Multi-hit specials (s1/s2/s3) already got their one full recipe burst from checkSpecial on
       // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
       // not the whole recipe again (that would replay a 3-14 tone burst per sub-hit, overlapping).
-      (mv&&mv.hits>1?Audio.recipes.light1:(Audio.recipes[a.moveName]||Audio.recipes.lights))();
+      this.playRecipe(mv&&mv.hits>1?Audio.recipes.light1:(Audio.recipes[a.moveName]||Audio.recipes.lights));
       // Streak lines are in the player's own voice ("Carl's fan club just doubled in size"), so they
       // only fire for p1's combos, not a mob/AI p2's.
-      if(this.fight&&a===this.fight.p1&&(a.combo===3||a.combo===5||a.combo===10))Audio.announce('streak'+a.combo,this.fight.presRng)}
-    else if(t==='block')Audio.recipes.block();
-    else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.presRng)}
-    else if(t==='miss'){if(b&&b.state==='DASH')Audio.recipes.dash()}
-    else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}},
+      if(this.fight&&a===this.fight.p1&&(a.combo===3||a.combo===5||a.combo===10))Audio.announce('streak'+a.combo,this.fight.presRng);
+      // Task 5.4: haptics — a short vibration on the frame the PLAYER (p1) is the one who took the
+      // hit (b===p1, not a===p1). Guarded by both the settings toggle and navigator.vibrate actually
+      // existing (no Vibration API at all on iOS Safari; an unguarded call would throw and take the
+      // rest of this handler down with it).
+      if(this.fight&&b===this.fight.p1&&Save.data.settings.haptics&&typeof navigator.vibrate==='function')navigator.vibrate(12)}
+    else if(t==='block')this.playRecipe(Audio.recipes.block);
+    else if(t==='parry'){this.playRecipe(Audio.recipes.parry);Audio.announce('parry',this.fight.presRng)}
+    else if(t==='miss'){if(b&&b.state==='DASH')this.playRecipe(Audio.recipes.dash)}
+    else if(t==='ko'){this.playRecipe(Audio.recipes.ko);Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}},
   // Arena sugar: draws the next Arena.start() encounter for the current streak and starts it with
   // mode:'arena' (never gated by Quest.start/energy -- Phase 4 ruling 4, "arena costs no energy").
   startArena(o={}){return this.startFight(Object.assign({},o,{encounter:Arena.start(),mode:'arena'}))},
@@ -256,6 +314,52 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(r.xp)parts.push('+'+r.xp+' XP');
     if(r.units)parts.push('+'+r.units+' UNITS');
     return parts.join('  ')},
+  // Task 5.4: an 854x480 offscreen canvas (never attached to the DOM — a share card renders exactly
+  // like a screenshot, with no live #wrap/#btns/overlay chrome in it) summarizing the just-finished
+  // (or in-progress; nothing here requires f.over) fight: champion portrait, name, PEAK VIEWERS,
+  // floor/boss-or-streak, and today's date via Meta.today() (never a raw Date/performance.now() —
+  // same injectable-clock rule Meta.today() itself already enforces). Returns a PNG data URL;
+  // G.share() (below) is the one real caller, tests/harness.py's --share calls this directly.
+  shareCard(){
+    const cv=document.createElement('canvas');cv.width=854;cv.height=480;
+    const c=cv.getContext('2d');
+    c.fillStyle='#090b12';c.fillRect(0,0,cv.width,cv.height);
+    const champId=this.champ||Save.data.active,def=DEFS[champId];
+    if(def){
+      const portrait=Rig.portrait(lookFor(def)),pw=140,ph=140,px=cv.width/2-pw/2,py=48;
+      c.drawImage(portrait,px,py,pw,ph);
+      c.strokeStyle='#f4c542';c.lineWidth=3;c.strokeRect(px+1.5,py+1.5,pw-3,ph-3)}
+    c.textAlign='center';c.fillStyle='#fff';c.font='900 30px ui-monospace,monospace';
+    c.fillText(def?def.name:'CHAMPION',cv.width/2,232);
+    c.fillStyle='#f4c542';c.font='bold 24px ui-monospace,monospace';
+    c.fillText('PEAK VIEWERS '+Render.fmtViewers(Broadcast.state.peak||0),cv.width/2,276);
+    // floor/boss for a quest fight, streak for an arena one, nothing for a bare exhibition -- mirrors
+    // onFightEnd's own mode/questTarget reads just below.
+    let prog='';
+    if(this.mode==='quest'&&this.questTarget)prog='FLOOR '+this.questTarget.floor+(this.questTarget.node==='boss'?' — BOSS':'');
+    else if(this.mode==='arena')prog='STREAK '+(Save.data.arena.streak||0);
+    if(prog){c.font='16px ui-monospace,monospace';c.fillStyle='#ccc';c.fillText(prog,cv.width/2,308)}
+    c.font='12px ui-monospace,monospace';c.fillStyle='#888';
+    c.fillText(Meta.today(),cv.width/2,336);
+    c.font='bold 12px ui-monospace,monospace';c.fillStyle='#555';
+    c.fillText("CARL'S DOORWAY BRAWL",cv.width/2,440);
+    return cv.toDataURL('image/png')},
+  // navigator.share({files:[...]}) when the platform supports sharing an actual file (most mobile
+  // browsers); otherwise falls back to downloadShareCard's plain <a download> link, which every
+  // browser supports unconditionally. Best-effort: any failure along the navigator.share path
+  // (including the user cancelling the native share sheet, which rejects the promise) falls back to
+  // the download link rather than leaving the player with nothing.
+  share(){
+    const dataUrl=this.shareCard();
+    if(!navigator.share){this.downloadShareCard(dataUrl);return}
+    fetch(dataUrl).then(r=>r.blob()).then(blob=>{
+      const file=new File([blob],'carls-doorway-brawl.png',{type:'image/png'});
+      const shareData={files:[file],title:"CARL'S DOORWAY BRAWL",text:'My run in the dungeon.'};
+      if(navigator.canShare&&!navigator.canShare(shareData))return this.downloadShareCard(dataUrl);
+      return navigator.share(shareData)}).catch(()=>this.downloadShareCard(dataUrl))},
+  downloadShareCard(dataUrl){
+    const a=document.createElement('a');a.href=dataUrl;a.download='carls-doorway-brawl.png';
+    document.body.appendChild(a);a.click();a.remove()},
   // Called from tick() once the KO slow-mo has fully counted down (fight.slowmo hits 0). Split out
   // of onEvent('ko',...) because the KO event fires synchronously inside the same f.step() that ends
   // the fight, well before slow-mo has had a chance to play; flipping state here on the frame it
@@ -419,7 +523,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // both fire on the exact same tick, so doing it in both places would double-play the sound.
   checkSpecial(fighter,prevMoveName){const mn=fighter.moveName;
     if(mn&&mn!==prevMoveName&&(mn==='s1'||mn==='s2')){
-      (Audio.recipes[mn]||Audio.recipes.lights)();
+      this.playRecipe(Audio.recipes[mn]||Audio.recipes.lights);
       // Recipe plays for either side (game feel); the announcer line is reserved for the human's
       // own specials only, so it doesn't caption every mob/AI special too.
       if(fighter===this.fight.p1)Audio.announce('special',this.fight.presRng)}},
@@ -434,7 +538,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     const att=(f.p1.state==='ATTACK'&&f.p1.moveName==='s3')?f.p1:f.p2;
     this.cinemFocus=att;
     this.hideToast();
-    Audio.recipes.s3();
+    this.playRecipe(Audio.recipes.s3);
     if(att===f.p1)Audio.announce('special',f.presRng)},
   // Test/debug helper (also used by tests/harness.py --cinematic): starts a fight, arms p1 with a
   // scripted s3, sim-steps until the cinematic is up, then advances FX so a screenshot shows the
@@ -466,7 +570,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // only Screens (loaded after this file) knows how to resolve -- safe to reference here because
   // these callbacks only run on a later click, well after the whole script (including
   // 85_screens.js) has parsed.
-  init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
+  init(){
+    // Task 5.4: applySettings() must run BEFORE the first fit() call below — it sets the
+    // 'left-handed' body class fit()'s own positionToast() reads to compute the toast's gap.
+    this.applySettings();
+    this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
+    // Task 5.4: the first-load "TAP TO START" audio-unlock layer — synchronous (not deferred to the
+    // rAF below) so a touch device shows it immediately, with no first-frame flicker of the layer
+    // being absent then popping in.
+    this.initTapLayer();
     // Reuses the previous fight's full options (p1/p2/ai/ctrl1/ctrl2/encounter/clock), overriding only
     // the seed — previously this passed just {seed,encounter}, silently dropping a custom p2/ai back
     // to the startFight defaults (donut/basic) on every rematch.
@@ -487,6 +599,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       const opts=Object.assign({},this.lastFightOpts,{seed:this.fight?this.fight.rng.int(1e9)+1:this.seed});
       if(this.mode==='arena')this.startArena(opts);else this.startFight(opts)};
     document.getElementById('resultTitleBtn').onclick=()=>this.backToOrigin();
+    // Task 5.4: SHARE (result overlay, static markup, bound once here — same pattern as 'again'/
+    // 'resultTitleBtn' above, not re-bound per Screens.renderResult() call).
+    document.getElementById('shareBtn').onclick=()=>this.share();
     document.getElementById('resume').onclick=()=>this.togglePause();
     document.getElementById('quit').onclick=()=>this.backToOrigin();
     // Unchanged from before Task 4.5 (still the only place that mutates Audio.muted/Save.data.mute);
