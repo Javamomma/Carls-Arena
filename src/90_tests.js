@@ -4090,6 +4090,36 @@ Test.add('a hit on an IDLE (non-attacking) foe is never an intercept, even with 
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
   eq(f.p2.hp,940,'a plain light on an idle foe is still exactly the pre-Phase-7 60 damage');
   ok(!f.log.some(e=>e.type==='intercept'),'an idle (non-ATTACK) defender can never be intercepted')});
+// Task 7.5 (7.3 review follow-up): intercept's own dmg/power/event bonus is gated to once per
+// attacking move INSTANCE (att.interceptedThisMove, 50_fighter.js/60_fight.js), not once per landed
+// sub-hit -- a multi-hit special (s1) whose first sub-hit already intercepted a vulnerable defender
+// must not re-credit the x1.5 dmg/+15 power/INTERCEPT! event a second time even if a LATER sub-hit of
+// that same activation catches the defender freshly vulnerable again (a real risk: HITSTUN from the
+// first sub-hit can end well inside the special's own remaining active window, letting the defender
+// throw a fresh dash-in before the flurry finishes). Driven by calling f.resolve() directly with two
+// hand-built sub-hit records against the same att.move instance (idx 0 then 1) -- the same level of
+// directness the "past medium startup" test above already uses for att/def state, just one step lower
+// since this needs to isolate exactly one attacking move's TWO sub-hits, not a whole real special's
+// organic timing.
+Test.add('intercept credit (dmg/power/event) fires at most once per attacking move instance, even when a multi-hit special catches the defender vulnerable twice',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  att.move=att.moveDef('s1');att.moveName='s1';att.chainNode=0;att.interceptedThisMove=false;att.hits=new Set();att.power=100;
+  const armVulnerable=()=>{def.hp=1000;def.move=def.moveDef('medium');def.moveName='medium';def.effStartup=def.move.startup;
+    def.dashLeft=0;def.dashRate=0;def.chainNode=1;def.hits=new Set();def.landed=false;def.setState('ATTACK',2)};
+  armVulnerable();
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:false});
+  ok(f.log.some(e=>e.type==='intercept'),'sub-hit 0 must be credited as an intercept (def was mid medium-startup)');
+  eq(att.power,115,'sub-hit 0 banks powHit(0, s1\'s own value)+the intercept\'s flat +15');
+  const hit0=f.log.find(e=>e.type==='hit'&&e.who===1);
+  ok(hit0,'sub-hit 0 must land');
+  armVulnerable(); // re-arm a FRESH vulnerable dash-in before the special's next sub-hit -- the double-dip risk
+  const powerBefore=att.power;
+  f.resolve({type:'hit',att,def,idx:1,m:att.move,last:false});
+  eq(att.power,powerBefore,'a second sub-hit of the SAME move instance must bank no extra +15 even though def is freshly vulnerable again');
+  eq(f.log.filter(e=>e.type==='intercept').length,1,'only one intercept event total, not one per qualifying sub-hit');
+  const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
+  eq(hits.length,2,'sanity: both sub-hits actually landed');
+  ok(hits[1].val<hit0.val,'the second (non-credited) sub-hit must not get the 1.5x intercept damage multiplier')});
 Test.add('a dash-back through an active hitbox grants dexterity (+20% crit via Effects.mods.critDelta) and emits a dexterity event',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{dashBack:true}}])});
   closeIn(f);run(f,5);

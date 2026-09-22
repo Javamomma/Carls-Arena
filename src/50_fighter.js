@@ -57,7 +57,19 @@ class Fighter{
     // could read something other than IDLE right when tick()'s old check ran, leaving the flag stuck
     // true until some later, unrelated IDLE frame). _kdCounter never looks at .state at all, so it
     // can't be defeated the same way; AI.make now only ever reads wasKnockedDown.
-    this._kdCounter=0}
+    this._kdCounter=0;
+    // interceptedThisMove (Task 7.5, 7.3 review follow-up): set true the instant THIS move instance
+    // has already been credited an intercept (Fight.resolve, 60_fight.js) -- reset in startMove below,
+    // alongside every other per-instance field (hits/landed/chainNode). Guards the same "once per
+    // move, not once per sub-hit" property hitstop's own `!m.hits||last` gate already gives hitstop,
+    // for a case that gate can't cover: an intercept's own eligibility is read off the DEFENDER's
+    // live state (def.state==='ATTACK'&&startup&&dash/track), not the attacker's sub-hit index, so a
+    // multi-hit special (s1/s2/s3) whose early sub-hit intercepts a dash-in, knocks the defender into
+    // HITSTUN, but leaves enough of its own active window for the defender to recover and throw a
+    // FRESH vulnerable dash-in before the special's later sub-hits land, would otherwise re-credit the
+    // x1.5 dmg/+15 power/INTERCEPT! event a second time off what is, from the attacker's side, still
+    // one single move activation. See Fight.resolve's own comment for exactly where this is read/set.
+    this.interceptedThisMove=false}
   get front(){return this.x+this.face*this.width/2}
   busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
   setState(s,f=0){if(s==='KNOCKDOWN'){this.wasKnockedDown=true;this._kdCounter=KNOCKDOWN.frames+KNOCKDOWN.inv}this.state=s;this.f=f}
@@ -75,6 +87,7 @@ class Fighter{
   startMove(name,node,overrides){
     this.move=overrides?Object.assign({},this.moveDef(name),overrides):this.moveDef(name);
     this.moveName=name;this.hits=new Set();this.landed=false;this.chainNode=node===undefined?0:node;
+    this.interceptedThisMove=false;
     if(this.move.cost)this.power-=this.move.cost;this.setupDash();this.setState(this.move.charge?'CHARGE':'ATTACK')}
   // Movement inside moves (Task 6.2): computes dashLeft/dashRate/effStartup once, from the move's own
   // track/stepIn/dash fields and the this.foeDist snapshot Fight.step wrote before this frame's act()

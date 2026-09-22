@@ -141,7 +141,19 @@ class Fight{
     // same "read the pre-resolve state" discipline Fight.step's own c1/c2 detect-before-resolve split
     // already keeps for a true mutual trade. def.phase() (50_fighter.js) is Task 7.2's own helper,
     // reused rather than duplicated here per the controller's ruling.
-    const intercept=def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track));
+    // Task 7.5 (7.3 review follow-up): gated by att.interceptedThisMove -- once per attacking move
+    // instance, not once per landed sub-hit. def's own vulnerable window (state/phase/dash-or-track)
+    // naturally clears the instant a sub-hit lands on def (clearMove() below moves def out of ATTACK),
+    // which already stops the OBVIOUS repeat; interceptedThisMove exists for the case that alone
+    // doesn't cover -- a multi-hit att move (s1/s2/s3) whose early sub-hit intercepts, then leaves
+    // enough of its own active window that def recovers and throws a second vulnerable dash-in before
+    // the special's later sub-hits land. See Fighter.startMove/the field's own comment (50_fighter.js)
+    // for the full reasoning; mirrors the "once per move" property hitstop's own `!m.hits||last` gate
+    // already gives hitstop, applied here via a live flag instead since intercept's own trigger is
+    // state-based, not sub-hit-index-based.
+    const rawIntercept=def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track));
+    const intercept=rawIntercept&&!att.interceptedThisMove;
+    if(intercept)att.interceptedThisMove=true;
     // ref carries dmg, the two power deltas, and the move itself so armorUp/powerGain can adjust
     // them before either is applied; defender-side hooks run first, then attacker-side, both against
     // the same ref. Fix-wave item 6: ref.move (not att.move) is what powerGain reads — on a true

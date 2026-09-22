@@ -1995,7 +1995,19 @@ class Fighter{
     // could read something other than IDLE right when tick()'s old check ran, leaving the flag stuck
     // true until some later, unrelated IDLE frame). _kdCounter never looks at .state at all, so it
     // can't be defeated the same way; AI.make now only ever reads wasKnockedDown.
-    this._kdCounter=0}
+    this._kdCounter=0;
+    // interceptedThisMove (Task 7.5, 7.3 review follow-up): set true the instant THIS move instance
+    // has already been credited an intercept (Fight.resolve, 60_fight.js) -- reset in startMove below,
+    // alongside every other per-instance field (hits/landed/chainNode). Guards the same "once per
+    // move, not once per sub-hit" property hitstop's own `!m.hits||last` gate already gives hitstop,
+    // for a case that gate can't cover: an intercept's own eligibility is read off the DEFENDER's
+    // live state (def.state==='ATTACK'&&startup&&dash/track), not the attacker's sub-hit index, so a
+    // multi-hit special (s1/s2/s3) whose early sub-hit intercepts a dash-in, knocks the defender into
+    // HITSTUN, but leaves enough of its own active window for the defender to recover and throw a
+    // FRESH vulnerable dash-in before the special's later sub-hits land, would otherwise re-credit the
+    // x1.5 dmg/+15 power/INTERCEPT! event a second time off what is, from the attacker's side, still
+    // one single move activation. See Fight.resolve's own comment for exactly where this is read/set.
+    this.interceptedThisMove=false}
   get front(){return this.x+this.face*this.width/2}
   busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
   setState(s,f=0){if(s==='KNOCKDOWN'){this.wasKnockedDown=true;this._kdCounter=KNOCKDOWN.frames+KNOCKDOWN.inv}this.state=s;this.f=f}
@@ -2013,6 +2025,7 @@ class Fighter{
   startMove(name,node,overrides){
     this.move=overrides?Object.assign({},this.moveDef(name),overrides):this.moveDef(name);
     this.moveName=name;this.hits=new Set();this.landed=false;this.chainNode=node===undefined?0:node;
+    this.interceptedThisMove=false;
     if(this.move.cost)this.power-=this.move.cost;this.setupDash();this.setState(this.move.charge?'CHARGE':'ATTACK')}
   // Movement inside moves (Task 6.2): computes dashLeft/dashRate/effStartup once, from the move's own
   // track/stepIn/dash fields and the this.foeDist snapshot Fight.step wrote before this frame's act()
@@ -2655,7 +2668,19 @@ class Fight{
     // same "read the pre-resolve state" discipline Fight.step's own c1/c2 detect-before-resolve split
     // already keeps for a true mutual trade. def.phase() (50_fighter.js) is Task 7.2's own helper,
     // reused rather than duplicated here per the controller's ruling.
-    const intercept=def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track));
+    // Task 7.5 (7.3 review follow-up): gated by att.interceptedThisMove -- once per attacking move
+    // instance, not once per landed sub-hit. def's own vulnerable window (state/phase/dash-or-track)
+    // naturally clears the instant a sub-hit lands on def (clearMove() below moves def out of ATTACK),
+    // which already stops the OBVIOUS repeat; interceptedThisMove exists for the case that alone
+    // doesn't cover -- a multi-hit att move (s1/s2/s3) whose early sub-hit intercepts, then leaves
+    // enough of its own active window that def recovers and throws a second vulnerable dash-in before
+    // the special's later sub-hits land. See Fighter.startMove/the field's own comment (50_fighter.js)
+    // for the full reasoning; mirrors the "once per move" property hitstop's own `!m.hits||last` gate
+    // already gives hitstop, applied here via a live flag instead since intercept's own trigger is
+    // state-based, not sub-hit-index-based.
+    const rawIntercept=def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track));
+    const intercept=rawIntercept&&!att.interceptedThisMove;
+    if(intercept)att.interceptedThisMove=true;
     // ref carries dmg, the two power deltas, and the move itself so armorUp/powerGain can adjust
     // them before either is applied; defender-side hooks run first, then attacker-side, both against
     // the same ref. Fix-wave item 6: ref.move (not att.move) is what powerGain reads — on a true
@@ -10650,6 +10675,36 @@ Test.add('a hit on an IDLE (non-attacking) foe is never an intercept, even with 
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
   eq(f.p2.hp,940,'a plain light on an idle foe is still exactly the pre-Phase-7 60 damage');
   ok(!f.log.some(e=>e.type==='intercept'),'an idle (non-ATTACK) defender can never be intercepted')});
+// Task 7.5 (7.3 review follow-up): intercept's own dmg/power/event bonus is gated to once per
+// attacking move INSTANCE (att.interceptedThisMove, 50_fighter.js/60_fight.js), not once per landed
+// sub-hit -- a multi-hit special (s1) whose first sub-hit already intercepted a vulnerable defender
+// must not re-credit the x1.5 dmg/+15 power/INTERCEPT! event a second time even if a LATER sub-hit of
+// that same activation catches the defender freshly vulnerable again (a real risk: HITSTUN from the
+// first sub-hit can end well inside the special's own remaining active window, letting the defender
+// throw a fresh dash-in before the flurry finishes). Driven by calling f.resolve() directly with two
+// hand-built sub-hit records against the same att.move instance (idx 0 then 1) -- the same level of
+// directness the "past medium startup" test above already uses for att/def state, just one step lower
+// since this needs to isolate exactly one attacking move's TWO sub-hits, not a whole real special's
+// organic timing.
+Test.add('intercept credit (dmg/power/event) fires at most once per attacking move instance, even when a multi-hit special catches the defender vulnerable twice',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  att.move=att.moveDef('s1');att.moveName='s1';att.chainNode=0;att.interceptedThisMove=false;att.hits=new Set();att.power=100;
+  const armVulnerable=()=>{def.hp=1000;def.move=def.moveDef('medium');def.moveName='medium';def.effStartup=def.move.startup;
+    def.dashLeft=0;def.dashRate=0;def.chainNode=1;def.hits=new Set();def.landed=false;def.setState('ATTACK',2)};
+  armVulnerable();
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:false});
+  ok(f.log.some(e=>e.type==='intercept'),'sub-hit 0 must be credited as an intercept (def was mid medium-startup)');
+  eq(att.power,115,'sub-hit 0 banks powHit(0, s1\'s own value)+the intercept\'s flat +15');
+  const hit0=f.log.find(e=>e.type==='hit'&&e.who===1);
+  ok(hit0,'sub-hit 0 must land');
+  armVulnerable(); // re-arm a FRESH vulnerable dash-in before the special's next sub-hit -- the double-dip risk
+  const powerBefore=att.power;
+  f.resolve({type:'hit',att,def,idx:1,m:att.move,last:false});
+  eq(att.power,powerBefore,'a second sub-hit of the SAME move instance must bank no extra +15 even though def is freshly vulnerable again');
+  eq(f.log.filter(e=>e.type==='intercept').length,1,'only one intercept event total, not one per qualifying sub-hit');
+  const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
+  eq(hits.length,2,'sanity: both sub-hits actually landed');
+  ok(hits[1].val<hit0.val,'the second (non-credited) sub-hit must not get the 1.5x intercept damage multiplier')});
 Test.add('a dash-back through an active hitbox grants dexterity (+20% crit via Effects.mods.critDelta) and emits a dexterity event',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{dashBack:true}}])});
   closeIn(f);run(f,5);
