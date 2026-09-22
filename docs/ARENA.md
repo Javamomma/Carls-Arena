@@ -826,3 +826,71 @@ Tasks 4.2-4.3: implementer DONE (9ece64d, 28afd17). Rulings: Save.data.pity adde
 Task 4.4: implementer DONE (32ad675); concern: energy gate only on {floor,node}. Ruling: bare {encounter:id} must not grant quest rewards (exhibition semantics) — reviewer to verify. Reviewer (sonnet) dispatched
 Task 4.6: implementer DONE (be7337b..a589242, 5 commits). Rulings: --e2e chains all five floor-1 nodes then the boss (boss is save-locked otherwise) — accepted; boss-retry exhaustion is recorded, not a failure — accepted (the bot's boss win rate is ~13%).
 Rulings for the wave: pity = every 10th open of a kind guarantees that kind's TOP tier (basic 3★, premium 4★) — plan amended; shards scale by rolled tier 1/2/3/5; node gold raised to 160·n+60·k; locked nodes disabled with in-panel refusal text and the toast raised above overlays; Phase 5 seams added now (FLOORS entries get an explicit `id` and Quest looks floors up by id so a tutorial floor can exist; SHOP_ITEMS table generalizing buyIso; Rewards.mult hook) — cost if wrong: an economy retune in Phase 5.
+
+## Release rubric (2026-09-22, Task 5.6)
+
+Every criterion below has a verification command actually run against the final Task 5.6 build
+(commit `2a45b43`, the last commit before this one), with its real result pasted, not summarized from
+memory. Phase 0-4 rows point at each phase's own detailed exit table above where one exists; this
+table's numbers are a fresh re-run today, not a copy of the historical figures (they've drifted
+slightly since — e.g. unit test count — which is expected and fine, the gate is "still passes", not
+"identical numbers").
+
+### Phase exit criteria (Phases 0-5)
+
+| Phase | Criterion | Status | Verification |
+|---|---|---|---|
+| 0 | `tools/build.py --check` exits 0, `--unit` passes, headless load has no page errors | DONE | `python3 tools/build.py --check` → exit 0; `--unit` → 298 pass, 0 fail, page `errors:[]` |
+| 1 | 26+ unit tests pass | DONE (298 ≫ 26) | `python3 tests/harness.py --unit` |
+| 1 | Four 300s soaks clean | DONE historically (2026-09-21 log entry above: 4×300s, `frames_total` all >16200/18000); today's equivalent health re-checked via the full matrix + a 60s soak, both clean | `python3 tests/harness.py --sim --seconds 60` → `frames_total` 1874/1800 (>100%, 5 fights, 0 errors); `--matrix` → 216/216 cells clean (below) |
+| 1 | Hand-play confirms all six Task 1.7 Step 3 control checks | **NOT DONE** — never performed; still the one open item from the original Phase 1 log entry above. No agent in this SDD pipeline has hands; the closest available substitute is automated: `Ctrl.competent`/`Ctrl.script` exercise light chains, medium range-closing, heavy charging, block/parry timing, dash evasion, and the special button on every `--matrix`/`--e2e`/`--tutorial`/`--batch` run (all green today), which is behavioral coverage but not a human confirming the *feel* the brief actually asked for | none available — flagging for a human playtest pass, not closing this row |
+| 1 | Repo on GitHub | DONE (repo exists; `origin` already carries every commit through `7655b3f`) — this task's own 6 commits are intentionally **not pushed** per the brief's "Do not push" rule; pushing is the controller's call | `git remote -v` → `origin https://github.com/Javamomma/Carls-Arena.git` |
+| 2 | All of Task 2.9 Step 4 (soak matrix, perf, HUD-zoom test, shots); final review clean; pushed | DONE (own exit table above, 2026-09-21); re-verified live today (matrix/perf below) | see "Phase 2 exit" table above |
+| 3 | ≥85 tests; `--matrix` clean; batch table monotone; reviewer named every new character; final review clean; pushed | DONE (own exit table above, 2026-09-22) | see "Phase 3 exit" table above |
+| 4 | ≥130 tests; `--e2e` exits 0 ×3 seeds; matrix/perf green; screens shots reviewed; final review clean; pushed | DONE (own exit table + final-review fix wave above, 2026-09-22) | see "Phase 4 exit" / "Final-review fix wave" above |
+| 5 | Rubric all DONE; `--e2e`/`--tutorial`/`--matrix`/`--perf`/batch gate green | DONE except the two rows below | this table |
+| 5 | Final whole-branch review clean | **PENDING** — out of scope for Task 5.6 itself (the brief: "review is the controller's job after you report"); this implementer does not dispatch a review | controller's own final-review pass, after this report |
+| 5 | Pushed; Pages serving the release | **PENDING** — GitHub Pages is live and serving the game (`curl` below), but the live build predates this branch's local commits (last pushed through `7655b3f`); pushing this branch is explicitly out of scope ("Do not push") | `curl -sI https://javamomma.github.io/Carls-Arena/` → `HTTP/2 200`; live `index.html` is 407,649 bytes vs this build's 533,906 — an older build (3 hits for `TUTORIAL`/`VIEWERS`/`Sponsors` vs 77 in this build), confirming Pages hasn't picked up Phase 4/5 yet |
+
+### Release items (Task 5.6)
+
+| Criterion | Status | Verification |
+|---|---|---|
+| Unit tests | 298 pass, 0 fail | `python3 tests/harness.py --unit` |
+| Soak matrix (216 cells) | 216/216 clean, 0 errors | `python3 tests/harness.py --matrix` → `# 216 cells, 19.0s total wall time`, no `errors` column nonzero |
+| Perf < 6 ms/frame | `ms_per_frame` 0.0878 (`ms_step` 0.0055, `ms_render` 0.0823) | `python3 tests/harness.py --perf 600` |
+| Batch gate: monotone non-increasing, t1≥80%, last≤30% | t1 100% / t2 93.3% / t3 73.3% / t4 53.3% / t5 23.3% — monotone, in band | `python3 tests/batch.py --n 30 --p1 carl --ai t1,t2,t3,t4,t5` |
+| Both floor bosses in the 10-35% win-rate band at n=30 | `f1_grull` 13.3%, `f2_mother` 16.7% | same `batch.py` run, per-floor-node/boss table |
+| `--e2e` exits 0 for 3 seeds | seeds 1, 2, 3 all exit 0, 0 page/console/summary errors | `python3 tests/harness.py --e2e --seed {1,2,3}` |
+| `--e2e --loops 20` (sustained menu+fight soak) | exit 0, 0 errors; arena 3 wins/streak 5/best 5; energy 998; gold 8480 / iso 340 / units 150 | `python3 tests/harness.py --e2e --seed 1 --loops 20` |
+| `--tutorial` exits 0 | steps advance 1→2→3→4 in order, `tutorialDone` set, exactly +300 gold, 0 errors | `python3 tests/harness.py --tutorial --seed 1` |
+| `--share` exits 0 | PNG data URL, IHDR decodes to exactly 854×480 | `python3 tests/harness.py --share` |
+| `index.html` size | 533,906 bytes = 521.4 KiB | `python3 -c "import os;print(os.path.getsize('index.html'))"` |
+| Load time < 1s from `file://` (goto → `G` defined) | max 0.036s over 5 runs (36ms ≪ 1000ms) | one-off Playwright script: `pg.goto(INDEX); pg.wait_for_function('typeof G!=="undefined"')`, timed with `time.time()` around both calls |
+| No page/console errors on title/map/roster/crystal/shop/arena/settings, a quest fight, and result | 0 errors on every one of the 9 screens; final state `RESULT` | `python3 tests/harness.py --screens-smoke` (new flag; see `tests/harness.py`) |
+| Phone layout at 844×390 CSS-px landscape: canvas letterboxed, buttons ≥44px inside viewport, no horizontal scroll | canvas 693×390 (854:480 aspect preserved, fits the 844×390 viewport); all 4 buttons 76×76px, fully inside; `scrollWidth` 844 ≤ viewport 844 | `python3 tests/harness.py --phone-check` (new flag; see `tests/harness.py`) |
+| `?atlas=1` with no `assets/` folder produces no errors | 0 page errors; `ATLAS.carl`/`ATLAS.donut` both resolve to `null` (the documented silent-fallback behavior) — **caveat**: Chromium logs 2 console `error`-level lines per missing-asset attempt (`Failed to load resource: 404` on a real HTTP server, `Fetch API cannot load ... file scheme` under this repo's own `file://` harness) — this is the browser's own network-request devtools log for ANY failed resource fetch (identical to what a missing favicon produces), not a thrown JS error or an `Atlas.load`/app-code `console.error` call; `Atlas.load`'s own try/catch (68_rig.js) already turns every failure mode (missing file, bad JSON, `file://`'s scheme rejection) into a clean resolved `null` with no throw. Verified on both `file://` and a real local HTTP server (below) to rule out a `file://`-only artifact | two one-off Playwright scripts (see the Task 5.6 report) — `file://…/index.html?atlas=1` and `python3 -m http.server` + `?atlas=1`, each: `G.startFight(...)`, 60 ticks, then read `ATLAS.carl`/`ATLAS.donut` |
+
+Both new harness flags (`--screens-smoke`, `--phone-check`) are documented in `tests/harness.py`'s own
+module docstring and `--help`, and in the README's Development section, alongside every other flag
+this rubric exercises.
+
+## Task 5.6 close-out (2026-09-22)
+
+Release pass, five commits (`355e226..2a45b43` on `main`), plus this docs commit closing it out.
+**Two items folded in from earlier reviews, deferred until this task:** left-handed canvas gesture
+zones (the on-screen buttons already mirrored, in Task 5.4; the raw touch zones themselves didn't)
+now mirror via `Input.zoneFor`/`Input.swipeDx`; `BUFFS.tutorialGuard` no longer reads the global
+`Tutorial` object (a sim-purity leak the source scan didn't catch since it never covered `BUFFS.*`
+hook bodies) — it reads `holder.guardActive`, a plain Fighter field `G.startTutorial`/`Tutorial.tick`
+set/clear, and the purity scan now covers every `BUFFS.*` hook against a wider banned-identifier list.
+Two new harness flags, `--screens-smoke` and `--phone-check`, back the release rubric's screen/phone
+rows. An art pass against `docs/reference/rendition.jpg` gave both HP bars a tapered gold frame,
+the title a dark plate with a gold outline, warmer torch glow, and a faint vignette — all `docs/shots/
+*.png` regenerated via a new `tools/shots.sh`. The README got a play link, a 4-shot gallery, a full
+gesture/keyboard control reference, a Development section listing every harness flag, and a credits
+note. The release rubric above covers every Phase 0-5 exit criterion plus every Task 5.6 release item,
+each with a command actually run today and its real result pasted — two items are genuinely open
+(human hand-play from Phase 1, never done; the final whole-branch review and the push to `origin`,
+both explicitly this task's controller's job, not this implementer's) and are flagged as such rather
+than marked DONE. Unit tests: 298 passing, 0 failing. `git status` clean; no push performed.

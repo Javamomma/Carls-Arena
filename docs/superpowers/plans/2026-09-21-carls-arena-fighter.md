@@ -50,12 +50,12 @@
 
 | Phase | Deliverable | Sessions | Total tokens (est.) | Detail level in this doc | Status |
 |---|---|---|---|---|---|
-| 0 | Repo, build, harness, title-to-fight state machine | 1 | 0.3M | Full tasks | Done |
-| 1 | Core fight loop: input, moves, block/parry/dash, specials, timer, KO, basic AI, unit tests | 2-3 | 1.2M | Full tasks | Done |
-| 2 | Feel and champions: camera, procedural sprites, hitstop/shake/particles, sfx, crit/armor, 4 champions, S3 cinematic | 3-4 | 1.5-2M | Task list + interfaces + exit tests | Done (2026-09-21; see `docs/ARENA.md` "Phase 2 exit") |
-| 3 | AI tiers, node buffs, encounters, 8 champions, batch win-rate tool | 3 | 1-1.5M | Task list + interfaces + exit tests | Done (2026-09-22; see `docs/ARENA.md` "Phase 3 exit") |
-| 4 | Meta: roster, crystals, quest map, rewards, arena streak | 5-6 | 2-3M | Task list + interfaces + exit tests | Done (2026-09-22; see `docs/ARENA.md` "Phase 4 exit") |
-| 5 | Broadcast layer, tutorial, settings, perf, rubric, Pages deploy | 3-4 | 1-1.5M | Task list + exit tests | Not started |
+| 0 | Repo, build, harness, title-to-fight state machine | 1 | 0.3M | Full tasks (this file) | Done |
+| 1 | Core fight loop: input, moves, block/parry/dash, specials, timer, KO, basic AI, unit tests | 2-3 | 1.2M | Full tasks (this file) | Done |
+| 2 | Feel and champions: camera, procedural sprites, hitstop/shake/particles, sfx, crit/armor, 4 champions, S3 cinematic | 3-4 | 1.5-2M | [`docs/superpowers/plans/2026-09-21-phase2-feel.md`](2026-09-21-phase2-feel.md) | Done (2026-09-21; see `docs/ARENA.md` "Phase 2 exit") |
+| 3 | AI tiers, node buffs, encounters, 8 champions, batch win-rate tool | 3 | 1-1.5M | [`docs/superpowers/plans/2026-09-21-phase3-ai-encounters.md`](2026-09-21-phase3-ai-encounters.md) | Done (2026-09-22; see `docs/ARENA.md` "Phase 3 exit") |
+| 4 | Meta: roster, crystals, quest map, rewards, arena streak | 5-6 | 2-3M | [`docs/superpowers/plans/2026-09-22-phase4-meta.md`](2026-09-22-phase4-meta.md) | Done (2026-09-22; see `docs/ARENA.md` "Phase 4 exit") |
+| 5 | Broadcast layer, tutorial, settings, perf, rubric, Pages deploy | 3-4 | 1-1.5M | [`docs/superpowers/plans/2026-09-22-phase5-broadcast-release.md`](2026-09-22-phase5-broadcast-release.md) | Done (2026-09-22; see `docs/ARENA.md` "Release rubric") |
 
 Phases 2-5 get their own bite-sized plan file (same format as Phase 1) at the start of that phase, written against the interfaces frozen here. Do not start a later phase until the earlier phase's exit criteria pass.
 

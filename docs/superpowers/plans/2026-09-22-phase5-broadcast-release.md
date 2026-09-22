@@ -79,3 +79,14 @@ Tests: `Atlas.load` resolves null for a missing manifest without throwing and ne
 Commit `docs: release rubric and README`.
 
 **Phase 5 exit criteria:** rubric all DONE; `--e2e`, `--tutorial`, `--matrix`, `--perf`, batch gate green; final whole-branch review clean; pushed; Pages serving the release.
+
+**Status (2026-09-22, Task 5.6 close-out — see `docs/ARENA.md` "Release rubric" for the full table):**
+- [x] Rubric all DONE (`docs/ARENA.md` "Release rubric") — except the two rows below, which the rubric
+      itself marks PENDING rather than DONE.
+- [x] `--e2e` (3 seeds + `--loops 20`), `--tutorial`, `--matrix` (216 cells), `--perf` (600 frames),
+      and the batch gate (monotone + both bosses in the 10-35% band) all green.
+- [ ] Final whole-branch review clean — not yet run; out of scope for Task 5.6 itself (the
+      controller's job, after this report).
+- [ ] Pushed; Pages serving the release — GitHub Pages IS live and serving the game, but the live
+      build still predates this branch (last pushed through `7655b3f`); pushing is explicitly out of
+      scope for this task ("Do not push" — the controller's call once the final review is clean).

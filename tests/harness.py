@@ -24,6 +24,13 @@
       # granted; prints a JSON summary and exits 1 on any assertion/page/console error
   python3 tests/harness.py --tutorial --shot docs/shots/p5-tutorial-1.png  # same run, plus an early
       # (step 1, before any light lands) screenshot of a live fight frame with #tutorialPrompt visible
+  python3 tests/harness.py --screens-smoke                           # Task 5.6: visits every screen
+      # (title/map/roster/crystal/shop/arena/settings) plus one real quest fight through to a natural
+      # KO/Screens.result; prints {screens:[{screen,errors}]} and exits 1 if any screen recorded a
+      # page/console error
+  python3 tests/harness.py --phone-check                             # Task 5.6: 844x390 CSS-px
+      # landscape viewport; asserts the canvas stays letterboxed at 854:480, every on-screen button is
+      # a real >=44px touch target fully inside the viewport, and the page never scrolls horizontally
 
 Exit 1 on any page error, console error, or if the game never left TITLE.
 """
