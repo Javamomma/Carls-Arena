@@ -2,8 +2,28 @@
 
 Rubric table lands in Phase 5 (same format as Carls-Dash docs/PARITY.md: criterion, status, verification command).
 
+Redesign program index (Phases 6-11, goal/status/plan file/exit criterion for each):
+[`docs/superpowers/plans/2026-09-22-carls-arena-redesign-program.md`](superpowers/plans/2026-09-22-carls-arena-redesign-program.md).
+
 ## Progress log
 
+- 2026-09-22 — Phase 6 close-out ("The First Five Minutes"): Tasks 6.1-6.6 landed on `main`. For the
+  owner, this phase fixed: floor 1 is now winnable at level 1 (reordered doors, retuned mob stats,
+  every door/boss shows a REC. LVL hint), every move is driven by one-thumb gestures (tap/swipe-right/
+  swipe-left/hold, matching the owner's own requested scheme) instead of touch zones, the tutorial is
+  a visible sparring session (SPAR plate, LESSON n/4 banner, a real SHIELD DOWN kill) instead of an
+  enemy that silently can't die, kicks are drawn as leg strikes distinct from punches in every rig,
+  and a defeat always offers a working CONTINUE and TITLE exit. Movement now lives inside the moves
+  themselves (a range-tracking dash-in medium, a step-in light, AI that closes distance at neutral) —
+  no separate WALK state. Task 6.6's own close-out work: a deferred prompt-clearance minor from 6.4
+  (the tutorial's LESSON/prompt pills now clear the fighter's head by a real margin at lesson 1's
+  close spawn, via a lower gameplay zoom ceiling during tutorial mode only), the full gate re-run,
+  `tools/shots.sh` regenerated (42 shots, now covering the tutorial's own freeze frames) and the
+  README brought current (gallery, REC. LVL, exact keyboard caveats), and this program's Phase 7-11
+  index. See "Phase 6 exit" below for the full gate table, the owner-report checklist, and one
+  **known-open issue**: the abstract AI-tier `t1..t5` batch gate (unrelated to the shipped floor
+  content, which is healthy) regressed during Task 6.2 and was not fixed in this task — see that
+  section for the evidence and why.
 - 2026-09-22 — Final-review fix wave for Phase 5 (release blockers), items 1-8, one commit each
   (docs/shots/p3-floor1-boss.png regenerated in its own commit alongside item 1). Both Important-path
   defects from the final review fixed: (1) the heavy-charge bar/block-parry ring collided with the
@@ -1073,3 +1093,112 @@ f1_hob         20      70.0      8.98       0   (target: door 5 in 40-70%)
 
 **Files touched this round**: `src/40_movedata.js` (shaman reverted; comment rewritten), `src/45_encounter.js`
 (`f1_shaman.tier` t5→t3; comments updated), `src/90_tests.js` (two tests amended per above).
+
+## Phase 6 exit (2026-09-22)
+
+Tasks 6.1-6.6, commits `1725fcf..e81d402` (plan/notes doc through this close-out's shots+README
+commit) on `main`. Full-branch verification below is a fresh re-run at Task 6.6's own final commit,
+not a copy of each task's own report numbers.
+
+### Owner-report checklist (`docs/design/playtest-notes-2026-09-22.md`)
+
+Every item Arshia reported directly, checked against what actually shipped this phase:
+
+| Owner report | Status | What changed |
+|---|---|---|
+| "The goblin didn't really die until it started to beat me up" (tutorial dummy reads as a bug, not a lesson) | **FIXED** | Task 6.4: the tutorial is now a visible spar — a SPAR plate + shield glyph + "TRAINING DUMMY — CANNOT BE KO'D" replaces the enemy HP bar, a "LESSON n / 4" banner tracks progress, the dummy visibly winds up (red flash) before its lesson-3 swing, and lesson 4 ends in a real SHIELD DOWN flash before FINISH HIM |
+| "The graphics could use a lot of work. It's just stick figures right now." | **OPEN** — Phase 8 (Art upgrade) | Out of scope for Phase 6 by design (the plan's own goal was movement/controls/tutorial/mob balance, not rig art); Task 6.5 did give kicks their own distinct leg-strike poses, but the rigs themselves are still vector stick figures |
+| Mobile controls wanted: swipe RIGHT = dash forward, swipe BACK = block, TAP = attack | **FIXED** | Task 6.3: exactly this scheme, whole-canvas gestures (tap→light, hold→block/parry, swipe right→dash-in medium, swipe left→dash back), replacing the old left/right touch zones |
+| "We'll need to develop more complicated attacks." | **OPEN** — Phases 7 (combo grammar, intercept/dexterity) and 9 (champion kits: signature/heavy effect/S1-S3/passive per champion) | Not started this phase |
+| "We need to think through the level up process." | **OPEN** — Phase 10 (Progression: 6-star system, catalyst tiers, new ISO curve, masteries tree) | Not started this phase |
+| "Kick and punch do the same thing graphically." | **FIXED** | Task 6.5: KICK (`medium`) is now a leg strike in every rig (human rear-leg snap, big-rig stomping front kick, quad-rig rearing double-paw slam), with its own dust-arc impact fx; light stays the arm jab. New pose test asserts the kick's striking limb travels ≥60px while the lead hand stays near idle |
+| "Hobgoblin Brute is impossible to defeat, need to level up before we get there." (floor 1 door 3, level 1, ~460 gold) | **FIXED** | Task 6.1: floor 1 reordered (goblin → skeleton → goblin2 → shaman → hobgoblin — the hobgoblin moved from door 3 to door 5), every door/boss now shows a REC. LVL hint (red once the active champion is under it), and floor-1 mob stats were retuned so a level-1 human clears doors 1-3 comfortably (≥85% bot win rate) with door 5's hobgoblin landing in the intended 40-70% band (70% at n=30) instead of being unwinnable |
+| "No way to exit it seems after a defeat." (result screen after a loss) | **FIXED** | Task 6.1: `#titleBtn` is a new, always-visible TITLE button on the result screen, bound independently of `Screens._origin` so it can't be defeated by anything wrong with CONTINUE's own routing; CONTINUE and TITLE both show on every outcome, in every mode |
+
+### Full gate (re-run at commit `e81d402`, before this section's own commit)
+
+| Command | Result |
+|---|---|
+| `python3 tools/build.py --check` | exit 0 |
+| `python3 tools/build.py` | wrote `index.html` (653,107 bytes, 21 parts) |
+| `python3 tests/harness.py --unit` | 352 pass, 0 fail, 0 page/console errors |
+| `python3 tests/harness.py --sim --seconds 60` | 0 errors, 0 console errors, 5 fights |
+| `python3 tests/harness.py --matrix` | 216/216 cells, 0 errors, 20.4s wall time |
+| `python3 tests/harness.py --e2e --seed 1` | 0 page errors, 0 summary errors; all 5 floor-1 doors + boss won |
+| `python3 tests/harness.py --e2e --seed 2` | 0 page errors, 0 summary errors; all 5 floor-1 doors + boss won |
+| `python3 tests/harness.py --e2e --seed 3` | 0 page errors, 0 summary errors; all 5 floor-1 doors + boss won |
+| `python3 tests/harness.py --tutorial --seed 1` | steps `[1,2,3,4]` in order, `tutorialDone` true, +300 gold, 0 errors |
+| `python3 tests/harness.py --tutorial --seed 2` | steps `[1,2,3,4]` in order, `tutorialDone` true, +300 gold, 0 errors |
+| `python3 tests/harness.py --tutorial --seed 3` | steps `[1,2,3,4]` in order, `tutorialDone` true, +300 gold, 0 errors |
+| `python3 tests/harness.py --screens-smoke` | 0 errors on all 9 screens (title/map/roster/crystal/shop/arena/settings/fight/result), final state `RESULT` |
+| `python3 tests/harness.py --phone-check` | canvas letterboxed and fits at 844×390; every button ≥44px and inside the viewport in both the attack-buttons-hidden and attack-buttons-shown states; `no_hscroll` true both times |
+| `python3 tests/harness.py --perf 300` | `ms_per_frame` 0.129 (`ms_step` 0.009, `ms_render` 0.120) — well under the 6ms gate |
+
+### Batch win-rate tables
+
+`python3 tests/batch.py --n 30 --p1 carl --ai t1,t2,t3,t4,t5` (the canonical tier-sweep + per-floor-node/boss command every phase table has used):
+
+```
+tier           fights  winrate%  avglen(s)  stalled
+t1             30      100.0     3.19       0
+t2             30      53.3      5.07       0
+t3             30      46.7      4.34       0
+t4             30      50.0      3.80       0
+t5             30      30.0      3.21       0
+# FAIL: win rate is not monotone non-increasing across tiers: [100.0, 53.3, 46.7, 50.0, 30.0]
+
+# per-floor-node/boss win rates (carl vs auto, n=30 each)
+encounter      fights  winrate%  avglen(s)  stalled
+f1_goblin      30      100.0     2.13       0   (target: doors 1-3 >= 85%)
+f1_skel        30      100.0     2.08       0
+f1_goblin2     30      100.0     2.13       0
+f1_shaman      30      93.3      3.33       0   (informational only, per Task 6.1's ruling)
+f1_hob         30      70.0      7.33       0   (target: door 5 in 40-70%)
+f1_grull       30      33.3      12.54      0   (floor 1 boss)
+f2_grub        30      76.7      3.87       0
+f2_skel2       30      96.7      4.37       0
+f2_shaman2     30      83.3      3.10       0
+f2_hob2        30      73.3      6.10       0
+f2_grub2       30      86.7      3.15       0
+f2_mother      30      33.3      9.05       0   (floor 2 boss)
+```
+
+**Floor-1 doors and both bosses are healthy**: doors 1-3 all at 100% (≥85% target), door 5's
+hobgoblin at 70% (in the 40-70% band), door 4's shaman at 93.3% (informational only, per Task 6.1's
+ruling that door 4's real target is human fairness, not the bot's win-rate band), and both floor
+bosses (`f1_grull` 33.3%, `f2_mother` 33.3%) unchanged from their historical range. None of this is
+new work this task — it's the same floor-1 gate Task 6.1 already tuned and shipped, re-confirmed here
+because the brief asked for it re-pasted alongside the rest of Task 6.6's gate.
+
+**The abstract `t1..t5` tier gate genuinely fails, and this is a real, newly-discovered regression,
+not noise.** `t3` (46.7%) sits below `t4` (50.0%), breaking the required monotone-non-increasing
+curve. Investigated (disposable git worktrees, no working-tree changes survived) rather than assumed:
+
+- Bisected to Task 6.2 (movement/AI-approach) exactly. At commit `dff0366` (Task 6.1's own base,
+  immediately before 6.2), the identical command gives a clean, comfortably-monotone curve: `t1 100.0
+  / t2 93.3 / t3 73.3 / t4 53.3 / t5 23.3`. At `5752bef` (Task 6.2's own final commit) it already
+  reads `100.0 / 53.3 / 46.7 / 50.0 / 30.0` — the exact numbers still shipping today; Tasks 6.3-6.5
+  (gestures, tutorial, kick art) made no further difference.
+- Root cause, best current understanding: `decideApproach` (`src/55_ai.js`, Task 6.2's own frozen
+  addition — "AI closes: at neutral with dist > lightRange for > 60 frames, every profile presses
+  medium") is a guaranteed, non-probabilistic attack. Before Task 6.2, low/mid tiers (t2 `attack:.04`,
+  t3 `attack:.25`) swung so rarely that a player who kept distance faced almost no offense from them;
+  now every tier gets a "free," undodgeable-by-design medium every `approach` frames (t2 every 70,
+  t3 every 50) regardless of its own `attack` stat, which is a much bigger relative buff to a
+  previously-passive tier than to an already-aggressive one (t4/t5), compressing the intended
+  difficulty curve.
+- Attempted a same-scope `AI_TIERS` retune this task (lower `t2`/`t3` `attack`, raise `t5`
+  `block`/`parry`) and could get the exact canonical `--n 30` command green, but couldn't do it
+  cleanly: (a) it wasn't robust — `--n 60` or a different `--seed-base` still showed the same t3/t4
+  inversion and t5 creeping past 30%, so it looked like overfitting to one seed range rather than a
+  real fix; (b) `AI.make`'s per-controller RNG is a single shared stream across every behaviour, so
+  even a small `attack` change shifts unrelated downstream rolls — the only `t3.attack` values that
+  fixed the gate (≤.165) broke the existing pinned unit test `'brawl AI blocks a medium at least once
+  in 20 seconds'` (t3 got combo'd to death before ever throwing a block, because lowering `attack`
+  also weakens t3's own combo-interrupt via `comboFollow`), and the values that kept that test green
+  (≥.17) left the gate failing. No single-lever fix was found in this task's own time budget.
+- **Reverted** the attempted `AI_TIERS` changes rather than ship a fragile, seed-cherry-picked
+  rebalance; `src/55_ai.js` is unchanged from Task 6.5's HEAD. Flagged to the controller during this
+  task (not discovered after the fact) for a ruling: either a dedicated fix-round task (proper TDD
+  iteration + review, same process Task 6.1 used for the shaman tuning) or an accepted, documented gap
+  — this table records the real numbers either way rather than a green result that didn't happen.

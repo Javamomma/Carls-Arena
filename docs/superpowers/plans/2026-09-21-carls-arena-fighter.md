@@ -56,8 +56,10 @@
 | 3 | AI tiers, node buffs, encounters, 8 champions, batch win-rate tool | 3 | 1-1.5M | [`docs/superpowers/plans/2026-09-21-phase3-ai-encounters.md`](2026-09-21-phase3-ai-encounters.md) | Done (2026-09-22; see `docs/ARENA.md` "Phase 3 exit") |
 | 4 | Meta: roster, crystals, quest map, rewards, arena streak | 5-6 | 2-3M | [`docs/superpowers/plans/2026-09-22-phase4-meta.md`](2026-09-22-phase4-meta.md) | Done (2026-09-22; see `docs/ARENA.md` "Phase 4 exit") |
 | 5 | Broadcast layer, tutorial, settings, perf, rubric, Pages deploy | 3-4 | 1-1.5M | [`docs/superpowers/plans/2026-09-22-phase5-broadcast-release.md`](2026-09-22-phase5-broadcast-release.md) | Done (2026-09-22; see `docs/ARENA.md` "Release rubric") |
+| 6 | Redesign 1, "The First Five Minutes": gesture controls, movement-in-moves, floor-1 level gate, visible tutorial spar, leg-strike kicks | 5-6 | 2-2.5M | [`docs/superpowers/plans/2026-09-22-phase6-first-five-minutes.md`](2026-09-22-phase6-first-five-minutes.md) | Done (2026-09-22; see `docs/ARENA.md` "Phase 6 exit") |
 
-Phases 2-5 get their own bite-sized plan file (same format as Phase 1) at the start of that phase, written against the interfaces frozen here. Do not start a later phase until the earlier phase's exit criteria pass.
+Phases 2-5 get their own bite-sized plan file (same format as Phase 1) at the start of that phase, written against the interfaces frozen here. Do not start a later phase until the earlier phase's exit criteria pass. Phase 6 began a second redesign arc, not originally scoped in this file — its own plan and every phase after it (7-11) are tracked in the standing
+[redesign program index](2026-09-22-carls-arena-redesign-program.md) instead of being added here row by row.
 
 ## File structure (locked in Phase 0)
 
