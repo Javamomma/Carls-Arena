@@ -10808,6 +10808,14 @@ Test.add('HITFEEL: intercept pushes shake 10 and punch .05 regardless of the int
   eq(sh.amt,10,'intercept shake amt must be the fixed 10, not the intercepting light\'s own (0) HITFEEL.light.shake');
   ok(pu,'an intercept must push punch: '+f.fx.map(e=>e.kind).join());
   eq(pu.pct,.05,'intercept punch pct must be .05');eq(pu.hold,6,'intercept punch hold must be 6')});
+// Task 7.5 (7.4 review follow-up): HITFEEL.<class>.stop is documentation-only (resolve() never reads
+// it for hitstop itself -- see HITFEEL's own header comment, 40_movedata.js) and must equal its
+// matching MOVES.*.hitstop so a future hitstop retune that forgets to update this table is a visible
+// mismatch, not a silent drift.
+Test.add('HITFEEL.<class>.stop equals its matching MOVES.*.hitstop for light/medium/heavy/s1/s2/s3',()=>{
+  for(const k of['light','medium','heavy','s1','s2','s3'])
+    eq(HITFEEL[k].stop,MOVES[k].hitstop,'HITFEEL.'+k+'.stop must equal MOVES.'+k+'.hitstop');
+  eq(HITFEEL.intercept.stop,10,"intercept's own hardcoded hitstop (60_fight.js) must match HITFEEL.intercept.stop too")});
 Test.add('FX.push honors a per-descriptor hold (heavy\'s own 10 vs PUNCH_HOLD\'s fallback 6), and the camera cap still holds throughout',()=>{
   FX.reset();
   FX.push({kind:'punch',pct:.04,hold:10}); // heavy's own HITFEEL entry, verbatim
