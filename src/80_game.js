@@ -99,7 +99,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // drained and discarded so nothing queued during the card fires the instant it clears.
       f.cinematic--;this.frameNow=f.frame;Input.drain();
       if(f.cinematic===0){this.cinemFocus=null;this.showToast()}
-      FX.pushAll(f.fx);f.fx.length=0;return}
+      FX.pushAll(f.fx);f.fx.length=0;
+      // In sim mode FX ages exactly once per tick, right here (never off rAF/wall clock), so a
+      // --sim --shot screenshot depends only on how many G.tick() calls ran, not on real elapsed
+      // time; loop() skips its own FX.update() while G.sim is true so it isn't aged twice.
+      if(this.sim)FX.update();
+      return}
     const pm1=f.p1.moveName,pm2=f.p2.moveName;
     if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
     else f.step();
@@ -107,6 +112,8 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
     this.checkCinematicFx(f);
     FX.pushAll(f.fx);f.fx.length=0;
+    // Same determinism note as the cinematic branch above.
+    if(this.sim)FX.update();
     this.syncSpecials()},
   // Detects a fighter's moveName transitioning into s1/s2/s3 this tick (the sim itself never
   // references Audio/G, so this has to be watched from outside) and plays that special's recipe
@@ -150,7 +157,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(this.fight){
       const punchIn=this.fight.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.6}:null;
       Camera.update(this.cam,this.fight,punchIn)}
-    FX.update();
+    // In sim mode, tick() already aged FX once per sim step above (or per cinematic frame); aging it
+    // again here off the wall-clock rAF cadence is exactly the non-determinism this closes (a --sim
+    // screenshot's FX state would otherwise depend on real time elapsed between Python evaluate()
+    // round trips, not on the number of sim frames actually stepped).
+    if(!this.sim)FX.update();
     Render.frame(this.fight);requestAnimationFrame(t=>this.loop(t))},
   init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
     document.getElementById('fightBtn').onclick=()=>{Audio.init();this.startFight()};

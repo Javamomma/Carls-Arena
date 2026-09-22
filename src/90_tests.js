@@ -188,3 +188,14 @@ Test.add('brute AI lands a heavy on an idle target within 600 frames',()=>{
   closeIn(f);run(f,600);
   ok(landed,'brute AI should land at least one heavy on an idle p1 within 600 frames')});
 Test.add('HUD statics are cached across frames',()=>{Render.frame(null);const a=Render._hudCache;Render.frame(null);ok(a&&a===Render._hudCache)});
+Test.add('FX ages once per sim tick in sim mode, deterministically (not off wall-clock rAF)',()=>{
+  const runOnce=()=>{
+    const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
+    G.fight=f;G.state='FIGHT';G.sim=true;G._tickN=0;FX.reset();
+    for(let i=0;i<8;i++)G.tick(); // lands the scripted light1, queueing a spark via Fight.resolve
+    ok(FX.list.some(p=>p.kind==='spark'),'hit landed and queued a spark');
+    for(let i=0;i<10;i++)G.tick(); // 10 further sim ticks, each aging FX exactly once via G.tick
+    return FX.list.length};
+  const a=runOnce(),b=runOnce();
+  eq(a,b,'identical script/seed -> identical FX state after the same tick count');
+  G.fight=null;G.state='TITLE';G.sim=false});

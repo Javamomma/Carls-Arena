@@ -1169,7 +1169,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // drained and discarded so nothing queued during the card fires the instant it clears.
       f.cinematic--;this.frameNow=f.frame;Input.drain();
       if(f.cinematic===0){this.cinemFocus=null;this.showToast()}
-      FX.pushAll(f.fx);f.fx.length=0;return}
+      FX.pushAll(f.fx);f.fx.length=0;
+      // In sim mode FX ages exactly once per tick, right here (never off rAF/wall clock), so a
+      // --sim --shot screenshot depends only on how many G.tick() calls ran, not on real elapsed
+      // time; loop() skips its own FX.update() while G.sim is true so it isn't aged twice.
+      if(this.sim)FX.update();
+      return}
     const pm1=f.p1.moveName,pm2=f.p2.moveName;
     if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
     else f.step();
@@ -1177,6 +1182,8 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
     this.checkCinematicFx(f);
     FX.pushAll(f.fx);f.fx.length=0;
+    // Same determinism note as the cinematic branch above.
+    if(this.sim)FX.update();
     this.syncSpecials()},
   // Detects a fighter's moveName transitioning into s1/s2/s3 this tick (the sim itself never
   // references Audio/G, so this has to be watched from outside) and plays that special's recipe
@@ -1220,7 +1227,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(this.fight){
       const punchIn=this.fight.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.6}:null;
       Camera.update(this.cam,this.fight,punchIn)}
-    FX.update();
+    // In sim mode, tick() already aged FX once per sim step above (or per cinematic frame); aging it
+    // again here off the wall-clock rAF cadence is exactly the non-determinism this closes (a --sim
+    // screenshot's FX state would otherwise depend on real time elapsed between Python evaluate()
+    // round trips, not on the number of sim frames actually stepped).
+    if(!this.sim)FX.update();
     Render.frame(this.fight);requestAnimationFrame(t=>this.loop(t))},
   init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
     document.getElementById('fightBtn').onclick=()=>{Audio.init();this.startFight()};
@@ -1423,5 +1434,16 @@ Test.add('brute AI lands a heavy on an idle target within 600 frames',()=>{
   closeIn(f);run(f,600);
   ok(landed,'brute AI should land at least one heavy on an idle p1 within 600 frames')});
 Test.add('HUD statics are cached across frames',()=>{Render.frame(null);const a=Render._hudCache;Render.frame(null);ok(a&&a===Render._hudCache)});
+Test.add('FX ages once per sim tick in sim mode, deterministically (not off wall-clock rAF)',()=>{
+  const runOnce=()=>{
+    const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
+    G.fight=f;G.state='FIGHT';G.sim=true;G._tickN=0;FX.reset();
+    for(let i=0;i<8;i++)G.tick(); // lands the scripted light1, queueing a spark via Fight.resolve
+    ok(FX.list.some(p=>p.kind==='spark'),'hit landed and queued a spark');
+    for(let i=0;i<10;i++)G.tick(); // 10 further sim ticks, each aging FX exactly once via G.tick
+    return FX.list.length};
+  const a=runOnce(),b=runOnce();
+  eq(a,b,'identical script/seed -> identical FX state after the same tick count');
+  G.fight=null;G.state='TITLE';G.sim=false});
 
 </script></body></html>
