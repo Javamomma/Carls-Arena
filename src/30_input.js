@@ -10,7 +10,15 @@
 //   combo grammar's in-combo heavy ender -- held.heavy just feeds intent.heavy every frame regardless
 //   of Fighter state, and Fighter.act (50_fighter.js) is what decides what THAT means: a normal
 //   22-frame heavy from IDLE, or, if this fighter is sitting in chainNode-4 recovery, the CHAIN.
-//   enders.heavy 14-frame shortened ender (40_movedata.js). No gesture-detection code changed here.
+//   enders.heavy 14-frame shortened ender (40_movedata.js).
+//   Fix round 1 (verdict-7.2 C1): the ORIGINAL Task 7.2 pass left this line true for the L key/Shift+K
+//   but not for the touch gesture itself -- a fresh swipe-right's own immediate `q.push('medium')`
+//   (right at the SWIPE_PX crossing) always won the race against held.heavy arming HEAVY_HOLD_FRAMES
+//   later, so the named gesture could never actually reach the heavy branch. pointermove now reads
+//   this fighter's live chainNode/phase (read-only) and, ONLY while sitting in a chainNode-4 recovery,
+//   defers the medium/heavy decision to release/hold-time instead of queuing medium immediately -- see
+//   pointermove's own comment below for the exact mechanism. Every other swipe-right (not mid a node-4
+//   recovery) is untouched.
 //   swipe left  (>= SWIPE_PX within SWIPE_FRAMES, dx>|dy|)      -> 'dashBack', pushed the frame it fires
 //   ...then still held DASH_BACK.frames SIM FRAMES after that  -> held.block, until release (counted
 //     by tick(), called once per sim frame from Ctrl.player -- see its own comment below)
@@ -36,7 +44,22 @@
 // withInputClock, 90_tests.js) -- only its default implementation and what its return value now means
 // (frames, not ms) changed.
 const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
-  GESTURE:{TAP_FRAMES:8,TAP_DRIFT:24,SWIPE_PX:44,SWIPE_FRAMES:16,HEAVY_HOLD_FRAMES:12,BLOCK_HOLD_FRAMES:8},
+  GESTURE:{TAP_FRAMES:8,TAP_DRIFT:24,SWIPE_PX:44,SWIPE_FRAMES:16,HEAVY_HOLD_FRAMES:12,BLOCK_HOLD_FRAMES:8,
+    // Fix round 1 (verdict-7.2 C1): a SEPARATE, shorter hold threshold for the in-combo heavy ender's
+    // own pendingEnder decision (tick(), below) -- HEAVY_HOLD_FRAMES(12) is tuned for "swipe into a
+    // fresh full heavy from neutral", where there's no clock running against the player. A chainNode-4
+    // window has a hard ceiling: it's just that node's own MOVES.light/medium recovery (8 frames for a
+    // light-reached node 4, the shortest and most common case; 14 for a medium-reached one), after
+    // which chainNode resets to 0 whether or not the player ever acted. Measured directly (driving the
+    // real Input/Fighter pipeline four taps deep, then a swipe held past 12 frames): HEAVY_HOLD_FRAMES
+    // never gets a chance to arm inside an 8-frame window -- node 4 has already reset to IDLE by frame
+    // 8, so held.heavy arming at frame 12 instead starts a bare 22-frame heavy from neutral (chainNode
+    // 0), not the shortened ender. ENDER_HOLD_FRAMES=4 leaves comfortable margin under the tightest
+    // (8-frame, light-reached) window on both sides: enough runway after it fires for the hold to
+    // register, and enough of the window still left after it fires for the charge itself (which only
+    // needs to START within the window -- CHAIN.enders.heavy's own 14-frame charge runs on the fighter's
+    // OWN new ATTACK/CHARGE instance, independent of node 4's now-finished one) to begin.
+    ENDER_HOLD_FRAMES:4},
   // Injectable clock (default G.frameNow, the sim's own frame counter) so tests can drive gesture
   // timing deterministically by overriding Input.now instead of racing the real sim. G is defined
   // later in the concatenated build (80_game.js) -- safe here since this arrow function's body only
@@ -59,7 +82,7 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
       if(G.state==='FIGHT'&&G.hitPause(p.x,p.y)){G.togglePause();return}
       if(G.state==='TITLE')return G.startFight();if(G.state!=='FIGHT')return;
       if(this._ptr)return; // one canvas pointer at a time -- later pointers are ignored until this lifts
-      this._ptr={id:e.pointerId,x0:p.x,y0:p.y,t0:this.now(),drifted:false,dashDir:null,blockOn:false,heavyOn:false,dashFrames:0,actAt:0}});
+      this._ptr={id:e.pointerId,x0:p.x,y0:p.y,t0:this.now(),drifted:false,dashDir:null,blockOn:false,heavyOn:false,dashFrames:0,actAt:0,pendingEnder:false}});
     canvas.addEventListener('pointermove',e=>{const P=this._ptr;if(!P||P.id!==e.pointerId)return;
       const p=pos(e),dx=p.x-P.x0,dy=p.y-P.y0;
       if(Math.hypot(dx,dy)>=this.GESTURE.TAP_DRIFT)P.drifted=true;
@@ -67,11 +90,36 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
       // (P.blockOn) never re-evaluates as a swipe, and neither does a pointer that already swiped.
       if(!P.dashDir&&!P.blockOn&&this.now()-P.t0<=this.GESTURE.SWIPE_FRAMES&&
          Math.abs(dx)>=this.GESTURE.SWIPE_PX&&Math.abs(dx)>Math.abs(dy)){
-        if(dx>0){P.dashDir='R';P.actAt=this.now();this.q.push('medium');this._log('swipeR')}
+        if(dx>0){
+          P.dashDir='R';P.actAt=this.now();
+          // Fix round 1 (verdict-7.2 C1): a fresh swipe-right used to push 'medium' unconditionally,
+          // right here, the instant SWIPE_PX crossed -- if this fighter is sitting in its own
+          // chainNode-4 recovery (the in-combo heavy ender's own window, Fighter.act's cn===
+          // CHAIN.nodes-1 branch), that immediate push committed to the medium ender well before
+          // tick()'s own hold-timer (below) ever got a chance to arm held.heavy, making the brief's
+          // named "swipe-right-and-hold" heavy-ender gesture unreachable. Read this fighter's live
+          // chainNode/phase read-only (the same G.fight.p1 read Input.drain()'s own powerAuto
+          // resolution already makes below -- Input never mutates sim state) and, only in that one
+          // window, defer the decision: don't queue medium yet (P.pendingEnder), let `up` below queue
+          // it on release if the hold never reaches HEAVY_HOLD_FRAMES, or let tick()'s existing
+          // held.heavy arm (unchanged) win if it does. Every OTHER swipe-right (not mid a node-4
+          // recovery) keeps firing 'medium' immediately, exactly as before.
+          const f=typeof G!=='undefined'&&G.fight&&G.fight.p1;
+          const atNode4Recovery=!!(f&&f.state==='ATTACK'&&f.chainNode===4&&f.phase&&f.phase()==='recovery'&&f.landed);
+          P.pendingEnder=atNode4Recovery;
+          if(!atNode4Recovery)this.q.push('medium');
+          this._log('swipeR')}
         else{P.dashDir='L';P.dashFrames=0;this.q.push('dashBack');this._log('swipeL')}}});
     const up=e=>{const P=this._ptr;if(!P||P.id!==e.pointerId)return;this._ptr=null;
       if(P.blockOn){this.held.block=false;return} // hold-block or dash-back-hold-block, either way
-      if(P.dashDir==='R'){this.held.heavy=false;return} // clears whether or not heavy ever engaged
+      if(P.dashDir==='R'){
+        // Fix round 1: a pending ender (the swipe began mid a chainNode-4 recovery, see pointermove
+        // above) that never reached the hold-timer resolves to the medium ender HERE, on release --
+        // the immediate push above was suppressed specifically so this frame's chainNode/phase could
+        // decide, not the swipe-cross frame's. P.heavyOn true means tick() already armed held.heavy (a
+        // genuine hold to HEAVY_HOLD_FRAMES); that's the heavy ender's own path, nothing to push here.
+        if(P.pendingEnder&&!P.heavyOn)this.q.push('medium');
+        this.held.heavy=false;return} // clears whether or not heavy ever engaged
       if(P.dashDir==='L')return; // dashBack already fired on the swipe; nothing more on release
       if(!P.drifted&&this.now()-P.t0<this.GESTURE.TAP_FRAMES){this.q.push('light');this._log('tap')}};
     const cancel=e=>{const P=this._ptr;if(!P||P.id!==e.pointerId)return;this._ptr=null;
@@ -133,7 +181,10 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
     if(P){
       if(!P.dashDir&&!P.blockOn&&!P.drifted&&this.now()-P.t0>=this.GESTURE.BLOCK_HOLD_FRAMES){
         P.blockOn=true;this.held.block=true;this._log('hold')}
-      if(P.dashDir==='R'&&!P.heavyOn&&this.now()-P.actAt>=this.GESTURE.HEAVY_HOLD_FRAMES){
+      // Fix round 1: a pendingEnder swipe (see pointermove's own comment) arms on the shorter
+      // ENDER_HOLD_FRAMES instead of the generic HEAVY_HOLD_FRAMES -- see GESTURE.ENDER_HOLD_FRAMES'
+      // own comment for why the normal 12-frame threshold can't fit inside a chainNode-4 window.
+      if(P.dashDir==='R'&&!P.heavyOn&&this.now()-P.actAt>=(P.pendingEnder?this.GESTURE.ENDER_HOLD_FRAMES:this.GESTURE.HEAVY_HOLD_FRAMES)){
         P.heavyOn=true;this.held.heavy=true;this._log('swipeRHold')}
       if(P.dashDir==='L'&&!P.blockOn){
         P.dashFrames++;

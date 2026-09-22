@@ -157,9 +157,17 @@ class Fighter{
         if(intent.light)return this.startMove('light',cn+1);
         if(intent.medium)return this.startMove('medium',cn+1)}
       else if(cn===CHAIN.nodes-1){
+        // Fix round 1 (verdict-7.2 C1): intent.heavy is checked FIRST here, ahead of light/medium.
+        // The keyboard alias Shift+K (30_input.js) sets intent.medium (queued) and intent.heavy (held)
+        // in the very same keydown event, so both can legitimately be true on the same frame here --
+        // heavy must win that tie, or the in-combo heavy ender is unreachable from that key combo. The
+        // touch gesture's own race (a fresh swipe-right pushing 'medium' immediately, long before
+        // held.heavy ever arms) is fixed at the source instead, in Input's own pointermove handler --
+        // see its comment for why this reordering alone can't fix that one (intent.heavy simply isn't
+        // true yet on the frame intent.medium is read there).
+        if(intent.heavy)return this.startMove('heavy',CHAIN.nodes,CHAIN.enders.heavy);
         if(intent.light)return this.startMove('light',CHAIN.nodes);
-        if(intent.medium)return this.startMove('medium',CHAIN.nodes);
-        if(intent.heavy)return this.startMove('heavy',CHAIN.nodes,CHAIN.enders.heavy)}}
+        if(intent.medium)return this.startMove('medium',CHAIN.nodes)}}
     // Fix-wave item 5 (final review, Important): releasing heavy early used to always cancel to IDLE
     // outright (clearMove, no swing) -- the README (and the swipe-and-hold gesture's own naming)
     // promised "release after a short charge to swing", which this branch never actually did; only a
@@ -175,7 +183,12 @@ class Fighter{
     // place that reads what releasing it actually does.
     else if(S==='CHARGE'&&!intent.heavy){
       if(this.f>=HEAVY_MIN_CHARGE)this.setState('ATTACK');
-      else{this.clearMove();this.setState('IDLE')}}}
+      // Fix round 1 (found while testing verdict-7.2 C1's fix): a too-early release cancels straight
+      // to IDLE without ever reaching tick()'s own phase==='done' reset -- for the in-combo heavy
+      // ender specifically (chainNode was set to CHAIN.nodes by startMove's own node argument) this
+      // used to leave chainNode stuck at 5 while genuinely back at IDLE, violating "0 when not
+      // chaining". Harmless no-op for a plain neutral heavy cancel, whose chainNode is already 0.
+      else{this.clearMove();this.chainNode=0;this.setState('IDLE')}}}
   // Advance one frame of the state machine.
   tick(){
     // Self-clear wasKnockedDown the tick after _kdCounter (armed to KNOCKDOWN.frames+KNOCKDOWN.inv
