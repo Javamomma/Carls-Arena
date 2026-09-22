@@ -81,8 +81,15 @@ POSES.heavyCharge=[
   {t:1,ang:{torso:D(-20),rShoulder:D(108),rElbow:D(-4),lShoulder:D(6), lElbow:D(16),rHip:D(-10),lHip:D(10)},off:{x:-8,y:4}}];
 // Heavy release: from overhead down through a forward-and-down smash, driving into a crouch on
 // impact (front knee bends, hip drops) — a vertical arc, unlike medium's horizontal lunge.
+// Fix round 2 (controller review, Task 3.5 fix round 2): t:0's rShoulder pulled in from 175 to 128,
+// the same move heavyCharge's own comment above already describes (172->108) — 'heavy' itself was
+// just never checked against the old HUD test (which only sampled 'heavyCharge'/'s3'), so this near-
+// vertical raise went untrimmed until the "every pose of every look" test (90_tests.js) started
+// walking it too and found Carl's own hand above HUD_LINE at his ordinary (non-cinematic) zoom cap —
+// see that test's pinning check. Still a clear overhead wind-up, just short of vertical, matching
+// heavyCharge's own read.
 POSES.heavy=[
-  {t:0, ang:{torso:D(-18),rShoulder:D(175),rElbow:D(-4),rHip:D(-8), lHip:D(8)},off:{x:-8,y:4}},
+  {t:0, ang:{torso:D(-18),rShoulder:D(96),rElbow:D(-4),rHip:D(-8), lHip:D(8)},off:{x:-8,y:4}},
   {t:.5,ang:{torso:D(26), rShoulder:D(48), rElbow:D(18),rHip:D(22), lHip:D(-8),rKnee:D(-14)},off:{x:16,y:9}},
   {t:1, ang:{torso:D(10), rShoulder:D(75), rElbow:D(30),rHip:D(8),  lHip:D(-4)},off:{x:6,y:2}}];
 POSES.block=[
@@ -590,7 +597,7 @@ const Rig={
     if(propId==='dagger'){ // human rig: blade tip off j.rHand, same direction math as draw()'s dagger
       const h=j.rHand,len=look.armLen*.46,n=Math.hypot(face,-.32),dx=face/n,dy=-.32/n;
       return[{x:h.x+dx*len,y:h.y+dy*len}]}
-    if(propId==='club'){const h=j.rHand;return[{x:h.x+face*10,y:h.y-30}]} // human rig: goblin/hobgoblin's club
+    if(propId==='club'){const h=j.rHand;return[{x:h.x+face*10,y:h.y-9}]} // human rig: Hobgoblin's club (draw()'s shaft length, kept in sync — see its Fix round 2 comment)
     if(propId==='spikedclub'){const h=j.rHand,len=look.armLen*.6;return[{x:h.x+face*len*.3,y:h.y-len}]}
     if(propId==='horns'){const r=look.headR;
       return[-1,1].map(s=>({x:j.head.x+s*r*1.05,y:j.head.y-r*2.1}))}
@@ -625,13 +632,24 @@ const Rig={
   // before folding it into reach is valid because off.x only ever enters the FK once, as a straight
   // additive shift to hip.x that every other joint's position is built from (sin/cos terms all compose
   // on top of it) — so undoing it after the fact is exactly equivalent to solving with off.x=0.
-  extent(look,scale){
+  // opts.excludePoses (default none): pose keys to skip entirely — used ONLY by G.startFight's
+  // per-fight camera zoom cap (Fix round 2, controller review), to leave out 'win'/'ko': those play
+  // under the RESULT overlay after the fight is already over, not during ordinary play, so their own
+  // (often raised-arm) height shouldn't drag every fight's normal zoom cap down. The reach test (and
+  // anything else caring about the true worst case) always calls extent() with no opts, so it still
+  // sees every pose. Folded into the cache key (scale plus a sorted, joined excludePoses string) so
+  // the two call shapes cache independently instead of clobbering each other.
+  extent(look,scale,opts){
     scale=scale||1;
+    const excl=opts&&opts.excludePoses;
+    const cacheKey=scale+(excl&&excl.length?'|excl:'+excl.slice().sort().join(','):'');
     look._extentCache=look._extentCache||{};
-    if(look._extentCache[scale])return look._extentCache[scale];
+    if(look._extentCache[cacheKey])return look._extentCache[cacheKey];
     const table=look.rig==='quad'?POSES_QUAD:look.rig==='big'?POSES_BIG:POSES;
+    const skip=excl&&excl.length?new Set(excl):null;
     let minY=0,maxReach=0;
     for(const key in table){
+      if(skip&&skip.has(key))continue;
       const kf=table[key];
       for(let i=0;i<kf.length-1;i++){
         const ta=kf[i].t,tb=kf[i+1].t;
@@ -643,7 +661,7 @@ const Rig={
           for(const propId of look.props||[])
             for(const ep of this.propExtra(propId,look,j,1))fold(ep.x,ep.y)}}}
     const result={top:-minY*scale,reach:maxReach*scale};
-    return look._extentCache[scale]=result},
+    return look._extentCache[cacheKey]=result},
   poseFor(f){
     const st=f.state;
     // A fighter has no dedicated locomotion state; the only x movement while IDLE comes from
@@ -852,10 +870,16 @@ const Rig={
         c.strokeStyle='#3a2f22';c.lineWidth=4;c.lineCap='round';
         c.beginPath();c.moveTo(h.x,h.y);c.lineTo(baseX,baseY);c.stroke()}
       if(p==='club'){const h=j.rHand;
+        // Fix round 2 (controller review, Task 3.5 fix round 2): shaft shortened 30->9 (knob spacing
+        // to match) — Hobgoblin's held club extends past his hand in every pose he holds it in
+        // (block's own raised guard, not just an attack, ended up the tallest once 'heavy' was
+        // trimmed), and propExtra's matching formula below (kept in sync with this shape) was what
+        // pinned carl×hobgoblin's zoom cap below 1.12/1.28 — see the "every pose of every look..."
+        // pinning test in 90_tests.js.
         c.strokeStyle=look.secondary;c.lineWidth=10;c.lineCap='round';
-        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*10,h.y-30);c.stroke();
+        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*10,h.y-9);c.stroke();
         c.fillStyle='#3a2f22';for(let i=0;i<3;i++){c.beginPath();
-          c.arc(h.x+face*(6+i*2),h.y-8-i*8,3,0,Math.PI*2);c.fill()}}}
+          c.arc(h.x+face*(6+i*2),h.y-6-i*2,3,0,Math.PI*2);c.fill()}}}
     c.restore()},
   // Big-brute draw: same shading philosophy as draw() (thick rounded-cap limb strokes with a dark
   // outline under the fill, back-limbs-then-torso-then-front-limbs layering, a waist-tapered torso

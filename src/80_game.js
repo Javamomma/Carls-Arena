@@ -72,8 +72,16 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // zoom before that point crosses HUD_LINE. Two ceilings share the same ratio: 1.12 is the normal
     // gameplay cap (matches Fight.tick's own camTarget.zoom clamp), 1.28 the S3 cinematic punch-in —
     // both get clamped down together if a tall-enough pairing needs it, never independently.
-    {const p1ext=Rig.extent(lookFor(this.fight.p1.def),this.fight.p1.def.scale||1);
-     const p2ext=Rig.extent(lookFor(this.fight.p2.def),this.fight.p2.def.scale||1);
+    // Fix round 2 (controller review): 'win'/'ko' excluded from this calc specifically — they only
+    // ever play under the RESULT overlay once the fight is already over (see G.tick/toResult), not
+    // during ordinary play, so a raised-arm win pose (Carl's own included — see the pinning test in
+    // 90_tests.js) shouldn't quietly shave every ordinary fight's normal zoom cap below 1.12/1.28.
+    // Any overshoot past HUD_LINE during the result screen itself is accepted; the reach test (which
+    // cares about a different, always-active concern — EDGE_PAD/the wall clamp) still checks every
+    // pose including these two.
+    const CAP_EXCL={excludePoses:['win','ko']};
+    {const p1ext=Rig.extent(lookFor(this.fight.p1.def),this.fight.p1.def.scale||1,CAP_EXCL);
+     const p2ext=Rig.extent(lookFor(this.fight.p2.def),this.fight.p2.def.scale||1,CAP_EXCL);
      const tallestTop=Math.max(p1ext.top,p2ext.top);
      const ratio=(Camera.anchorY-HUD_LINE)/tallestTop;
      this.zoomCap=Math.min(1.12,ratio);this.cineZoomCap=Math.min(1.28,ratio)}
