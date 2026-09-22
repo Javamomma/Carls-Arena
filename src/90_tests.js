@@ -2866,6 +2866,36 @@ Test.add('completing the tutorial sets tutorialDone and grants 300 gold exactly 
   eq(G.state,'RESULT');
   eq(Save.data.gold,goldAfterFirst,'a second completion (replayed via the map\'s .node.tutorial row) must not grant gold again');
   G.toTitle();G.sim=false});
+// Fix-wave item 1 (final review, Critical): every lesson now gets its own stall timer and fallback
+// hint (not just POWER), and the tutorial fight has no clock of its own -- a tap-only player used to
+// dead-end at lesson 2 (the dummy stays passive until lesson 3, so nothing ever happens) with no hint
+// at all, then get handed the FULL completion grant once the old 120s clock ran out having learned
+// exactly one move.
+Test.add('an idle player stalled on lesson 2 (kick) for 700 frames gets its own hint, and the fight never ends',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=1;Tutorial.state.done=[true,false,false,false];
+  G.sim=true;
+  for(let i=0;i<700;i++)G.tick();
+  ok(Tutorial.stalled,'must have stalled well past STALL_FRAMES ('+Tutorial.STALL_FRAMES+')');
+  ok(Tutorial.prompt.includes(Tutorial.HINTS[1]),'prompt must include lesson 2\'s own fallback hint: '+Tutorial.prompt);
+  eq(G.state,'FIGHT','an idle player must never time out -- the tutorial fight has no clock');
+  G.toTitle();G.sim=false});
+Test.add('an idle player stuck on lesson 2 for 8000 frames still never ends the fight or grants completion',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=1;Tutorial.state.done=[true,false,false,false];
+  G.sim=true;
+  for(let i=0;i<8000;i++)G.tick();
+  eq(G.state,'FIGHT','8000 idle sim frames must never end the tutorial fight');
+  eq(Save.data.tutorialDone,false,'no completion grant without ever reaching lesson 4');
+  eq(Tutorial.state.step,1,'sanity: still stuck on lesson 2, never force-completed');
+  G.toTitle();G.sim=false});
+Test.add('lesson 2 completes on a STARTED medium even if it whiffs and never lands',()=>{
+  Tutorial.reset();Tutorial.state.step=1;
+  const p1={moveName:'medium'};const f={p1};
+  Tutorial.tick(f); // no 'hit'/'parry' event is ever fired -- this medium never connects
+  eq(Tutorial.state.step,2,'a started-but-whiffed medium must still complete lesson 2')});
 Test.add('Screens.renderMap always shows a .node.tutorial entry on floor 1 that starts G.startTutorial when clicked, and is never disabled',()=>{
   Save.data=Meta.defaults();Save.data.tutorialDone=true; // even once done, it must stay replayable
   Screens.map(1);
@@ -2965,8 +2995,11 @@ Test.add('G.forceButtons is forced on for lessons 1-2 and turns back off from le
   ok(document.body.classList.contains('show-atk'),'body.show-atk must be set while forced on');
   Tutorial.state.step=1;
   eq(G.forceButtons,true,'lesson 2 must still force the attack buttons on (unchanged by lesson 1->2)');
-  Tutorial._medium=true;
-  Tutorial.tick(G.fight); // lands the medium -- advances lesson 2 -> lesson 3
+  // Fix-wave item 1: lesson 2 now reads fight.p1.moveName directly (a STARTED medium, not only a
+  // landed one) instead of a Tutorial._medium flag set by onEvent -- see Tutorial.steps[1]'s own
+  // comment.
+  G.fight.p1.moveName='medium';
+  Tutorial.tick(G.fight); // a started medium -- advances lesson 2 -> lesson 3
   eq(Tutorial.state.step,2,'sanity: must have advanced into lesson 3');
   eq(G.forceButtons,false,'lesson 3 must turn the forced buttons back off');
   G.toTitle();

@@ -4134,25 +4134,41 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
 const Tutorial={
   state:{step:0,done:[false,false,false,false]},
   prompt:'',
-  _lights:0,_medium:false,_parried:false,_powerSet:false,_flash:0,
-  // Fix-wave item 6 (final review, Minor): the POWER step's own stall hint. _stepFrames counts sim
-  // frames since the CURRENT step became current (reset on every advance, see reset()/tick() below);
-  // STALL_FRAMES is how long the last step (POWER) is given before `stalled` flips true and an extra
-  // hint layers onto the prompt -- see tick()'s own comment for why only that step gets one.
-  STALL_FRAMES:900,_stepFrames:0,stalled:false,
+  _lights:0,_parried:false,_powerSet:false,_flash:0,
+  // Fix-wave item 1 (final review, Critical): EVERY step now runs its own stall timer, not just the
+  // last one -- a tap-only player used to dead-end at lesson 2 (the dummy is passive until lesson 3,
+  // so nothing ever happens) with no hint and no way forward except the fight's own clock, which
+  // G.startTutorial now removes entirely (clock:Infinity -- see its own comment). _stepFrames counts
+  // sim frames since the CURRENT step became current (reset on every advance, see reset()/tick()
+  // below); STALL_FRAMES is how long any step is given before `stalled` flips true and its own
+  // fallback hint layers onto the prompt (HINTS below); FORCE_FRAMES is a second, later threshold
+  // (lessons 2-3 only) that temporarily forces the attack/block buttons back on for a player who
+  // still hasn't found them.
+  STALL_FRAMES:600,FORCE_FRAMES:1500,_stepFrames:0,stalled:false,
+  // Fix-wave item 1: per-step fallback hints, appended to the step's own prompt once STALL_FRAMES has
+  // passed with no progress -- lesson 4 (POWER) keeps its own pre-existing wording (the one hint the
+  // final review's first-play walkthrough specifically called out).
+  HINTS:['Tap anywhere on the screen','Swipe right anywhere to kick — or tap KICK',
+    'Hold anywhere to block, let go as the flash hits','TAP THE GLOWING POWER BUTTON'],
   // Task 6.4 (frozen prompt text): rewritten for the whole-canvas gestures -- lessons 1-2 also point
   // at the real BLOCK/PUNCH/KICK buttons ("(or tap PUNCH)"/"(or tap KICK)"), which G.startTutorial/
   // Tutorial.tick (below) force on (G.forceButtons) for exactly those two lessons, per the plan
   // ruling "Lessons 1-2 force the attack buttons on... so prompts can also say 'or tap PUNCH / KICK'".
+  // Fix-wave item 1: lesson 2 ("SWIPE RIGHT to kick") now credits a STARTED medium -- fight.p1.
+  // moveName==='medium' observed directly, the instant the move begins -- instead of only a landed
+  // hit; a whiffed kick still teaches the gesture/button and must not leave a player stuck rethrowing
+  // it at a dummy that's still passive at this step anyway (Ctrl.tutorialDummy never attacks before
+  // lesson 3). Mirrors how step 3 (POWER) already reads fight.p1.moveName directly rather than
+  // waiting on an onEvent-fed flag.
   steps:[
     {prompt:'TAP to punch — land 3 hits (or tap PUNCH)',done:()=>Tutorial._lights>=3},
-    {prompt:'SWIPE RIGHT to kick (or tap KICK)',done:()=>Tutorial._medium},
+    {prompt:'SWIPE RIGHT to kick (or tap KICK)',done:fight=>!!(fight&&fight.p1&&fight.p1.moveName==='medium')},
     {prompt:'HOLD to block, release as the hit lands to PARRY',done:()=>Tutorial._parried},
     {prompt:'POWER — fire a special',
       done:fight=>!!(fight&&fight.p1&&(fight.p1.moveName==='s1'||fight.p1.moveName==='s2'||fight.p1.moveName==='s3'))}],
   reset(){
     this.state={step:0,done:[false,false,false,false]};
-    this._lights=0;this._medium=false;this._parried=false;this._powerSet=false;this._flash=0;
+    this._lights=0;this._parried=false;this._powerSet=false;this._flash=0;
     this._stepFrames=0;this.stalled=false;
     this.prompt=this.steps[0].prompt},
   // Fed every Fight.emit'd event (mirrors Broadcast.onEvent's own wiring), gated to the CURRENT step
@@ -4163,7 +4179,6 @@ const Tutorial={
     if(!fight||!fight.p1)return;
     const p1=fight.p1,step=this.state.step;
     if(step===0&&type==='hit'&&a===p1&&a.moveName&&a.moveName.indexOf('light')===0)this._lights++;
-    else if(step===1&&type==='hit'&&a===p1&&a.moveName==='medium')this._medium=true;
     else if(step===2&&type==='parry'&&a===p1)this._parried=true},
   // Called once per sim frame (mirrors Broadcast.tick's own wiring): arms step 4's power-100 grant
   // exactly once (the instant that step becomes current, never re-applied once the player starts
@@ -4171,27 +4186,34 @@ const Tutorial={
   // Completion itself (Save.data.tutorialDone/the one-time gold grant) is NOT decided here -- see
   // G.onFightEnd's tutorial branch: the fight ends on the dummy's own natural KO, independent of
   // whether every step was actually followed, matching the ruling that rejected a forced
-  // G.endTutorial()-style finish in favor of the real player-vs-dummy combat path.
+  // G.endTutorial()-style finish in favor of the real player-vs-dummy combat path. Fix-wave item 1:
+  // G.onFightEnd now ALSO requires state.step to have actually reached steps.length before granting
+  // completion -- belt-and-suspenders now that the fight has no clock of its own to time out on, but
+  // kept in case some other, non-natural end ever reaches onFightEnd early.
   tick(fight){
     if(!fight)return;
     if(this._flash>0)this._flash--;
     const step=this.state.step;
     if(step>=this.steps.length)return;
     if(step===3&&!this._powerSet&&fight.p1){fight.p1.power=100;this._powerSet=true}
-    // Fix-wave item 6 (final review, Minor): if the POWER step (the last one, index steps.length-1)
-    // isn't completed within STALL_FRAMES sim frames of becoming current, layer an extra hint onto
-    // the prompt and flip `stalled` -- G.syncTutorialPrompt reads it to pulse #btnPower (CSS, see
-    // 00_head.html), so an idle player who never worked out POWER (the exact snag the final review's
-    // first-play walkthrough flagged) gets pointed at the one button to press instead of being left on
-    // a static prompt against a 1 hp immortal dummy until the fight's own 120s clock expires. Only the
-    // last step gets this -- the earlier three (punch/medium/parry) are taught by the dummy's own
-    // scripted attack pattern (Ctrl.tutorialDummy) prompting a reaction, where POWER has nothing to
-    // react to and is the one step a genuinely idle player can stall on indefinitely.
-    if(step===this.steps.length-1){
-      this._stepFrames++;
-      if(!this.stalled&&this._stepFrames>=this.STALL_FRAMES){
-        this.stalled=true;
-        this.prompt=this.steps[step].prompt+' — TAP THE GLOWING POWER BUTTON'}}
+    // Fix-wave item 1 (final review, Critical): every step (not just POWER) gets its own stall timer
+    // now -- if it isn't completed within STALL_FRAMES sim frames of becoming current, its own
+    // fallback hint (HINTS above) layers onto the prompt and `stalled` flips true (G.syncTutorialPrompt
+    // reads it to pulse #btnPower, still meaningful for lesson 4; the earlier lessons just show the
+    // extra text). A tap-only player used to dead-end at lesson 2 in total silence -- the dummy stays
+    // passive until lesson 3, so nothing ever happened to react to -- this is the fix.
+    this._stepFrames++;
+    if(!this.stalled&&this._stepFrames>=this.STALL_FRAMES){
+      this.stalled=true;
+      this.prompt=this.steps[step].prompt+' — '+this.HINTS[step]}
+    // Fix-wave item 1: past FORCE_FRAMES on lesson 2 or 3 specifically (steps 1/2 -- the two lessons
+    // that normally decide BLOCK/PUNCH/KICK visibility on their own, see G.startTutorial/the step===2
+    // transition below), temporarily force the attack buttons back on for a player who's still stuck
+    // well past the stall hint -- lesson 2 already shows them by default so this is a no-op there, but
+    // lesson 3 (block) normally hides them once lesson 2 ends, and a player who can't find the
+    // whole-canvas hold gesture benefits from BLOCK reappearing as a real, visible fallback target.
+    if((step===1||step===2)&&this._stepFrames>=this.FORCE_FRAMES&&typeof G!=='undefined'&&!G.forceButtons){
+      G.forceButtons=true;G.applySettings()}
     if(this.steps[step].done(fight)){
       this.state.done[step]=true;this._flash=30;this.state.step++;
       this._stepFrames=0;this.stalled=false;
@@ -4204,7 +4226,14 @@ const Tutorial={
       // Task 6.4: BLOCK/PUNCH/KICK are only forced on for lessons 1-2 (set true by G.startTutorial,
       // reset here the instant lesson 3 begins) -- from lesson 3 on, the player's own showButtons
       // setting is all that's left deciding it (G.applySettings ORs forceButtons with the setting).
+      // Fix-wave item 1: this also clears any FORCE_FRAMES stall-force from lesson 2 above, so lesson
+      // 3 starts exactly as before (buttons hidden unless the player's own setting shows them, or its
+      // own stall force kicks back in) rather than inheriting lesson 2's forced-on state.
       if(this.state.step===2&&typeof G!=='undefined'){G.forceButtons=false;G.applySettings()}
+      // Fix-wave item 1: same reset leaving lesson 3 (entering POWER) -- clears any stall-force lesson
+      // 3 itself armed, so POWER's own stall hint (pulsing #btnPower) is the only thing left pointing
+      // at anything once every attack button lesson is behind the player.
+      if(this.state.step===3&&typeof G!=='undefined'){G.forceButtons=false;G.applySettings()}
       // Release pass: clears the p2 dummy's own guardActive flag (not a Tutorial-side read) the
       // instant every step is done, so BUFFS.tutorialGuard (47_buffs.js) stops capping damage and
       // "FINISH HIM" is a real natural KO -- see that buff's comment for why it reads holder state
@@ -4521,8 +4550,17 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // the player can never actually be KO'd mid-lesson with no special case anywhere in Fight/Fighter.
   startTutorial(o={}){
     Tutorial.reset();
-    const started=this.startFight(Object.assign({},o,{encounter:'tutorial',mode:'tutorial',
-      ctrl2:o.ctrl2||Ctrl.tutorialDummy(o.seed||this.seed),
+    // Fix-wave item 1 (final review, Critical): the tutorial fight now runs with NO clock at all
+    // (Fight.finish's time-up branch is unreachable -- Infinity minus STEP every frame never reaches
+    // <=0) instead of the default 120s every other fight uses. Completion is decided purely by
+    // Tutorial.state.step reaching steps.length (see onFightEnd's own tutorial branch below), never
+    // by a timer running out -- an idle/tap-only player who never advances past lesson 2 used to sit
+    // there until the clock expired and then be handed the FULL completion grant (gold, free crystal,
+    // tutorialDone) having learned exactly one move. Pairs with the per-step stall timer above
+    // (Tutorial.STALL_FRAMES/HINTS/FORCE_FRAMES), which is what actually moves a stuck player forward
+    // now that the clock can't do it for them.
+    const started=this.startFight(Object.assign({},o,{encounter:'tutorial',mode:'tutorial',clock:Infinity,
+      ctrl2:o.ctrl2||Ctrl.tutorialDummy(o.seed||1),
       playerBuffs:(o.playerBuffs||[]).concat('noKo')}));
     // Task 5.3: BUFFS.tutorialGuard (47_buffs.js) layered onto the live p2 Fighter directly, outside
     // ENCOUNTERS.tutorial's own frozen `buffs:[]` -- it keeps the dummy from dying to an early light
@@ -4744,10 +4782,20 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       Quest.complete(floor,node,won);
       if(won)rewards=Rewards.forNode(floor,node)
     }else if(this.mode==='arena')Arena.record(won);
-    else if(this.mode==='tutorial'&&won){
+    // Fix-wave item 1 (final review, Critical): completion additionally requires every Tutorial step
+    // to have actually been taught (state.step reached steps.length) -- won alone is no longer enough.
+    // With the tutorial's own clock now removed (G.startTutorial, clock:Infinity) the fight can only
+    // ever end in a natural win once guardActive has already been cleared (which itself only happens
+    // at steps.length, see Tutorial.tick), so this is belt-and-suspenders for real play; it matters
+    // for anything that could still end the fight early (a debug/test hook) without ever completing
+    // the lessons -- that must return to the map with no grant, not a partial one.
+    else if(this.mode==='tutorial'&&won&&Tutorial.state.step>=Tutorial.steps.length){
       // Task 5.3: completion = a natural win in tutorial mode -- the fight ends on the dummy's real
       // KO (ruling: rejected a forced G.endTutorial()-style finish in favor of the actual player-vs-
-      // dummy combat path), independent of whether every Tutorial.steps prompt was actually followed.
+      // dummy combat path). Fix-wave item 1 added the explicit state.step>=steps.length guard above
+      // (real play always satisfies it alongside `won` anyway -- see that fix's own comment); this
+      // comment's ORIGINAL "independent of whether every step was followed" is no longer the whole
+      // story, kept historical rather than rewritten.
       // tutorialDone + the one-time 300 gold only ever grant ONCE: Save.data.tutorialDone starts
       // false (Meta.defaults) and this branch is itself guarded on it, so replaying the map's own
       // permanently-open .node.tutorial row can't re-farm the grant. G.tutorialJustGranted (read by
@@ -8367,6 +8415,36 @@ Test.add('completing the tutorial sets tutorialDone and grants 300 gold exactly 
   eq(G.state,'RESULT');
   eq(Save.data.gold,goldAfterFirst,'a second completion (replayed via the map\'s .node.tutorial row) must not grant gold again');
   G.toTitle();G.sim=false});
+// Fix-wave item 1 (final review, Critical): every lesson now gets its own stall timer and fallback
+// hint (not just POWER), and the tutorial fight has no clock of its own -- a tap-only player used to
+// dead-end at lesson 2 (the dummy stays passive until lesson 3, so nothing ever happens) with no hint
+// at all, then get handed the FULL completion grant once the old 120s clock ran out having learned
+// exactly one move.
+Test.add('an idle player stalled on lesson 2 (kick) for 700 frames gets its own hint, and the fight never ends',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=1;Tutorial.state.done=[true,false,false,false];
+  G.sim=true;
+  for(let i=0;i<700;i++)G.tick();
+  ok(Tutorial.stalled,'must have stalled well past STALL_FRAMES ('+Tutorial.STALL_FRAMES+')');
+  ok(Tutorial.prompt.includes(Tutorial.HINTS[1]),'prompt must include lesson 2\'s own fallback hint: '+Tutorial.prompt);
+  eq(G.state,'FIGHT','an idle player must never time out -- the tutorial fight has no clock');
+  G.toTitle();G.sim=false});
+Test.add('an idle player stuck on lesson 2 for 8000 frames still never ends the fight or grants completion',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=1;Tutorial.state.done=[true,false,false,false];
+  G.sim=true;
+  for(let i=0;i<8000;i++)G.tick();
+  eq(G.state,'FIGHT','8000 idle sim frames must never end the tutorial fight');
+  eq(Save.data.tutorialDone,false,'no completion grant without ever reaching lesson 4');
+  eq(Tutorial.state.step,1,'sanity: still stuck on lesson 2, never force-completed');
+  G.toTitle();G.sim=false});
+Test.add('lesson 2 completes on a STARTED medium even if it whiffs and never lands',()=>{
+  Tutorial.reset();Tutorial.state.step=1;
+  const p1={moveName:'medium'};const f={p1};
+  Tutorial.tick(f); // no 'hit'/'parry' event is ever fired -- this medium never connects
+  eq(Tutorial.state.step,2,'a started-but-whiffed medium must still complete lesson 2')});
 Test.add('Screens.renderMap always shows a .node.tutorial entry on floor 1 that starts G.startTutorial when clicked, and is never disabled',()=>{
   Save.data=Meta.defaults();Save.data.tutorialDone=true; // even once done, it must stay replayable
   Screens.map(1);
@@ -8466,8 +8544,11 @@ Test.add('G.forceButtons is forced on for lessons 1-2 and turns back off from le
   ok(document.body.classList.contains('show-atk'),'body.show-atk must be set while forced on');
   Tutorial.state.step=1;
   eq(G.forceButtons,true,'lesson 2 must still force the attack buttons on (unchanged by lesson 1->2)');
-  Tutorial._medium=true;
-  Tutorial.tick(G.fight); // lands the medium -- advances lesson 2 -> lesson 3
+  // Fix-wave item 1: lesson 2 now reads fight.p1.moveName directly (a STARTED medium, not only a
+  // landed one) instead of a Tutorial._medium flag set by onEvent -- see Tutorial.steps[1]'s own
+  // comment.
+  G.fight.p1.moveName='medium';
+  Tutorial.tick(G.fight); // a started medium -- advances lesson 2 -> lesson 3
   eq(Tutorial.state.step,2,'sanity: must have advanced into lesson 3');
   eq(G.forceButtons,false,'lesson 3 must turn the forced buttons back off');
   G.toTitle();
