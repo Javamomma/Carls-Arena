@@ -82,7 +82,20 @@ class Fight{
   // directly rather than driving a real chain).
   nodeDmg(att,m){return m.chainDmg?m.chainDmg[Math.max(1,Math.min(att.chainNode||1,m.chainDmg.length))-1]:m.dmg}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
-    if(type==='miss')return this.emit('miss',att,def,0);
+    if(type==='miss'){
+      // Task 7.3 (frozen interface, exact ruling): dexterity -- def dodged this hit specifically by
+      // dashing back through it with i-frames still up (def.state==='DASH'&&def.inv>0; detect() also
+      // returns 'miss' for KNOCKDOWN/KO/WIN and the post-getup i-frame window, none of which are a
+      // real dodge, so the state check is what tells them apart -- see Fighter.wasKnockedDown's own
+      // comment, 50_fighter.js, for why a bare inv-edge check alone can't). Effects.apply's own
+      // Effects.tick/emitEffect plumbing (48_effects.js) already logs a generic type:'effect' entry
+      // for this; the dedicated 'dexterity' event below carries the {who,dir} shape Task 7.4 needs to
+      // shake directionally, which the generic effect event has no slot for (see emitTell's comment).
+      if(def.state==='DASH'&&def.inv>0){
+        Effects.apply(this,def,'dexterity',{source:att});
+        this.fx.push({kind:'afterimage',x:def.x,y:FLOOR-80,face:def.face});
+        this.emitTell('dexterity',def,att.face)}
+      return this.emit('miss',att,def,0)}
     if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;att.chainNode=0;def.setState('IDLE');
       this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
       return this.emit('parry',def,att,0)}
@@ -120,6 +133,15 @@ class Fight{
     // Crit rolls once per landed hit, after the class bonus and before armor.
     const crit=!this.noCrit&&this.rng.next()<(att.def.crit+attMods.critDelta);
     const critMul=crit?(att.def.critMul||CRIT_MUL_DEFAULT):1;
+    // Task 7.3 (frozen interface, exact ruling): intercept -- att's hit catches def still in the
+    // STARTUP of def's own move, and that move is one that actually advances def toward the foe
+    // (def.move.dash||def.move.track -- true for light's own dash/stepIn and every medium's track;
+    // false for heavy/specials, which telegraph in place). Read here (before def.clearMove() below
+    // ever touches def.state/def.move) since it's def's PRE-this-hit attack that's being punished, the
+    // same "read the pre-resolve state" discipline Fight.step's own c1/c2 detect-before-resolve split
+    // already keeps for a true mutual trade. def.phase() (50_fighter.js) is Task 7.2's own helper,
+    // reused rather than duplicated here per the controller's ruling.
+    const intercept=def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track));
     // ref carries dmg, the two power deltas, and the move itself so armorUp/powerGain can adjust
     // them before either is applied; defender-side hooks run first, then attacker-side, both against
     // the same ref. Fix-wave item 6: ref.move (not att.move) is what powerGain reads — on a true
@@ -129,11 +151,11 @@ class Fight{
     // and powerGain's old `att.move` read silently no-op'd. ref is a fresh object built fresh for
     // THIS resolve() call, never touched by the other side's resolve, so ref.move is always the
     // move that actually landed this call.
-    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*cls*critMul*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
+    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*cls*critMul*(intercept?1.5:1)*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
     this.buffHook('onHit',def,att,def,ref);this.buffHook('onHit',att,att,def,ref);
     const dmg=ref.dmg;
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
-    att.power=Math.min(POWER_MAX,att.power+ref.powHit);def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
+    att.power=Math.min(POWER_MAX,att.power+ref.powHit+(intercept?15:0));def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
     // Task 7.2: CHAIN.enders (light:{}/medium:{push,knockdown}) only applies to the landed hit that's
     // actually the chain's node-5 finisher (a plain light/medium at nodes 1-4 gets no bonus, so an
     // early cancel into medium can't fish for the push/knockdown a full 5-hit chain earns) -- the
@@ -170,7 +192,9 @@ class Fight{
     // knockback gate above): a 4-hit S3 shouldn't stack four 14-frame freezes back to back. Every
     // landed hit still shakes/sparks/pops for combo feedback; only the freeze itself is gated, and
     // an intermediate multi-hit leaves any hitstop already armed by a same-frame mutual trade alone.
-    if(!m.hits||last)this.hitstop=m.hitstop;
+    // Task 7.3 (frozen interface, exact ruling): an intercept's own hitstop (10) replaces whatever
+    // the landed move's own m.hitstop would have set, same gating as the plain case above.
+    if(!m.hits||last)this.hitstop=intercept?10:m.hitstop;
     // Task 6.5: a landed medium (KICK, a leg strike in every rig -- Phase 6 ruling 4) pushes a low
     // dust arc instead of the usual gold spark burst -- data-only (which fx kind gets pushed), never
     // touching hitstop/shake, so the sim stays exactly as deterministic as it already was. att.face
@@ -184,6 +208,17 @@ class Fight{
     // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
     this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
     this.fx.push({kind:'shake',amt:m.hitstop});
+    // Task 7.3 (frozen interface, exact ruling): the intercept's own read/reward gets its own punch-
+    // in fx term (Task 7.4 composes fx.pct into the camera zoom) and its own INTERCEPT! callout, on
+    // top of (never instead of) the plain damage popup/spark just pushed above -- and its own event,
+    // carrying {who,dir} (dir is att's own facing, per the ruling) so Task 7.4's directional shake can
+    // tell which way to kick the camera. Presentation stays minimal here on purpose (Task 7.4 owns the
+    // full hit-feel pass); see emitTell's own comment for why this needs a dedicated event distinct
+    // from the plain 'hit' one just below.
+    if(intercept){
+      this.fx.push({kind:'punch',pct:.05});
+      this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'INTERCEPT!',col:'#ff9d3b',big:true});
+      this.emitTell('intercept',att,att.face)}
     this.emit('hit',att,def,dmg,att.moveName)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
     this.winner=a.hp<=0?b:b.hp<=0?a:(a.hp/a.maxHp>=b.hp/b.maxHp?a:b);
@@ -203,4 +238,15 @@ class Fight{
   // them special-case it yet.
   emitEffect(holder,id,stacks,flag){
     this.log.push({f:this.frame,type:'effect',who:holder.side,id,stacks,[flag]:true});
-    this.onEvent('effect',holder,null,stacks)}}
+    this.onEvent('effect',holder,null,stacks)}
+  // Task 7.3 (frozen interface, exact shape): 'intercept'/'dexterity' events carry {type,who,dir} --
+  // `who` is the fighter credited for the read (the interceptor for 'intercept', the dodger for
+  // 'dexterity'; see each call site's own comment), `dir` is always the CURRENT resolve() call's own
+  // attacker facing (att.face) so Task 7.4's directional camera shake always kicks the same way the
+  // exchange was actually facing, regardless of which side `who` turns out to be. A dedicated sibling
+  // to emitEffect for the same reason that one exists: emit()'s own (type,a,b,val,move) shape has no
+  // `dir` slot, and folding a facing sign into `val` would collide with every other event's own use
+  // of that field as a magnitude (dmg/chip/stacks).
+  emitTell(type,holder,dir){
+    this.log.push({f:this.frame,type,who:holder.side,dir});
+    this.onEvent(type,holder,null,dir)}}

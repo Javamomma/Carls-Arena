@@ -12,7 +12,13 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
   EFFECT_STYLE:{bleed:{text:'BLEED',col:'#c62828'},stun:{text:'STUN',col:'#8cd8ff'},
     armorBreak:{text:'ARMOR BREAK',col:'#9a9a9a'},fury:{text:'FURY',col:'#ff5a4a'},
     powerGain:{text:'POWER+',col:'#f4c542'},powerBurn:{text:'POWER BURN',col:'#ff8c00'},
-    regen:{text:'REGEN',col:'#4caf50'},weakness:{text:'WEAKNESS',col:'#7e57c2'}},
+    regen:{text:'REGEN',col:'#4caf50'},weakness:{text:'WEAKNESS',col:'#7e57c2'},
+    // Task 7.3: blue, per the plan's own "popup, blue afterimage" description of the dodge read --
+    // the 'effectPopup' case below already turns this into the same styled popup every other EFFECTS
+    // id gets, so this one line is the only wiring this file needs for the dexterity POPUP; the
+    // afterimage streak itself is its own fx kind, pushed separately by Fight.resolve (see 'afterimage'
+    // below), since Effects.apply has no notion of a facing-direction streak.
+    dexterity:{text:'DEXTERITY',col:'#4fc3f7'}},
   reset(){this.list.length=0;this.shake=0;this.flash=0;this.card=null;this.shieldDown=null},
   _seed(i){const fr=(G.fight&&G.fight.frame)||0;return((fr*97+i*131+1)>>>0)||1},
   push(ev){
@@ -42,6 +48,15 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
       // kind hit/parry/thorns damage already uses (draw()'s 'popup' case below needs no change) --
       // text/color looked up from EFFECT_STYLE above rather than chosen by the sim, and a stack count
       // >1 appended (e.g. 'BLEED x3') so a re-applied/stacked effect reads differently from a fresh one.
+      // Task 7.3: dexterity's own "blue afterimage" read (the plan's own words) -- a minimal
+      // placeholder streak at the dodging fighter's position, faded over its own short life. Task 7.4
+      // owns the full hit-feel pass (per this task's brief, "keep fx here minimal") so this is
+      // deliberately plain: no rig silhouette, just a translucent trailing band leaning the direction
+      // the dodger was facing (ev.face), consistent with every other fx kind here reading a plain
+      // sim-pushed descriptor and choosing its own presentation.
+      case'afterimage':
+        this.list.push({kind:'afterimage',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:20});
+        break;
       case'effectPopup':{
         const st=this.EFFECT_STYLE[ev.id]||{text:String(ev.id||'?').toUpperCase(),col:'#fff'};
         const text=ev.stacks>1?st.text+' x'+ev.stacks:st.text;
@@ -112,6 +127,10 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
       // soft puff than a hard-edged spark), just its own grey-brown color and a touch more opaque so
       // a low sweep of 6 still reads clearly against the floor art next to a landed light's gold spark.
       else if(p.kind==='dustArc'){c.globalAlpha=Math.max(0,(1-p.life/p.max)*.6);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,2.6+p.life*.13,0,Math.PI*2);c.fill()}
+      // Task 7.3: a fading blue band trailing behind the dodge's own facing, a minimal placeholder
+      // for the dexterity read -- see push()'s own comment on why this stays plain.
+      else if(p.kind==='afterimage'){const t=p.life/p.max;c.globalAlpha=Math.max(0,(1-t)*.5);
+        c.fillStyle='#4fc3f7';c.fillRect(p.x-p.face*28-14,p.y-40,28,80)}
       else if(p.kind==='popup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
         // Task 6.4: a capped (muted) hit always reads grey, regardless of what col it was pushed
         // with (crit/normal) -- the frozen "capped popups drawn grey" interface.

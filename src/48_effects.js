@@ -49,7 +49,18 @@ const EFFECTS={
   regen:{id:'regen',dur:300,maxStacks:3,
     tick(fight,holder,e){holder.hp=Math.min(holder.maxHp,holder.hp+holder.maxHp*0.0015*e.stacks*e.potency/60)}},
   weakness:{id:'weakness',dur:480,maxStacks:3,
-    mod(e,m){m.atkMul*=1-0.12*e.stacks*e.potency}}};
+    mod(e,m){m.atkMul*=1-0.12*e.stacks*e.potency}},
+  // Task 7.3 (frozen interface, exact values): earned by dashing back through a foe's own active
+  // hitbox with i-frames still up (Fight.resolve's own miss branch, 60_fight.js, is the only call
+  // site -- see its comment for the def.state==='DASH'&&def.inv>0 gate that tells a real dodge apart
+  // from KNOCKDOWN get-up i-frames, which never award this). maxStacks:1 (a flat +0.2, not a
+  // stackable bonus -- dodging twice inside the 3s window just refreshes the clock, same "latest
+  // apply wins" semantics every other EFFECTS id gets from Effects.apply) so the *e.stacks factor
+  // below is always 1 at potency 1, the only combination any move/dodge ever passes; kept in the
+  // formula anyway for the same reason armorBreak/fury/weakness keep theirs -- a future potency-
+  // scaled variant (a bigger single-dodge reward) needs no second EFFECTS entry.
+  dexterity:{id:'dexterity',dur:180,maxStacks:1,
+    mod(e,m){m.critDelta+=0.2*e.stacks*e.potency}}};
 
 const Effects={
   // Refreshes duration to EFFECTS[id].dur and adds stacks up to maxStacks (the newest call's potency/

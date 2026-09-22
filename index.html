@@ -1412,11 +1412,18 @@ const CHAIN={openers:['light','medium'],nodes:5,
   enders:{light:{},medium:{push:90,knockdown:true},heavy:{charge:14,sig:true}}};
 // Task 6.2 (movement inside moves): per-frame rates Fighter.setupDash uses for medium's track and
 // light1's stepIn. DASH_TRACK_SPEED preserves medium's old flat dash(140)/startup(10) rate exactly
-// (140/10=14) so an already-in-range medium (dashLeft 0, see setupDash) and a far one that only needs
+// (140/10=14) so an already-in-range medium (dashLeft 0, see setupDash) and a near one that only needs
 // a few frames both move at the same speed a player already learned. DASH_STEPIN_SPEED is chosen so
 // stepIn(110)/DASH_STEPIN_SPEED always equals light1's own unchanged 5-frame startup (110/22=5) --
 // a step-in light never needs to run longer than the swing already does; it either closes the gap
 // within its own 5 frames or it doesn't connect, same as a real whiffed jab.
+// Task 7.3 (frozen interface, exact ruling): DASH_TRACK_SPEED is now only the FLOOR speed for a
+// medium's tracked dash-in, not a fixed rate for every gap -- Fighter.setupDash scales the per-frame
+// speed up to max(DASH_TRACK_SPEED, dashLeft/14) so the far end of MOVES.medium.track (up to 300px)
+// never needs more than 14 effective startup frames to close, capping the dash-in telegraph a defender
+// can be caught napping in (a longer, uncapped startup is exactly what made intercepting a far dash-in
+// nearly free before this task -- see Fight.resolve's own intercept comment). A close medium (small or
+// zero dashLeft) still travels at the same flat 14px/frame rate as always.
 const DASH_TRACK_SPEED=14,DASH_STEPIN_SPEED=22;
 // Task 7.2 (frozen interface): def.sigEffect={id,stacks,target?} -- fired only by the in-combo heavy
 // ender (CHAIN.enders.heavy, m.sig:true) once it lands, via Effects.apply (48_effects.js). `target`
@@ -1799,7 +1806,18 @@ const EFFECTS={
   regen:{id:'regen',dur:300,maxStacks:3,
     tick(fight,holder,e){holder.hp=Math.min(holder.maxHp,holder.hp+holder.maxHp*0.0015*e.stacks*e.potency/60)}},
   weakness:{id:'weakness',dur:480,maxStacks:3,
-    mod(e,m){m.atkMul*=1-0.12*e.stacks*e.potency}}};
+    mod(e,m){m.atkMul*=1-0.12*e.stacks*e.potency}},
+  // Task 7.3 (frozen interface, exact values): earned by dashing back through a foe's own active
+  // hitbox with i-frames still up (Fight.resolve's own miss branch, 60_fight.js, is the only call
+  // site -- see its comment for the def.state==='DASH'&&def.inv>0 gate that tells a real dodge apart
+  // from KNOCKDOWN get-up i-frames, which never award this). maxStacks:1 (a flat +0.2, not a
+  // stackable bonus -- dodging twice inside the 3s window just refreshes the clock, same "latest
+  // apply wins" semantics every other EFFECTS id gets from Effects.apply) so the *e.stacks factor
+  // below is always 1 at potency 1, the only combination any move/dodge ever passes; kept in the
+  // formula anyway for the same reason armorBreak/fury/weakness keep theirs -- a future potency-
+  // scaled variant (a bigger single-dodge reward) needs no second EFFECTS entry.
+  dexterity:{id:'dexterity',dur:180,maxStacks:1,
+    mod(e,m){m.critDelta+=0.2*e.stacks*e.potency}}};
 
 const Effects={
   // Refreshes duration to EFFECTS[id].dur and adds stacks up to maxStacks (the newest call's potency/
@@ -1948,8 +1966,15 @@ class Fighter{
     const m=this.move,lightRange=this.moveDef('light').range;
     if(m.track){
       const need=this.foeDist==null?0:Math.max(0,this.foeDist-lightRange);
-      this.dashLeft=Math.min(need,m.track);this.dashRate=DASH_TRACK_SPEED;
-      this.effStartup=Math.max(m.startup,this.dashLeft>0?Math.ceil(this.dashLeft/DASH_TRACK_SPEED):0)}
+      this.dashLeft=Math.min(need,m.track);
+      // Task 7.3 (frozen ruling): DASH_TRACK_SPEED is the floor, not a fixed rate -- the per-frame
+      // speed scales up to max(DASH_TRACK_SPEED, dashLeft/14) so effStartup never needs to grow past
+      // 14 frames, however far the gap. The 1e-9 epsilon on the ceil below guards a floating divide-
+      // then-multiply roundtrip at dashLeft===m.track (300/(300/14) can land a hair over 14.0 in
+      // float64) from ever reporting 15 -- see the "far medium effective startup <=14, at any gap"
+      // test, which sweeps gaps right up to and past m.track.
+      this.dashRate=this.dashLeft>0?Math.max(DASH_TRACK_SPEED,this.dashLeft/14):DASH_TRACK_SPEED;
+      this.effStartup=Math.max(m.startup,this.dashLeft>0?Math.ceil(this.dashLeft/this.dashRate-1e-9):0)}
     else if(m.stepIn&&this.foeDist!=null&&this.foeDist>lightRange){
       this.dashLeft=Math.min(this.foeDist-lightRange,m.stepIn);this.dashRate=DASH_STEPIN_SPEED;
       this.effStartup=m.startup} // stepIn/DASH_STEPIN_SPEED===m.startup by construction; never grows
@@ -2504,7 +2529,20 @@ class Fight{
   // directly rather than driving a real chain).
   nodeDmg(att,m){return m.chainDmg?m.chainDmg[Math.max(1,Math.min(att.chainNode||1,m.chainDmg.length))-1]:m.dmg}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
-    if(type==='miss')return this.emit('miss',att,def,0);
+    if(type==='miss'){
+      // Task 7.3 (frozen interface, exact ruling): dexterity -- def dodged this hit specifically by
+      // dashing back through it with i-frames still up (def.state==='DASH'&&def.inv>0; detect() also
+      // returns 'miss' for KNOCKDOWN/KO/WIN and the post-getup i-frame window, none of which are a
+      // real dodge, so the state check is what tells them apart -- see Fighter.wasKnockedDown's own
+      // comment, 50_fighter.js, for why a bare inv-edge check alone can't). Effects.apply's own
+      // Effects.tick/emitEffect plumbing (48_effects.js) already logs a generic type:'effect' entry
+      // for this; the dedicated 'dexterity' event below carries the {who,dir} shape Task 7.4 needs to
+      // shake directionally, which the generic effect event has no slot for (see emitTell's comment).
+      if(def.state==='DASH'&&def.inv>0){
+        Effects.apply(this,def,'dexterity',{source:att});
+        this.fx.push({kind:'afterimage',x:def.x,y:FLOOR-80,face:def.face});
+        this.emitTell('dexterity',def,att.face)}
+      return this.emit('miss',att,def,0)}
     if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;att.chainNode=0;def.setState('IDLE');
       this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
       return this.emit('parry',def,att,0)}
@@ -2542,6 +2580,15 @@ class Fight{
     // Crit rolls once per landed hit, after the class bonus and before armor.
     const crit=!this.noCrit&&this.rng.next()<(att.def.crit+attMods.critDelta);
     const critMul=crit?(att.def.critMul||CRIT_MUL_DEFAULT):1;
+    // Task 7.3 (frozen interface, exact ruling): intercept -- att's hit catches def still in the
+    // STARTUP of def's own move, and that move is one that actually advances def toward the foe
+    // (def.move.dash||def.move.track -- true for light's own dash/stepIn and every medium's track;
+    // false for heavy/specials, which telegraph in place). Read here (before def.clearMove() below
+    // ever touches def.state/def.move) since it's def's PRE-this-hit attack that's being punished, the
+    // same "read the pre-resolve state" discipline Fight.step's own c1/c2 detect-before-resolve split
+    // already keeps for a true mutual trade. def.phase() (50_fighter.js) is Task 7.2's own helper,
+    // reused rather than duplicated here per the controller's ruling.
+    const intercept=def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track));
     // ref carries dmg, the two power deltas, and the move itself so armorUp/powerGain can adjust
     // them before either is applied; defender-side hooks run first, then attacker-side, both against
     // the same ref. Fix-wave item 6: ref.move (not att.move) is what powerGain reads — on a true
@@ -2551,11 +2598,11 @@ class Fight{
     // and powerGain's old `att.move` read silently no-op'd. ref is a fresh object built fresh for
     // THIS resolve() call, never touched by the other side's resolve, so ref.move is always the
     // move that actually landed this call.
-    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*cls*critMul*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
+    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*cls*critMul*(intercept?1.5:1)*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
     this.buffHook('onHit',def,att,def,ref);this.buffHook('onHit',att,att,def,ref);
     const dmg=ref.dmg;
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
-    att.power=Math.min(POWER_MAX,att.power+ref.powHit);def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
+    att.power=Math.min(POWER_MAX,att.power+ref.powHit+(intercept?15:0));def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
     // Task 7.2: CHAIN.enders (light:{}/medium:{push,knockdown}) only applies to the landed hit that's
     // actually the chain's node-5 finisher (a plain light/medium at nodes 1-4 gets no bonus, so an
     // early cancel into medium can't fish for the push/knockdown a full 5-hit chain earns) -- the
@@ -2592,7 +2639,9 @@ class Fight{
     // knockback gate above): a 4-hit S3 shouldn't stack four 14-frame freezes back to back. Every
     // landed hit still shakes/sparks/pops for combo feedback; only the freeze itself is gated, and
     // an intermediate multi-hit leaves any hitstop already armed by a same-frame mutual trade alone.
-    if(!m.hits||last)this.hitstop=m.hitstop;
+    // Task 7.3 (frozen interface, exact ruling): an intercept's own hitstop (10) replaces whatever
+    // the landed move's own m.hitstop would have set, same gating as the plain case above.
+    if(!m.hits||last)this.hitstop=intercept?10:m.hitstop;
     // Task 6.5: a landed medium (KICK, a leg strike in every rig -- Phase 6 ruling 4) pushes a low
     // dust arc instead of the usual gold spark burst -- data-only (which fx kind gets pushed), never
     // touching hitstop/shake, so the sim stays exactly as deterministic as it already was. att.face
@@ -2606,6 +2655,17 @@ class Fight{
     // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
     this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
     this.fx.push({kind:'shake',amt:m.hitstop});
+    // Task 7.3 (frozen interface, exact ruling): the intercept's own read/reward gets its own punch-
+    // in fx term (Task 7.4 composes fx.pct into the camera zoom) and its own INTERCEPT! callout, on
+    // top of (never instead of) the plain damage popup/spark just pushed above -- and its own event,
+    // carrying {who,dir} (dir is att's own facing, per the ruling) so Task 7.4's directional shake can
+    // tell which way to kick the camera. Presentation stays minimal here on purpose (Task 7.4 owns the
+    // full hit-feel pass); see emitTell's own comment for why this needs a dedicated event distinct
+    // from the plain 'hit' one just below.
+    if(intercept){
+      this.fx.push({kind:'punch',pct:.05});
+      this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'INTERCEPT!',col:'#ff9d3b',big:true});
+      this.emitTell('intercept',att,att.face)}
     this.emit('hit',att,def,dmg,att.moveName)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
     this.winner=a.hp<=0?b:b.hp<=0?a:(a.hp/a.maxHp>=b.hp/b.maxHp?a:b);
@@ -2625,7 +2685,18 @@ class Fight{
   // them special-case it yet.
   emitEffect(holder,id,stacks,flag){
     this.log.push({f:this.frame,type:'effect',who:holder.side,id,stacks,[flag]:true});
-    this.onEvent('effect',holder,null,stacks)}}
+    this.onEvent('effect',holder,null,stacks)}
+  // Task 7.3 (frozen interface, exact shape): 'intercept'/'dexterity' events carry {type,who,dir} --
+  // `who` is the fighter credited for the read (the interceptor for 'intercept', the dodger for
+  // 'dexterity'; see each call site's own comment), `dir` is always the CURRENT resolve() call's own
+  // attacker facing (att.face) so Task 7.4's directional camera shake always kicks the same way the
+  // exchange was actually facing, regardless of which side `who` turns out to be. A dedicated sibling
+  // to emitEffect for the same reason that one exists: emit()'s own (type,a,b,val,move) shape has no
+  // `dir` slot, and folding a facing sign into `val` would collide with every other event's own use
+  // of that field as a magnitude (dmg/chip/stacks).
+  emitTell(type,holder,dir){
+    this.log.push({f:this.frame,type,who:holder.side,dir});
+    this.onEvent(type,holder,null,dir)}}
 
 // Parallax dungeon stage + follow camera. Pure presentation: reads Fight/Fighter state, never writes it.
 const Stage={cache:{},
@@ -4413,7 +4484,10 @@ const Render={ctx:canvas.getContext('2d'),
   // buffBadges above -- buffBadges only ever reads G.encounter.buffs, the static per-encounter list;
   // this reads a live fighter's own fighter.effects, which either fighter can carry and which changes
   // stack/duration frame to frame).
-  EFFECT_CODES:{bleed:'B',stun:'S',armorBreak:'A',fury:'F',powerGain:'P',powerBurn:'X',regen:'R',weakness:'W'},
+  // Task 7.3: 'D' for dexterity, added the same way every other EFFECTS id got a code here -- the
+  // badge draw call below already falls back to '?' for an unmapped id, so this alone is the only
+  // wiring the HUD badge needs.
+  EFFECT_CODES:{bleed:'B',stun:'S',armorBreak:'A',fury:'F',powerGain:'P',powerBurn:'X',regen:'R',weakness:'W',dexterity:'D'},
   // One 12px badge per active timed effect on the given fighter: a dark square, a shrinking gold ring
   // traced clockwise from noon (e.left/EFFECTS[e.id].dur, so it empties out exactly as the effect's
   // own duration does), the effect's 1-letter code, and a small stack-count digit in the corner when
@@ -4598,7 +4672,13 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
   EFFECT_STYLE:{bleed:{text:'BLEED',col:'#c62828'},stun:{text:'STUN',col:'#8cd8ff'},
     armorBreak:{text:'ARMOR BREAK',col:'#9a9a9a'},fury:{text:'FURY',col:'#ff5a4a'},
     powerGain:{text:'POWER+',col:'#f4c542'},powerBurn:{text:'POWER BURN',col:'#ff8c00'},
-    regen:{text:'REGEN',col:'#4caf50'},weakness:{text:'WEAKNESS',col:'#7e57c2'}},
+    regen:{text:'REGEN',col:'#4caf50'},weakness:{text:'WEAKNESS',col:'#7e57c2'},
+    // Task 7.3: blue, per the plan's own "popup, blue afterimage" description of the dodge read --
+    // the 'effectPopup' case below already turns this into the same styled popup every other EFFECTS
+    // id gets, so this one line is the only wiring this file needs for the dexterity POPUP; the
+    // afterimage streak itself is its own fx kind, pushed separately by Fight.resolve (see 'afterimage'
+    // below), since Effects.apply has no notion of a facing-direction streak.
+    dexterity:{text:'DEXTERITY',col:'#4fc3f7'}},
   reset(){this.list.length=0;this.shake=0;this.flash=0;this.card=null;this.shieldDown=null},
   _seed(i){const fr=(G.fight&&G.fight.frame)||0;return((fr*97+i*131+1)>>>0)||1},
   push(ev){
@@ -4628,6 +4708,15 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
       // kind hit/parry/thorns damage already uses (draw()'s 'popup' case below needs no change) --
       // text/color looked up from EFFECT_STYLE above rather than chosen by the sim, and a stack count
       // >1 appended (e.g. 'BLEED x3') so a re-applied/stacked effect reads differently from a fresh one.
+      // Task 7.3: dexterity's own "blue afterimage" read (the plan's own words) -- a minimal
+      // placeholder streak at the dodging fighter's position, faded over its own short life. Task 7.4
+      // owns the full hit-feel pass (per this task's brief, "keep fx here minimal") so this is
+      // deliberately plain: no rig silhouette, just a translucent trailing band leaning the direction
+      // the dodger was facing (ev.face), consistent with every other fx kind here reading a plain
+      // sim-pushed descriptor and choosing its own presentation.
+      case'afterimage':
+        this.list.push({kind:'afterimage',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:20});
+        break;
       case'effectPopup':{
         const st=this.EFFECT_STYLE[ev.id]||{text:String(ev.id||'?').toUpperCase(),col:'#fff'};
         const text=ev.stacks>1?st.text+' x'+ev.stacks:st.text;
@@ -4698,6 +4787,10 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
       // soft puff than a hard-edged spark), just its own grey-brown color and a touch more opaque so
       // a low sweep of 6 still reads clearly against the floor art next to a landed light's gold spark.
       else if(p.kind==='dustArc'){c.globalAlpha=Math.max(0,(1-p.life/p.max)*.6);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,2.6+p.life*.13,0,Math.PI*2);c.fill()}
+      // Task 7.3: a fading blue band trailing behind the dodge's own facing, a minimal placeholder
+      // for the dexterity read -- see push()'s own comment on why this stays plain.
+      else if(p.kind==='afterimage'){const t=p.life/p.max;c.globalAlpha=Math.max(0,(1-t)*.5);
+        c.fillStyle='#4fc3f7';c.fillRect(p.x-p.face*28-14,p.y-40,28,80)}
       else if(p.kind==='popup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
         // Task 6.4: a capped (muted) hit always reads grey, regardless of what col it was pushed
         // with (crit/normal) -- the frozen "capped popups drawn grey" interface.
@@ -10151,5 +10244,87 @@ Test.add('Effects module and every EFFECTS[id] hook stay presentation-free and R
     const e=EFFECTS[id];
     for(const hook of['tick','onApply','mod'])
       if(e[hook])ok(!EFF_PURITY.test(e[hook].toString()),'EFFECTS.'+id+'.'+hook+' must stay presentation- and RNG-free')}});
+
+// --- Task 7.3: intercept, dexterity, capped dash-in telegraph -----------------------------------
+// A light thrown from IDLE lands as a plain node-1 opener (nodeDmg 1, no crit under mkFight's default
+// noCrit:true) for a clean base of round(carl.atk(60)*1*1*1*1*1)=60 -- the frozen x1.5 intercept
+// multiplier on that clean number (90) is what the dmg assertion below checks, with no rounding
+// ambiguity either way.
+Test.add('a light landing on a foe mid-medium-startup intercepts: x1.5 damage, +15 power, hitstop 10, an intercept event',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});
+  closeIn(f);run(f,5);
+  const hit=f.log.find(e=>e.type==='hit'&&e.who===1);
+  ok(hit,'the light must land');
+  eq(hit.move,'light');
+  eq(hit.val,90,'base 60 dmg becomes 90 at the frozen x1.5 intercept multiplier (def is still in medium startup)');
+  eq(f.p1.power,22,"powHit(7)+the intercept's own flat +15, nothing else banked power this fight");
+  eq(f.hitstop,10,"the intercept's own hitstop replaces the light's own (much shorter) m.hitstop");
+  const iv=f.log.find(e=>e.type==='intercept');
+  ok(iv,'an intercept event must be logged');
+  eq(iv.who,1,'p1 (the interceptor) is credited');
+  eq(iv.dir,1,"dir is the attacker's (p1's) own facing");
+  ok(f.fx.some(x=>x.kind==='punch'&&x.pct===.05),'a punch fx descriptor must be queued');
+  ok(f.fx.some(x=>x.kind==='popup'&&x.text==='INTERCEPT!'),'an INTERCEPT! popup must be queued')});
+Test.add('a hit landing on a foe already past medium startup (into recovery) is a plain hit, no intercept',()=>{
+  // Hand-set p2 into a medium already in its own recovery window (f=startup+1=11, inside the
+  // [startup+active,startup+active+recovery)=[14,28) recovery span 5 ticks from now, once p1's own
+  // light finishes its 5-frame startup below) -- isolates "def.phase() is not startup" from having to
+  // script exact controller-frame timing through a real full medium.
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
+  // p2.hits pre-marks its own (single) hit index 0 as already resolved -- otherwise p2's own medium
+  // hitbox, already active at the hand-set f below, would land on p1 this same step (medium's range
+  // easily reaches p1 at closeIn's light-range spacing) and interrupt p1's own light via HITSTUN
+  // before it ever gets a chance to swing back.
+  const p2=f.p2;p2.move=p2.moveDef('medium');p2.moveName='medium';p2.effStartup=p2.move.startup;
+  p2.dashLeft=0;p2.dashRate=0;p2.chainNode=1;p2.hits=new Set([0]);p2.landed=true;
+  p2.setState('ATTACK',p2.move.startup+1);
+  run(f,10);
+  const hit=f.log.find(e=>e.type==='hit'&&e.who===1);
+  ok(hit,'the light must land');
+  eq(hit.val,60,'a plain (non-intercept) light does exactly the pre-Phase-7 60 damage');
+  ok(!f.log.some(e=>e.type==='intercept'),'no intercept once def is past its own startup phase')});
+Test.add('a hit on an IDLE (non-attacking) foe is never an intercept, even with no other change (bit-identical guard)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
+  eq(f.p2.hp,940,'a plain light on an idle foe is still exactly the pre-Phase-7 60 damage');
+  ok(!f.log.some(e=>e.type==='intercept'),'an idle (non-ATTACK) defender can never be intercepted')});
+Test.add('a dash-back through an active hitbox grants dexterity (+20% crit via Effects.mods.critDelta) and emits a dexterity event',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{dashBack:true}}])});
+  closeIn(f);run(f,5);
+  eq(f.log[f.log.length-1].type,'miss','the light still just whiffs on the dodge, same log shape as before this task');
+  eq(f.p2.hp,1000,'a dodge deals no damage');
+  ok(Effects.has(f.p2,'dexterity'),'dexterity must be applied to the dodging defender');
+  eq(Effects.mods(f.p2).critDelta,.2,'a single dexterity stack at potency 1 is the frozen +0.2');
+  const dv=f.log.find(e=>e.type==='dexterity');
+  ok(dv,'a dexterity event must be logged');
+  eq(dv.who,-1,'p2 (the dodger) is credited (p2 is side -1)');
+  eq(dv.dir,1,"dir is the attacker's (p1's) own facing, same convention as intercept");
+  ok(f.fx.some(x=>x.kind==='afterimage'),'an afterimage fx descriptor must be queued');
+  ok(f.log.some(e=>e.type==='effect'&&e.id==='dexterity'&&e.applied),"Effects.apply's own generic effect event still fires too")});
+Test.add('a miss from KNOCKDOWN get-up i-frames (not a real dash-back dodge) never grants dexterity',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
+  f.p2.setState('IDLE');f.p2.inv=KNOCKDOWN.inv;f.p2.wasKnockedDown=true; // a getup i-frame window, not DASH
+  run(f,5);
+  ok(!Effects.has(f.p2,'dexterity'),'get-up invulnerability is not a dodge -- def.state must be DASH, not IDLE, to earn dexterity');
+  ok(!f.log.some(e=>e.type==='dexterity'),'no dexterity event for a non-DASH miss')});
+Test.add('a far medium dash-in never needs more than 14 effective startup frames, at any gap (including past MOVES.medium.track itself)',()=>{
+  for(const gap of[0,10,50,100,150,196,200,250,299,300,301,400,1000]){
+    const F=mkFighter();F.foeDist=gap;F.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
+    ok(F.effStartup<=14,'gap '+gap+' must cap at 14, got '+F.effStartup);
+    ok(F.effStartup>=MOVES.medium.startup,'gap '+gap+' must never go below the base startup, got '+F.effStartup)}});
+Test.add('a medium dash-in still travels its full dashLeft and never overshoots, at the new scaled speed',()=>{
+  // Same "drive Fighter directly, isolate from Fight.step's own knockback" isolation the pre-existing
+  // spawn-distance test above uses -- this one specifically exercises the far end of m.track, where
+  // the per-frame speed now scales past DASH_TRACK_SPEED.
+  const F=mkFighter();const foeX=F.x+300+48;
+  F.foeDist=300;F.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
+  ok(F.dashRate>DASH_TRACK_SPEED,'a 300px gap must scale the per-frame speed past the floor, got '+F.dashRate);
+  for(let i=0;i<F.effStartup;i++){F.tick();ok(F.x<=foeX-F.width,'must never cross past the foe')}
+  const gap=foeX-F.x-F.width;
+  ok(Math.abs(gap-MOVES.light.range)<2,'must still land at ~light range once the dash-in ends, got '+gap)});
+Test.add('an already-in-range medium keeps its old flat startup and speed (bit-identical guard: DASH_TRACK_SPEED is still the floor)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-60-48; // foeDist=60, already inside light.range(70)
+  f.step();
+  eq(f.p1.effStartup,MOVES.medium.startup,'no dash needed, base startup unchanged from before this task')});
 
 </script></body></html>

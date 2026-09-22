@@ -95,8 +95,15 @@ class Fighter{
     const m=this.move,lightRange=this.moveDef('light').range;
     if(m.track){
       const need=this.foeDist==null?0:Math.max(0,this.foeDist-lightRange);
-      this.dashLeft=Math.min(need,m.track);this.dashRate=DASH_TRACK_SPEED;
-      this.effStartup=Math.max(m.startup,this.dashLeft>0?Math.ceil(this.dashLeft/DASH_TRACK_SPEED):0)}
+      this.dashLeft=Math.min(need,m.track);
+      // Task 7.3 (frozen ruling): DASH_TRACK_SPEED is the floor, not a fixed rate -- the per-frame
+      // speed scales up to max(DASH_TRACK_SPEED, dashLeft/14) so effStartup never needs to grow past
+      // 14 frames, however far the gap. The 1e-9 epsilon on the ceil below guards a floating divide-
+      // then-multiply roundtrip at dashLeft===m.track (300/(300/14) can land a hair over 14.0 in
+      // float64) from ever reporting 15 -- see the "far medium effective startup <=14, at any gap"
+      // test, which sweeps gaps right up to and past m.track.
+      this.dashRate=this.dashLeft>0?Math.max(DASH_TRACK_SPEED,this.dashLeft/14):DASH_TRACK_SPEED;
+      this.effStartup=Math.max(m.startup,this.dashLeft>0?Math.ceil(this.dashLeft/this.dashRate-1e-9):0)}
     else if(m.stepIn&&this.foeDist!=null&&this.foeDist>lightRange){
       this.dashLeft=Math.min(this.foeDist-lightRange,m.stepIn);this.dashRate=DASH_STEPIN_SPEED;
       this.effStartup=m.startup} // stepIn/DASH_STEPIN_SPEED===m.startup by construction; never grows

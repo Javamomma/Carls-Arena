@@ -35,11 +35,18 @@ const CHAIN={openers:['light','medium'],nodes:5,
   enders:{light:{},medium:{push:90,knockdown:true},heavy:{charge:14,sig:true}}};
 // Task 6.2 (movement inside moves): per-frame rates Fighter.setupDash uses for medium's track and
 // light1's stepIn. DASH_TRACK_SPEED preserves medium's old flat dash(140)/startup(10) rate exactly
-// (140/10=14) so an already-in-range medium (dashLeft 0, see setupDash) and a far one that only needs
+// (140/10=14) so an already-in-range medium (dashLeft 0, see setupDash) and a near one that only needs
 // a few frames both move at the same speed a player already learned. DASH_STEPIN_SPEED is chosen so
 // stepIn(110)/DASH_STEPIN_SPEED always equals light1's own unchanged 5-frame startup (110/22=5) --
 // a step-in light never needs to run longer than the swing already does; it either closes the gap
 // within its own 5 frames or it doesn't connect, same as a real whiffed jab.
+// Task 7.3 (frozen interface, exact ruling): DASH_TRACK_SPEED is now only the FLOOR speed for a
+// medium's tracked dash-in, not a fixed rate for every gap -- Fighter.setupDash scales the per-frame
+// speed up to max(DASH_TRACK_SPEED, dashLeft/14) so the far end of MOVES.medium.track (up to 300px)
+// never needs more than 14 effective startup frames to close, capping the dash-in telegraph a defender
+// can be caught napping in (a longer, uncapped startup is exactly what made intercepting a far dash-in
+// nearly free before this task -- see Fight.resolve's own intercept comment). A close medium (small or
+// zero dashLeft) still travels at the same flat 14px/frame rate as always.
 const DASH_TRACK_SPEED=14,DASH_STEPIN_SPEED=22;
 // Task 7.2 (frozen interface): def.sigEffect={id,stacks,target?} -- fired only by the in-combo heavy
 // ender (CHAIN.enders.heavy, m.sig:true) once it lands, via Effects.apply (48_effects.js). `target`

@@ -3921,3 +3921,85 @@ Test.add('Effects module and every EFFECTS[id] hook stay presentation-free and R
     const e=EFFECTS[id];
     for(const hook of['tick','onApply','mod'])
       if(e[hook])ok(!EFF_PURITY.test(e[hook].toString()),'EFFECTS.'+id+'.'+hook+' must stay presentation- and RNG-free')}});
+
+// --- Task 7.3: intercept, dexterity, capped dash-in telegraph -----------------------------------
+// A light thrown from IDLE lands as a plain node-1 opener (nodeDmg 1, no crit under mkFight's default
+// noCrit:true) for a clean base of round(carl.atk(60)*1*1*1*1*1)=60 -- the frozen x1.5 intercept
+// multiplier on that clean number (90) is what the dmg assertion below checks, with no rounding
+// ambiguity either way.
+Test.add('a light landing on a foe mid-medium-startup intercepts: x1.5 damage, +15 power, hitstop 10, an intercept event',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});
+  closeIn(f);run(f,5);
+  const hit=f.log.find(e=>e.type==='hit'&&e.who===1);
+  ok(hit,'the light must land');
+  eq(hit.move,'light');
+  eq(hit.val,90,'base 60 dmg becomes 90 at the frozen x1.5 intercept multiplier (def is still in medium startup)');
+  eq(f.p1.power,22,"powHit(7)+the intercept's own flat +15, nothing else banked power this fight");
+  eq(f.hitstop,10,"the intercept's own hitstop replaces the light's own (much shorter) m.hitstop");
+  const iv=f.log.find(e=>e.type==='intercept');
+  ok(iv,'an intercept event must be logged');
+  eq(iv.who,1,'p1 (the interceptor) is credited');
+  eq(iv.dir,1,"dir is the attacker's (p1's) own facing");
+  ok(f.fx.some(x=>x.kind==='punch'&&x.pct===.05),'a punch fx descriptor must be queued');
+  ok(f.fx.some(x=>x.kind==='popup'&&x.text==='INTERCEPT!'),'an INTERCEPT! popup must be queued')});
+Test.add('a hit landing on a foe already past medium startup (into recovery) is a plain hit, no intercept',()=>{
+  // Hand-set p2 into a medium already in its own recovery window (f=startup+1=11, inside the
+  // [startup+active,startup+active+recovery)=[14,28) recovery span 5 ticks from now, once p1's own
+  // light finishes its 5-frame startup below) -- isolates "def.phase() is not startup" from having to
+  // script exact controller-frame timing through a real full medium.
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
+  // p2.hits pre-marks its own (single) hit index 0 as already resolved -- otherwise p2's own medium
+  // hitbox, already active at the hand-set f below, would land on p1 this same step (medium's range
+  // easily reaches p1 at closeIn's light-range spacing) and interrupt p1's own light via HITSTUN
+  // before it ever gets a chance to swing back.
+  const p2=f.p2;p2.move=p2.moveDef('medium');p2.moveName='medium';p2.effStartup=p2.move.startup;
+  p2.dashLeft=0;p2.dashRate=0;p2.chainNode=1;p2.hits=new Set([0]);p2.landed=true;
+  p2.setState('ATTACK',p2.move.startup+1);
+  run(f,10);
+  const hit=f.log.find(e=>e.type==='hit'&&e.who===1);
+  ok(hit,'the light must land');
+  eq(hit.val,60,'a plain (non-intercept) light does exactly the pre-Phase-7 60 damage');
+  ok(!f.log.some(e=>e.type==='intercept'),'no intercept once def is past its own startup phase')});
+Test.add('a hit on an IDLE (non-attacking) foe is never an intercept, even with no other change (bit-identical guard)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
+  eq(f.p2.hp,940,'a plain light on an idle foe is still exactly the pre-Phase-7 60 damage');
+  ok(!f.log.some(e=>e.type==='intercept'),'an idle (non-ATTACK) defender can never be intercepted')});
+Test.add('a dash-back through an active hitbox grants dexterity (+20% crit via Effects.mods.critDelta) and emits a dexterity event',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{dashBack:true}}])});
+  closeIn(f);run(f,5);
+  eq(f.log[f.log.length-1].type,'miss','the light still just whiffs on the dodge, same log shape as before this task');
+  eq(f.p2.hp,1000,'a dodge deals no damage');
+  ok(Effects.has(f.p2,'dexterity'),'dexterity must be applied to the dodging defender');
+  eq(Effects.mods(f.p2).critDelta,.2,'a single dexterity stack at potency 1 is the frozen +0.2');
+  const dv=f.log.find(e=>e.type==='dexterity');
+  ok(dv,'a dexterity event must be logged');
+  eq(dv.who,-1,'p2 (the dodger) is credited (p2 is side -1)');
+  eq(dv.dir,1,"dir is the attacker's (p1's) own facing, same convention as intercept");
+  ok(f.fx.some(x=>x.kind==='afterimage'),'an afterimage fx descriptor must be queued');
+  ok(f.log.some(e=>e.type==='effect'&&e.id==='dexterity'&&e.applied),"Effects.apply's own generic effect event still fires too")});
+Test.add('a miss from KNOCKDOWN get-up i-frames (not a real dash-back dodge) never grants dexterity',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
+  f.p2.setState('IDLE');f.p2.inv=KNOCKDOWN.inv;f.p2.wasKnockedDown=true; // a getup i-frame window, not DASH
+  run(f,5);
+  ok(!Effects.has(f.p2,'dexterity'),'get-up invulnerability is not a dodge -- def.state must be DASH, not IDLE, to earn dexterity');
+  ok(!f.log.some(e=>e.type==='dexterity'),'no dexterity event for a non-DASH miss')});
+Test.add('a far medium dash-in never needs more than 14 effective startup frames, at any gap (including past MOVES.medium.track itself)',()=>{
+  for(const gap of[0,10,50,100,150,196,200,250,299,300,301,400,1000]){
+    const F=mkFighter();F.foeDist=gap;F.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
+    ok(F.effStartup<=14,'gap '+gap+' must cap at 14, got '+F.effStartup);
+    ok(F.effStartup>=MOVES.medium.startup,'gap '+gap+' must never go below the base startup, got '+F.effStartup)}});
+Test.add('a medium dash-in still travels its full dashLeft and never overshoots, at the new scaled speed',()=>{
+  // Same "drive Fighter directly, isolate from Fight.step's own knockback" isolation the pre-existing
+  // spawn-distance test above uses -- this one specifically exercises the far end of m.track, where
+  // the per-frame speed now scales past DASH_TRACK_SPEED.
+  const F=mkFighter();const foeX=F.x+300+48;
+  F.foeDist=300;F.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
+  ok(F.dashRate>DASH_TRACK_SPEED,'a 300px gap must scale the per-frame speed past the floor, got '+F.dashRate);
+  for(let i=0;i<F.effStartup;i++){F.tick();ok(F.x<=foeX-F.width,'must never cross past the foe')}
+  const gap=foeX-F.x-F.width;
+  ok(Math.abs(gap-MOVES.light.range)<2,'must still land at ~light range once the dash-in ends, got '+gap)});
+Test.add('an already-in-range medium keeps its old flat startup and speed (bit-identical guard: DASH_TRACK_SPEED is still the floor)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-60-48; // foeDist=60, already inside light.range(70)
+  f.step();
+  eq(f.p1.effStartup,MOVES.medium.startup,'no dash needed, base startup unchanged from before this task')});

@@ -213,7 +213,10 @@ const Render={ctx:canvas.getContext('2d'),
   // buffBadges above -- buffBadges only ever reads G.encounter.buffs, the static per-encounter list;
   // this reads a live fighter's own fighter.effects, which either fighter can carry and which changes
   // stack/duration frame to frame).
-  EFFECT_CODES:{bleed:'B',stun:'S',armorBreak:'A',fury:'F',powerGain:'P',powerBurn:'X',regen:'R',weakness:'W'},
+  // Task 7.3: 'D' for dexterity, added the same way every other EFFECTS id got a code here -- the
+  // badge draw call below already falls back to '?' for an unmapped id, so this alone is the only
+  // wiring the HUD badge needs.
+  EFFECT_CODES:{bleed:'B',stun:'S',armorBreak:'A',fury:'F',powerGain:'P',powerBurn:'X',regen:'R',weakness:'W',dexterity:'D'},
   // One 12px badge per active timed effect on the given fighter: a dark square, a shrinking gold ring
   // traced clockwise from noon (e.left/EFFECTS[e.id].dur, so it empties out exactly as the effect's
   // own duration does), the effect's 1-letter code, and a small stack-count digit in the corner when
