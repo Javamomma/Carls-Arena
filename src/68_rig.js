@@ -258,10 +258,18 @@ POSES_QUAD.light5=pawSwipe('fl',{peakU:104,peakL:-20,peakOffX:28,spinePeak:16,st
 // that existing budget with real margin (reach 253.7/250.8 vs the 260 ceiling) rather than becoming
 // the new worst case; `top` is unaffected (210.0/234.5, matching every pre-existing pose's own ceiling)
 // — the rear-up's own peak height never exceeds each look's already-tallest pose (s3/knockdown/win).
+// Fix-wave item 9 (final review, Minor): the deferred-item triage found the round-2 re-spec still
+// reading as a lunge, not a slam -- "no anticipation frame, hind legs hidden inside the body capsule".
+// t:0 already carried SOME rear-up pitch, but the hind legs (blU/blL/brU/brL) barely differed from
+// POSES_QUAD.idle's own near-straight stance, so the coil never read as distinct from a plain idle-ish
+// pose. Deepened the hind-leg crouch (a real weight-bearing bend, not a token lift) and the hip drop
+// (off.y 10->16, the "hips drop" ask -- see off.y's own reach-is-cheap comment further up this file),
+// and dialled spine/chest to the frozen "chest up ~30deg" (solveQuad's own chain: chestA=spineA+
+// a('chest'), so spine:14+chest:16 lands exactly there).
 POSES_QUAD.medium=[
-  {t:0, ang:{spine:D(20),chest:D(20),neck:D(20),tail1:D(10),tail2:D(-4),
+  {t:0, ang:{spine:D(14),chest:D(16),neck:D(20),tail1:D(10),tail2:D(-4),
              flU:D(-40),flL:D(30),frU:D(-36),frL:D(28),
-             blU:D(20),blL:D(-14),brU:D(18),brL:D(-12)},off:{x:-6,y:10}},
+             blU:D(36),blL:D(-28),brU:D(34),brL:D(-26)},off:{x:-6,y:16}},
   {t:.43,ang:{spine:D(8),chest:D(10),neck:D(36),tail1:D(4),tail2:D(2),
              flU:D(78),flL:D(-26),frU:D(74),frL:D(-24),
              blU:D(16),blL:D(-10),brU:D(14),brL:D(-8)},off:{x:12,y:0}},
@@ -419,10 +427,20 @@ POSES_BIG.light5=jab('r',{startSh:-12,startEl:42,peakSh:94,peakEl:12,peakOffX:24
 // this satisfies for all three rig kinds — Mongo/Grull's own reach budget has real margin here (their
 // worst-case reach across the whole pose set is s3/knockdown, not this kick), unlike the human/quad
 // rigs' much tighter budgets (see those tables' own comments).
+// Fix-wave item 9 (final review, Minor): the active-frame rHip/rKnee (106/24) put the kicking foot
+// only ~5px below the torso joint (chest height's own representative joint in this rig -- see
+// solveBig's hip/torso/waist/neck chain) with next to no margin, which the final review's hands-on
+// screenshot read as a head-height kick rather than the frozen "stomping front kick... at roughly
+// chest height" contract. Retuned to rHip:95/rKnee:20 (tot 115) so the foot lands close to the
+// midpoint between hip.y and torso.y with real margin on both sides -- still clears the >=60px-forward
+// bar with room to spare (measured ~150px forward of idle at Mongo's own proportions) and keeps this
+// well inside the existing reach budget (Mongo's own worst-case pose is still s3/knockdown, unaffected
+// by this change). See the 'kick: medium's active-phase pose...' test (90_tests.js), extended to assert
+// this foot-height contract directly instead of only forward distance.
 POSES_BIG.medium=[
   {t:0, ang:{torso:D(2),head:D(-2),rHip:D(-40),rKnee:D(70),lHip:D(-4),lKnee:D(6),
              lShoulder:D(10),lElbow:D(62),rShoulder:D(14),rElbow:D(62)},off:{x:-4,y:8}},
-  {t:.43,ang:{torso:D(4),head:D(-2),rHip:D(106),rKnee:D(24),lHip:D(6),lKnee:D(-4),
+  {t:.43,ang:{torso:D(4),head:D(-2),rHip:D(95),rKnee:D(20),lHip:D(6),lKnee:D(-4),
              lShoulder:D(16),lElbow:D(66),rShoulder:D(20),rElbow:D(66)},off:{x:4,y:4}},
   {t:1, ang:{torso:D(1),rHip:D(12),rKnee:D(-6),lHip:D(-10),lKnee:D(10),
              lShoulder:D(4),lElbow:D(64),rShoulder:D(16),rElbow:D(64)},off:{x:0,y:0}}];

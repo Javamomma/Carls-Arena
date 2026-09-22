@@ -7,6 +7,31 @@ Redesign program index (Phases 6-11, goal/status/plan file/exit criterion for ea
 
 ## Progress log
 
+- 2026-09-22 — Phase 6 final-review fix wave ("the first five minutes"), items 1-9, one commit each
+  (9's minors grouped). Both Critical defects inside the first three minutes fixed: (1) the tutorial
+  used to dead-end in silence at lesson 2 (the dummy stays passive until lesson 3) and hand a tap-only
+  player the FULL completion grant once the fight's own 120s clock ran out -- every lesson now runs its
+  own stall timer with a per-step fallback hint, lesson 2 credits a started (not only landed) medium,
+  and the tutorial fight now has no clock at all (`clock:Infinity`), so completion is purely
+  `Tutorial.state.step` reaching `steps.length`; (2) the tutorial's own prompt pill/lesson banner used
+  to paint over the VICTORY headline on a tutorial win's result screen -- `G.onFightEnd` now hides them
+  first. Also: (3) the tier gate's real root cause corrected -- `approach` is provably inert (see the
+  "Correction" note above the retune section below), not the review's own prior `react`/block-hold
+  conflation is the actual lever; a new per-tier `hold` field plus a measured fallback restores a
+  monotone curve at n=30/60 and three seed bases; (4) `RNG(seed)` now discards 8 warm-up draws (every
+  real fight's first crit is no longer a guaranteed roll) and a real fight now draws a persisted,
+  varying seed (`Save.data.fightSeed++`) instead of the constant `G.seed`; (5) releasing a charged heavy
+  now swings once past `HEAVY_MIN_CHARGE` frames instead of only ever cancelling or fully auto-firing,
+  matching the README/gesture's own promise; (6) lesson 4's SHIELD DOWN/FINISH HIM now waits for the
+  special's own move to actually resolve before clearing the dummy's guard, so it survives to a real
+  follow-up KO; (7) the free tutorial crystal now guarantees a new champion by construction
+  (`guaranteeNew`), not by relying on the default save seed; (8) every DOM screen (not just the in-fight
+  canvas) now fits 844x390 without clipping, and `--phone-check` actually covers them; (9) minors:
+  TRAINING DUMMY legibility, the announcer toast silenced for the whole tutorial, result-line segments
+  joined with ` · ` (was two HTML-collapsed spaces), Mongo's/Donut's kick poses retuned (chest-height
+  stomp; a real anticipation coil), gesture hold thresholds moved from wall-clock ms to sim frames
+  (`G.frameNow`), and a stale 0.95/0.88 comment fixed. Full gate green at every commit; the tier gate's
+  measured tables and the phone-check output are in their own sections below.
 - 2026-09-22 — Phase 6 close-out ("The First Five Minutes"): Tasks 6.1-6.6 landed on `main`. For the
   owner, this phase fixed: floor 1 is now winnable at level 1 (reordered doors, retuned mob stats,
   every door/boss shows a REC. LVL hint), every move is driven by one-thumb gestures (tap/swipe-right/

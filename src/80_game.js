@@ -461,6 +461,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     const started=this.startFight(Object.assign({},o,{encounter:'tutorial',mode:'tutorial',clock:Infinity,
       ctrl2:o.ctrl2||Ctrl.tutorialDummy(o.seed||1),
       playerBuffs:(o.playerBuffs||[]).concat('noKo')}));
+    // Fix-wave item 9 (final review, Minor): hides the announcer toast outright for the whole tutorial
+    // (G.say itself also no-ops in tutorial mode, above -- this clears any line left over from
+    // whatever fight/screen preceded it, which a no-op alone wouldn't). G.tick's own S3-cinematic
+    // showToast() is the only other writer of this element's hidden state; a tutorial fight can never
+    // actually reach an S3 (it only ever grants exactly 100 power, enough for S1), so nothing re-shows
+    // it before the fight ends.
+    this.hideToast();
     // Task 5.3: BUFFS.tutorialGuard (47_buffs.js) layered onto the live p2 Fighter directly, outside
     // ENCOUNTERS.tutorial's own frozen `buffs:[]` -- it keeps the dummy from dying to an early light
     // chain before every step is taught, and stops applying itself the instant guardActive is cleared
@@ -494,7 +501,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // Task 5.4: settings.announcer===false makes every announcer line a no-op -- gated here, the one
   // place Audio.announce (20_audio.js) and G's own direct #toast fallback both already route through,
   // rather than at each Audio.announce call site.
-  say(text){if(this.fight&&this.fight.cinematic>0)return;if(!Save.data.settings.announcer)return;
+  // Fix-wave item 9 (final review, Minor): the announcer toast is also a no-op for the whole duration
+  // of a tutorial-mode fight -- final-review-verdict.md's playtest note flagged it still sitting over
+  // the fighters and competing with the lesson prompt/banner for the same on-screen real estate;
+  // G.startTutorial (below) also hides the DOM element outright (this.hideToast()) so any line left
+  // over from a previous fight/screen doesn't linger visible either.
+  say(text){if(this.fight&&this.fight.cinematic>0)return;if(this.mode==='tutorial')return;
+    if(!Save.data.settings.announcer)return;
     if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
   // Hides the DOM #toast announcer (an absolutely-positioned element outside the canvas, so nothing
   // drawn on-canvas can cover it) for the duration of the S3 cinematic, and cancels Audio.say's
@@ -752,7 +765,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       const hpLine=winner.def.name+' wins with '+Math.round(100*winner.hp/winner.maxHp)+'% health.';
       const rewardLine=rewards?(leveledUp?'LEVEL UP!':this.rewardsText(rewards)):'';
       const peakLine='PEAK VIEWERS '+Render.fmtViewers(peakViewers);
-      document.getElementById('resultLine').textContent=(rewardLine?hpLine+'  '+rewardLine:hpLine)+'  '+peakLine;
+      // Fix-wave item 9 (final review, Minor): ' · ' instead of two plain spaces, which HTML collapses
+      // to one -- matches Screens.renderResult's own join (85_screens.js).
+      document.getElementById('resultLine').textContent=(rewardLine?hpLine+' · '+rewardLine:hpLine)+' · '+peakLine;
       this.show('result',true);this.show('btns',false)}},
   // Freeze p1 into a named pose for screenshotting (tests/harness.py --pose). Maps a pose key to the
   // Fighter state/moveName/f (and, where poseFor divides by it, stun) that Rig.poseFor resolves back
@@ -865,9 +880,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // right up near its 1.12 ceiling; at that zoom Carl's own head-top screen point lands only ~29px
     // below HUD_LINE, leaving no room at all for #tutorialLesson+#tutorialPrompt (~50px combined)
     // to sit above his head with real clearance -- exactly the "prompt pill 12px above the head"
-    // owner-facing bug. A lower gameplay ceiling during Tutorial mode (0.95, still a readable
-    // close-up, just not the max) buys back that headroom without touching the shared zoom formula
-    // any other mode relies on.
+    // owner-facing bug. A lower gameplay ceiling during Tutorial mode (fix-wave item 9: this comment
+    // said 0.95, the shipped value below has always been 0.88 -- still a readable close-up, just not
+    // the max) buys back that headroom without touching the shared zoom formula any other mode relies
+    // on.
     const gameplayCeil=this.mode==='tutorial'?0.88:1.12;
     const capNow=punchIn
       ?Math.min(1.28,(Camera.anchorY-HUD_LINE)/this.topNow(this.cinemFocus))

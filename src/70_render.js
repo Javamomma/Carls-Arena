@@ -293,8 +293,13 @@ const Render={ctx:canvas.getContext('2d'),
     // Task 6.4: while p2.guardActive (the tutorial's dummy, every lesson until 'SHIELD DOWN'), the
     // sub-label under the name reads 'TRAINING DUMMY — CANNOT BE KO'D' instead of the plain 'LVL 1' —
     // the shield's own presentation always trumps the level line, never shown together.
-    if(b.guardActive){c.font='9px ui-monospace,monospace';c.fillStyle='#7fd18a';
-      c.fillText('TRAINING DUMMY — CANNOT BE KO\'D',p2barX+barW,39)}
+    // Fix-wave item 9 (final review, Minor): 9px non-bold at low contrast against the SPAR plate read
+    // as near-illegible at phone size -- bumped to 11px bold with a thin dark stroke first (the same
+    // stroke-then-fill technique glyphAt above already uses for readability over a busy background),
+    // plus a brighter fill so it reads as the important "you can't lose this" cue it is, not filler.
+    if(b.guardActive){c.font='bold 11px ui-monospace,monospace';
+      c.lineWidth=3;c.strokeStyle='rgba(0,0,0,.7)';c.strokeText('TRAINING DUMMY — CANNOT BE KO\'D',p2barX+barW,39);
+      c.fillStyle='#a0f0b0';c.fillText('TRAINING DUMMY — CANNOT BE KO\'D',p2barX+barW,39)}
     else{c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39)}
     if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW,b.def.name);
     this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22','right');

@@ -418,25 +418,28 @@ const Screens={
     if(G.fight&&G.fight.winner){
       const w=G.fight.winner;
       line=w.def.name+' wins with '+Math.round(100*w.hp/w.maxHp)+'% health.'}
+    // Fix-wave item 9 (final review, Minor): segments joined with ' · ' instead of two plain spaces,
+    // which HTML collapses to one -- "+300 GOLD NEW CHAMPION: KATIA 1★ PEAK VIEWERS 1,283" used to
+    // run every segment together with no visible separation at all.
     if(rewards){
       const rt=G.rewardsText(rewards);
-      if(rt)line=line?line+'  '+rt:rt}
+      if(rt)line=line?line+' · '+rt:rt}
     // Task 5.3: the tutorial's own special line -- shown on every tutorial win, even a replay through
     // the map's .node.tutorial row (which never re-grants gold, see G.onFightEnd); the +300 GOLD
     // suffix only appears on the run that actually granted it (G.tutorialJustGranted).
     if(won&&G.mode==='tutorial'){
       const t='TUTORIAL COMPLETE'+(G.tutorialJustGranted?' — +300 GOLD':'');
-      line=line?line+'  '+t:t;
+      line=line?line+' · '+t:t;
       // Task 6.4: on a first completion only, the free basic crystal G.onFightEnd already opened
       // (G.tutorialFreeCrystal, Crystal.open('basic',{free:true})) gets the exact same result-line
       // text the standalone crystal screen's own reveal shows (Screens.resultText) -- "NEW CHAMPION:
       // KATIA 2★" for a fresh pull, or the dup/shards line if it happened to roll an already-owned
       // champion. Never shown on a replay (tutorialJustGranted false, tutorialFreeCrystal null).
       if(G.tutorialJustGranted&&G.tutorialFreeCrystal)
-        line=line+'  '+Screens.resultText(G.tutorialFreeCrystal)}
+        line=line+' · '+Screens.resultText(G.tutorialFreeCrystal)}
     // Task 5.1: the ratings recap -- shown for every fight (win or loss), independent of rewards,
     // since viewers accrue off the fight itself, not off the quest/arena outcome.
-    if(this._peakViewers!=null)line=(line?line+'  ':'')+'PEAK VIEWERS '+Render.fmtViewers(this._peakViewers);
+    if(this._peakViewers!=null)line=(line?line+' · ':'')+'PEAK VIEWERS '+Render.fmtViewers(this._peakViewers);
     document.getElementById('resultLine').textContent=line;
     // Task 6.1 (frozen Phase 6 interface): FIGHT AGAIN only for an exhibition or arena WIN --
     // replaced the old "shown for every outcome except a quest win or any tutorial result" rule,

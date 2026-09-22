@@ -232,55 +232,57 @@ function tap(id,x,y){const r=canvas.getBoundingClientRect();
     move(mx,my){canvas.dispatchEvent(new PointerEvent('pointermove',Object.assign({pointerId:id,bubbles:true},at(mx,my))))},
     up(){canvas.dispatchEvent(new PointerEvent('pointerup',Object.assign({pointerId:id,bubbles:true},c0)))},
     cancel(){canvas.dispatchEvent(new PointerEvent('pointercancel',Object.assign({pointerId:id,bubbles:true},c0)))}}}
-// Stubs Input.now with a manually-advanced clock (starting at 0) so gesture timing (TAP_MS,
-// BLOCK_HOLD_MS, SWIPE_MS, HEAVY_HOLD_MS) can be driven deterministically instead of racing real
-// wall time -- fn receives `adv(ms)` to move the clock forward. Always restores Input.now after.
+// Fix-wave item 9 (final review, Minor): stubs Input.now with a manually-advanced FRAME counter
+// (starting at 0) so gesture timing (TAP_FRAMES, BLOCK_HOLD_FRAMES, SWIPE_FRAMES, HEAVY_HOLD_FRAMES --
+// all sim frames now, not wall-clock ms, see Input's own header comment in 30_input.js) can be driven
+// deterministically instead of racing the real sim -- fn receives `adv(frames)` to move the counter
+// forward. Always restores Input.now after.
 function withInputClock(fn){const prev=Input.now;let t=0;Input.now=()=>t;
-  try{fn(ms=>{t+=ms})}finally{Input.now=prev}}
+  try{fn(frames=>{t+=frames})}finally{Input.now=prev}}
 Test.add('gesture: tap fires light on release only, never on pointerdown',()=>{
   withFight(()=>withInputClock(adv=>{
     const p=tap(1,400,240);
     p.down();
     eq(Input.q.length,0,'no light on pointerdown');
-    adv(50);p.up();
+    adv(3);p.up(); // well under TAP_FRAMES(8)
     eq(Input.q.filter(a=>a==='light').length,1,'exactly one light queued on release')}))});
-Test.add('gesture: holding in place >=BLOCK_HOLD_MS engages block; releasing clears it (no light)',()=>{
+Test.add('gesture: holding in place >=BLOCK_HOLD_FRAMES engages block; releasing clears it (no light)',()=>{
   withFight(()=>withInputClock(adv=>{
     const p=tap(1,400,240);
-    p.down();adv(200);Input.tick();
-    ok(Input.held.block,'block engaged after a 200ms hold');
+    p.down();adv(9);Input.tick(); // past BLOCK_HOLD_FRAMES(8)
+    ok(Input.held.block,'block engaged after a 9-frame hold');
     ok(Input.pointerLog.some(e=>e.type==='hold'),'hold logged to pointerLog');
     p.up();
     eq(Input.held.block,false,'block cleared on release');
     eq(Input.q.includes('light'),false,'a hold must never also fire a light on release')}))});
-Test.add('gesture: swipe right >=SWIPE_PX within SWIPE_MS queues medium exactly once',()=>{
+Test.add('gesture: swipe right >=SWIPE_PX within SWIPE_FRAMES queues medium exactly once',()=>{
   withFight(()=>withInputClock(adv=>{
     const p=tap(1,300,240);
-    p.down();adv(100);p.move(360,240); // 60px right in 100ms
+    p.down();adv(6);p.move(360,240); // 60px right within 6 frames, under SWIPE_FRAMES(16)
     eq(Input.q.filter(a=>a==='medium').length,1,'medium queued once on the frame the threshold crosses');
     p.move(420,240); // further movement of the same swipe must not re-queue it
     eq(Input.q.filter(a=>a==='medium').length,1,'still exactly once');
     p.up()}))});
-Test.add('gesture: swipe right held HEAVY_HOLD_MS after firing engages heavy; release clears it',()=>{
+Test.add('gesture: swipe right held HEAVY_HOLD_FRAMES after firing engages heavy; release clears it',()=>{
   withFight(()=>withInputClock(adv=>{
     const p=tap(1,300,240);
-    p.down();adv(50);p.move(360,240); // swipe fires at t=50
-    adv(250);Input.tick(); // 250ms after the swipe fired
-    ok(Input.held.heavy,'heavy engaged after a 250ms hold past the swipe');
+    p.down();adv(3);p.move(360,240); // swipe fires at t=3
+    adv(13);Input.tick(); // 13 frames past the swipe firing, over HEAVY_HOLD_FRAMES(12)
+    ok(Input.held.heavy,'heavy engaged after a 13-frame hold past the swipe');
     ok(Input.pointerLog.some(e=>e.type==='swipeRHold'));
     p.up();
     eq(Input.held.heavy,false,'heavy cleared on release')}))});
 Test.add('gesture: swipe left queues dashBack',()=>{
   withFight(()=>withInputClock(adv=>{
     const p=tap(1,400,240);
-    p.down();adv(50);p.move(340,240); // 60px left
+    p.down();adv(3);p.move(340,240); // 60px left
     ok(Input.q.includes('dashBack'));
     ok(Input.pointerLog.some(e=>e.type==='swipeL'));
     p.up()}))});
 Test.add('gesture: swipe left held past DASH_BACK.frames sim ticks engages block; release clears it',()=>{
   withFight(()=>withInputClock(adv=>{
     const p=tap(1,400,240);
-    p.down();adv(50);p.move(340,240);
+    p.down();adv(3);p.move(340,240);
     for(let i=0;i<DASH_BACK.frames-1;i++){Input.tick();eq(Input.held.block,false,'not yet at tick '+i)}
     Input.tick();
     ok(Input.held.block,'block engaged once DASH_BACK.frames sim ticks have elapsed since the dash fired');
@@ -293,22 +295,22 @@ Test.add('gesture: a second canvas pointer while one is down is ignored until th
     first.down();
     second.down();second.move(500,240);second.up();
     eq(Input.q.length,0,'the ignored second pointer must not queue anything');
-    adv(200);Input.tick();
+    adv(9);Input.tick(); // past BLOCK_HOLD_FRAMES(8)
     ok(Input.held.block,'the first pointer must still engage its own hold normally');
     first.up();
     eq(Input.held.block,false)}))});
 Test.add('gesture: drift beyond TAP_DRIFT cancels the tap (no light) without qualifying as a swipe',()=>{
   withFight(()=>withInputClock(adv=>{
     const p=tap(1,400,240);
-    p.down();adv(50);p.move(400,400); // 160px vertical drift -- fails swipe's dx>|dy| test too
-    adv(50);p.up();
+    p.down();adv(2);p.move(400,400); // 160px vertical drift -- fails swipe's dx>|dy| test too
+    adv(2);p.up();
     eq(Input.q.includes('light'),false,'a drifted tap must not fire light');
     eq(Input.q.includes('medium'),false,'nor should vertical drift ever queue a swipe');
     eq(Input.q.includes('dashBack'),false)}))});
 Test.add('gesture: PointerEvent pointercancel clears block/heavy without firing a tap',()=>{
   withFight(()=>withInputClock(adv=>{
     const p=tap(1,400,240);
-    p.down();adv(200);Input.tick();ok(Input.held.block,'sanity: block engaged before the cancel');
+    p.down();adv(9);Input.tick();ok(Input.held.block,'sanity: block engaged before the cancel'); // past BLOCK_HOLD_FRAMES(8)
     p.cancel();
     eq(Input.held.block,false,'pointercancel must clear an engaged block');
     eq(Input.q.includes('light'),false,'pointercancel must never fire a light')}))});
@@ -962,6 +964,21 @@ Test.add('toast never overlaps the BLOCK/PUNCH button labels',()=>{
   ok(!intersects(t,punch),'toast rect '+JSON.stringify(t)+' must not intersect PUNCH+label '+JSON.stringify(punch));
   Save.data.settings.showButtons=false;G.applySettings();
   G.toTitle()});
+// Fix-wave item 9 (final review, Minor): the announcer toast used to still sit over the fighters
+// during the tutorial, competing with the lesson prompt/banner for the same real estate. G.startTutorial
+// now hides it outright (clearing any line left over from a previous fight/screen), and G.say is a
+// no-op for the whole duration of tutorial mode.
+Test.add('the announcer toast is hidden and G.say is a no-op for the whole tutorial',()=>{
+  Save.data=Meta.defaults();
+  Audio.say('leftover text from a previous fight');
+  const toast=document.getElementById('toast');
+  ok(!toast.classList.contains('hidden'),'sanity: the toast starts visible with leftover text');
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  ok(toast.classList.contains('hidden'),'starting the tutorial must hide the toast outright');
+  G.frameNow=1000;G._sayAt=-999; // well past G.say's own 90-frame throttle window
+  G.say('a tutorial-mode line');
+  eq(toast.textContent,'','G.say must be a no-op for the whole tutorial');
+  G.toTitle();G.sim=false});
 
 // --- Task 3.2: buffs framework ---
 Test.add('regen heals the holder 0.017% maxHp per frame, capped at maxHp',()=>{
@@ -2652,12 +2669,12 @@ Test.add('leftHanded no longer mirrors canvas gestures: swipe right still queues
   Save.data=Meta.defaults();Save.data.settings.leftHanded=true;
   withFight(()=>withInputClock(adv=>{
     const right=tap(1,300,240);
-    right.down();adv(50);right.move(360,240);
+    right.down();adv(3);right.move(360,240);
     ok(Input.q.includes('medium'),'swipe right must still queue medium when leftHanded is true');
     ok(!Input.q.includes('dashBack'));
     right.up();Input.q.length=0;
     const left=tap(2,300,240);
-    left.down();adv(50);left.move(240,240);
+    left.down();adv(3);left.move(240,240);
     ok(Input.q.includes('dashBack'),'swipe left must still queue dashBack when leftHanded is true');
     left.up()}));
   Save.data.settings.leftHanded=false});
@@ -3375,11 +3392,19 @@ Test.add('kick: medium\'s active-phase pose drives a striking limb >=60px forwar
     ok(footFwd>=60,'human kicking foot must be >=60px forward of idle: '+footFwd.toFixed(1));
     ok(handDrift<=20,'human lead hand must stay within 20px of idle: '+handDrift.toFixed(1))}
   // big (Mongo): a stomping front kick (rFoot); both fists stay near their own idle guard -- checked
-  // via the left fist, matching the human check's "lead hand" side.
+  // via the left fist, matching the human check's "lead hand" side. Fix-wave item 9 (final review,
+  // Minor): the foot used to land only ~5px below solveBig's own `torso` joint (this rig's chest-
+  // height representative -- hip/torso/waist/neck is its body chain, see solveBig's own comment) with
+  // next to no margin, which read as a head-height kick, not the frozen "stomping front kick... at
+  // roughly chest height". Screen y is inverted (more negative = higher), so "between hip and chest"
+  // means torso.y <= foot.y <= hip.y.
   {const idle=Rig.solve(LOOKS.mongo,'idle',0,1),strike=Rig.solve(LOOKS.mongo,'medium',T,1);
     const footFwd=strike.rFoot.x-idle.rFoot.x,handDrift=Math.abs(strike.lHand.x-idle.lHand.x);
     ok(footFwd>=60,'big kicking foot must be >=60px forward of idle: '+footFwd.toFixed(1));
-    ok(handDrift<=20,'big guard fist must stay within 20px of idle: '+handDrift.toFixed(1))}
+    ok(handDrift<=20,'big guard fist must stay within 20px of idle: '+handDrift.toFixed(1));
+    ok(strike.rFoot.y<=strike.hip.y&&strike.rFoot.y>=strike.torso.y,
+      'big kicking foot must land between hip ('+strike.hip.y.toFixed(1)+') and chest/torso ('+
+      strike.torso.y.toFixed(1)+') height, got '+strike.rFoot.y.toFixed(1))}
   // quad (Donut): Fix round 2 (controller ruling) -- a hind-leg kick numerically satisfied ">=60px
   // forward" but swung AWAY from the foe (a hind leg physically can't reach something in front without
   // an impossible whole-body spin), so the quad rig is carved out of "leg" specifically: a rearing

@@ -2,11 +2,11 @@
 // pointer is tracked at a time (this._ptr): the first pointer down; any later pointer is ignored
 // entirely (never even recorded) until the first lifts, per docs/design/mcoc-comparison-notes.md §2.
 // Gesture -> intent (all frozen, Input.GESTURE below):
-//   tap (down->up < TAP_MS, drift < TAP_DRIFT)                -> 'light', pushed on release
-//   hold in place (>= BLOCK_HOLD_MS, drift < TAP_DRIFT)        -> held.block, until release
-//   swipe right (>= SWIPE_PX within SWIPE_MS, dx>|dy|)         -> 'medium', pushed the frame it fires
-//   ...then still held HEAVY_HOLD_MS after that                -> held.heavy, until release
-//   swipe left  (>= SWIPE_PX within SWIPE_MS, dx>|dy|)         -> 'dashBack', pushed the frame it fires
+//   tap (down->up < TAP_FRAMES, drift < TAP_DRIFT)              -> 'light', pushed on release
+//   hold in place (>= BLOCK_HOLD_FRAMES, drift < TAP_DRIFT)     -> held.block, until release
+//   swipe right (>= SWIPE_PX within SWIPE_FRAMES, dx>|dy|)      -> 'medium', pushed the frame it fires
+//   ...then still held HEAVY_HOLD_FRAMES after that             -> held.heavy, until release
+//   swipe left  (>= SWIPE_PX within SWIPE_FRAMES, dx>|dy|)      -> 'dashBack', pushed the frame it fires
 //   ...then still held DASH_BACK.frames SIM FRAMES after that  -> held.block, until release (counted
 //     by tick(), called once per sim frame from Ctrl.player -- see its own comment below)
 // Drift beyond TAP_DRIFT before a swipe threshold is reached just cancels the tap/hold outright (no
@@ -17,12 +17,32 @@
 // Left-handed (Save.data.settings.leftHanded) is now a button-PLACEMENT setting only (00_head.html's
 // body.left-handed CSS, applied by G.applySettings) -- gestures read identically either way; the old
 // zoneFor/swipeDx mirroring is gone along with the zones themselves.
+// Fix-wave item 9 (final review, Minor): every hold/timing threshold is now measured in SIM frames
+// (Input.now's default reads G.frameNow, the same fight-frame counter Broadcast/Tutorial's own tick
+// cadence already relies on -- see G.tick's own comment) instead of wall-clock ms
+// (performance.now()) -- the final review found Input.tick() (called from inside Fight.step via
+// Ctrl.player) reading performance.now() meant the gesture grammar ran on wall-clock time while
+// everything else in the sim runs on frame counts, so a real frame-rate dip (the sim's own
+// accumulator catching up in a rapid burst of ticks) shifted gesture timing relative to the sim
+// instead of staying in lockstep with it. TAP_MS(140)->TAP_FRAMES(8), BLOCK_HOLD_MS(140)->
+// BLOCK_HOLD_FRAMES(8), HEAVY_HOLD_MS(200)->HEAVY_HOLD_FRAMES(12), SWIPE_MS(260)->SWIPE_FRAMES(16) --
+// all at the same nominal 60fps-equivalent duration the old ms values targeted. Input.now itself stays
+// injectable (tests override it with a manually-advanced counter instead of racing G.tick(); see
+// withInputClock, 90_tests.js) -- only its default implementation and what its return value now means
+// (frames, not ms) changed.
 const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
-  GESTURE:{TAP_MS:140,TAP_DRIFT:24,SWIPE_PX:44,SWIPE_MS:260,HEAVY_HOLD_MS:200,BLOCK_HOLD_MS:140},
-  // Injectable wall clock (default performance.now) so tests can drive gesture timing deterministically
-  // by overriding Input.now instead of racing real time.
-  now:()=>performance.now(),
-  POWER_HOLD_MS:400,_powerT0:0,_powerShown:false,
+  GESTURE:{TAP_FRAMES:8,TAP_DRIFT:24,SWIPE_PX:44,SWIPE_FRAMES:16,HEAVY_HOLD_FRAMES:12,BLOCK_HOLD_FRAMES:8},
+  // Injectable clock (default G.frameNow, the sim's own frame counter) so tests can drive gesture
+  // timing deterministically by overriding Input.now instead of racing the real sim. G is defined
+  // later in the concatenated build (80_game.js) -- safe here since this arrow function's body only
+  // runs when actually called, well after the whole script has parsed, the same later-file-from-
+  // earlier-file pattern Crystal.open already uses for CHAMPS (12_meta.js).
+  now:()=>(typeof G!=='undefined'?G.frameNow:0),
+  // Fix-wave item 9: POWER_HOLD_MS(400)->POWER_HOLD_FRAMES(24) -- this.now() (just above) is shared by
+  // the POWER button's own long-press-to-picker timing, not just the canvas gestures; once its default
+  // switched from wall-clock ms to sim frames, this threshold had to move with it or a 400ms hold would
+  // silently become a ~6.7s one.
+  POWER_HOLD_FRAMES:24,_powerT0:0,_powerShown:false,
   // Appends to the last-8 gesture log (Input.pointerLog) tests and the tutorial read to see what a
   // player's thumb actually did: 'tap','hold','swipeR','swipeRHold','swipeL','swipeLHold'.
   _log(type){this.pointerLog.push({type,frame:(typeof G!=='undefined'&&G.frameNow)||0});
@@ -40,7 +60,7 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
       if(Math.hypot(dx,dy)>=this.GESTURE.TAP_DRIFT)P.drifted=true;
       // Swipe fires once, the frame its threshold is crossed -- a hold that already engaged block
       // (P.blockOn) never re-evaluates as a swipe, and neither does a pointer that already swiped.
-      if(!P.dashDir&&!P.blockOn&&this.now()-P.t0<=this.GESTURE.SWIPE_MS&&
+      if(!P.dashDir&&!P.blockOn&&this.now()-P.t0<=this.GESTURE.SWIPE_FRAMES&&
          Math.abs(dx)>=this.GESTURE.SWIPE_PX&&Math.abs(dx)>Math.abs(dy)){
         if(dx>0){P.dashDir='R';P.actAt=this.now();this.q.push('medium');this._log('swipeR')}
         else{P.dashDir='L';P.dashFrames=0;this.q.push('dashBack');this._log('swipeL')}}});
@@ -48,7 +68,7 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
       if(P.blockOn){this.held.block=false;return} // hold-block or dash-back-hold-block, either way
       if(P.dashDir==='R'){this.held.heavy=false;return} // clears whether or not heavy ever engaged
       if(P.dashDir==='L')return; // dashBack already fired on the swipe; nothing more on release
-      if(!P.drifted&&this.now()-P.t0<this.GESTURE.TAP_MS){this.q.push('light');this._log('tap')}};
+      if(!P.drifted&&this.now()-P.t0<this.GESTURE.TAP_FRAMES){this.q.push('light');this._log('tap')}};
     const cancel=e=>{const P=this._ptr;if(!P||P.id!==e.pointerId)return;this._ptr=null;
       if(P.blockOn)this.held.block=false;if(P.dashDir==='R')this.held.heavy=false};
     canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',cancel);
@@ -75,7 +95,7 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
       if(k==='k'&&this._kHeavyDown){this.held.heavy=false;this._kHeavyDown=false}})},
   // On-screen buttons: BLOCK is a hold (mirrors the canvas hold gesture); PUNCH/KICK fire on press.
   // POWER taps 'powerAuto' (drain() resolves it to the highest affordable special); held past
-  // POWER_HOLD_MS it shows the S1-S3 picker instead, and releasing over a chip fires that special.
+  // POWER_HOLD_FRAMES it shows the S1-S3 picker instead, and releasing over a chip fires that special.
   // Release point is read with elementFromPoint (not e.target) because touch pointers implicitly
   // capture to their pointerdown target, so e.target would still be #btnPower on release. POWER is
   // always shown; BLOCK/PUNCH/KICK are optional (Save.data.settings.showButtons or G.forceButtons,
@@ -106,14 +126,14 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
   // the real DASH state's own duration exactly.
   tick(){const P=this._ptr;
     if(P){
-      if(!P.dashDir&&!P.blockOn&&!P.drifted&&this.now()-P.t0>=this.GESTURE.BLOCK_HOLD_MS){
+      if(!P.dashDir&&!P.blockOn&&!P.drifted&&this.now()-P.t0>=this.GESTURE.BLOCK_HOLD_FRAMES){
         P.blockOn=true;this.held.block=true;this._log('hold')}
-      if(P.dashDir==='R'&&!P.heavyOn&&this.now()-P.actAt>=this.GESTURE.HEAVY_HOLD_MS){
+      if(P.dashDir==='R'&&!P.heavyOn&&this.now()-P.actAt>=this.GESTURE.HEAVY_HOLD_FRAMES){
         P.heavyOn=true;this.held.heavy=true;this._log('swipeRHold')}
       if(P.dashDir==='L'&&!P.blockOn){
         P.dashFrames++;
         if(P.dashFrames>=DASH_BACK.frames){P.blockOn=true;this.held.block=true;this._log('swipeLHold')}}}
-    if(this._powerT0&&!this._powerShown&&this.now()-this._powerT0>=this.POWER_HOLD_MS){this._powerShown=true;document.getElementById('powerPicker').classList.add('show')}},
+    if(this._powerT0&&!this._powerShown&&this.now()-this._powerT0>=this.POWER_HOLD_FRAMES){this._powerShown=true;document.getElementById('powerPicker').classList.add('show')}},
   drain(){const it={light:false,medium:false,heavy:this.held.heavy,block:this.held.block,dashBack:false,special:0};
     for(const a of this.q){
       if(a==='powerAuto'){const p=G.fight?G.fight.p1.power:0;let n=0;for(let k=3;k>=1;k--)if(p>=100*k){n=k;break}it.special=n}
