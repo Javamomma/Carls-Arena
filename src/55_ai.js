@@ -65,7 +65,20 @@ const AI_TIERS={
   // decoupling alone (react/dash unchanged) passed n=30 but still broke t5<=30 at n=60 (31.7%). The
   // final review's own measured retune -- react 5->8 here (still the shared action cooldown, not
   // block-hold; hold above already carries that meaning) -- restores it.
-  t4:{react:8, attack:.65,block:.9, parry:.6, dash:.06,special:1,   heavy:.3, intercept:.5, bait:.25,punish:1, approach:40,hold:5, comboMix:true},
+  // Task 7.5 (measured, see the task report's own before/after tables): attack .65->.55/block .9->
+  // .85/parry .6->.5. Ctrl.competent (the fixed win-rate yardstick bot, 30_input.js) learned a
+  // dash-back read against a foe's medium dash-in -- it now dodges a large share of every AI tier's
+  // own medium-based offense outright (no chip, +20% crit for its own next hits via the dexterity
+  // effect) instead of merely blocking it, which costs the bot roughly one committed 12-frame DASH
+  // window of its own offense per successful read but denies the AI far more than that in return.
+  // t4 specifically crossed below t5 in the tier sweep (a real, not just noisy, inversion: 16.7% vs
+  // 23.3% at n=30 seed-base 1) once the read landed -- a straight buff (more attack/block/parry) would
+  // have made t4 HARDER and pushed the bot's win rate against it further down, the wrong direction;
+  // nerfing t4 slightly (easier to beat) is what actually restores t4>t5 separation. Chosen over
+  // touching react/hold/dash (t4's other already-tuned knobs, fix-wave item 3's own fallback) to keep
+  // this retune isolated to the fields this task's own mechanic actually interacts with (attack rate
+  // and the two defensive rolls Ctrl.competent's own offense now has to get through more often).
+  t4:{react:8, attack:.55,block:.85,parry:.5, dash:.06,special:1,   heavy:.3, intercept:.5, bait:.25,punish:1, approach:40,hold:5, comboMix:true},
   // Fix-wave item 3 (measured fallback): dash .08->.04, same reasoning/source as t4.react above.
   t5:{react:1, attack:.9, block:.95,parry:.8, dash:.04,special:1,   heavy:.35,intercept:.9, bait:.4, punish:1, approach:30,hold:4, comboMix:true}};
 const AI={

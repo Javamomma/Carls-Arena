@@ -109,10 +109,17 @@ const CHAMPS={
 // prints for it -- door 4's actual target is "a level-3 human (this door's recLevel) should find it
 // fair," not a 40-70% bot win rate; the batch table below is recorded as information, not a gate, for
 // this one encounter. See docs/ARENA.md's Task 6.1 entry, "Fix round 0" section, for the full context.
+//
+// Task 7.5: hobgoblin.atk 52->39 (hp untouched). Ctrl.competent's own new dash-back read (30_input.js)
+// and mixed M-L-L-L-M chain, plus the t4 AI_TIERS retune that followed (55_ai.js's own comment),
+// still left f1_hob under the frozen 40-70% band at seed-base 101 (36.7% at n=30 even after the t4
+// retune); an atk-only cut (same lever every other over/under-band mob or boss in this table gets)
+// brings both seed bases back into band (63.3%/46.7% at n=30, 66.7%/50.0% at n=60) — see the task
+// report for the full measured sweep.
 const MOBS={
   goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:360,atk:30,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',impact:'blade',
     moves:{heavy:{charge:14,dmg:2.0}}},
-  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:736,atk:52,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human',impact:'blunt', // Phase 2 fix round 2: 1.2->1.1, see LOOKS.hobgoblin
+  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:736,atk:39,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human',impact:'blunt', // Phase 2 fix round 2: 1.2->1.1, see LOOKS.hobgoblin
     moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}},
   skeleton: {id:'skeleton',name:'SKELETON',cls:'rogue', hp:320,atk:28,color:'#d8d0c0',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.95,rig:'human',impact:'blade'},
   // s1 override: a longer 6-hit flurry (base s1 is 3 hits) — the shaman's signature multi-hit special.
@@ -173,7 +180,13 @@ const BOSSES={
   // roughly doubled once CHAIN.enders.light stopped forcing a knockdown pause every 5 lights) — the t5
   // AI_TIERS retune alone still left this boss at 53.3% (n=30), well over the 10-35% band; hp left
   // untouched, atk-only brings it back to 23.3% (n=30).
-  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:46,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',impact:'blunt',
+  // Task 7.5: atk 46->50. t5 wasn't itself retuned this task (unlike t4 -- see AI_TIERS' own comment
+  // -- t5's tier-sweep number barely moved, 23.3->21.7 at n=30/n=60, so a blanket t5 nerf/buff wasn't
+  // warranted), but Ctrl.competent's own dash-back read still raised this specific boss's win rate
+  // past the 35% ceiling at seed-base 101 (20.0%/36.7% at seed-base 1/101, n=30) -- a boss-specific
+  // atk bump (same lever as every prior retune here, hp left alone) restores both seeds into band
+  // (20.0%/23.3%) without touching the shared t5 tier the general sweep already passes.
+  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:50,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',impact:'blunt',
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};

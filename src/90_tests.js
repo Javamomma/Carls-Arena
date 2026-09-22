@@ -1444,7 +1444,12 @@ Test.add('floor-1 mob tuning: goblin/skeleton/shaman/hobgoblin hp and atk match 
   eq(DEFS.goblin.hp,360);eq(DEFS.goblin.atk,30);
   eq(DEFS.skeleton.hp,320);eq(DEFS.skeleton.atk,28);
   eq(DEFS.shaman.hp,345);eq(DEFS.shaman.atk,36);eq(DEFS.shaman.armor,0);eq(DEFS.shaman.blockProf,0);
-  eq(DEFS.hobgoblin.hp,736);eq(DEFS.hobgoblin.atk,52)});
+  // Task 7.5: atk 52->39 -- Ctrl.competent's own new dash-back read (30_input.js) and mixed M-L-L-L-M
+  // chain (see the task report) pushed f1_hob's win rate under the frozen 40-70% band once the t4
+  // AI_TIERS retune alone wasn't enough (both share f1_hob's tier); hp left untouched, atk-only
+  // retune (same lever as grull/mother_rat's own boss-specific retunes, MOBS/BOSSES's own comments)
+  // brings it back into band -- see docs/ARENA.md's Phase 7 close-out table for the measured numbers.
+  eq(DEFS.hobgoblin.hp,736);eq(DEFS.hobgoblin.atk,39)});
 Test.add('G.startFight({...,playerBuffs}) applies to p1 via the same Buffs.apply the enemy path uses',()=>{
   G.startFight({p1:'carl',p2:'donut',ai:'dummy',playerBuffs:['powerGain','armorUp']});
   eq(G.fight.p1.buffs.length,2);
