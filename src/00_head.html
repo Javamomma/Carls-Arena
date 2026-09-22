@@ -20,6 +20,16 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .cbtn{position:absolute;width:76px;height:76px;border-radius:50%;border:3px solid #f4c542;background:rgba(26,31,51,.8);color:#f4c542;font:inherit;font-size:26px;display:flex;align-items:center;justify-content:center;line-height:1}
 .cbtn::after{content:attr(data-label);position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:4px;font-size:10px;letter-spacing:1px;color:#f4c542;white-space:nowrap}
 .cbtn.ready{background:#f4c542;color:#111;box-shadow:0 0 16px 4px rgba(244,197,66,.65)}
+/* Fix-wave item 6 (final review, Minor): the tutorial POWER-step stall hint -- G.syncTutorialPrompt
+   toggles .pulse on #btnPower once Tutorial.stalled (POWER not fired within STALL_FRAMES sim frames).
+   reduceMotion-safe: body.reduce-motion (mirrors Save.data.settings.reduceMotion, G.applySettings)
+   and the OS-level prefers-reduced-motion both swap the animated glow for a static, stronger one
+   instead of disabling the hint outright -- a player who needs the animation OFF still needs to be
+   pointed at the button. */
+@keyframes tutorialPulse{0%,100%{box-shadow:0 0 16px 4px rgba(244,197,66,.65)}50%{box-shadow:0 0 28px 10px rgba(244,197,66,1)}}
+.cbtn.pulse{animation:tutorialPulse 1s ease-in-out infinite}
+body.reduce-motion .cbtn.pulse{animation:none;box-shadow:0 0 24px 8px rgba(244,197,66,.95)}
+@media (prefers-reduced-motion:reduce){.cbtn.pulse{animation:none;box-shadow:0 0 24px 8px rgba(244,197,66,.95)}}
 #btnBlock{left:22px;bottom:40px}
 #btnPower{right:22px;bottom:40px}
 #btnKick{right:110px;bottom:40px}

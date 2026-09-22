@@ -20,6 +20,16 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .cbtn{position:absolute;width:76px;height:76px;border-radius:50%;border:3px solid #f4c542;background:rgba(26,31,51,.8);color:#f4c542;font:inherit;font-size:26px;display:flex;align-items:center;justify-content:center;line-height:1}
 .cbtn::after{content:attr(data-label);position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:4px;font-size:10px;letter-spacing:1px;color:#f4c542;white-space:nowrap}
 .cbtn.ready{background:#f4c542;color:#111;box-shadow:0 0 16px 4px rgba(244,197,66,.65)}
+/* Fix-wave item 6 (final review, Minor): the tutorial POWER-step stall hint -- G.syncTutorialPrompt
+   toggles .pulse on #btnPower once Tutorial.stalled (POWER not fired within STALL_FRAMES sim frames).
+   reduceMotion-safe: body.reduce-motion (mirrors Save.data.settings.reduceMotion, G.applySettings)
+   and the OS-level prefers-reduced-motion both swap the animated glow for a static, stronger one
+   instead of disabling the hint outright -- a player who needs the animation OFF still needs to be
+   pointed at the button. */
+@keyframes tutorialPulse{0%,100%{box-shadow:0 0 16px 4px rgba(244,197,66,.65)}50%{box-shadow:0 0 28px 10px rgba(244,197,66,1)}}
+.cbtn.pulse{animation:tutorialPulse 1s ease-in-out infinite}
+body.reduce-motion .cbtn.pulse{animation:none;box-shadow:0 0 24px 8px rgba(244,197,66,.95)}
+@media (prefers-reduced-motion:reduce){.cbtn.pulse{animation:none;box-shadow:0 0 24px 8px rgba(244,197,66,.95)}}
 #btnBlock{left:22px;bottom:40px}
 #btnPower{right:22px;bottom:40px}
 #btnKick{right:110px;bottom:40px}
@@ -3673,6 +3683,11 @@ const Tutorial={
   state:{step:0,done:[false,false,false,false]},
   prompt:'',
   _lights:0,_medium:false,_parried:false,_powerSet:false,_flash:0,
+  // Fix-wave item 6 (final review, Minor): the POWER step's own stall hint. _stepFrames counts sim
+  // frames since the CURRENT step became current (reset on every advance, see reset()/tick() below);
+  // STALL_FRAMES is how long the last step (POWER) is given before `stalled` flips true and an extra
+  // hint layers onto the prompt -- see tick()'s own comment for why only that step gets one.
+  STALL_FRAMES:900,_stepFrames:0,stalled:false,
   steps:[
     {prompt:'TAP PUNCH — land 3 light hits',done:()=>Tutorial._lights>=3},
     {prompt:'SWIPE RIGHT / KICK — land a medium',done:()=>Tutorial._medium},
@@ -3682,6 +3697,7 @@ const Tutorial={
   reset(){
     this.state={step:0,done:[false,false,false,false]};
     this._lights=0;this._medium=false;this._parried=false;this._powerSet=false;this._flash=0;
+    this._stepFrames=0;this.stalled=false;
     this.prompt=this.steps[0].prompt},
   // Fed every Fight.emit'd event (mirrors Broadcast.onEvent's own wiring), gated to the CURRENT step
   // only -- each branch sets just its own step's flag, so an event that would match a LATER step
@@ -3706,8 +3722,23 @@ const Tutorial={
     const step=this.state.step;
     if(step>=this.steps.length)return;
     if(step===3&&!this._powerSet&&fight.p1){fight.p1.power=100;this._powerSet=true}
+    // Fix-wave item 6 (final review, Minor): if the POWER step (the last one, index steps.length-1)
+    // isn't completed within STALL_FRAMES sim frames of becoming current, layer an extra hint onto
+    // the prompt and flip `stalled` -- G.syncTutorialPrompt reads it to pulse #btnPower (CSS, see
+    // 00_head.html), so an idle player who never worked out POWER (the exact snag the final review's
+    // first-play walkthrough flagged) gets pointed at the one button to press instead of being left on
+    // a static prompt against a 1 hp immortal dummy until the fight's own 120s clock expires. Only the
+    // last step gets this -- the earlier three (punch/medium/parry) are taught by the dummy's own
+    // scripted attack pattern (Ctrl.tutorialDummy) prompting a reaction, where POWER has nothing to
+    // react to and is the one step a genuinely idle player can stall on indefinitely.
+    if(step===this.steps.length-1){
+      this._stepFrames++;
+      if(!this.stalled&&this._stepFrames>=this.STALL_FRAMES){
+        this.stalled=true;
+        this.prompt=this.steps[step].prompt+' — TAP THE GLOWING POWER BUTTON'}}
     if(this.steps[step].done(fight)){
       this.state.done[step]=true;this._flash=30;this.state.step++;
+      this._stepFrames=0;this.stalled=false;
       this.prompt=this.state.step<this.steps.length?this.steps[this.state.step].prompt:'FINISH HIM';
       // Release pass: clears the p2 dummy's own guardActive flag (not a Tutorial-side read) the
       // instant every step is done, so BUFFS.tutorialGuard (47_buffs.js) stops capping damage and
@@ -3789,8 +3820,17 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(!el)return;
     el.classList.add('show');
     el.classList.toggle('flash',Tutorial._flash>0);
-    el.textContent=Tutorial.prompt},
-  hideTutorialPrompt(){const el=document.getElementById('tutorialPrompt');if(el)el.classList.remove('show')},
+    el.textContent=Tutorial.prompt;
+    // Fix-wave item 6 (final review, Minor): pulses #btnPower once Tutorial.stalled (POWER step idle
+    // past STALL_FRAMES) -- see Tutorial.tick's own comment. Toggled every tutorial-mode tick, same
+    // as .flash just above, and cleared automatically the instant Tutorial.stalled goes back to false
+    // (the step advancing resets it) with no separate call needed.
+    const pwr=document.getElementById('btnPower');
+    if(pwr)pwr.classList.toggle('pulse',Tutorial.stalled)},
+  hideTutorialPrompt(){const el=document.getElementById('tutorialPrompt');if(el)el.classList.remove('show');
+    // Fix-wave item 6: also clears any pulse left over from a previous tutorial run -- mirrors the
+    // comment on this function's only other caller-relevant state (Tutorial.prompt itself).
+    const pwr=document.getElementById('btnPower');if(pwr)pwr.classList.remove('pulse')},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   // Task 5.4: settings whose effect is a standing DOM/layout state (not read live each time, unlike
   // reduceMotion/sfx/announcer/haptics, which are checked directly off Save.data.settings at their
@@ -3799,6 +3839,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // toggle button is clicked.
   applySettings(){
     document.body.classList.toggle('left-handed',!!Save.data.settings.leftHanded);
+    // Fix-wave item 6: mirrors reduceMotion onto a body class (same pattern as left-handed just
+    // above) so the POWER-stall pulse's CSS (00_head.html) can go static instead of animated without
+    // every future animated element having to read Save.data.settings itself.
+    document.body.classList.toggle('reduce-motion',!!Save.data.settings.reduceMotion);
     this.positionToast()},
   // Pure function of (viewport w/h, is-a-touch-device) — no window/navigator read of its own — so
   // tests can drive every truth-table cell directly, per the frozen interface. Portrait AND a touch
@@ -7202,6 +7246,30 @@ Test.add('Tutorial step 3 sets fight.p1.power to 100 exactly once, and advances 
   Tutorial.tick(f);
   eq(Tutorial.state.step,4,'firing s1 must complete step 3');
   eq(Tutorial.prompt,'FINISH HIM')});
+// Fix-wave item 6 (final review, Minor): the final review's first-play walkthrough flagged a player
+// who never works out POWER as stuck, in silence, against a 1 hp immortal dummy until the fight's own
+// 120s clock expires. Driven through the real G.tick loop (mirrors how STALL_FRAMES is actually
+// counted in play) with an idle player so nothing ever completes step 3 on its own.
+Test.add('an idle player stalled on the POWER step gets an extra hint and a pulsing #btnPower after STALL_FRAMES, both clearing once the step completes',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=3;Tutorial.state.done=[true,true,true,false]; // first three steps already taught
+  G.sim=true;
+  for(let i=0;i<Tutorial.STALL_FRAMES-1;i++)G.tick();
+  ok(!Tutorial.stalled,'must not stall before STALL_FRAMES sim frames have passed');
+  eq(document.getElementById('btnPower').classList.contains('pulse'),false,'#btnPower must not pulse yet');
+  ok(!Tutorial.prompt.includes('TAP THE GLOWING POWER BUTTON'));
+  G.tick(); // the STALL_FRAMES-th frame on step 3
+  ok(Tutorial.stalled,'must stall once STALL_FRAMES sim frames have passed with no special fired');
+  ok(Tutorial.prompt.includes('TAP THE GLOWING POWER BUTTON'),'prompt: '+Tutorial.prompt);
+  ok(document.getElementById('btnPower').classList.contains('pulse'),'#btnPower must pulse while stalled');
+  // The player finally taps POWER -- firing the special must clear both the stall hint and the pulse.
+  G.fight.p1.act(Object.assign(Ctrl.EMPTY(),{special:1}));
+  G.tick();
+  eq(Tutorial.state.step,4,'firing s1 must complete step 3');
+  ok(!Tutorial.stalled,'stalled must clear once the step completes');
+  eq(document.getElementById('btnPower').classList.contains('pulse'),false,'#btnPower pulse must clear once the step completes');
+  G.toTitle();G.sim=false});
 Test.add('G.startTutorial starts ENCOUNTERS.tutorial in mode tutorial with no energy spent and the goblin at half hp/30% atk',()=>{
   Save.data=Meta.defaults();
   const energyBefore=Save.data.energy.n;

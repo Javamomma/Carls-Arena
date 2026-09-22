@@ -2360,6 +2360,30 @@ Test.add('Tutorial step 3 sets fight.p1.power to 100 exactly once, and advances 
   Tutorial.tick(f);
   eq(Tutorial.state.step,4,'firing s1 must complete step 3');
   eq(Tutorial.prompt,'FINISH HIM')});
+// Fix-wave item 6 (final review, Minor): the final review's first-play walkthrough flagged a player
+// who never works out POWER as stuck, in silence, against a 1 hp immortal dummy until the fight's own
+// 120s clock expires. Driven through the real G.tick loop (mirrors how STALL_FRAMES is actually
+// counted in play) with an idle player so nothing ever completes step 3 on its own.
+Test.add('an idle player stalled on the POWER step gets an extra hint and a pulsing #btnPower after STALL_FRAMES, both clearing once the step completes',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=3;Tutorial.state.done=[true,true,true,false]; // first three steps already taught
+  G.sim=true;
+  for(let i=0;i<Tutorial.STALL_FRAMES-1;i++)G.tick();
+  ok(!Tutorial.stalled,'must not stall before STALL_FRAMES sim frames have passed');
+  eq(document.getElementById('btnPower').classList.contains('pulse'),false,'#btnPower must not pulse yet');
+  ok(!Tutorial.prompt.includes('TAP THE GLOWING POWER BUTTON'));
+  G.tick(); // the STALL_FRAMES-th frame on step 3
+  ok(Tutorial.stalled,'must stall once STALL_FRAMES sim frames have passed with no special fired');
+  ok(Tutorial.prompt.includes('TAP THE GLOWING POWER BUTTON'),'prompt: '+Tutorial.prompt);
+  ok(document.getElementById('btnPower').classList.contains('pulse'),'#btnPower must pulse while stalled');
+  // The player finally taps POWER -- firing the special must clear both the stall hint and the pulse.
+  G.fight.p1.act(Object.assign(Ctrl.EMPTY(),{special:1}));
+  G.tick();
+  eq(Tutorial.state.step,4,'firing s1 must complete step 3');
+  ok(!Tutorial.stalled,'stalled must clear once the step completes');
+  eq(document.getElementById('btnPower').classList.contains('pulse'),false,'#btnPower pulse must clear once the step completes');
+  G.toTitle();G.sim=false});
 Test.add('G.startTutorial starts ENCOUNTERS.tutorial in mode tutorial with no energy spent and the goblin at half hp/30% atk',()=>{
   Save.data=Meta.defaults();
   const energyBefore=Save.data.energy.n;
