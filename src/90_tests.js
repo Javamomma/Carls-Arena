@@ -2988,6 +2988,28 @@ Test.add('#tutorialLesson shows LESSON n / 4 for the current step, clamps at 4 d
   ok(!document.getElementById('tutorialLesson').classList.contains('show'),
     '#tutorialLesson must hide once the tutorial ends');
   G.sim=false});
+// Task 6.6 (deferred minor from 6.4): the controller's own p6-tutorial-1.png viewing found the
+// prompt pill sitting only ~12px above Carl's head at lesson 1's real 150px spawn (not the closeIn()
+// range the harness screenshot itself uses) -- close enough to read as touching his hair. Measures
+// the SAME two geometries the reported bug compared: the pill's own bottom edge (positionTutorialPrompt,
+// canvas-local via getBoundingClientRect(), the same DOM->canvas-local scale the toast-overlap test
+// above already uses) against p1's head-top screen point (Camera.toScreen + G.topNow, the same
+// per-frame head-top calc G's own zoom-cap code and the HUD-clearance tests already trust).
+Test.add('the tutorial prompt pill clears p1\'s head by >=30px canvas-local px at lesson 1\'s real 150px spawn',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  G.sim=true;
+  for(let i=0;i<60;i++)G.tick(); // let the camera lerp all the way onto lesson 1's own zoom target
+  eq(Tutorial.state.step,0,'idle p1 never lands a light -- must still be on lesson 1');
+  const headTopY=Camera.toScreen(G.cam,G.fight.p1.x,FLOOR-G.topNow(G.fight.p1)).sy;
+  G.positionTutorialPrompt();
+  const cr=canvas.getBoundingClientRect(),sx=W/cr.width,sy=H/cr.height;
+  const pill=document.getElementById('tutorialPrompt').getBoundingClientRect();
+  const pillBottom=(pill.bottom-cr.top)*sy;
+  const gap=headTopY-pillBottom; // positive: pill's bottom edge clears above the head's own top
+  ok(gap>=30,'prompt pill must clear p1\'s head by >=30px at lesson-1 spawn, got '+gap.toFixed(1)+
+    ' (headTopY='+headTopY.toFixed(1)+', pillBottom='+pillBottom.toFixed(1)+')');
+  G.toTitle();G.sim=false});
 Test.add('completing lesson 4 pushes a shieldDown fx and clears p2.guardActive on the same tick',()=>{
   Tutorial.reset();Tutorial.state.step=3;
   const p1={power:0,state:'IDLE',moveName:null};

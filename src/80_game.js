@@ -782,9 +782,18 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // worst case across every pose). Normal gameplay caps off the taller of both fighters' CURRENT
     // poses; the cinematic punch-in caps off just the attacker's (this.cinemFocus's) current pose,
     // since that's the only fighter the camera is centering on during the S3 freeze.
+    // Task 6.6: the tutorial's own lesson 1 spawns the dummy only 150px away (deliberately, so a tap
+    // connects -- see G.startTutorial) which drives the distance-based camTarget.zoom (60_fight.js)
+    // right up near its 1.12 ceiling; at that zoom Carl's own head-top screen point lands only ~29px
+    // below HUD_LINE, leaving no room at all for #tutorialLesson+#tutorialPrompt (~50px combined)
+    // to sit above his head with real clearance -- exactly the "prompt pill 12px above the head"
+    // owner-facing bug. A lower gameplay ceiling during Tutorial mode (0.95, still a readable
+    // close-up, just not the max) buys back that headroom without touching the shared zoom formula
+    // any other mode relies on.
+    const gameplayCeil=this.mode==='tutorial'?0.88:1.12;
     const capNow=punchIn
       ?Math.min(1.28,(Camera.anchorY-HUD_LINE)/this.topNow(this.cinemFocus))
-      :Math.min(1.12,(Camera.anchorY-HUD_LINE)/Math.max(this.topNow(f.p1),this.topNow(f.p2)));
+      :Math.min(gameplayCeil,(Camera.anchorY-HUD_LINE)/Math.max(this.topNow(f.p1),this.topNow(f.p2)));
     Camera.update(this.cam,f,punchIn,capNow);
     FX.update();
     // f.over flips true inside f.step() the instant a KO/timeout resolves, well before slow-mo has
