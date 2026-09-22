@@ -1,5 +1,12 @@
 class Fight{
-  constructor(o){this.rng=RNG(o.seed||1);this.p1=new Fighter(o.p1,1,o.ctrl1);this.p2=new Fighter(o.p2,-1,o.ctrl2);
+  constructor(o){const seed=o.seed||1;this.rng=RNG(seed);
+    // Presentation-side stream (announcer line picks) kept fully separate from this.rng: nothing in
+    // Fight/Fighter/AI ever reads presRng, so whether or how many announcer lines actually get
+    // picked during a run (e.g. wired to G.onEvent live vs a bare mkFight in a unit test) can never
+    // shift a later crit roll or any other sim outcome. Derived from the fight seed (not shared with
+    // it) via a cheap integer hash so distinct seeds still get distinct announcer streams.
+    this.presRng=RNG((seed*2654435761>>>0)^0x5eed);
+    this.p1=new Fighter(o.p1,1,o.ctrl1);this.p2=new Fighter(o.p2,-1,o.ctrl2);
     this.frame=0;this.clock=o.clock===undefined?120:o.clock;this.hitstop=0;this.over=false;this.winner=null;this.log=[];this.onEvent=o.onEvent||(()=>{});
     this.fx=[];this.slowmo=0;this.cinematic=0; // fx: plain events drained by G into FX each tick; slowmo/cinematic: frame counters G steps around
     this.noCrit=!!o.noCrit; // mkFight defaults this true for deterministic Phase 1/2 tests; G.startFight leaves crits live

@@ -23,7 +23,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
     // regardless of how recently the previous fight's last toast landed.
     this.frameNow=0;this._sayAt=-999;
-    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.announce('start',this.fight.rng)},
+    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.announce('start',this.fight.presRng)},
   // Throttled announcer display: only updates the toast if at least 90 frames (1.5s) have passed
   // since the last line, so a burst of events can't stomp on each other mid-read. Audio.say remains
   // the unthrottled display primitive this calls into. A no-op while the S3 cinematic is up — the
@@ -44,11 +44,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
       // not the whole recipe again (that would replay a 3-14 tone burst per sub-hit, overlapping).
       (mv&&mv.hits>1?Audio.recipes.light1:(Audio.recipes[a.moveName]||Audio.recipes.lights))();
-      if(a.combo===3||a.combo===5||a.combo===10)Audio.announce('streak'+a.combo,this.fight.rng)}
+      if(a.combo===3||a.combo===5||a.combo===10)Audio.announce('streak'+a.combo,this.fight.presRng)}
     else if(t==='block')Audio.recipes.block();
-    else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.rng)}
+    else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.presRng)}
     else if(t==='miss'){if(b&&b.state==='DASH')Audio.recipes.dash()}
-    else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.rng)}},
+    else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}},
   // Called from tick() once the KO slow-mo has fully counted down (fight.slowmo hits 0). Split out
   // of onEvent('ko',...) because the KO event fires synchronously inside the same f.step() that ends
   // the fight, well before slow-mo has had a chance to play; flipping state here on the frame it
@@ -135,7 +135,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       (Audio.recipes[mn]||Audio.recipes.lights)();
       // Recipe plays for either side (game feel); the announcer line is reserved for the human's
       // own specials only, so it doesn't caption every mob/AI special too.
-      if(fighter===this.fight.p1)Audio.announce('special',this.fight.rng)}},
+      if(fighter===this.fight.p1)Audio.announce('special',this.fight.presRng)}},
   // Watches the fx this tick's f.step() (if any) just queued for a 'card' event — the S3 cinematic
   // trigger — and, off that, plays the s3 recipe once, sets G.cinemFocus (read by loop() to punch
   // the camera in on the attacker while fight.cinematic>0), and hides the toast so nothing already
@@ -148,7 +148,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.cinemFocus=att;
     this.hideToast();
     Audio.recipes.s3();
-    if(att===f.p1)Audio.announce('special',f.rng)},
+    if(att===f.p1)Audio.announce('special',f.presRng)},
   // Test/debug helper (also used by tests/harness.py --cinematic): starts a fight, arms p1 with a
   // scripted s3, sim-steps until the cinematic is up, then advances FX so a screenshot shows the
   // card fully in (past its 12-frame slide-in) rather than mid-slide.

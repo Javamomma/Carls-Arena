@@ -81,7 +81,8 @@ const Audio={ac:null,muted:Save.data.mute,_t:0,
   // burst of events (e.g. a streak landing right before a KO) doesn't overwrite itself mid-read.
   announce(kind,rng){G.say(this.pickLine(kind,rng))}};
 // Snarky dungeon-game-show-host lines, Dungeon Crawler Carl flavored (Carl, Donut, the dungeon,
-// sponsors, viewers). No profanity. Picked deterministically via Audio.pickLine(kind, fight.rng).
+// sponsors, viewers). No profanity. Picked deterministically via Audio.pickLine(kind, fight.presRng)
+// — a presentation-side stream, never fight.rng, so announcer lines can never perturb the sim.
 const Lines={
   start:[
     "Ladies, gentlemen, and things with too many eyes: welcome back to the dungeon!",
@@ -387,7 +388,14 @@ const AI={profiles:{
       return it}}}};
 
 class Fight{
-  constructor(o){this.rng=RNG(o.seed||1);this.p1=new Fighter(o.p1,1,o.ctrl1);this.p2=new Fighter(o.p2,-1,o.ctrl2);
+  constructor(o){const seed=o.seed||1;this.rng=RNG(seed);
+    // Presentation-side stream (announcer line picks) kept fully separate from this.rng: nothing in
+    // Fight/Fighter/AI ever reads presRng, so whether or how many announcer lines actually get
+    // picked during a run (e.g. wired to G.onEvent live vs a bare mkFight in a unit test) can never
+    // shift a later crit roll or any other sim outcome. Derived from the fight seed (not shared with
+    // it) via a cheap integer hash so distinct seeds still get distinct announcer streams.
+    this.presRng=RNG((seed*2654435761>>>0)^0x5eed);
+    this.p1=new Fighter(o.p1,1,o.ctrl1);this.p2=new Fighter(o.p2,-1,o.ctrl2);
     this.frame=0;this.clock=o.clock===undefined?120:o.clock;this.hitstop=0;this.over=false;this.winner=null;this.log=[];this.onEvent=o.onEvent||(()=>{});
     this.fx=[];this.slowmo=0;this.cinematic=0; // fx: plain events drained by G into FX each tick; slowmo/cinematic: frame counters G steps around
     this.noCrit=!!o.noCrit; // mkFight defaults this true for deterministic Phase 1/2 tests; G.startFight leaves crits live
@@ -1108,7 +1116,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
     // regardless of how recently the previous fight's last toast landed.
     this.frameNow=0;this._sayAt=-999;
-    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.announce('start',this.fight.rng)},
+    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.announce('start',this.fight.presRng)},
   // Throttled announcer display: only updates the toast if at least 90 frames (1.5s) have passed
   // since the last line, so a burst of events can't stomp on each other mid-read. Audio.say remains
   // the unthrottled display primitive this calls into. A no-op while the S3 cinematic is up — the
@@ -1129,11 +1137,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
       // not the whole recipe again (that would replay a 3-14 tone burst per sub-hit, overlapping).
       (mv&&mv.hits>1?Audio.recipes.light1:(Audio.recipes[a.moveName]||Audio.recipes.lights))();
-      if(a.combo===3||a.combo===5||a.combo===10)Audio.announce('streak'+a.combo,this.fight.rng)}
+      if(a.combo===3||a.combo===5||a.combo===10)Audio.announce('streak'+a.combo,this.fight.presRng)}
     else if(t==='block')Audio.recipes.block();
-    else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.rng)}
+    else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.presRng)}
     else if(t==='miss'){if(b&&b.state==='DASH')Audio.recipes.dash()}
-    else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.rng)}},
+    else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}},
   // Called from tick() once the KO slow-mo has fully counted down (fight.slowmo hits 0). Split out
   // of onEvent('ko',...) because the KO event fires synchronously inside the same f.step() that ends
   // the fight, well before slow-mo has had a chance to play; flipping state here on the frame it
@@ -1220,7 +1228,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       (Audio.recipes[mn]||Audio.recipes.lights)();
       // Recipe plays for either side (game feel); the announcer line is reserved for the human's
       // own specials only, so it doesn't caption every mob/AI special too.
-      if(fighter===this.fight.p1)Audio.announce('special',this.fight.rng)}},
+      if(fighter===this.fight.p1)Audio.announce('special',this.fight.presRng)}},
   // Watches the fx this tick's f.step() (if any) just queued for a 'card' event — the S3 cinematic
   // trigger — and, off that, plays the s3 recipe once, sets G.cinemFocus (read by loop() to punch
   // the camera in on the attacker while fight.cinematic>0), and hides the toast so nothing already
@@ -1233,7 +1241,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.cinemFocus=att;
     this.hideToast();
     Audio.recipes.s3();
-    if(att===f.p1)Audio.announce('special',f.rng)},
+    if(att===f.p1)Audio.announce('special',f.presRng)},
   // Test/debug helper (also used by tests/harness.py --cinematic): starts a fight, arms p1 with a
   // scripted s3, sim-steps until the cinematic is up, then advances FX so a screenshot shows the
   // card fully in (past its 12-frame slide-in) rather than mid-slide.
@@ -1427,7 +1435,23 @@ Test.add('POWER tap fires the highest affordable special',()=>{const f=mkFight()
 Test.add('encounter resolves floor, name and enemy def',()=>{const e=Encounter.resolve('f1_goblin');eq(e.floor,1);eq(e.name,'THE DEPTHS');eq(e.enemy.id,'goblin');const o=Encounter.resolve({floor:3,name:'X',enemy:'hobgoblin',tier:'brawl'});eq(o.enemy.hp,DEFS.hobgoblin.hp)});
 Test.add('startFight with an encounter sets p2 to the mob and scales hp',()=>{G.startFight({encounter:{floor:2,name:'T',enemy:'goblin',tier:'dummy',hpMul:2,atkMul:1},ctrl1:Ctrl.idle()});eq(G.fight.p2.def.id,'goblin');eq(G.fight.p2.maxHp,600);eq(G.encounter.floor,2);G.toTitle()});
 Test.add('every move has a sound recipe and announcer lines exist per kind',()=>{for(const k in MOVES)ok(typeof Audio.recipes[k]==='function',k);for(const k of ['start','streak3','streak5','streak10','parry','special','win','loss'])ok(Lines[k]&&Lines[k].length>=8,k)});
-Test.add('announce picks deterministically from the fight rng and throttles',()=>{const r1=RNG(5),r2=RNG(5);eq(Audio.pickLine('parry',r1),Audio.pickLine('parry',r2));G._sayAt=-999;G.frameNow=100;G.say('a');eq(document.getElementById('toast').textContent,'a');G.say('b');eq(document.getElementById('toast').textContent,'a');G.frameNow=200;G.say('b');eq(document.getElementById('toast').textContent,'b')});
+Test.add('announce picks deterministically from any RNG and throttles',()=>{const r1=RNG(5),r2=RNG(5);eq(Audio.pickLine('parry',r1),Audio.pickLine('parry',r2));G._sayAt=-999;G.frameNow=100;G.say('a');eq(document.getElementById('toast').textContent,'a');G.say('b');eq(document.getElementById('toast').textContent,'a');G.frameNow=200;G.say('b');eq(document.getElementById('toast').textContent,'b')});
+Test.add('announcer lines do not change the fight',()=>{
+  // Same seed/scripts, the only difference is whether onEvent is wired to G.onEvent (so every
+  // announcer/streak/special line actually gets picked via Audio.announce during the run). If the
+  // announcer drew from the fight's own sim rng, this draw would shift every later crit roll and
+  // the two fights would diverge; presRng is a separate stream the sim never reads, so they must not.
+  const mkScript=()=>Ctrl.script([L(0,600)]);
+  const a=mkFight({ctrl1:mkScript(),ctrl2:AI.make('basic',3),noCrit:false,seed:7});
+  run(a,600);
+  const b=mkFight({ctrl1:mkScript(),ctrl2:AI.make('basic',3),noCrit:false,seed:7,
+    onEvent:(t,x,y,v)=>G.onEvent(t,x,y,v)});
+  G.fight=b;G.state='FIGHT';
+  run(b,600);
+  G.fight=null;G.state='TITLE';
+  eq(b.p1.hp,a.p1.hp,'p1 hp must match regardless of announcer lines');
+  eq(b.p2.hp,a.p2.hp,'p2 hp must match regardless of announcer lines');
+  eq(b.log.length,a.log.length,'log length must match regardless of announcer lines')});
 Test.add('a multi-hit special plays its recipe once and a light thud per landed sub-hit',()=>{
   const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),onEvent:(t,a,b,v)=>G.onEvent(t,a,b,v)});
   closeIn(f);f.p1.power=200;

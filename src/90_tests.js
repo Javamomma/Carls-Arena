@@ -158,7 +158,23 @@ Test.add('POWER tap fires the highest affordable special',()=>{const f=mkFight()
 Test.add('encounter resolves floor, name and enemy def',()=>{const e=Encounter.resolve('f1_goblin');eq(e.floor,1);eq(e.name,'THE DEPTHS');eq(e.enemy.id,'goblin');const o=Encounter.resolve({floor:3,name:'X',enemy:'hobgoblin',tier:'brawl'});eq(o.enemy.hp,DEFS.hobgoblin.hp)});
 Test.add('startFight with an encounter sets p2 to the mob and scales hp',()=>{G.startFight({encounter:{floor:2,name:'T',enemy:'goblin',tier:'dummy',hpMul:2,atkMul:1},ctrl1:Ctrl.idle()});eq(G.fight.p2.def.id,'goblin');eq(G.fight.p2.maxHp,600);eq(G.encounter.floor,2);G.toTitle()});
 Test.add('every move has a sound recipe and announcer lines exist per kind',()=>{for(const k in MOVES)ok(typeof Audio.recipes[k]==='function',k);for(const k of ['start','streak3','streak5','streak10','parry','special','win','loss'])ok(Lines[k]&&Lines[k].length>=8,k)});
-Test.add('announce picks deterministically from the fight rng and throttles',()=>{const r1=RNG(5),r2=RNG(5);eq(Audio.pickLine('parry',r1),Audio.pickLine('parry',r2));G._sayAt=-999;G.frameNow=100;G.say('a');eq(document.getElementById('toast').textContent,'a');G.say('b');eq(document.getElementById('toast').textContent,'a');G.frameNow=200;G.say('b');eq(document.getElementById('toast').textContent,'b')});
+Test.add('announce picks deterministically from any RNG and throttles',()=>{const r1=RNG(5),r2=RNG(5);eq(Audio.pickLine('parry',r1),Audio.pickLine('parry',r2));G._sayAt=-999;G.frameNow=100;G.say('a');eq(document.getElementById('toast').textContent,'a');G.say('b');eq(document.getElementById('toast').textContent,'a');G.frameNow=200;G.say('b');eq(document.getElementById('toast').textContent,'b')});
+Test.add('announcer lines do not change the fight',()=>{
+  // Same seed/scripts, the only difference is whether onEvent is wired to G.onEvent (so every
+  // announcer/streak/special line actually gets picked via Audio.announce during the run). If the
+  // announcer drew from the fight's own sim rng, this draw would shift every later crit roll and
+  // the two fights would diverge; presRng is a separate stream the sim never reads, so they must not.
+  const mkScript=()=>Ctrl.script([L(0,600)]);
+  const a=mkFight({ctrl1:mkScript(),ctrl2:AI.make('basic',3),noCrit:false,seed:7});
+  run(a,600);
+  const b=mkFight({ctrl1:mkScript(),ctrl2:AI.make('basic',3),noCrit:false,seed:7,
+    onEvent:(t,x,y,v)=>G.onEvent(t,x,y,v)});
+  G.fight=b;G.state='FIGHT';
+  run(b,600);
+  G.fight=null;G.state='TITLE';
+  eq(b.p1.hp,a.p1.hp,'p1 hp must match regardless of announcer lines');
+  eq(b.p2.hp,a.p2.hp,'p2 hp must match regardless of announcer lines');
+  eq(b.log.length,a.log.length,'log length must match regardless of announcer lines')});
 Test.add('a multi-hit special plays its recipe once and a light thud per landed sub-hit',()=>{
   const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),onEvent:(t,a,b,v)=>G.onEvent(t,a,b,v)});
   closeIn(f);f.p1.power=200;

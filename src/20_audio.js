@@ -30,7 +30,8 @@ const Audio={ac:null,muted:Save.data.mute,_t:0,
   // burst of events (e.g. a streak landing right before a KO) doesn't overwrite itself mid-read.
   announce(kind,rng){G.say(this.pickLine(kind,rng))}};
 // Snarky dungeon-game-show-host lines, Dungeon Crawler Carl flavored (Carl, Donut, the dungeon,
-// sponsors, viewers). No profanity. Picked deterministically via Audio.pickLine(kind, fight.rng).
+// sponsors, viewers). No profanity. Picked deterministically via Audio.pickLine(kind, fight.presRng)
+// — a presentation-side stream, never fight.rng, so announcer lines can never perturb the sim.
 const Lines={
   start:[
     "Ladies, gentlemen, and things with too many eyes: welcome back to the dungeon!",
