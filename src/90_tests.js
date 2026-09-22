@@ -4261,17 +4261,37 @@ Test.add('camera punch-in composes as min(base*(1+FX.punch), capNow): it actuall
   // Same base target (1.0) and a generous cap (1.2) both runs below, so the only variable between
   // the two cams is FX.punch itself -- if Camera.update ignored FX.punch entirely, both would settle
   // at the exact same zoom, which the "camB must end up strictly above camA" assertion below rules out.
+  // Fix-wave item 2 (final review I2): retargeted from capNow=1.2 (well above anything gameplay
+  // ever uses) to the real gameplay ceiling, 1.12 -- see Fight.camTarget's own ramp, now capped at
+  // 1.06 so the punch has headroom to actually move zoom before hitting 1.12.
   const f={camTarget:{x:0,zoom:1.0}};
   const camA={x:0,zoom:1},camB={x:0,zoom:1};
-  FX.punch=0;for(let i=0;i<200;i++)Camera.update(camA,f,null,1.2);
-  FX.punch=.1;for(let i=0;i<200;i++){Camera.update(camB,f,null,1.2);ok(camB.zoom<=1.2+1e-9,'cam.zoom must never exceed capNow, got '+camB.zoom)}
+  FX.punch=0;for(let i=0;i<200;i++)Camera.update(camA,f,null,1.12);
+  FX.punch=.1;for(let i=0;i<200;i++){Camera.update(camB,f,null,1.12);ok(camB.zoom<=1.12+1e-9,'cam.zoom must never exceed capNow, got '+camB.zoom)}
   ok(camB.zoom>camA.zoom,'a nonzero FX.punch must raise cam.zoom above the plain base-target zoom: base='+camA.zoom+' punched='+camB.zoom);
-  ok(Math.abs(camB.zoom-1.1)<0.01,'camB must settle at base*(1+punch)=1.1 (well under the 1.2 cap), got '+camB.zoom);
-  // Now push punch past what the cap allows: base 1.0 * (1+.5) = 1.5, capped at 1.2.
+  ok(Math.abs(camB.zoom-1.1)<0.01,'camB must settle at base*(1+punch)=1.1 (well under the 1.12 cap), got '+camB.zoom);
+  // Now push punch past what the cap allows: base 1.0 * (1+.5) = 1.5, capped at 1.12.
   FX.punch=.5;const camC={x:0,zoom:1};
-  for(let i=0;i<200;i++){Camera.update(camC,f,null,1.2);ok(camC.zoom<=1.2+1e-9,'cam.zoom must never exceed capNow even when punch alone would exceed it, got '+camC.zoom)}
-  ok(Math.abs(camC.zoom-1.2)<0.01,'camC must settle at the cap (1.2), not at the uncapped base*(1+punch)=1.5, got '+camC.zoom);
+  for(let i=0;i<200;i++){Camera.update(camC,f,null,1.12);ok(camC.zoom<=1.12+1e-9,'cam.zoom must never exceed capNow even when punch alone would exceed it, got '+camC.zoom)}
+  ok(Math.abs(camC.zoom-1.12)<0.01,'camC must settle at the cap (1.12), not at the uncapped base*(1+punch)=1.5, got '+camC.zoom);
   FX.punch=0;FX.reset()});
+// Fix-wave item 2 (final review I2): the composition-math test above proves Camera.update's own
+// arithmetic; this one proves the shipped behavior -- that at REAL landing distances, against the
+// REAL gameplay cap (1.12), the punch actually moves the composed zoom target measurably above the
+// un-punched one, per class. Distances are the review's own measured landing gaps: 110px pairs with
+// an intercept (any light/medium startup is interceptable, HITFEEL.intercept.punch=.05), 130px with
+// a heavy (HITFEEL.heavy.punch=.04), 160px with a medium (HITFEEL.medium.punch=.02).
+Test.add('fix-wave I2: camera punch-in is no longer inert at real gameplay distances/cap -- it measurably raises the composed zoom target for medium/heavy/intercept',()=>{
+  const f=mkFight();f.p1.x=0;f.p2.x=110;f.updateCam();
+  const capNow=1.12;
+  const gainAt=(dist,pct)=>{f.p1.x=0;f.p2.x=dist;f.updateCam();
+    const base=f.camTarget.zoom,punched=Math.min(base*(1+pct),capNow);return punched-base};
+  const gMedium=gainAt(160,HITFEEL.medium.punch);
+  const gHeavy=gainAt(130,HITFEEL.heavy.punch);
+  const gIntercept=gainAt(110,HITFEEL.intercept.punch);
+  ok(gMedium>=0.015,'medium punch at 160px must gain at least 0.015 (2%) over the un-punched target, got '+gMedium);
+  ok(gHeavy>=0.035,'heavy punch at 130px must gain at least 0.035 (4%) over the un-punched target, got '+gHeavy);
+  ok(gIntercept>=0.045,'intercept punch at 110px must gain at least 0.045 (5%) over the un-punched target, got '+gIntercept)});
 Test.add('FX.punch envelope: jumps to the pushed target, holds, then eases back to exactly 0',()=>{
   FX.reset();
   FX.push({kind:'punch',pct:.05});

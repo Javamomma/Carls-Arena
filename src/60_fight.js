@@ -15,8 +15,16 @@ class Fight{
   // 120-500 distance range, just a smaller max, since the rescaled rig at 1.35 put a raised-arm
   // pose's hand above the HUD (see 68_rig.js's 'tallest pose stays under the HUD at max zoom' test;
   // the still-higher 1.28 cinematic-only cap is G's, not the sim's — Fight never reaches it itself).
+  // Fix-wave item 2 (final review I2): this ramp's own ceiling is now 1.06, not 1.12 -- the gameplay
+  // cap G passes into Camera.update as capNow (80_game.js's zoomCap) is UNCHANGED at 1.12 (HUD
+  // clearance still holds at that number, see 68_rig.js's own test), but this base target used to
+  // already saturate at 1.12 for any real hit-landing distance, leaving the per-class camera punch
+  // percentage (HITFEEL.<class>.punch, composed by Camera.update as min(base*(1+punch), capNow))
+  // nowhere to go -- punch was being composed against a base already sitting AT the cap. Lowering
+  // the ramp's own ceiling to 1.06 gives the punch real headroom up to 1.12 at the distances hits
+  // actually land (see the fix-wave I2 test just below the punch composition tests, 90_tests.js).
   updateCam(){const dist=Math.abs(this.p2.x-this.p1.x);
-    this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.12-(dist-120)/380*0.12,1,1.12)}}
+    this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.06-(dist-120)/380*0.12,1,1.06)}}
   step(){if(this.over)return;if(this.cinematic>0)return;if(this.hitstop>0){this.hitstop--;return}
     this.frame++;this.clock-=STEP;
     // Task 6.2: fighter.foeDist is the live hurtbox-edge gap, written before either side's
