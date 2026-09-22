@@ -779,6 +779,18 @@ Test.add('Save.load migrates an existing v1 localStorage value without throwing'
   }finally{
     if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
     Save.load()}});
+// Fix round 1: Save.load used to migrate only in memory, never writing the upgraded v2 shape back
+// to localStorage — so a v1 save stayed v1 on disk forever, re-migrating (and paying its reset
+// costs, e.g. roster) on every single load. Save.load now persists via put() after migrating.
+Test.add('Save.load persists the migrated v2 shape back to localStorage',()=>{
+  const backup=localStorage.getItem(Save.key);
+  try{
+    localStorage.setItem(Save.key,JSON.stringify({v:1,gold:5,units:2,roster:{},mute:true,settings:{}}));
+    Save.load();
+    eq(JSON.parse(localStorage.getItem(Save.key)).v,2,'localStorage must hold the migrated v2 save, not the original v1 one')
+  }finally{
+    if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
+    Save.load()}});
 Test.add('Save.put/load round-trips a v2 save',()=>{
   const backup=localStorage.getItem(Save.key);
   try{

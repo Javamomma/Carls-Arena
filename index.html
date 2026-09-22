@@ -63,7 +63,7 @@ const Meta={
       roster:{carl:{stars:1,rank:1,level:1,xp:0,shards:0}},
       active:'carl',
       floors:{1:{nodes:['open','locked','locked','locked','locked'],boss:'locked'}},
-      energy:{n:10,max:10,ts:0},
+      energy:{n:Energy.max,max:Energy.max,ts:0},
       arena:{best:0,streak:0},
       mute:false,settings:{},stats:{fights:0,wins:0}}},
   // v1 -> v2: keep gold/units/mute/settings, everything else starts fresh (including roster, which
@@ -98,12 +98,15 @@ const Stats={
   derive(def,entry){
     const mul=(1+.25*(entry.stars-1))*(1+.10*(entry.rank-1))*(1+.01*(entry.level-1));
     return{hp:Math.round(def.hp*mul),atk:Math.round(def.atk*mul)}}};
+// Energy.max is the single source of truth for the energy cap (Save.data.energy.max is only a
+// mirror of it, set from here in Meta.defaults, kept in the save shape for Screens to read later —
+// tick/spend never read e.max so there is exactly one place this constant can drift from).
 const Energy={
   now:()=>Date.now(),
   max:10,
   tick(){
     const e=Save.data.energy;
-    const regen=Math.min(Math.floor((Energy.now()-e.ts)/360000),e.max-e.n);
+    const regen=Math.min(Math.floor((Energy.now()-e.ts)/360000),Energy.max-e.n);
     if(regen>0){e.n+=regen;e.ts+=regen*360000}
     return e.n},
   spend(n){
@@ -116,7 +119,7 @@ const Crystal={},Quest={},Rewards={},Roster={},Arena={};
 
 const Save={key:'carlsArena.v1',data:null,
   load(){let raw=null;try{raw=JSON.parse(localStorage.getItem(this.key))}catch(e){raw=null}
-    this.data=Meta.migrate(raw)},
+    this.data=Meta.migrate(raw);this.put()},
   put(){try{localStorage.setItem(this.key,JSON.stringify(this.data))}catch(e){}}};
 Save.load();
 
@@ -3647,6 +3650,18 @@ Test.add('Save.load migrates an existing v1 localStorage value without throwing'
     Save.load();
     eq(Save.data.v,2);eq(Save.data.gold,5);eq(Save.data.units,2);eq(Save.data.mute,true);
     eq(Save.data.roster.carl.stars,1)
+  }finally{
+    if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
+    Save.load()}});
+// Fix round 1: Save.load used to migrate only in memory, never writing the upgraded v2 shape back
+// to localStorage — so a v1 save stayed v1 on disk forever, re-migrating (and paying its reset
+// costs, e.g. roster) on every single load. Save.load now persists via put() after migrating.
+Test.add('Save.load persists the migrated v2 shape back to localStorage',()=>{
+  const backup=localStorage.getItem(Save.key);
+  try{
+    localStorage.setItem(Save.key,JSON.stringify({v:1,gold:5,units:2,roster:{},mute:true,settings:{}}));
+    Save.load();
+    eq(JSON.parse(localStorage.getItem(Save.key)).v,2,'localStorage must hold the migrated v2 save, not the original v1 one')
   }finally{
     if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
     Save.load()}});

@@ -10,7 +10,7 @@ const Meta={
       roster:{carl:{stars:1,rank:1,level:1,xp:0,shards:0}},
       active:'carl',
       floors:{1:{nodes:['open','locked','locked','locked','locked'],boss:'locked'}},
-      energy:{n:10,max:10,ts:0},
+      energy:{n:Energy.max,max:Energy.max,ts:0},
       arena:{best:0,streak:0},
       mute:false,settings:{},stats:{fights:0,wins:0}}},
   // v1 -> v2: keep gold/units/mute/settings, everything else starts fresh (including roster, which
@@ -45,12 +45,15 @@ const Stats={
   derive(def,entry){
     const mul=(1+.25*(entry.stars-1))*(1+.10*(entry.rank-1))*(1+.01*(entry.level-1));
     return{hp:Math.round(def.hp*mul),atk:Math.round(def.atk*mul)}}};
+// Energy.max is the single source of truth for the energy cap (Save.data.energy.max is only a
+// mirror of it, set from here in Meta.defaults, kept in the save shape for Screens to read later —
+// tick/spend never read e.max so there is exactly one place this constant can drift from).
 const Energy={
   now:()=>Date.now(),
   max:10,
   tick(){
     const e=Save.data.energy;
-    const regen=Math.min(Math.floor((Energy.now()-e.ts)/360000),e.max-e.n);
+    const regen=Math.min(Math.floor((Energy.now()-e.ts)/360000),Energy.max-e.n);
     if(regen>0){e.n+=regen;e.ts+=regen*360000}
     return e.n},
   spend(n){
