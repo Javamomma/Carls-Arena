@@ -1010,10 +1010,19 @@ POSES.heavyCharge=[
 // just never checked against the old HUD test (which only sampled 'heavyCharge'/'s3'), so this near-
 // vertical raise went untrimmed until the "every pose of every look" test (90_tests.js) started
 // walking it too and found Carl's own hand above HUD_LINE at his ordinary (non-cinematic) zoom cap —
-// see that test's pinning check. Still a clear overhead wind-up, just short of vertical, matching
-// heavyCharge's own read.
+// see that test's pinning check.
+// Task 3.6 heavy-pose check: the "pin ordinary-pair caps" commit (caab728) trimmed t:0's rShoulder
+// further still, to 96 — past the point this comment's own "128, still a clear overhead wind-up"
+// claim covered, and without updating this comment. At 96, docs/shots/p2-heavy.png read as a level
+// forward reach nearly identical to light3's own peak shoulder angle (95, see POSES.light3), not an
+// overhead wind-up at all. Raised back to 118 — the largest value that still keeps 'carl/hobgoblin/
+// katia/donut/goblin pairings pin the zoom cap at exactly 1.12/1.28' green (90_tests.js; 119 fails
+// it) — which reads as a raised, cocked-back wind-up clearly above light3's horizontal reach, though
+// short of a fully vertical cock. 118 is a hard ceiling set by Carl's own reach against the dynamic
+// zoom cap (Rig.extent), not an aesthetic choice; a more vertical wind-up would need either a shorter
+// reach elsewhere in this pose or slack in the 1.12/1.28 pin itself.
 POSES.heavy=[
-  {t:0, ang:{torso:D(-18),rShoulder:D(96),rElbow:D(-4),rHip:D(-8), lHip:D(8)},off:{x:-8,y:4}},
+  {t:0, ang:{torso:D(-18),rShoulder:D(118),rElbow:D(-4),rHip:D(-8), lHip:D(8)},off:{x:-8,y:4}},
   {t:.5,ang:{torso:D(26), rShoulder:D(48), rElbow:D(18),rHip:D(22), lHip:D(-8),rKnee:D(-14)},off:{x:16,y:9}},
   {t:1, ang:{torso:D(10), rShoulder:D(75), rElbow:D(30),rHip:D(8),  lHip:D(-4)},off:{x:6,y:2}}];
 POSES.block=[
