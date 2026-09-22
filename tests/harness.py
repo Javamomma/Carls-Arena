@@ -15,6 +15,31 @@ from playwright.sync_api import sync_playwright
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INDEX = 'file://' + os.path.join(ROOT, 'index.html')
 
+def build_soak_js(seed, p1n, p2n, ain, ctrl_expr, ticks, enc='', probes=()):
+    """The one restart-on-KO soak loop, shared by run_matrix_cell and the plain `--sim` path: a
+    single in-page evaluate() that starts a fight, steps it G.tick() at a time for `ticks` sim
+    frames, and restarts on KO (a fresh seed each time) the instant G.state hits RESULT so a KO
+    is caught the very next tick, not at the next batch/probe boundary. `ctrl_expr` is a raw JS
+    expression for p1's controller (it's built inside `start=seed=>...`, so it may reference that
+    closure's `seed` param to get a fresh Ctrl.random() draw per restart). `probes` are raw JS
+    expressions sampled once every 60 ticks (one simulated second) into a returned {expr: [...]}
+    map, matching the old per-second Python-side sampling cadence.
+    """
+    probe_init = ','.join('%s:[]' % json.dumps(e) for e in probes)
+    probe_push = ''.join('probes[%s].push(%s);' % (json.dumps(e), e) for e in probes)
+    return ("(()=>{G.sim=true;let s=%d,fights=1,framesTotal=0,p1wins=0,ticks=%d;"
+            "const probes={%s};"
+            "const start=seed=>G.startFight({seed,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s%s});"
+            "start(s);"
+            "for(let i=0;i<ticks;i++){G.tick();"
+            "if((i+1)%%60===0){%s}"
+            "if(G.state==='RESULT'){framesTotal+=G.fight.frame;"
+            "if(G.fight.winner&&G.fight.winner.side===1)p1wins++;"
+            "s++;fights++;start(s)}}"
+            "framesTotal+=G.fight.frame;"
+            "return{fights,framesTotal,p1wins,probes}})()"
+            ) % (seed, ticks, probe_init, p1n, p2n, ain, ctrl_expr, enc, probe_push)
+
 def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
     """One soak cell: a fresh page, p1 on Ctrl.random(seed), p2 on AI.make(ain). The whole
     restart-on-KO loop runs as a single in-page evaluate() so a KO is caught the very next tick
@@ -26,16 +51,7 @@ def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
     pg.on('console', lambda m: cell_errors.append(m.text) if m.type == 'error' else None)
     pg.goto(INDEX)
     pg.wait_for_function('typeof G!=="undefined"')
-    js = ("(()=>{G.sim=true;let s=%d,fights=1,framesTotal=0,p1wins=0,ticks=%d;"
-          "const start=seed=>G.startFight({seed,p1:'%s',p2:'%s',ai:'%s',ctrl1:Ctrl.random(seed)});"
-          "start(s);"
-          "for(let i=0;i<ticks;i++){G.tick();"
-          "if(G.state==='RESULT'){framesTotal+=G.fight.frame;"
-          "if(G.fight.winner&&G.fight.winner.side===1)p1wins++;"
-          "s++;fights++;start(s)}}"
-          "framesTotal+=G.fight.frame;"
-          "return{fights,framesTotal,p1wins}})()"
-          ) % (seed, int(sim_seconds * 60), p1n, p2n, ain)
+    js = build_soak_js(seed, p1n, p2n, ain, 'Ctrl.random(seed)', int(sim_seconds * 60))
     r = pg.evaluate(js)
     pg.close()
     return {'p1': p1n, 'p2': p2n, 'ai': ain, 'seed': seed, 'fights': r['fights'], 'p1wins': r['p1wins'],
@@ -171,26 +187,16 @@ def main():
             sys.exit(1 if errors or console else 0)
         probes = {e: [] for e in a.probe}
         if a.sim:
-            # G.state goes to RESULT on KO and stepFrame() is a no-op unless state is FIGHT, so a
-            # long soak that KOs early would otherwise spend the rest of its budget doing nothing.
-            # Keep restarting with a fresh seed and accumulate real simulated frames across fights.
-            seed = a.seed
-            fights = 1
-            frames_total = 0
-            for _ in range(int(a.seconds)):
-                pg.evaluate('G.simFrames(60)')
-                for e in a.probe:
-                    probes[e].append(pg.evaluate(e))
-                if pg.evaluate('G.state') == 'RESULT':
-                    frames_total += pg.evaluate('G.fight.frame')
-                    seed += 1
-                    fights += 1
-                    ctrl2 = 'Ctrl.random(%d)' % seed if a.bot == 'random' else 'Ctrl.idle()'
-                    pg.evaluate("G.startFight({seed:%d,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s%s})"
-                                % (seed, a.p1, a.p2, a.ai, ctrl2, enc))
-            frames_total += pg.evaluate('G.fight.frame')
-            out['frames_total'] = frames_total
-            out['fights'] = fights
+            # Same restart-on-KO in-page loop run_matrix_cell uses (build_soak_js): one evaluate()
+            # steps G.tick() for the whole requested duration, restarting with a fresh seed the
+            # instant G.state hits RESULT (not at the next 60-tick/probe boundary as the old
+            # per-second Python loop did), and samples --probe expressions once per simulated second.
+            ctrl_expr = 'Ctrl.random(seed)' if a.bot == 'random' else 'Ctrl.idle()'
+            js = build_soak_js(a.seed, a.p1, a.p2, a.ai, ctrl_expr, int(a.seconds * 60), enc, a.probe)
+            r = pg.evaluate(js)
+            out['frames_total'] = r['framesTotal']
+            out['fights'] = r['fights']
+            probes = r['probes']
         else:
             t0 = time.time()
             while time.time() - t0 < a.seconds:
