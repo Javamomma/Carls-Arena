@@ -218,8 +218,18 @@ const Crystal={
     // pull's luck isn't wasted against a counter that only ever reset on a forced pity trigger.
     else if(stars>=topTier)Save.data.pity[kind]=0;
     else Save.data.pity[kind]=pity;
-    const champId=rng.pick(Object.keys(CHAMPS));
     const roster=Save.data.roster;
+    // Fix-wave item 7 (final review, Important): opts.guaranteeNew (default falsy) picks the champion
+    // uniformly from CHAMPS ids NOT already in the roster, while any remain -- used by the tutorial's
+    // own free completion crystal (G.startTutorial's playerBuffs/G.onFightEnd's Crystal.open('basic',
+    // {free:true,guaranteeNew:true})) so "the roster grows to 2" is an actual guarantee, not a
+    // roll that happens to land on a fresh champion because Save.data.seed defaults to 1. Falls back
+    // to picking from every CHAMPS id (the pre-existing behavior, a legitimate dup roll) once the
+    // roster already owns all of them -- same rng instance either way, so this still only ever draws
+    // once per open.
+    const guaranteeNew=!!(opts&&opts.guaranteeNew);
+    const notOwned=guaranteeNew?Object.keys(CHAMPS).filter(id=>!roster[id]):null;
+    const champId=(notOwned&&notOwned.length)?rng.pick(notOwned):rng.pick(Object.keys(CHAMPS));
     let result;
     if(roster[champId]){
       const entry=roster[champId];

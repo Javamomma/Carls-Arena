@@ -712,15 +712,18 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // actually granted it" story -- null on a replay (Screens.renderResult reads it to show the
       // pull's own result line only on the win that earned it, and Screens.renderMap reads
       // tutorialJustGranted, not this, to decide whether to pulse DOOR 1). Crystal.open('basic',
-      // {free:true}) skips the cost entirely (12_meta.js) -- a fresh save has 0 gold at this point, and
-      // the +300 gold grant just below happens in the same branch, so ordering here doesn't matter for
-      // affordability either way; free just makes it explicit and immune to a future cost retune.
+      // {free:true,guaranteeNew:true}) skips the cost entirely (12_meta.js) -- a fresh save has 0 gold
+      // at this point, and the +300 gold grant just below happens in the same branch, so ordering here
+      // doesn't matter for affordability either way; free just makes it explicit and immune to a
+      // future cost retune. Fix-wave item 7 (final review, Important): guaranteeNew:true makes "the
+      // roster grows to 2" an actual guarantee (picks uniformly from CHAMPS ids not yet owned) instead
+      // of something that only worked because Save.data.seed happened to default to 1 and roll Katia.
       this.tutorialFreeCrystal=null;
       if(!Save.data.tutorialDone){
         Save.data.tutorialDone=true;
         Save.data.gold=(Save.data.gold||0)+300;
         Save.put();
-        this.tutorialFreeCrystal=Crystal.open('basic',{free:true})}}
+        this.tutorialFreeCrystal=Crystal.open('basic',{free:true,guaranteeNew:true})}}
     let leveledUp=false;
     if(rewards){
       // Fix round 1: reads this.champ (the champion who actually fought), not Save.data.active --

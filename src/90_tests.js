@@ -1362,6 +1362,27 @@ Test.add('Crystal.open pity counter resets after triggering',()=>{
   Save.data=Meta.defaults();Save.data.gold=999999;Save.data.pity.basic=9;
   Crystal.open('basic');
   eq(Save.data.pity.basic,0)});
+// Fix-wave item 7 (final review, Important): opts.guaranteeNew picks uniformly from CHAMPS ids NOT
+// already in the roster, while any remain -- "the roster grows to 2" used to only work because
+// Save.data.seed defaulted to 1 and deterministically rolled Katia; any change to the default seed or
+// pull order would have silently broken it. Checked across seeds 1..20 (the frozen "guaranteed" bar).
+Test.add('Crystal.open(kind,{free:true,guaranteeNew:true}) always grows a fresh roster to 2, seeds 1..20',()=>{
+  for(let seed=1;seed<=20;seed++){
+    Save.data=Meta.defaults();Save.data.seed=seed;
+    eq(Object.keys(Save.data.roster).length,1,'sanity: a fresh save starts with exactly 1 champion, seed '+seed);
+    const r=Crystal.open('basic',{free:true,guaranteeNew:true});
+    ok(r,'open must succeed, seed '+seed);
+    eq(r.dup,false,'guaranteeNew must never land on an already-owned champion while one remains, seed '+seed);
+    eq(Object.keys(Save.data.roster).length,2,'the roster must grow to exactly 2, seed '+seed)}});
+Test.add('guaranteeNew falls back to a normal (possibly dup) pick once every CHAMPS id is already owned',()=>{
+  Save.data=Meta.defaults();
+  for(const id of Object.keys(CHAMPS))
+    Save.data.roster[id]=Save.data.roster[id]||{stars:1,rank:1,level:1,xp:0,shards:0};
+  const before=Object.keys(Save.data.roster).length;
+  const r=Crystal.open('basic',{free:true,guaranteeNew:true});
+  ok(r,'open must still succeed once every champion is already owned');
+  eq(Object.keys(Save.data.roster).length,before,'no new roster slot -- nothing left to guarantee');
+  ok(r.dup,'the result must read as an ordinary dup once every champion is owned')});
 // Ruled alongside item 4: a NATURAL top-tier roll (the raw table hitting the top tier on its own,
 // well before the pity counter reaches 10) also resets pity, the same as a pity-forced one -- a
 // player who gets lucky shouldn't have that luck "wasted" against a counter that only reset on a
