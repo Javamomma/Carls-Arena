@@ -899,7 +899,18 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // belt-and-suspenders on top of onEvent only ever arming it while !this.sim in the first place
       // (frozen ruling: "in --sim/headless mode it is a no-op", so a batch/headless replay's own
       // win-rate table stays bit-identical to a pre-Task-7.4 run no matter how many intercepts land).
-      else if(this.dilate>0&&!this.sim){if(++this._dilateN%2===0){f.step();this.dilate--;Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}}
+      // Fix-wave item 1 (final review I1): hitstop and dilate used to race each other -- the branch
+      // below spent this.dilate on every "every-other-real-tick" beat regardless of whether hitstop
+      // was still counting down, so an intercept's own 10-frame hitstop (60_fight.js) could (and did)
+      // burn through the whole 6-tick dilation budget while the sim sat frozen, leaving nothing left
+      // to actually stretch once hitstop cleared. Now: while hitstop is still >0, step every real
+      // tick (same as the plain else branch below) WITHOUT touching dilate/_dilateN at all, so the
+      // budget is untouched until the freeze is over; only once f.hitstop===0 does the every-other-
+      // real-tick spend (this._dilateN) begin, so the dilation always plays out as sim motion, never
+      // as extra frozen ticks.
+      else if(this.dilate>0&&!this.sim){
+        if(f.hitstop>0){f.step();Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}
+        else if(++this._dilateN%2===0){f.step();this.dilate--;Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}}
       else{f.step();Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}
       this.frameNow=f.frame;
       this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);

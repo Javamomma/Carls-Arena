@@ -4378,6 +4378,28 @@ Test.add('a real (non-sim) intercept lands still steps through G.tick end to end
   ok(f.log.some(e=>e.type==='intercept'),'sanity: the scripted exchange must have actually produced an intercept');
   eq(G.dilate,0,'dilate must have fully drained back to 0 well within 60 real ticks');
   G.fight=null;G.state='TITLE';G.sim=false});
+// Fix-wave item 1 (final review I1): the 6-tick dilation window must be SPENT only once hitstop has
+// cleared (the sim ticks it stretches must actually be ticks that move the sim), not raced against
+// hitstop's own countdown -- see this test's own name and G.tick's own comment for the mechanism.
+Test.add('fix-wave I1: intercept dilation is spent only once hitstop clears -- fight.frame actually advances on the dilated ticks instead of being swallowed by the freeze',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}]),
+    onEvent:(t,a,b,v)=>G.onEvent(t,a,b,v)});
+  closeIn(f);
+  G.fight=f;G.state='FIGHT';G.sim=false;G.dilate=0;G._dilateN=0;G._tickN=0;
+  let iters=0;
+  while(!f.log.some(e=>e.type==='intercept')&&iters<60){G.tick();iters++}
+  ok(f.log.some(e=>e.type==='intercept'),'sanity: the scripted exchange must have produced a real intercept');
+  ok(G.dilate>0&&f.hitstop>0,'sanity: dilate must be armed while hitstop is still active right after the intercept lands');
+  // Drain hitstop first -- none of these ticks may spend the dilation budget.
+  while(f.hitstop>0&&iters<100)G.tick(),iters++;
+  eq(f.hitstop,0,'hitstop must fully clear before dilation starts spending its own budget');
+  eq(G.dilate,6,'the dilation budget must still be the full 6 ticks -- none of it may be spent while hitstop was still counting down');
+  let advancing=0,realTicks=0;
+  while(G.dilate>0&&iters<100){const before=f.frame;G.tick();iters++;realTicks++;if(f.frame>before)advancing++}
+  ok(advancing>=3,'fight.frame must advance on at least 3 of the dilated ticks, got '+advancing);
+  eq(advancing,6,'all 6 dilated ticks must eventually move the sim once hitstop has cleared, got '+advancing);
+  eq(realTicks,12,'6 sim ticks stretched over double the real ticks (half rate) means exactly 12 real G.tick() calls after the hitstop ends, got '+realTicks);
+  G.fight=null;G.state='TITLE';G.sim=false});
 // Task 7.4 (frozen ruling): --sim/batch determinism -- this whole task is presentation-only, so a
 // fight driven purely through Fight.step() (never through G.tick/FX, exactly what tests/batch.py's
 // own win-rate sweeps and the harness's --sim soak both do) must be bit-identical to the pre-Task-7.4
