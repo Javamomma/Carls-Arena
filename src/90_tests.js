@@ -526,7 +526,10 @@ Test.add('FX updates and expires particles deterministically',()=>{FX.reset();FX
 Test.add('on-screen buttons map to intents',()=>{Input.q.length=0;const btn=id=>document.getElementById(id);ok(btn('btnBlock')&&btn('btnPunch')&&btn('btnKick')&&btn('btnPower'));btn('btnPunch').dispatchEvent(new PointerEvent('pointerdown',{pointerId:7,bubbles:true}));btn('btnKick').dispatchEvent(new PointerEvent('pointerdown',{pointerId:8,bubbles:true}));ok(Input.q.includes('light')&&Input.q.includes('medium'));btn('btnBlock').dispatchEvent(new PointerEvent('pointerdown',{pointerId:9,bubbles:true}));eq(Input.held.block,true);btn('btnBlock').dispatchEvent(new PointerEvent('pointerup',{pointerId:9,bubbles:true}));eq(Input.held.block,false);Input.q.length=0});
 Test.add('POWER tap fires the highest affordable special',()=>{const f=mkFight();G.fight=f;f.p1.power=250;Input.q.push('powerAuto');eq(Input.drain().special,2);f.p1.power=50;Input.q.push('powerAuto');eq(Input.drain().special,0);G.fight=null});
 Test.add('encounter resolves floor, name and enemy def',()=>{const e=Encounter.resolve('f1_goblin');eq(e.floor,1);eq(e.name,'THE DEPTHS');eq(e.enemy.id,'goblin');const o=Encounter.resolve({floor:3,name:'X',enemy:'hobgoblin',tier:'brawl'});eq(o.enemy.hp,DEFS.hobgoblin.hp)});
-Test.add('startFight with an encounter sets p2 to the mob and scales hp',()=>{G.startFight({encounter:{floor:2,name:'T',enemy:'goblin',tier:'dummy',hpMul:2,atkMul:1},ctrl1:Ctrl.idle()});eq(G.fight.p2.def.id,'goblin');eq(G.fight.p2.maxHp,600);eq(G.encounter.floor,2);G.toTitle()});
+// Task 6.1: hpMul:2 was pinned against the pre-Phase-6 goblin hp (300*2=600); the mob tuning pass
+// raised DEFS.goblin.hp to 360, so the expected scaled value is computed off the live def instead of
+// re-pinning another literal that the next balance pass would just have to re-derive again.
+Test.add('startFight with an encounter sets p2 to the mob and scales hp',()=>{G.startFight({encounter:{floor:2,name:'T',enemy:'goblin',tier:'dummy',hpMul:2,atkMul:1},ctrl1:Ctrl.idle()});eq(G.fight.p2.def.id,'goblin');eq(G.fight.p2.maxHp,DEFS.goblin.hp*2);eq(G.encounter.floor,2);G.toTitle()});
 Test.add('every move has a sound recipe and announcer lines exist per kind',()=>{for(const k in MOVES)ok(typeof Audio.recipes[k]==='function',k);for(const k of ['start','streak3','streak5','streak10','parry','special','win','loss'])ok(Lines[k]&&Lines[k].length>=8,k)});
 Test.add('announce picks deterministically from any RNG and throttles',()=>{const r1=RNG(5),r2=RNG(5);eq(Audio.pickLine('parry',r1),Audio.pickLine('parry',r2));G._sayAt=-999;G.frameNow=100;G.say('a');eq(document.getElementById('toast').textContent,'a');G.say('b');eq(document.getElementById('toast').textContent,'a');G.frameNow=200;G.say('b');eq(document.getElementById('toast').textContent,'b')});
 Test.add('announcer lines do not change the fight',()=>{
@@ -804,6 +807,28 @@ Test.add('every FLOORS node except two has at least one buff',()=>{
     for(const nid of fl.nodes){if(Encounter.resolve(nid).buffIds.length===0)noBuff++}
     ok(Encounter.resolve(fl.boss).buffIds.length>=1,fl.boss+' (boss) must have at least one buff')}
   eq(noBuff,2,'exactly two FLOORS nodes should ship with no buff')});
+// Task 6.1, ruling 3: floor 1's original order (goblin, skeleton, hobgoblin, shaman, goblin2) put the
+// 700 hp brute at door 3 -- "Hobgoblin Brute is impossible to defeat" (owner playtest note). Reordered
+// so the brute is the floor's hardest fight at door 5, gated behind a REC. LVL hint, and f1_goblin2
+// (already an ENCOUNTERS entry, but at tier t3) drops to tier t2 to actually clear the ≥85% door-3 bar.
+Test.add('floor 1 door order is goblin, skeleton, goblin2, shaman, hobgoblin, each with the frozen recLevel',()=>{
+  eq(FLOORS[0].nodes.join(','),'f1_goblin,f1_skel,f1_goblin2,f1_shaman,f1_hob');
+  const want={f1_goblin:1,f1_skel:1,f1_goblin2:2,f1_shaman:3,f1_hob:4,f1_grull:4};
+  for(const id in want)eq(ENCOUNTERS[id].recLevel,want[id],id+' recLevel');
+  eq(ENCOUNTERS.f1_goblin2.tier,'t2','door 3 must be an easy tier so a level-1 human can clear it')});
+Test.add('floor 2 encounters carry a sensible recLevel ramp (4,5,5,6,6, boss 7)',()=>{
+  const want={f2_grub:4,f2_skel2:5,f2_shaman2:5,f2_hob2:6,f2_grub2:6,f2_mother:7};
+  for(const id in want)eq(ENCOUNTERS[id].recLevel,want[id],id+' recLevel')});
+// Task 6.1, ruling 3: playtest-note tuning -- goblin/skeleton hp raised and atk lowered exactly to
+// the plan's given numbers (longer, safer early fights instead of fast trades). hobgoblin/shaman
+// needed MORE than the plan's own ±15% hp/atk latitude to actually land in the door-4/5 40-70%
+// win-rate band against tests/batch.py's Ctrl.competent bot -- see 40_movedata.js's MOBS comment
+// (and docs/ARENA.md's Task 6.1 entry) for the documented tuning trail this pins the destination of.
+Test.add('floor-1 mob tuning: goblin/skeleton/shaman/hobgoblin hp and atk match the Phase 6 rebalance',()=>{
+  eq(DEFS.goblin.hp,360);eq(DEFS.goblin.atk,30);
+  eq(DEFS.skeleton.hp,320);eq(DEFS.skeleton.atk,28);
+  eq(DEFS.shaman.hp,820);eq(DEFS.shaman.atk,36);eq(DEFS.shaman.armor,.15);eq(DEFS.shaman.blockProf,.25);
+  eq(DEFS.hobgoblin.hp,736);eq(DEFS.hobgoblin.atk,52)});
 Test.add('G.startFight({...,playerBuffs}) applies to p1 via the same Buffs.apply the enemy path uses',()=>{
   G.startFight({p1:'carl',p2:'donut',ai:'dummy',playerBuffs:['powerGain','armorUp']});
   eq(G.fight.p1.buffs.length,2);
@@ -1803,7 +1828,7 @@ Test.add('every Phase 4 screen\'s DOM ids exist',()=>{
     'rosterCards','rosterBack','crystalCards','crystalBack',
     'shopCurrency','shopCards','shopBack',
     'arenaStreak','arenaBest','arenaEnemy','arenaFight','arenaBack',
-    'resultTitle','resultLine','again','resultTitleBtn'];
+    'resultTitle','resultLine','again','resultTitleBtn','titleBtn'];
   for(const id of ids)ok(document.getElementById(id),'#'+id+' must exist')});
 Test.add('G.bootScreens() binds the title screen\'s buttons on real page load (fix round 1, Critical: they were unbound until some other Screens.* function had run once -- Screens.renderTitle is the only place they get an onclick, and nothing called any Screens function at boot)',()=>{
   Screens._current=null;                       // simulate a fresh load: no Screens.* has rendered yet
@@ -1845,6 +1870,33 @@ Test.add('the map screen\'s energy pip row has energy.max pips, energy.n of them
   const pips=[...document.querySelectorAll('#mapEnergy .pip')];
   eq(pips.length,Save.data.energy.max);
   eq(pips.filter(p=>p.classList.contains('full')).length,3);
+  Screens.title()});
+// Task 6.1, ruling 3: "recommended LVL 4" hint (owner playtest note on the hobgoblin) -- every door,
+// open or not, shows a small REC. LVL n line under its label so a player can see the climb ahead
+// without opening it; .under (red) marks a door above the active champion's current level, but never
+// disables it (still enterable -- a strong player can push through early).
+Test.add('map doors show REC. LVL n under the label, with .under when the active champion is below it',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster.carl.level=1;
+  Screens.map(1);
+  const f=FLOORS[0];
+  const nodeEls=[...document.querySelectorAll('#mapPath .node:not(.boss)')];
+  eq(nodeEls.length,f.nodes.length);
+  nodeEls.forEach((el,i)=>{
+    const enc=ENCOUNTERS[f.nodes[i]];
+    const hint=el.querySelector('.reclvl');
+    ok(hint,'door '+i+' must show a REC. LVL hint');
+    eq(hint.textContent,'REC. LVL '+enc.recLevel);
+    eq(hint.classList.contains('under'),1<enc.recLevel,'door '+i+' .under must match level(1) < recLevel('+enc.recLevel+')')});
+  const bossEl=document.querySelector('#mapPath .node.boss');
+  const bossHint=bossEl.querySelector('.reclvl');
+  ok(bossHint,'boss door must show a REC. LVL hint');
+  eq(bossHint.textContent,'REC. LVL '+ENCOUNTERS[f.boss].recLevel);
+  ok(bossHint.classList.contains('under'));
+  Save.data.roster.carl.level=10; // well above every floor-1 recLevel: no door should read .under
+  Screens.map(1);
+  for(const el of document.querySelectorAll('#mapPath .node'))
+    ok(!el.querySelector('.reclvl').classList.contains('under'),'a level-10 champion must clear every floor-1 hint');
   Screens.title()});
 // Fix-wave item 3 (Important): six node rows (5 doors + boss) at the old 44px min-height + 5x6px
 // gaps summed to 294px into a 272px #mapPath box, so `overflow:hidden` clipped both ends -- BOSS cut
@@ -2065,6 +2117,91 @@ Test.add('Screens.result({gold,iso,xp},true) fills VICTORY and the reward line',
 Test.add('Screens.result(null,false) fills DEFEATED with no reward line',()=>{
   Screens.result(null,false);
   eq(document.getElementById('resultTitle').textContent,'DEFEATED');
+  Screens.title()});
+// Task 6.1: playtest note "No way to exit it seems after a defeat" -- CONTINUE (resultTitleBtn) was
+// already wired to G.backToOrigin() and did navigate correctly on a scripted repro, but the result
+// overlay had no SEPARATE, unconditional exit: only one combined button, always labeled CONTINUE,
+// always routing through Screens._origin. The frozen Phase 6 interface requires a second button,
+// TITLE, always present and always going straight to the title screen regardless of origin state --
+// a guaranteed escape hatch a broken/stale _origin can't defeat. FIGHT AGAIN's own visibility also
+// changes here (frozen: "only for exhibition and arena wins") -- previously shown on any quest loss
+// or any exhibition/arena outcome including a loss.
+Test.add('after a scripted quest LOSS, CONTINUE returns to the map and TITLE returns to the title; FIGHT AGAIN is hidden',()=>{
+  Save.data=Meta.defaults();
+  Screens.map(1);
+  document.querySelectorAll('#mapPath .node:not(.boss)')[0].click(); // sets origin map/1
+  G.toTitle();
+  G.startFight({floor:1,node:0,champ:'carl',ctrl2:AI.make('basic',9),seed:3});
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(document.getElementById('resultTitle').textContent,'DEFEATED');
+  eq(document.getElementById('again').style.display,'none','FIGHT AGAIN must be hidden for quest');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'map');eq(Screens._floor,1);
+  // Re-fight the same (still-open) node so TITLE gets its own independent RESULT screen to click from.
+  G.startFight({floor:1,node:0,champ:'carl',ctrl2:AI.make('basic',9),seed:3});
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  document.getElementById('titleBtn').click();
+  eq(Screens._current,'title');
+  G.sim=false});
+Test.add('after a scripted exhibition LOSS, both CONTINUE and TITLE return to the title; FIGHT AGAIN is hidden',()=>{
+  Save.data=Meta.defaults();
+  Screens.title();Screens._origin={name:'title'}; // matches EXHIBITION's own onclick (85_screens.js)
+  G.startFight({ctrl2:AI.make('basic',9),seed:3});
+  eq(G.mode,'exhibition');
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(document.getElementById('again').style.display,'none','FIGHT AGAIN must be hidden on an exhibition loss');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'title');
+  G.startFight({ctrl2:AI.make('basic',9),seed:3});
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600&&G.state!=='RESULT';i++)G.tick();
+  document.getElementById('titleBtn').click();
+  eq(Screens._current,'title');
+  G.sim=false});
+Test.add('after a scripted arena LOSS, CONTINUE returns to the arena panel and TITLE returns to the title; FIGHT AGAIN is hidden',()=>{
+  Save.data=Meta.defaults();
+  Screens.arena();Screens._origin={name:'arena'}; // matches arenaFight's own onclick (85_screens.js)
+  G.startArena({ctrl2:AI.make('basic',9),seed:3});
+  eq(G.mode,'arena');
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(document.getElementById('again').style.display,'none','FIGHT AGAIN must be hidden on an arena loss');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'arena');
+  G.startArena({ctrl2:AI.make('basic',9),seed:3});
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600&&G.state!=='RESULT';i++)G.tick();
+  document.getElementById('titleBtn').click();
+  eq(Screens._current,'title');
+  G.sim=false});
+// The tutorial's own player buff (BUFFS.noKo, applied by G.startTutorial) makes a REAL tutorial loss
+// unreachable -- p1 cannot be KO'd mid-lesson by design (Task 5.3). Scripted directly through
+// Screens.result(), the same low-level technique the two unit tests just above this block already
+// use, so the defensive CONTINUE/TITLE/no-FIGHT-AGAIN behavior is still pinned for this mode/won
+// combination even though no real fight can produce it.
+Test.add('a forced tutorial-mode LOSS result still shows working CONTINUE/TITLE with FIGHT AGAIN hidden',()=>{
+  const prevMode=G.mode;
+  try{
+    G.mode='tutorial';
+    Screens._origin={name:'map',args:[1]};
+    Screens.result(null,false);
+    eq(document.getElementById('resultTitle').textContent,'DEFEATED');
+    eq(document.getElementById('again').style.display,'none','FIGHT AGAIN must be hidden in tutorial mode');
+    document.getElementById('resultTitleBtn').click();
+    eq(Screens._current,'map');eq(Screens._floor,1);
+    G.mode='tutorial';
+    Screens._origin={name:'map',args:[1]};
+    Screens.result(null,false);
+    document.getElementById('titleBtn').click();
+    eq(Screens._current,'title')
+  }finally{G.mode=prevMode}
   Screens.title()});
 Test.add('starting a fight from any browsing screen hides that screen (it must not linger over the fight)',()=>{
   Save.data=Meta.defaults();

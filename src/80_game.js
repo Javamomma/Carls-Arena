@@ -795,15 +795,22 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // lastFightOpts (still carrying the stale encounter/mode) is safe -- the trailing
     // {encounter,mode} in that assign always wins over whatever o.encounter/o.mode already were.
     // Quest mode is unaffected: it keeps replaying lastFightOpts's {floor,node} sugar directly through
-    // startFight below, which re-spends energy and re-checks the lock via the real Quest.start path
-    // (FIGHT AGAIN is only ever shown for a quest LOSS -- see Screens.renderResult -- so the node is
-    // still 'open' and this is exactly the intended retry).
+    // startFight below, which re-spends energy and re-checks the lock via the real Quest.start path.
+    // Task 6.1 (frozen Phase 6 interface): FIGHT AGAIN is now only ever SHOWN for an exhibition or
+    // arena WIN (Screens.renderResult decides visibility) -- quest and tutorial never show it, and
+    // neither does an exhibition/arena LOSS. This handler itself stays mode-generic (not gated on
+    // won/mode) since it's only ever reachable through a click when the button is actually visible.
     document.getElementById('again').onclick=()=>{
       const opts=Object.assign({},this.lastFightOpts,{seed:this.fight?this.fight.rng.int(1e9)+1:this.seed});
       if(this.mode==='arena')this.startArena(opts);else this.startFight(opts)};
     document.getElementById('resultTitleBtn').onclick=()=>this.backToOrigin();
+    // Task 6.1 (owner playtest note: "No way to exit it seems after a defeat"): TITLE is a second,
+    // unconditional exit off the result overlay, always visible (Screens.renderResult never hides
+    // it), always going straight to the title screen -- independent of Screens._origin, so it can't
+    // be defeated by anything wrong with CONTINUE's own origin routing.
+    document.getElementById('titleBtn').onclick=()=>this.toTitle();
     // Task 5.4: SHARE (result overlay, static markup, bound once here — same pattern as 'again'/
-    // 'resultTitleBtn' above, not re-bound per Screens.renderResult() call).
+    // 'resultTitleBtn'/'titleBtn' above, not re-bound per Screens.renderResult() call).
     document.getElementById('shareBtn').onclick=()=>this.share();
     document.getElementById('resume').onclick=()=>this.togglePause();
     document.getElementById('quit').onclick=()=>this.backToOrigin();

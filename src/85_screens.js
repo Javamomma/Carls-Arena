@@ -163,14 +163,14 @@ const Screens={
       f.nodes.forEach((node,i)=>{
         const b=document.createElement('button');
         b.className='node '+node.state;
-        b.textContent='DOOR '+(i+1);
+        b.appendChild(Screens.doorStack('DOOR '+(i+1),node.enc));
         b.disabled=node.state!=='open';
         b.onclick=()=>{Screens._origin={name:'map',args:[n]};
           G.startFight({floor:n,node:i,champ:Save.data.active})};
         path.appendChild(b)});
       const boss=document.createElement('button');
       boss.className='node boss '+f.boss.state;
-      boss.textContent='BOSS';
+      boss.appendChild(Screens.doorStack('BOSS',f.boss.enc));
       boss.disabled=f.boss.state!=='open';
       boss.onclick=()=>{Screens._origin={name:'map',args:[n]};
         G.startFight({floor:n,node:'boss',champ:Save.data.active})};
@@ -184,6 +184,24 @@ const Screens={
     // writer, and only ever sets it, never clears it.
     document.getElementById('mapMsg').textContent='';
     document.getElementById('mapBack').onclick=()=>Screens.title()},
+  // Task 6.1, ruling 3 (owner playtest note: "recommended LVL 4" hint wanted on the hobgoblin): a
+  // door/boss button's label plus a small "REC. LVL n" line under it, red (.under) when the active
+  // roster champion's level is below ENCOUNTERS[encId].recLevel -- purely informational, never
+  // disables the door (still enterable; state/energy gating is the caller's own .disabled, set right
+  // after this in renderMap). Every real FLOORS-referenced encounter carries a recLevel now, but this
+  // stays defensive (no hint span at all) for any future node that doesn't.
+  doorStack(label,encId){
+    const stack=document.createElement('span');stack.className='doorstack';
+    const l=document.createElement('span');l.className='doorlabel';l.textContent=label;stack.appendChild(l);
+    const recLevel=ENCOUNTERS[encId]&&ENCOUNTERS[encId].recLevel;
+    if(recLevel!=null){
+      const entry=Save.data.roster[Save.data.active];
+      const level=entry?entry.level:1;
+      const hint=document.createElement('span');
+      hint.className='reclvl'+(level<recLevel?' under':'');
+      hint.textContent='REC. LVL '+recLevel;
+      stack.appendChild(hint)}
+    return stack},
   // ---- roster --------------------------------------------------------------------------------
   // Fix round 1 (controller review, Important): cards are a single-column, full-width row --
   // portrait | info | a horizontal action row -- so LEVEL UP/RANK UP/SELECT can be real 44px+
@@ -400,20 +418,28 @@ const Screens={
     // since viewers accrue off the fight itself, not off the quest/arena outcome.
     if(this._peakViewers!=null)line=(line?line+'  ':'')+'PEAK VIEWERS '+Render.fmtViewers(this._peakViewers);
     document.getElementById('resultLine').textContent=line;
-    // FIGHT AGAIN replays the exact same options (G.lastFightOpts) -- meaningless right after a
-    // quest win, since that node is now 'done' and Quest.start would just refuse it; hidden then,
-    // shown for every other outcome (a quest loss, any exhibition/arena result).
-    // Fix-wave item 2 (final review, Important): hidden for ANY tutorial-mode result, win or loss --
-    // G.lastFightOpts for a tutorial fight is {encounter:'tutorial',mode:'tutorial',
-    // ctrl2:Ctrl.tutorialDummy(...),playerBuffs:[...,'noKo']}, and FIGHT AGAIN's own handler (G.init,
-    // 80_game.js) always calls startFight(opts) directly, never G.startTutorial(opts) -- so it never
-    // runs Tutorial.reset(), replaying the fight with Tutorial.state already at step 4/"FINISH HIM"
-    // pinned on screen from frame one and p2.guardActive already false. Hidden rather than rerouted
-    // (ruling: CONTINUE already lands on the map -- Screens._origin is set to {name:'map',...} by
-    // every path that starts the tutorial -- so the map's own TUTORIAL button is the one correct way
-    // to replay it).
+    // Task 6.1 (frozen Phase 6 interface): FIGHT AGAIN only for an exhibition or arena WIN --
+    // replaced the old "shown for every outcome except a quest win or any tutorial result" rule,
+    // which is exactly what the owner's "No way to exit it seems after a defeat" playtest note was
+    // running into (a quest LOSS used to show FIGHT AGAIN + one combined CONTINUE/TITLE button with
+    // no dedicated, unconditional exit -- see below). Reasons the old per-mode exceptions no longer
+    // apply, kept for anyone re-deriving this:
+    // - quest: replaying the exact node right after a win is meaningless (Quest.start would refuse
+    //   it, node's already 'done'); replaying after a LOSS is also dropped now -- CONTINUE already
+    //   lands back on the open map node (Screens._origin), one tap into the same retry.
+    // - tutorial: G.lastFightOpts for a tutorial fight is {encounter:'tutorial',mode:'tutorial',
+    //   ctrl2:Ctrl.tutorialDummy(...),playerBuffs:[...,'noKo']}, and FIGHT AGAIN's own handler
+    //   (G.init, 80_game.js) always calls startFight(opts) directly, never G.startTutorial(opts) --
+    //   so it never runs Tutorial.reset(), replaying with Tutorial.state already at step 4/"FINISH
+    //   HIM" pinned on screen and p2.guardActive already false. The map's own always-open TUTORIAL
+    //   row is the one correct way to replay it.
+    // - exhibition/arena LOSS: dropped for the same "CONTINUE/TITLE are enough" reason as quest.
     const again=document.getElementById('again');
-    again.style.display=(G.mode==='tutorial'||(won&&G.mode==='quest'))?'none':'';
-    const cont=document.getElementById('resultTitleBtn');
-    cont.textContent='CONTINUE';
-    cont.onclick=()=>G.backToOrigin()}};
+    again.style.display=(won&&(G.mode==='exhibition'||G.mode==='arena'))?'':'none';
+    // CONTINUE always routes to wherever this fight was launched from (Screens._origin); TITLE
+    // (00_head.html) is a second, unconditional button -- always visible, always straight to the
+    // title screen, win or lose, every mode -- the fix for "No way to exit it seems after a defeat":
+    // a real escape hatch that doesn't depend on _origin resolving correctly. Both buttons' onclick
+    // are already bound once in G.init() (never re-bound here, same as 'again'/'shareBtn' above);
+    // only their text/labels are ever this render's own concern.
+    document.getElementById('resultTitleBtn').textContent='CONTINUE'}};

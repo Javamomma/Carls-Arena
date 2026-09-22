@@ -84,6 +84,13 @@ body.left-handed #powerPicker{right:auto;left:14px}
    unaffected. */
 .node.boss::before{content:'\1F451';margin-right:2px}
 .node.locked::before{content:'\1F512';margin-right:2px}
+/* Task 6.1: doorStack (85_screens.js) nests a door/boss button's label and its "REC. LVL n" hint in
+   their own vertical stack, inside .node's existing flex row (so the boss/locked ::before icon stays
+   inline with the label, unaffected) -- .reclvl is deliberately tiny/muted (informational, not a
+   warning by default); .under (level below recLevel) goes red, still never disables the door. */
+.doorstack{display:flex;flex-direction:column;align-items:center;line-height:1.3}
+.reclvl{font-size:8px;letter-spacing:1px;opacity:.7;color:inherit}
+.reclvl.under{color:#e2554f;opacity:1}
 /* Task 5.3: the map's own permanently-open TUTORIAL entry -- never disabled, so it gets a distinct
    teal (not .node.open's gold) so it doesn't read as just another campaign door. Lives in the .ftabs
    row (Screens.renderMap), not #mapPath's own node list, so it costs zero extra vertical space there
@@ -217,7 +224,11 @@ body.left-handed #powerPicker{right:auto;left:14px}
      screen is already showing, controlled purely by G, not by which screen is "current". -->
 <div class="overlay" id="tap"><div class="panel"><h1>TAP TO<br>START</h1><p class="sub">Tap anywhere to enable sound.</p></div></div>
 <div class="overlay" id="pauseMenu"><div class="panel"><h1>PAUSED</h1><button id="resume">RESUME</button><button id="quit">QUIT</button></div></div>
-<div class="overlay" id="result"><div class="panel"><h1 id="resultTitle">VICTORY</h1><p id="resultLine"></p><button id="shareBtn">SHARE</button><button id="again">FIGHT AGAIN</button><button id="resultTitleBtn">CONTINUE</button></div></div>
+<!-- Task 6.1 (owner playtest note: "No way to exit it seems after a defeat"): TITLE is a SEPARATE,
+     always-visible button from CONTINUE -- a guaranteed exit to the title screen that doesn't depend
+     on Screens._origin resolving correctly, win or lose, in every mode (Screens.renderResult,
+     85_screens.js). -->
+<div class="overlay" id="result"><div class="panel"><h1 id="resultTitle">VICTORY</h1><p id="resultLine"></p><button id="shareBtn">SHARE</button><button id="again">FIGHT AGAIN</button><button id="resultTitleBtn">CONTINUE</button><button id="titleBtn" class="secondary">TITLE</button></div></div>
 <div class="overlay" id="map"><div class="scr">
 <h2>CAMPAIGN</h2>
 <div class="ftabs" id="mapTabs"></div>
