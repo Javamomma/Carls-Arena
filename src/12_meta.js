@@ -37,6 +37,11 @@ const Meta={
       for(const k in d.arena)if(!(k in data.arena))data.arena[k]=d.arena[k];
       for(const k in d.stats)if(!(k in data.stats))data.stats[k]=d.stats[k];
       if(!data.roster||typeof data.roster!=='object'||!Object.keys(data.roster).length)data.roster=d.roster;
+      // Fix-wave item 10 (minor): migrate could reset `roster` (right above) without repointing a
+      // stale `active` that named a champion the reset just dropped -- Rewards.grant's xp path reads
+      // Save.data.roster[Save.data.active], so an unowned active silently ate every xp grant with no
+      // error. Repoints to the roster's own first key whenever active isn't (or no longer is) owned.
+      if(!data.roster[data.active])data.active=Object.keys(data.roster)[0];
       return data}
     return Meta.defaults()},
   // Fix-wave item 9 (Phase 5 seam, ruled): the SPONSOR PERK KIOSK used to be three hand-copied

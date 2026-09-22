@@ -33,7 +33,11 @@ const Screens={
   title(){this.show('title')},
   map(n){this._floor=n||this._floor||1;this.show('map')},
   roster(){this.show('roster')},
-  crystal(){this.show('crystal')},
+  // Fix-wave item 10: _reveal used to persist across navigation -- re-entering the crystal screen
+  // (without a fresh pull) replayed the PREVIOUS pull's completed reveal text as if it were new.
+  // Cleared here so a fresh entry always starts blank; openCrystal sets a new one right after this
+  // when it's the one driving navigation, so an in-flight open is unaffected.
+  crystal(){this._reveal=null;this.show('crystal')},
   shop(){this.show('shop')},
   arena(){this.show('arena')},
   result(rewards,won){this._rewards=rewards;this._won=won;this.show('result')},
@@ -72,9 +76,18 @@ const Screens={
     // same as the old fightBtn did.
     document.getElementById('btnExhibition').onclick=()=>{Screens._origin={name:'title'};
       Audio.init();G.startFight()}},
+  // Fix-wave item 10: a gold/units/iso strip, shared by the map and crystal screens (the kiosk
+  // already had its own, richer one -- shopCurrency -- with class catalysts too, since rankUp spends
+  // those there; map/crystal never spend catalysts, so this stays to the three main currencies).
+  renderCurrency(elId){
+    const el=document.getElementById(elId);
+    if(!el)return;
+    el.innerHTML=['GOLD '+(Save.data.gold||0),'UNITS '+(Save.data.units||0),'ISO '+(Save.data.iso||0)]
+      .map(s=>'<span>'+s+'</span>').join('')},
   // ---- map (campaign) -----------------------------------------------------------------------
   renderMap(){
     Energy.tick(); // regen before reading/displaying it or gating node clicks below
+    Screens.renderCurrency('mapCurrency');
     const n=this._floor;
     const f=Quest.floor(n);
     const heading=document.querySelector('#map h2');
@@ -189,6 +202,7 @@ const Screens={
     if(Screens._current!=='crystal')Screens.crystal();else Screens.refresh();
     Screens._reveal={kind,result:r,frame:0}},
   renderCrystal(){
+    Screens.renderCurrency('crystalCurrency');
     const wrap=document.getElementById('crystalCards');wrap.innerHTML='';
     for(const kind of['basic','premium']){
       const card=document.createElement('div');card.className='kcard';card.id='kcard_'+kind;

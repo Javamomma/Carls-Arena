@@ -4,7 +4,15 @@
 #wrap{position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
 canvas{display:block;image-rendering:pixelated;background:#101422}
 .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(9,11,18,.85)}.overlay.show{display:flex}
-.panel{text-align:center;padding:16px;max-width:520px}.panel h1{margin:0 0 8px;font-size:28px;letter-spacing:2px}.panel p{font-size:13px;line-height:1.5}.panel button{display:block;width:100%;margin:8px 0;padding:12px;font:inherit;font-size:16px;background:#f4c542;color:#111;border:0;border-radius:6px}
+.panel{text-align:center;padding:16px;max-width:520px}.panel h1{margin:0 0 8px;font-size:28px;letter-spacing:2px}.panel p{font-size:13px;line-height:1.5}.panel button{display:block;width:100%;margin:8px 0;padding:12px;font:inherit;font-size:16px;background:#f4c542;color:#111;border:0;border-radius:6px;min-height:44px}
+/* Fix-wave item 10: title screen hierarchy -- CAMPAIGN is the one button a player needs to find
+   immediately (bigger, brighter, glowing); ARENA/ROSTER/KIOSK/EXHIBITION are equal secondary
+   options in the same gold-outline style the .backbtn/.kcard buttons already use elsewhere; SOUND
+   is a settings toggle, not gameplay, so it drops into its own small row below everything else. */
+.panel button.primary{font-size:20px;padding:16px;box-shadow:0 0 16px 3px rgba(244,197,66,.55)}
+.panel button.secondary{background:#1a1f33;color:#f4c542;border:2px solid #f4c542;font-size:13px;padding:10px}
+.settingsrow{margin-top:10px}
+.settingsrow button{width:auto;min-width:150px;font-size:11px;padding:8px 14px;background:transparent;color:#999;border:1px solid #444}
 #btns{display:none}#btns.show{display:block}
 .cbtn{position:absolute;width:76px;height:76px;border-radius:50%;border:3px solid #f4c542;background:rgba(26,31,51,.8);color:#f4c542;font:inherit;font-size:26px;display:flex;align-items:center;justify-content:center;line-height:1}
 .cbtn::after{content:attr(data-label);position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:4px;font-size:10px;letter-spacing:1px;color:#f4c542;white-space:nowrap}
@@ -32,7 +40,11 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .scr h2{margin:0 0 8px;font-size:17px;letter-spacing:3px;color:#f4c542;text-transform:uppercase;transform:scaleX(.92)}
 .backbtn{margin-top:8px;width:180px;min-height:44px;align-self:center;padding:10px;font-size:13px;letter-spacing:1px;background:#1a1f33;color:#f4c542;border:2px solid #f4c542;border-radius:6px;flex:none}
 .curstrip{display:flex;gap:14px;justify-content:center;font-size:12px;color:#f4c542;margin:0 0 10px;flex-wrap:wrap}
-.ftabs{display:flex;gap:6px;justify-content:center;margin-bottom:8px}
+/* Fix-wave item 10: a compact variant for the map screen, which is already tight on vertical space
+   (see the item 3 fix) -- smaller font, no bottom margin (the .energy row right after it already
+   carries its own top margin). */
+.curstrip.small{font-size:10px;gap:10px;margin:0}
+.ftabs{display:flex;gap:6px;justify-content:center;margin-bottom:4px}
 .ftab{min-height:44px;padding:6px 16px;font-size:12px;letter-spacing:1px;background:#1a1f33;color:#999;border:1px solid #444;border-radius:4px}
 .ftab.active{color:#f4c542;border-color:#f4c542}
 .path{display:flex;flex-direction:column-reverse;align-items:center;gap:4px;overflow:hidden;flex:1;justify-content:center}
@@ -42,9 +54,14 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .node.open{border-color:#f4c542;color:#f4c542;background:#20263d}
 .node.done{border-color:#5c8a4a;color:#8fd18a;background:#182018}
 .node.boss{font-weight:bold}
-.node.locked::before{content:'\1F512';margin-right:2px}
+/* Fix-wave item 10: .node.locked and .node.boss::before had equal specificity (one class each), so
+   whichever rule came LATER in the stylesheet won a tie for a node with both classes -- .node.boss
+   used to be declared after .node.locked, so a locked boss showed the crown, never the lock. Locked
+   now comes after boss, so it wins that specific tie; an unlocked boss (only .boss matches) is
+   unaffected. */
 .node.boss::before{content:'\1F451';margin-right:2px}
-.energy{display:flex;gap:4px;justify-content:center;margin:4px 0}
+.node.locked::before{content:'\1F512';margin-right:2px}
+.energy{display:flex;gap:4px;justify-content:center;margin:3px 0}
 .pip{width:14px;height:14px;border-radius:3px;background:#2a2a2a;border:1px solid #555}
 .pip.full{background:#f4c542;border-color:#f4c542}
 /* Fix-wave item 6: the refusal line for a locked/energy-less node click -- inside the map panel
@@ -105,18 +122,19 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 <div class="overlay show" id="title"><div class="panel">
 <h1 id="titleLogo">CARL'S DOORWAY<br>BRAWL</h1>
 <p class="sub">ONE THUMB. ONE DOORWAY. ONE CRAWLER LEAVES.</p>
-<button id="btnCampaign">CAMPAIGN</button>
-<button id="btnArenaMenu">ARENA</button>
-<button id="btnRoster">ROSTER</button>
-<button id="btnKiosk">KIOSK</button>
-<button id="btnExhibition">EXHIBITION</button>
-<button id="titleMute">SOUND: ON</button>
+<button id="btnCampaign" class="primary">CAMPAIGN</button>
+<button id="btnArenaMenu" class="secondary">ARENA</button>
+<button id="btnRoster" class="secondary">ROSTER</button>
+<button id="btnKiosk" class="secondary">KIOSK</button>
+<button id="btnExhibition" class="secondary">EXHIBITION</button>
+<div class="settingsrow"><button id="titleMute">SOUND: ON</button></div>
 </div></div>
 <div class="overlay" id="pauseMenu"><div class="panel"><h1>PAUSED</h1><button id="resume">RESUME</button><button id="quit">QUIT</button></div></div>
 <div class="overlay" id="result"><div class="panel"><h1 id="resultTitle">VICTORY</h1><p id="resultLine"></p><button id="again">FIGHT AGAIN</button><button id="resultTitleBtn">CONTINUE</button></div></div>
 <div class="overlay" id="map"><div class="scr">
 <h2>CAMPAIGN</h2>
 <div class="ftabs" id="mapTabs"></div>
+<div class="curstrip small" id="mapCurrency"></div>
 <div class="energy" id="mapEnergy"></div>
 <div class="path" id="mapPath"></div>
 <div class="mapmsg" id="mapMsg"></div>
@@ -129,6 +147,7 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 </div></div>
 <div class="overlay" id="crystal"><div class="scr">
 <h2>CRYSTALS</h2>
+<div class="curstrip" id="crystalCurrency"></div>
 <div class="kcards" id="crystalCards"></div>
 <button class="backbtn" id="crystalBack">BACK</button>
 </div></div>
@@ -209,6 +228,11 @@ const Meta={
       for(const k in d.arena)if(!(k in data.arena))data.arena[k]=d.arena[k];
       for(const k in d.stats)if(!(k in data.stats))data.stats[k]=d.stats[k];
       if(!data.roster||typeof data.roster!=='object'||!Object.keys(data.roster).length)data.roster=d.roster;
+      // Fix-wave item 10 (minor): migrate could reset `roster` (right above) without repointing a
+      // stale `active` that named a champion the reset just dropped -- Rewards.grant's xp path reads
+      // Save.data.roster[Save.data.active], so an unowned active silently ate every xp grant with no
+      // error. Repoints to the roster's own first key whenever active isn't (or no longer is) owned.
+      if(!data.roster[data.active])data.active=Object.keys(data.roster)[0];
       return data}
     return Meta.defaults()},
   // Fix-wave item 9 (Phase 5 seam, ruled): the SPONSOR PERK KIOSK used to be three hand-copied
@@ -3490,7 +3514,11 @@ const Screens={
   title(){this.show('title')},
   map(n){this._floor=n||this._floor||1;this.show('map')},
   roster(){this.show('roster')},
-  crystal(){this.show('crystal')},
+  // Fix-wave item 10: _reveal used to persist across navigation -- re-entering the crystal screen
+  // (without a fresh pull) replayed the PREVIOUS pull's completed reveal text as if it were new.
+  // Cleared here so a fresh entry always starts blank; openCrystal sets a new one right after this
+  // when it's the one driving navigation, so an in-flight open is unaffected.
+  crystal(){this._reveal=null;this.show('crystal')},
   shop(){this.show('shop')},
   arena(){this.show('arena')},
   result(rewards,won){this._rewards=rewards;this._won=won;this.show('result')},
@@ -3529,9 +3557,18 @@ const Screens={
     // same as the old fightBtn did.
     document.getElementById('btnExhibition').onclick=()=>{Screens._origin={name:'title'};
       Audio.init();G.startFight()}},
+  // Fix-wave item 10: a gold/units/iso strip, shared by the map and crystal screens (the kiosk
+  // already had its own, richer one -- shopCurrency -- with class catalysts too, since rankUp spends
+  // those there; map/crystal never spend catalysts, so this stays to the three main currencies).
+  renderCurrency(elId){
+    const el=document.getElementById(elId);
+    if(!el)return;
+    el.innerHTML=['GOLD '+(Save.data.gold||0),'UNITS '+(Save.data.units||0),'ISO '+(Save.data.iso||0)]
+      .map(s=>'<span>'+s+'</span>').join('')},
   // ---- map (campaign) -----------------------------------------------------------------------
   renderMap(){
     Energy.tick(); // regen before reading/displaying it or gating node clicks below
+    Screens.renderCurrency('mapCurrency');
     const n=this._floor;
     const f=Quest.floor(n);
     const heading=document.querySelector('#map h2');
@@ -3646,6 +3683,7 @@ const Screens={
     if(Screens._current!=='crystal')Screens.crystal();else Screens.refresh();
     Screens._reveal={kind,result:r,frame:0}},
   renderCrystal(){
+    Screens.renderCurrency('crystalCurrency');
     const wrap=document.getElementById('crystalCards');wrap.innerHTML='';
     for(const kind of['basic','premium']){
       const card=document.createElement('div');card.className='kcard';card.id='kcard_'+kind;
@@ -5315,5 +5353,57 @@ Test.add('starting a fight from any browsing screen hides that screen (it must n
     G.startFight({p2:'donut'});
     ok(!document.getElementById(shown).classList.contains('show'),shown+' must be hidden once G.startFight begins');
     G.toTitle()}});
+// Fix-wave item 10 (minors, one commit) ----------------------------------------------------------
+Test.add('.panel buttons are real 44px+ touch targets (fix-wave item 10)',()=>{
+  Screens.title();
+  const b=document.getElementById('btnCampaign');
+  ok(b.getBoundingClientRect().height>=44,'.panel button height must be >=44px, got '+b.getBoundingClientRect().height);
+  Screens.title()});
+Test.add('a locked boss node shows the lock icon, not the crown (fix-wave item 10: .node.locked/.node.boss specificity)',()=>{
+  Save.data=Meta.defaults(); // boss starts locked
+  Screens.map(1);
+  const bossEl=document.querySelector('#map .node.boss');
+  const lockedNodeEl=document.querySelectorAll('#map .node:not(.boss)')[1]; // node 1 starts locked too
+  const bossContent=getComputedStyle(bossEl,'::before').content;
+  const lockedContent=getComputedStyle(lockedNodeEl,'::before').content;
+  eq(bossContent,lockedContent,'a locked boss must show the same icon as a plain locked node (the lock, not the crown)');
+  Screens.title()});
+Test.add('re-entering the crystal screen clears a prior pull\'s reveal (fix-wave item 10: _reveal never cleared)',()=>{
+  Save.data=Meta.defaults();Save.data.gold=500;Save.data.seed=1;
+  Screens.crystal();
+  document.getElementById('openBtn_basic').click();
+  G.sim=true;G.simFrames(40);
+  ok(document.getElementById('revealText_basic').textContent.length>0,'a reveal must show after a real pull');
+  Screens.title();
+  Screens.crystal(); // re-enter without a new pull
+  eq(Screens._reveal,null,'_reveal must be cleared on re-entering the crystal screen');
+  eq(document.getElementById('revealText_basic').textContent,'','no stale reveal text on re-entry');
+  G.sim=false;Screens.title()});
+Test.add('the map and crystal screens show a gold/units/iso currency strip (fix-wave item 10)',()=>{
+  Save.data=Meta.defaults();Save.data.gold=123;Save.data.units=45;Save.data.iso=6;
+  Screens.map(1);
+  let el=document.getElementById('mapCurrency');
+  ok(el,'#mapCurrency must exist');
+  ok(el.textContent.includes('123')&&el.textContent.includes('45')&&el.textContent.includes('6'),
+    'map currency strip must show gold/units/iso: '+el.textContent);
+  Screens.crystal();
+  el=document.getElementById('crystalCurrency');
+  ok(el,'#crystalCurrency must exist');
+  ok(el.textContent.includes('123'),'crystal currency strip must show gold: '+el.textContent);
+  Screens.title()});
+Test.add('Meta.migrate repoints a stale Save.data.active to an owned champion (fix-wave item 10: xp grants were silently dropped)',()=>{
+  const d=Meta.migrate({v:2,active:'mongo',roster:{carl:{stars:1,rank:1,level:1,xp:0,shards:0}}});
+  eq(d.active,'carl','active must be repointed to an owned champion once mongo turns out to be unowned');
+  const d2=Meta.migrate({v:2,active:'carl',roster:{carl:{stars:1,rank:1,level:1,xp:0,shards:0}}});
+  eq(d2.active,'carl','an already-valid active must be left alone')});
+Test.add('title screen: CAMPAIGN is the primary button, others secondary, SOUND in its own small row (fix-wave item 10)',()=>{
+  Screens.title();
+  const campaign=document.getElementById('btnCampaign'),roster=document.getElementById('btnRoster');
+  ok(campaign.classList.contains('primary'),'CAMPAIGN must be the primary button');
+  ok(!roster.classList.contains('primary'),'ROSTER must be a secondary button, not primary');
+  const cs=getComputedStyle(campaign),rs=getComputedStyle(roster);
+  ok(parseFloat(cs.fontSize)>parseFloat(rs.fontSize),'CAMPAIGN must read visually larger than a secondary button');
+  ok(document.getElementById('titleMute').closest('.settingsrow'),'SOUND must be moved into its own small settings row');
+  Screens.title()});
 
 </script></body></html>

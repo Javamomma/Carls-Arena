@@ -318,7 +318,11 @@ def main():
     ap.add_argument('--loops', type=int, default=None, metavar='N',
                      help="with --e2e: after the main run, repeat a Screens-render + one real "
                           "quest-node fight (at whatever node is currently open) + one G.startArena() "
-                          "fight N more times, for a sustained menu+fight soak")
+                          "fight N more times, for a sustained menu+fight soak. NOTE (fix-wave item "
+                          "10): loop iterations only assert the quest fight wasn't refused and "
+                          "capture page/console errors -- they do NOT re-run the main pass's "
+                          "gold/iso/xp/energy delta assertions per fight; treat --loops as a soak, "
+                          "not an itemized-assertion run")
     a = ap.parse_args()
     if a.floor is not None and a.node is None:
         ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2

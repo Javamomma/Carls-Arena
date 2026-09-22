@@ -1563,3 +1563,55 @@ Test.add('starting a fight from any browsing screen hides that screen (it must n
     G.startFight({p2:'donut'});
     ok(!document.getElementById(shown).classList.contains('show'),shown+' must be hidden once G.startFight begins');
     G.toTitle()}});
+// Fix-wave item 10 (minors, one commit) ----------------------------------------------------------
+Test.add('.panel buttons are real 44px+ touch targets (fix-wave item 10)',()=>{
+  Screens.title();
+  const b=document.getElementById('btnCampaign');
+  ok(b.getBoundingClientRect().height>=44,'.panel button height must be >=44px, got '+b.getBoundingClientRect().height);
+  Screens.title()});
+Test.add('a locked boss node shows the lock icon, not the crown (fix-wave item 10: .node.locked/.node.boss specificity)',()=>{
+  Save.data=Meta.defaults(); // boss starts locked
+  Screens.map(1);
+  const bossEl=document.querySelector('#map .node.boss');
+  const lockedNodeEl=document.querySelectorAll('#map .node:not(.boss)')[1]; // node 1 starts locked too
+  const bossContent=getComputedStyle(bossEl,'::before').content;
+  const lockedContent=getComputedStyle(lockedNodeEl,'::before').content;
+  eq(bossContent,lockedContent,'a locked boss must show the same icon as a plain locked node (the lock, not the crown)');
+  Screens.title()});
+Test.add('re-entering the crystal screen clears a prior pull\'s reveal (fix-wave item 10: _reveal never cleared)',()=>{
+  Save.data=Meta.defaults();Save.data.gold=500;Save.data.seed=1;
+  Screens.crystal();
+  document.getElementById('openBtn_basic').click();
+  G.sim=true;G.simFrames(40);
+  ok(document.getElementById('revealText_basic').textContent.length>0,'a reveal must show after a real pull');
+  Screens.title();
+  Screens.crystal(); // re-enter without a new pull
+  eq(Screens._reveal,null,'_reveal must be cleared on re-entering the crystal screen');
+  eq(document.getElementById('revealText_basic').textContent,'','no stale reveal text on re-entry');
+  G.sim=false;Screens.title()});
+Test.add('the map and crystal screens show a gold/units/iso currency strip (fix-wave item 10)',()=>{
+  Save.data=Meta.defaults();Save.data.gold=123;Save.data.units=45;Save.data.iso=6;
+  Screens.map(1);
+  let el=document.getElementById('mapCurrency');
+  ok(el,'#mapCurrency must exist');
+  ok(el.textContent.includes('123')&&el.textContent.includes('45')&&el.textContent.includes('6'),
+    'map currency strip must show gold/units/iso: '+el.textContent);
+  Screens.crystal();
+  el=document.getElementById('crystalCurrency');
+  ok(el,'#crystalCurrency must exist');
+  ok(el.textContent.includes('123'),'crystal currency strip must show gold: '+el.textContent);
+  Screens.title()});
+Test.add('Meta.migrate repoints a stale Save.data.active to an owned champion (fix-wave item 10: xp grants were silently dropped)',()=>{
+  const d=Meta.migrate({v:2,active:'mongo',roster:{carl:{stars:1,rank:1,level:1,xp:0,shards:0}}});
+  eq(d.active,'carl','active must be repointed to an owned champion once mongo turns out to be unowned');
+  const d2=Meta.migrate({v:2,active:'carl',roster:{carl:{stars:1,rank:1,level:1,xp:0,shards:0}}});
+  eq(d2.active,'carl','an already-valid active must be left alone')});
+Test.add('title screen: CAMPAIGN is the primary button, others secondary, SOUND in its own small row (fix-wave item 10)',()=>{
+  Screens.title();
+  const campaign=document.getElementById('btnCampaign'),roster=document.getElementById('btnRoster');
+  ok(campaign.classList.contains('primary'),'CAMPAIGN must be the primary button');
+  ok(!roster.classList.contains('primary'),'ROSTER must be a secondary button, not primary');
+  const cs=getComputedStyle(campaign),rs=getComputedStyle(roster);
+  ok(parseFloat(cs.fontSize)>parseFloat(rs.fontSize),'CAMPAIGN must read visually larger than a secondary button');
+  ok(document.getElementById('titleMute').closest('.settingsrow'),'SOUND must be moved into its own small settings row');
+  Screens.title()});

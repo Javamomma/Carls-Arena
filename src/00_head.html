@@ -4,7 +4,15 @@
 #wrap{position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
 canvas{display:block;image-rendering:pixelated;background:#101422}
 .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(9,11,18,.85)}.overlay.show{display:flex}
-.panel{text-align:center;padding:16px;max-width:520px}.panel h1{margin:0 0 8px;font-size:28px;letter-spacing:2px}.panel p{font-size:13px;line-height:1.5}.panel button{display:block;width:100%;margin:8px 0;padding:12px;font:inherit;font-size:16px;background:#f4c542;color:#111;border:0;border-radius:6px}
+.panel{text-align:center;padding:16px;max-width:520px}.panel h1{margin:0 0 8px;font-size:28px;letter-spacing:2px}.panel p{font-size:13px;line-height:1.5}.panel button{display:block;width:100%;margin:8px 0;padding:12px;font:inherit;font-size:16px;background:#f4c542;color:#111;border:0;border-radius:6px;min-height:44px}
+/* Fix-wave item 10: title screen hierarchy -- CAMPAIGN is the one button a player needs to find
+   immediately (bigger, brighter, glowing); ARENA/ROSTER/KIOSK/EXHIBITION are equal secondary
+   options in the same gold-outline style the .backbtn/.kcard buttons already use elsewhere; SOUND
+   is a settings toggle, not gameplay, so it drops into its own small row below everything else. */
+.panel button.primary{font-size:20px;padding:16px;box-shadow:0 0 16px 3px rgba(244,197,66,.55)}
+.panel button.secondary{background:#1a1f33;color:#f4c542;border:2px solid #f4c542;font-size:13px;padding:10px}
+.settingsrow{margin-top:10px}
+.settingsrow button{width:auto;min-width:150px;font-size:11px;padding:8px 14px;background:transparent;color:#999;border:1px solid #444}
 #btns{display:none}#btns.show{display:block}
 .cbtn{position:absolute;width:76px;height:76px;border-radius:50%;border:3px solid #f4c542;background:rgba(26,31,51,.8);color:#f4c542;font:inherit;font-size:26px;display:flex;align-items:center;justify-content:center;line-height:1}
 .cbtn::after{content:attr(data-label);position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:4px;font-size:10px;letter-spacing:1px;color:#f4c542;white-space:nowrap}
@@ -32,7 +40,11 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .scr h2{margin:0 0 8px;font-size:17px;letter-spacing:3px;color:#f4c542;text-transform:uppercase;transform:scaleX(.92)}
 .backbtn{margin-top:8px;width:180px;min-height:44px;align-self:center;padding:10px;font-size:13px;letter-spacing:1px;background:#1a1f33;color:#f4c542;border:2px solid #f4c542;border-radius:6px;flex:none}
 .curstrip{display:flex;gap:14px;justify-content:center;font-size:12px;color:#f4c542;margin:0 0 10px;flex-wrap:wrap}
-.ftabs{display:flex;gap:6px;justify-content:center;margin-bottom:8px}
+/* Fix-wave item 10: a compact variant for the map screen, which is already tight on vertical space
+   (see the item 3 fix) -- smaller font, no bottom margin (the .energy row right after it already
+   carries its own top margin). */
+.curstrip.small{font-size:10px;gap:10px;margin:0}
+.ftabs{display:flex;gap:6px;justify-content:center;margin-bottom:4px}
 .ftab{min-height:44px;padding:6px 16px;font-size:12px;letter-spacing:1px;background:#1a1f33;color:#999;border:1px solid #444;border-radius:4px}
 .ftab.active{color:#f4c542;border-color:#f4c542}
 .path{display:flex;flex-direction:column-reverse;align-items:center;gap:4px;overflow:hidden;flex:1;justify-content:center}
@@ -42,9 +54,14 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .node.open{border-color:#f4c542;color:#f4c542;background:#20263d}
 .node.done{border-color:#5c8a4a;color:#8fd18a;background:#182018}
 .node.boss{font-weight:bold}
-.node.locked::before{content:'\1F512';margin-right:2px}
+/* Fix-wave item 10: .node.locked and .node.boss::before had equal specificity (one class each), so
+   whichever rule came LATER in the stylesheet won a tie for a node with both classes -- .node.boss
+   used to be declared after .node.locked, so a locked boss showed the crown, never the lock. Locked
+   now comes after boss, so it wins that specific tie; an unlocked boss (only .boss matches) is
+   unaffected. */
 .node.boss::before{content:'\1F451';margin-right:2px}
-.energy{display:flex;gap:4px;justify-content:center;margin:4px 0}
+.node.locked::before{content:'\1F512';margin-right:2px}
+.energy{display:flex;gap:4px;justify-content:center;margin:3px 0}
 .pip{width:14px;height:14px;border-radius:3px;background:#2a2a2a;border:1px solid #555}
 .pip.full{background:#f4c542;border-color:#f4c542}
 /* Fix-wave item 6: the refusal line for a locked/energy-less node click -- inside the map panel
@@ -105,18 +122,19 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 <div class="overlay show" id="title"><div class="panel">
 <h1 id="titleLogo">CARL'S DOORWAY<br>BRAWL</h1>
 <p class="sub">ONE THUMB. ONE DOORWAY. ONE CRAWLER LEAVES.</p>
-<button id="btnCampaign">CAMPAIGN</button>
-<button id="btnArenaMenu">ARENA</button>
-<button id="btnRoster">ROSTER</button>
-<button id="btnKiosk">KIOSK</button>
-<button id="btnExhibition">EXHIBITION</button>
-<button id="titleMute">SOUND: ON</button>
+<button id="btnCampaign" class="primary">CAMPAIGN</button>
+<button id="btnArenaMenu" class="secondary">ARENA</button>
+<button id="btnRoster" class="secondary">ROSTER</button>
+<button id="btnKiosk" class="secondary">KIOSK</button>
+<button id="btnExhibition" class="secondary">EXHIBITION</button>
+<div class="settingsrow"><button id="titleMute">SOUND: ON</button></div>
 </div></div>
 <div class="overlay" id="pauseMenu"><div class="panel"><h1>PAUSED</h1><button id="resume">RESUME</button><button id="quit">QUIT</button></div></div>
 <div class="overlay" id="result"><div class="panel"><h1 id="resultTitle">VICTORY</h1><p id="resultLine"></p><button id="again">FIGHT AGAIN</button><button id="resultTitleBtn">CONTINUE</button></div></div>
 <div class="overlay" id="map"><div class="scr">
 <h2>CAMPAIGN</h2>
 <div class="ftabs" id="mapTabs"></div>
+<div class="curstrip small" id="mapCurrency"></div>
 <div class="energy" id="mapEnergy"></div>
 <div class="path" id="mapPath"></div>
 <div class="mapmsg" id="mapMsg"></div>
@@ -129,6 +147,7 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 </div></div>
 <div class="overlay" id="crystal"><div class="scr">
 <h2>CRYSTALS</h2>
+<div class="curstrip" id="crystalCurrency"></div>
 <div class="kcards" id="crystalCards"></div>
 <button class="backbtn" id="crystalBack">BACK</button>
 </div></div>
