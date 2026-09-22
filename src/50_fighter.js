@@ -23,6 +23,10 @@ class Fighter{
     // effStartup past the move's own m.startup.
     this.foeDist=null;this.dashLeft=0;this.dashRate=0;this.effStartup=0;
     this.buffs=[]; // resolved BUFFS objects (Buffs.apply sets this once; Fight never re-resolves ids per frame)
+    // Task 7.1: live timed-effect instances ({id,left,stacks,potency,source}), owned and mutated only
+    // by Effects.apply/tick/clear (48_effects.js) -- presentation (70_render.js/72_fx.js) reads this
+    // array for HUD badges but never writes it, same read-only boundary fighter.buffs already gets.
+    this.effects=[];
     // wasKnockedDown (Task 3.6 refactor): set true the instant this fighter enters KNOCKDOWN
     // (setState below), stays true through the knockdown timer and the post-getup invulnerable
     // window, then self-clears in tick() the frame after inv actually reaches 0 — giving AI.make's

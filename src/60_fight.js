@@ -29,6 +29,12 @@ class Fight{
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);
     this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();
     this.buffFrame(this.p1,this.p2);this.buffFrame(this.p2,this.p1);
+    // Task 7.1: Effects.tick runs once per step per fighter, same slot buffFrame already runs in
+    // (before detect/resolve) -- ticks every active timed effect's own per-frame hook (bleed/regen/
+    // powerGain) and counts its duration down, removing it (and emitting 'effect' expired) the frame
+    // its clock reaches 0. See 48_effects.js's own comment for why this yields exactly `dur` tick
+    // calls per applied effect.
+    Effects.tick(this,this.p1);Effects.tick(this,this.p2);
     this.separate();this.updateCam();
     this.checkCinematic(this.p1);this.checkCinematic(this.p2);
     // Detect both sides' hits against the pre-resolve state before applying either, so a true
@@ -78,11 +84,26 @@ class Fight{
       const chip=chipRef.chip;
       def.hp=Math.max(0,def.hp-chip);def.stun=m.blockstun;def.setState('BLOCKSTUN');
       def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;
+      // Task 7.1: m.applies (move data may carry applies:[{id,stacks?,potency?,on:'hit'|'crit'|'block'}])
+      // -- the on:'block' entries land here, applied to the defender (the blocker), after chip/state are
+      // already set so an applied stun's own onApply (EFFECTS.stun, 48_effects.js) can still override
+      // BLOCKSTUN with STUNNED the same way it overrides HITSTUN below. No move carries `applies` yet
+      // (Task 7.2 wires the first one), so this loop is a no-op in every fight today.
+      if(m.applies)for(let i=0;i<m.applies.length;i++){const ap=m.applies[i];
+        if(ap.on==='block')Effects.apply(this,def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
       this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip,att.moveName)}
     const m=r.m,last=r.last;
     const cls=CLASS_BEATS[att.def.cls]===def.def.cls?CLASS_BONUS:1;
+    // Task 7.1: Effects.mods(holder) -> {atkMul,armorDelta,critDelta}, neutral (1,0,0) whenever holder
+    // has no active mod-bearing effect (armorBreak/fury/weakness today; Task 7.3's dexterity is the
+    // first to set critDelta) -- read on the attacker for their own outgoing atkMul/critDelta (fury,
+    // weakness) and on the defender for their own armorDelta (armorBreak), each holder's mod applying
+    // to their own side of the exchange, same "holder's own stat" shape BUFFS.armorUp/powerGain already
+    // use. Multiplying by an exact 1 / adding an exact 0 (every fight today, since no move applies
+    // anything yet) leaves every float bit-identical to the pre-Phase-7 formula below.
+    const attMods=Effects.mods(att),defMods=Effects.mods(def);
     // Crit rolls once per landed hit, after the class bonus and before armor.
-    const crit=!this.noCrit&&this.rng.next()<att.def.crit;
+    const crit=!this.noCrit&&this.rng.next()<(att.def.crit+attMods.critDelta);
     const critMul=crit?(att.def.critMul||CRIT_MUL_DEFAULT):1;
     // ref carries dmg, the two power deltas, and the move itself so armorUp/powerGain can adjust
     // them before either is applied; defender-side hooks run first, then attacker-side, both against
@@ -93,12 +114,19 @@ class Fight{
     // and powerGain's old `att.move` read silently no-op'd. ref is a fresh object built fresh for
     // THIS resolve() call, never touched by the other side's resolve, so ref.move is always the
     // move that actually landed this call.
-    const ref={dmg:Math.round(att.def.atk*m.dmg*cls*critMul*(1-def.def.armor)),powHit:m.powHit,powTaken:m.powTaken,move:m};
+    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*m.dmg*cls*critMul*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
     this.buffHook('onHit',def,att,def,ref);this.buffHook('onHit',att,att,def,ref);
     const dmg=ref.dmg;
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
     att.power=Math.min(POWER_MAX,att.power+ref.powHit);def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
     def.clearMove();if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
+    // Task 7.1: m.applies -- on:'hit' entries fire on every landed hit, on:'crit' entries only when
+    // this landed hit actually crit; both apply to the defender (the struck fighter), after the
+    // HITSTUN/KNOCKDOWN transition above so an applied stun's own onApply (EFFECTS.stun) can still
+    // override it with STUNNED, exactly like the block branch's own applies loop. No move carries
+    // `applies` yet, so this is a no-op in every fight today -- see the "bit-identical" test.
+    if(m.applies)for(let i=0;i<m.applies.length;i++){const ap=m.applies[i];
+      if(ap.on==='hit'||(ap.on==='crit'&&crit))Effects.apply(this,def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
     // Medium landed as a combo ender (3rd+ hit of the combo, counting this one) shoves the defender
     // out past light range instead of the move's normal push, so the follow-up can't just re-chain.
     const push=(att.moveName==='medium'&&att.combo>=3)?90:m.push;
@@ -129,4 +157,15 @@ class Fight{
     this.emit('ko',this.winner,null,0)}
   // move is only meaningful (and only passed) for 'hit'/'block'; other event types leave it
   // undefined, which existing log consumers already ignore.
-  emit(type,a,b,val,move){this.log.push({f:this.frame,type,who:a?a.side:0,val,move});this.onEvent(type,a,b,val)}}
+  emit(type,a,b,val,move){this.log.push({f:this.frame,type,who:a?a.side:0,val,move});this.onEvent(type,a,b,val)}
+  // Task 7.1: 'effect' events (Effects.apply/.tick, 48_effects.js) carry id/stacks/applied|expired --
+  // a shape emit()'s own (type,a,b,val,move) log entry has no slot for. A small dedicated sibling
+  // instead of overloading emit(): logs the exact {type:'effect',who,id,stacks,applied|expired} shape
+  // the frozen Phase 7 interface calls for (flag is the string 'applied' or 'expired', stored as a
+  // computed boolean key so only one of the two is ever present per entry), then still funnels through
+  // the same onEvent(type,a,b,val) 4-arg contract every other event uses, so an 'effect' event reaches
+  // Broadcast/Tutorial/G.onEvent exactly the way 'hit'/'block'/'parry' already do, even though none of
+  // them special-case it yet.
+  emitEffect(holder,id,stacks,flag){
+    this.log.push({f:this.frame,type:'effect',who:holder.side,id,stacks,[flag]:true});
+    this.onEvent('effect',holder,null,stacks)}}

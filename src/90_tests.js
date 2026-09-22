@@ -3461,3 +3461,164 @@ Test.add('dustArc fx updates (gravity arc) and expires deterministically, same a
   ok(FX.list[0].x!==p0.x||FX.list[0].y!==p0.y,'dustArc particles must move each update, like spark/dust');
   for(let i=0;i<40;i++)FX.update();
   eq(FX.list.length,0,'dustArc particles must expire like every other fx kind')});
+
+// --- Task 7.1: Effects system (timed, stacking status effects) ---
+Test.add('Effects.apply throws on an unknown id',()=>{
+  const f=mkFight();ok(threw(()=>Effects.apply(f,f.p2,'nope',{})),'unknown effect id must throw')});
+Test.add('Effects.apply refreshes duration and adds stacks up to maxStacks, never past it, without duplicating the entry',()=>{
+  const f=mkFight();
+  const e1=Effects.apply(f,f.p2,'bleed',{stacks:3});
+  eq(e1.stacks,3);eq(e1.left,EFFECTS.bleed.dur);eq(f.p2.effects.length,1);
+  run(f,50);
+  eq(Effects.stacks(f.p2,'bleed'),3,'stacks untouched by ticking alone');
+  const e2=Effects.apply(f,f.p2,'bleed',{stacks:4});
+  eq(e2.stacks,5,'stacks must cap at maxStacks (5), not 3+4=7');
+  eq(e2.left,EFFECTS.bleed.dur,'a re-apply must refresh duration back to full even after 50 frames had already ticked off');
+  eq(f.p2.effects.length,1,'re-applying an already-active effect must not create a second entry')});
+Test.add('Effects.has/stacks/clear read and remove holder.effects entries',()=>{
+  const f=mkFight();
+  eq(Effects.has(f.p2,'regen'),false);eq(Effects.stacks(f.p2,'regen'),0);
+  Effects.apply(f,f.p2,'regen',{stacks:2});
+  ok(Effects.has(f.p2,'regen'));eq(Effects.stacks(f.p2,'regen'),2);
+  Effects.apply(f,f.p2,'weakness',{});
+  Effects.clear(f.p2,'regen');
+  eq(Effects.has(f.p2,'regen'),false);ok(Effects.has(f.p2,'weakness'),'clear with an id must only drop that one effect');
+  Effects.clear(f.p2);
+  eq(f.p2.effects.length,0,'clear with no id drops every effect on the holder')});
+Test.add('an effect expires after its own duration, is removed from fighter.effects, and logs an expired event',()=>{
+  const f=mkFight();
+  Effects.apply(f,f.p2,'stun',{});
+  eq(f.p2.effects.length,1);
+  run(f,EFFECTS.stun.dur-1);
+  eq(f.p2.effects.length,1,'must still be active one frame before its duration runs out');
+  run(f,1);
+  eq(f.p2.effects.length,0,'must be removed the exact frame its duration counts down to 0');
+  const ev=f.log.find(e=>e.type==='effect'&&e.expired);
+  ok(ev,'an expired effect event must be logged');eq(ev.id,'stun');eq(ev.who,f.p2.side)});
+Test.add('Effects.apply logs a {type:"effect",applied:true} event with id/stacks/who and calls onEvent(type,holder,null,stacks)',()=>{
+  let seen=null;
+  const f=mkFight({onEvent:(t,a,b,v)=>{if(t==='effect')seen={a,v}}});
+  Effects.apply(f,f.p2,'regen',{stacks:2});
+  const ev=f.log[f.log.length-1];
+  eq(ev.type,'effect');eq(ev.who,f.p2.side);eq(ev.id,'regen');eq(ev.stacks,2);eq(ev.applied,true);
+  ok(!ev.expired,'an applied event must not also carry expired');
+  ok(seen&&seen.a===f.p2&&seen.v===2,'onEvent must be called with (type,holder,null,stacks)')});
+Test.add('Effects.apply queues an effectPopup fx descriptor, and FX turns it into a labeled/colored popup',()=>{
+  const f=mkFight();
+  Effects.apply(f,f.p2,'bleed',{stacks:3});
+  const ev=f.fx.find(x=>x.kind==='effectPopup'&&x.id==='bleed');
+  ok(ev,'an effectPopup fx entry must be queued on apply');eq(ev.stacks,3);
+  FX.reset();FX.pushAll(f.fx);
+  const p=FX.list.find(x=>x.kind==='popup');
+  ok(p,'FX must turn an effectPopup descriptor into a rendered popup particle');
+  eq(p.text,FX.EFFECT_STYLE.bleed.text+' x3');eq(p.col,FX.EFFECT_STYLE.bleed.col)});
+Test.add('bleed drains 0.4% maxHp per second per stack, ignoring armor, over its full 180-frame duration',()=>{
+  const f=mkFight({p2:Object.assign({},CHAMPS.carl,{armor:.5})}); // armor must be ignored by bleed
+  Effects.apply(f,f.p2,'bleed',{stacks:5});
+  let hp=f.p2.hp;for(let i=0;i<180;i++)hp=Math.max(0,hp-f.p2.maxHp*0.004*5/60);
+  run(f,180);
+  eq(f.p2.hp,hp);
+  eq(f.p2.effects.length,0,'bleed must be gone once its own 180-frame duration has fully ticked')});
+Test.add('regen heals 0.15% maxHp per second per stack, capped at maxHp, over its full 300-frame duration',()=>{
+  const f=mkFight();f.p2.hp=f.p2.maxHp*0.5;
+  Effects.apply(f,f.p2,'regen',{stacks:3});
+  let hp=f.p2.hp;for(let i=0;i<300;i++)hp=Math.min(f.p2.maxHp,hp+f.p2.maxHp*0.0015*3/60);
+  run(f,300);
+  eq(f.p2.hp,hp);ok(f.p2.hp>f.p2.maxHp*0.5,'holder actually healed');
+  const g=mkFight();g.p2.hp=g.p2.maxHp-1;
+  Effects.apply(g,g.p2,'regen',{stacks:3});
+  run(g,20);
+  eq(g.p2.hp,g.p2.maxHp,'regen must cap at maxHp, never overheal')});
+Test.add('stun sets STUNNED for 60 frames via the existing STUNNED handling in Fighter (no second stun path)',()=>{
+  const f=mkFight();
+  Effects.apply(f,f.p2,'stun',{});
+  eq(f.p2.state,'STUNNED');eq(f.p2.stun,60);
+  run(f,59);eq(f.p2.state,'STUNNED','must still be stunned one frame early');
+  run(f,1);eq(f.p2.state,'IDLE','must clear at exactly frame 60, via Fighter.tick\'s own f>=stun check')});
+Test.add('powerGain adds +0.5 power per frame, capped at POWER_MAX',()=>{
+  const f=mkFight();Effects.apply(f,f.p1,'powerGain',{});
+  run(f,100);
+  eq(f.p1.power,50);
+  f.p1.power=POWER_MAX-1;run(f,5);
+  eq(f.p1.power,POWER_MAX,'must cap at POWER_MAX, never exceed it')});
+Test.add('powerBurn is instant: on apply it drains min(potency, holder.power) power (N, since maxStacks:1 means stacks can never scale it) and deals that same amount as damage',()=>{
+  const f=mkFight();f.p2.power=40;f.p2.hp=1000;
+  Effects.apply(f,f.p2,'powerBurn',{potency:25});
+  eq(f.p2.power,15,'25 power burned from 40');
+  eq(f.p2.hp,975,'damage dealt must equal the amount actually burned');
+  const g=mkFight();g.p2.power=10;g.p2.hp=1000;
+  Effects.apply(g,g.p2,'powerBurn',{potency:25});
+  eq(g.p2.power,0);eq(g.p2.hp,990,'burn/damage must clamp to the 10 power actually banked, not the requested 25')});
+Test.add('Effects.mods always returns atkMul/armorDelta/critDelta, neutral when no effect is active (critDelta is plumbing for Task 7.3\'s dexterity)',()=>{
+  const f=mkFight();
+  eq(JSON.stringify(Effects.mods(f.p1)),JSON.stringify({atkMul:1,armorDelta:0,critDelta:0}));
+  Effects.apply(f,f.p1,'fury',{stacks:2});
+  const mods=Effects.mods(f.p1);
+  eq(mods.atkMul,1+0.12*2);eq(mods.armorDelta,0);eq(mods.critDelta,0,'no effect in this task sets critDelta yet')});
+Test.add('a fight with no effects ever applied is bit-identical to the pre-Phase-7 damage formula (atkMul/armorDelta/critDelta default neutral)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
+  eq(f.p2.hp,940,'plain light damage must be unaffected by the new Effects.mods plumbing when nothing is active')});
+Test.add('fury on the attacker scales their own outgoing damage via Effects.mods.atkMul, read by Fight.resolve',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
+  Effects.apply(f,f.p1,'fury',{stacks:3});
+  run(f,5);
+  const dmg=Math.round(CHAMPS.carl.atk*(1+0.12*3)*MOVES.light1.dmg*1*1*(1-CHAMPS.carl.armor));
+  eq(f.p2.hp,1000-dmg)});
+Test.add('weakness on the attacker scales their own outgoing damage down via Effects.mods.atkMul',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
+  Effects.apply(f,f.p1,'weakness',{stacks:3});
+  run(f,5);
+  const dmg=Math.round(CHAMPS.carl.atk*(1-0.12*3)*MOVES.light1.dmg*1*1*(1-CHAMPS.carl.armor));
+  eq(f.p2.hp,1000-dmg)});
+Test.add('armorBreak on the defender reduces their own effective armor via Effects.mods.armorDelta',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
+  Effects.apply(f,f.p2,'armorBreak',{stacks:2});
+  run(f,5);
+  const dmg=Math.round(CHAMPS.carl.atk*1*MOVES.light1.dmg*1*1*(1-(CHAMPS.carl.armor-0.15*2)));
+  eq(f.p2.hp,1000-dmg)});
+Test.add('active effects do not change the fight\'s rng draw count (Effects consumes no RNG)',()=>{
+  const f1=mkFight({noCrit:false,ctrl1:Ctrl.script([L(0)])});closeIn(f1);
+  let n1=0;const raw1=f1.rng.next.bind(f1.rng);f1.rng.next=()=>{n1++;return raw1()};
+  run(f1,5);
+  const f2=mkFight({noCrit:false,ctrl1:Ctrl.script([L(0)])});closeIn(f2);
+  Effects.apply(f2,f2.p1,'fury',{stacks:5});Effects.apply(f2,f2.p2,'weakness',{stacks:3});
+  let n2=0;const raw2=f2.rng.next.bind(f2.rng);f2.rng.next=()=>{n2++;return raw2()};
+  run(f2,5);
+  eq(n2,n1,'the number of fight.rng draws must be identical whether or not effects are active')});
+Test.add('move data applies:[{id,stacks,on:"hit"}] applies the effect to the defender on a landed hit, and logs the event',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{light1:{applies:[{id:'bleed',stacks:2,on:'hit'}]}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
+  eq(Effects.stacks(f.p2,'bleed'),2,'a landed hit with an on:"hit" applies entry must apply the effect to the defender');
+  ok(f.log.some(e=>e.type==='effect'&&e.id==='bleed'&&e.applied),'an applied effect event must be logged')});
+Test.add('move data applies:[{...,on:"block"}] applies the effect to the defender when the hit is blocked (not on:"hit")',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{light1:{applies:[{id:'weakness',stacks:1,on:'block'},{id:'bleed',stacks:1,on:'hit'}]}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(f);run(f,15);
+  eq(Effects.stacks(f.p2,'weakness'),1,'a blocked hit with on:"block" must apply that effect to the blocker');
+  eq(Effects.stacks(f.p2,'bleed'),0,'an on:"hit" entry must not fire when the exchange was actually blocked')});
+Test.add('move data applies:[{...,on:"crit"}] only fires when the landed hit actually crit',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{light1:{applies:[{id:'armorBreak',stacks:1,on:'crit'}]}}});
+  const noCritF=mkFight({p1:P1,ctrl1:Ctrl.script([L(0)]),noCrit:true});closeIn(noCritF);run(noCritF,5);
+  eq(Effects.stacks(noCritF.p2,'armorBreak'),0,'on:"crit" must not fire on a non-crit hit');
+  const critF=mkFight({p1:P1,ctrl1:Ctrl.script([L(0)]),noCrit:false});closeIn(critF);critF.rng.next=()=>0;run(critF,5);
+  eq(Effects.stacks(critF.p2,'armorBreak'),1,'on:"crit" must fire when the landed hit actually crit')});
+Test.add('effect badges: 1-letter code + shrinking duration ring + stack count per active effect, on either fighter, never throws',()=>{
+  eq(Render.EFFECT_CODES.bleed,'B');eq(Render.EFFECT_CODES.stun,'S');eq(Render.EFFECT_CODES.armorBreak,'A');
+  eq(Render.EFFECT_CODES.fury,'F');eq(Render.EFFECT_CODES.powerGain,'P');eq(Render.EFFECT_CODES.powerBurn,'X');
+  eq(Render.EFFECT_CODES.regen,'R');eq(Render.EFFECT_CODES.weakness,'W');
+  const effects=[{id:'bleed',left:90,stacks:3,potency:1},{id:'stun',left:10,stacks:1,potency:1}];
+  ok(!threw(()=>Render.effectBadges(Render.ctx,0,0,300,effects,true)),'effectBadges must not throw (p1, left-aligned)');
+  ok(!threw(()=>Render.effectBadges(Render.ctx,0,0,300,effects,false)),'effectBadges must not throw (p2, right-aligned)');
+  ok(!threw(()=>Render.effectBadges(Render.ctx,0,0,300,[],true)),'effectBadges must not throw with an empty list');
+  ok(!threw(()=>Render.effectBadges(Render.ctx,0,0,300,null,true)),'effectBadges must not throw with no effects array at all')});
+Test.add('Effects module and every EFFECTS[id] hook stay presentation-free and RNG-free (sim purity + "Effects consumes no RNG")',()=>{
+  // Same wider pattern the BUFFS purity scan above uses (bans G./Tutorial./Screens., not just the
+  // DOM/render/audio surface) plus Math.random/performance.now (no legitimate reason for either here)
+  // and .rng./RNG( -- Effects must never itself draw from a fight's rng streams; Fight.resolve's own
+  // crit roll is the only rng consumer any effect's numbers ever feed into (via Effects.mods).
+  const EFF_PURITY=/document|canvas|Audio\.|FX\.|Render\.|Stage\.|Tutorial\.|Screens\.|G\.|Math\.random|performance\.now|\.rng\.|RNG\(/;
+  for(const fn of[Effects.apply,Effects.has,Effects.stacks,Effects.tick,Effects.mods,Effects.clear])
+    ok(!EFF_PURITY.test(fn.toString()),'Effects.'+(fn.name||'?')+' must stay presentation- and RNG-free');
+  for(const id in EFFECTS){
+    const e=EFFECTS[id];
+    for(const hook of['tick','onApply','mod'])
+      if(e[hook])ok(!EFF_PURITY.test(e[hook].toString()),'EFFECTS.'+id+'.'+hook+' must stay presentation- and RNG-free')}});

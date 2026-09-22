@@ -209,6 +209,35 @@ const Render={ctx:canvas.getContext('2d'),
       c.fillStyle='#f4c542';c.fillRect(bx,y,size,size);
       c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(bx+.5,y+.5,size-1,size-1);
       c.fillStyle='#000';c.fillText(this.BUFF_CODES[b.id]||'?',bx+size/2,y+size/2+1)})},
+  // Task 7.1: 1-letter code per timed effect id, for effectBadges below (a separate row from
+  // buffBadges above -- buffBadges only ever reads G.encounter.buffs, the static per-encounter list;
+  // this reads a live fighter's own fighter.effects, which either fighter can carry and which changes
+  // stack/duration frame to frame).
+  EFFECT_CODES:{bleed:'B',stun:'S',armorBreak:'A',fury:'F',powerGain:'P',powerBurn:'X',regen:'R',weakness:'W'},
+  // One 12px badge per active timed effect on the given fighter: a dark square, a shrinking gold ring
+  // traced clockwise from noon (e.left/EFFECTS[e.id].dur, so it empties out exactly as the effect's
+  // own duration does), the effect's 1-letter code, and a small stack-count digit in the corner when
+  // stacks>1. fromLeft stacks the row rightward from barX (p1, whose bar starts at the left edge) or
+  // leftward from barX+barW (p2, mirroring buffBadges' own leftward stacking so it never grows off the
+  // bar's own edge). Reads fighter.effects only -- never mutates it, same presentation boundary every
+  // other HUD piece in this file already respects (see the frozen "presentation reads fighter.effects,
+  // never mutates it" ruling).
+  effectBadges(c,barX,barY,barW,effects,fromLeft){
+    if(!effects||!effects.length)return;
+    const size=12,gap=4,y=barY+4;
+    c.textAlign='center';c.textBaseline='middle';c.font='bold 8px ui-monospace,monospace';
+    effects.forEach((e,i)=>{
+      const bx=fromLeft?barX+i*(size+gap):barX+barW-size-i*(size+gap);
+      c.fillStyle='#2a2a2a';c.fillRect(bx,y,size,size);
+      c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(bx+.5,y+.5,size-1,size-1);
+      const def=EFFECTS[e.id],pct=def?clamp(e.left/def.dur,0,1):0,cx=bx+size/2,cy=y+size/2;
+      c.strokeStyle='#f4c542';c.lineWidth=2;
+      c.beginPath();c.arc(cx,cy,size/2-1,-Math.PI/2,-Math.PI/2+Math.PI*2*pct);c.stroke();
+      c.fillStyle='#fff';c.fillText(this.EFFECT_CODES[e.id]||'?',cx,cy+1);
+      if(e.stacks>1){
+        c.font='bold 7px ui-monospace,monospace';c.fillStyle='#f4c542';c.textAlign='right';
+        c.fillText(String(e.stacks),bx+size,y+size);
+        c.font='bold 8px ui-monospace,monospace';c.textAlign='center'}})},
   // Boss name plate: a red-bordered field tight around p2's own name (not the whole HP-bar width),
   // plus a small gold crown glyph immediately to its left. Only drawn when G.encounter.boss (see
   // hud()). Presentation-only (reads G.encounter, never mutates it) — the sim has no notion of
@@ -309,6 +338,11 @@ const Render={ctx:canvas.getContext('2d'),
     if(b.guardActive)this.sparPlate(c,p2barX,48,barW,barH);
     else this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp,'left');
     if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);
+    // Task 7.1: per-fighter timed-effect badges. p1 gets its own row right under its bar (it never had
+    // a buffBadges row -- that one's always been p2/encounter-only); p2's row sits one badge-height+gap
+    // below its buffBadges row so an encounter buff and a landed effect never overlap.
+    this.effectBadges(c,p1barX,48+barH,barW,a.effects,true);
+    this.effectBadges(c,p2barX,48+barH+16,barW,b.effects,false);
     c.font='bold 12px ui-monospace,monospace';c.fillStyle='#fff';c.textAlign='center';
     c.fillText(Math.max(0,Math.round(a.hp))+' / '+a.maxHp,p1barX+barW/2,48+barH-4);
     if(!b.guardActive)c.fillText(Math.max(0,Math.round(b.hp))+' / '+b.maxHp,p2barX+barW/2,48+barH-4);

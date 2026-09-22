@@ -4,6 +4,15 @@
 // RNG, keyed off the current fight frame and particle index, never Math.random, so --sim
 // screenshots reproduce identically frame for frame.
 const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
+  // Task 7.1: label + color per timed effect id, read only here (presentation) -- Effects.apply
+  // (48_effects.js, sim-side) pushes a bare {kind:'effectPopup',x,y,id,stacks} descriptor with no
+  // color/text choice of its own, same "sim pushes plain data, FX turns it into a styled particle"
+  // split every other fx kind here already keeps (compare 'dustArc'/'popup' above, both fed by plain
+  // descriptors Fight.resolve builds).
+  EFFECT_STYLE:{bleed:{text:'BLEED',col:'#c62828'},stun:{text:'STUN',col:'#8cd8ff'},
+    armorBreak:{text:'ARMOR BREAK',col:'#9a9a9a'},fury:{text:'FURY',col:'#ff5a4a'},
+    powerGain:{text:'POWER+',col:'#f4c542'},powerBurn:{text:'POWER BURN',col:'#ff8c00'},
+    regen:{text:'REGEN',col:'#4caf50'},weakness:{text:'WEAKNESS',col:'#7e57c2'}},
   reset(){this.list.length=0;this.shake=0;this.flash=0;this.card=null;this.shieldDown=null},
   _seed(i){const fr=(G.fight&&G.fight.frame)||0;return((fr*97+i*131+1)>>>0)||1},
   push(ev){
@@ -29,6 +38,15 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
           const spd=1.6+rng.next()*2.2,rise=.25+rng.next()*.85;
           this.list.push({kind:'dustArc',x:ev.x,y:ev.y,vx:(ev.face||1)*spd,vy:-rise,life:0,max:22,col:'#8a7358'})}
         break;
+      // Task 7.1: turns a bare {id,stacks} effect descriptor into the same rendered 'popup' particle
+      // kind hit/parry/thorns damage already uses (draw()'s 'popup' case below needs no change) --
+      // text/color looked up from EFFECT_STYLE above rather than chosen by the sim, and a stack count
+      // >1 appended (e.g. 'BLEED x3') so a re-applied/stacked effect reads differently from a fresh one.
+      case'effectPopup':{
+        const st=this.EFFECT_STYLE[ev.id]||{text:String(ev.id||'?').toUpperCase(),col:'#fff'};
+        const text=ev.stacks>1?st.text+' x'+ev.stacks:st.text;
+        this.list.push({kind:'popup',x:ev.x,y:ev.y,text,col:st.col,big:false,muted:false,life:0,max:40});
+        break}
       case'popup':
         // Task 6.4: `muted` (Fight.resolve, forwarding BUFFS.tutorialGuard's ref.capped) draws grey
         // instead of the pushed col -- see draw() below. Stored alongside col (never overwriting it)
