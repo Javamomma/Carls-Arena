@@ -315,9 +315,12 @@ const LOOKS={
   // chain accumulates pitch angle segment over segment (spineA, then chestA=spineA+a('chest')), so
   // even a few degrees of "breathing" tilt lifts the chest (and therefore the front-paw attach point)
   // measurably above the hip line, unlike the human rig's independent per-limb angles.
+  // Fix round 1 (art review): bodyLen trimmed ~15% (170->144) and legW bumped (15->18) so the body
+  // capsule drawQuad now draws (width = bodyLen*.42, a filled rounded shape, not a thin stroke) reads
+  // as "long and low", not a snake — see drawQuad's body-drawing comment for the shape itself.
   donut:{rig:'quad',species:'cat',skin:'#f7ecdc',earInner:'#f6b8d6',eye:'#3f7fd6',accent:'#f4c542',
-    hipH:65,legLen:65,bodyLen:170,neckLen:46,headR:26,tailLen:120,
-    frontW:20,backW:24,legW:15,
+    hipH:65,legLen:65,bodyLen:144,neckLen:46,headR:26,tailLen:120,
+    frontW:20,backW:24,legW:18,
     props:['tiara','whiskers']},
   // PLACEHOLDER (Task 3.4 gives Mongo his own RigBig brute rig): a scaled-down copy of the
   // hobgoblin's proportions (def.scale is already 1.25 — full hobgoblin proportions on top of that
@@ -351,9 +354,12 @@ const LOOKS={
   // neckLen and headR*1.6 close to 1:1 (46 vs 41.6, 42 vs 41.6); grub matches that ratio at a
   // smaller absolute size instead (headR:16 -> headR*1.6=25.6, neckLen:20) so the head capsule sits
   // snug against the body the way "a dark head capsule" implies.
+  // Fix round 1 (art review): bodyLen trimmed ~15% (140->119) for the same filled-capsule-body
+  // reason as donut above; legW trimmed slightly (16->14) so the now-plumper body still contrasts
+  // against genuinely "stubby nub" legs rather than the legs bulking up to match it.
   grub:{rig:'quad',species:'grub',skin:'#c7d19a',headFill:'#33401d',segDark:'#5a6a30',
-    hipH:40,legLen:40,bodyLen:140,neckLen:15,headR:17,tailLen:36,
-    frontW:13,backW:13,legW:16,
+    hipH:40,legLen:40,bodyLen:119,neckLen:15,headR:17,tailLen:36,
+    frontW:13,backW:13,legW:14,
     props:['segments']},
   // PLACEHOLDER (Task 3.4 gives Grull his own RigBig rig): a scaled-down copy of the hobgoblin's
   // proportions (def.scale is 1.3, the biggest in the roster — see the mongo comment above for why
@@ -365,10 +371,12 @@ const LOOKS={
   // Mother Rat (boss): Task 3.4's RigQuad bone set at boss scale (def.scale:1.3, applied on top of
   // these already-large numbers). Grey-brown fur, a long pink tail, big rounded ears, and yellow
   // teeth drawn in drawQuad.
+  // Fix round 1 (art review): bodyLen trimmed ~15% (170->144), legW bumped (18->20) for "bulkier
+  // chest/haunches" on top of the filled-capsule body drawQuad now draws for every quad look.
   mother_rat:{rig:'quad',species:'rat',skin:'#6b5a4a',earInner:'#d98fa0',tailTint:'#d98fa0',
     teeth:'#e8d24a',eye:'#1a1a1a',
-    hipH:65,legLen:65,bodyLen:170,neckLen:42,headR:26,tailLen:170,
-    frontW:22,backW:26,legW:18,
+    hipH:65,legLen:65,bodyLen:144,neckLen:42,headR:26,tailLen:170,
+    frontW:22,backW:26,legW:20,
     props:['teeth']}};
 
 // Resolves a def's look, falling back to LOOKS.carl (once, with a console.warn) for a Phase-3-added
@@ -581,22 +589,32 @@ const Rig={
       c.lineWidth=w;c.strokeStyle=col||look.skin;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke()};
     const paw=(p)=>{const r=look.legW*.58;c.fillStyle=look.skin;c.strokeStyle=skinDark;c.lineWidth=1.2;
       c.beginPath();c.ellipse(p.x,p.y,r,r*.72,0,0,Math.PI*2);c.fill();c.stroke()};
-    // back legs first (behind the body), then the tail (base tucks under the hip)
-    limb(j.blHip,j.bl1,look.legW);limb(j.bl1,j.bl2,look.legW*.78);paw(j.bl2);
-    limb(j.brHip,j.br1,look.legW);limb(j.br1,j.br2,look.legW*.78);paw(j.br2);
+    // back legs first (behind the body), then the tail (base tucks under the hip). Upper legs
+    // noticeably thicker than lower (.55 taper, was .78 in round 1 — art review called the whole rig
+    // "wire-bodied" and this taper is part of giving it real limb volume, matching the human rig's
+    // own thigh/shin taper).
+    limb(j.blHip,j.bl1,look.legW);limb(j.bl1,j.bl2,look.legW*.55);paw(j.bl2);
+    limb(j.brHip,j.br1,look.legW);limb(j.br1,j.br2,look.legW*.55);paw(j.br2);
     limb(j.hip,j.tail1,look.legW*.6,look.tailTint);limb(j.tail1,j.tail2,look.legW*.42,look.tailTint);
     c.fillStyle=look.tailTint||look.skin;c.beginPath();c.arc(j.tail2.x,j.tail2.y,look.legW*.26,0,Math.PI*2);c.fill();
-    // body capsule: a single thick rounded stroke hip->spine->chest, dark outline under a lighter
-    // fill, plus a chest/belly highlight ellipse (the same trick the human torso uses for definition).
+    // Filled body: art review (Fix round 1) called the original hip->chest stroke (width
+    // look.legW*2.1, ~31.5 for donut over a 170-unit body) a "noodle" next to the human rig's filled
+    // torso. bodyW is now tied to bodyLen itself (0.42x) instead of leg thickness, so trimming
+    // bodyLen (also done this round) and widening the body are the same lever — a round, low body
+    // instead of a thin long one. Still drawn as a thick round-capped/joined stroke along
+    // hip->spine->chest (so it follows the spine's pitch bend during pounces/rear-ups instead of a
+    // rigid ellipse), plus a rounder-chest roundel at the front end and a lighter belly band.
     c.lineCap='round';c.lineJoin='round';
-    const bodyW=look.legW*2.1;
+    const bodyW=look.bodyLen*.42;
     c.lineWidth=bodyW+4;c.strokeStyle=skinDark;
     c.beginPath();c.moveTo(j.hip.x,j.hip.y);c.lineTo(j.spine.x,j.spine.y);c.lineTo(j.chest.x,j.chest.y);c.stroke();
     c.lineWidth=bodyW;c.strokeStyle=look.skin;
     c.beginPath();c.moveTo(j.hip.x,j.hip.y);c.lineTo(j.spine.x,j.spine.y);c.lineTo(j.chest.x,j.chest.y);c.stroke();
-    c.fillStyle=shade(look.skin,.18);c.beginPath();
-    c.ellipse((j.hip.x+j.chest.x)/2,(j.hip.y+j.chest.y)/2+bodyW*.22,look.bodyLen*.28,bodyW*.22,0,0,Math.PI*2);c.fill();
-    limb(j.chest,j.neck,bodyW*.62);
+    c.fillStyle=look.skin;c.beginPath();c.ellipse(j.chest.x,j.chest.y,bodyW*.62,bodyW*.58,0,0,Math.PI*2);c.fill();
+    c.lineWidth=1.5;c.strokeStyle=skinDark;c.stroke();
+    c.fillStyle=shade(look.skin,.2);c.beginPath();
+    c.ellipse((j.hip.x+j.chest.x)/2,(j.hip.y+j.chest.y)/2+bodyW*.26,look.bodyLen*.36,bodyW*.26,0,0,Math.PI*2);c.fill();
+    limb(j.chest,j.neck,bodyW*.5);
     // head: a distinct headFill for the grub's dark capsule, otherwise the body's own skin color
     const headFill=look.headFill||look.skin;
     c.fillStyle=headFill;c.beginPath();c.arc(j.head.x,j.head.y,look.headR,0,Math.PI*2);c.fill();
@@ -620,8 +638,8 @@ const Rig={
     c.fillStyle=look.eye||'#141414';
     c.beginPath();c.arc(j.head.x+face*look.headR*.45,j.head.y-look.headR*.05,look.headR*.14,0,Math.PI*2);c.fill();
     // front legs, drawn last of the limbs so they sit in front of the body
-    limb(j.flHip,j.fl1,look.legW);limb(j.fl1,j.fl2,look.legW*.78);paw(j.fl2);
-    limb(j.frHip,j.fr1,look.legW);limb(j.fr1,j.fr2,look.legW*.78);paw(j.fr2);
+    limb(j.flHip,j.fl1,look.legW);limb(j.fl1,j.fl2,look.legW*.55);paw(j.fl2);
+    limb(j.frHip,j.fr1,look.legW);limb(j.fr1,j.fr2,look.legW*.55);paw(j.fr2);
     for(const p of look.props||[]){
       if(p==='tiara'){ // a small gold crown resting between the ears
         const w=look.headR*.7,h=look.headR*.42,cx=j.head.x,cy=j.head.y-look.headR*.9;
