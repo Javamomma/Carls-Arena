@@ -96,12 +96,18 @@ const Render={ctx:canvas.getContext('2d'),
     if(hc.viewersLabel!==label){
       const vc=hc.viewersCanvas,vx=vc.getContext('2d');vx.clearRect(0,0,vc.width,vc.height);
       vx.font='10px ui-monospace,monospace';vx.fillStyle='#f4c542';vx.textAlign='center';vx.letterSpacing='1px';
+      // Fix-wave item 7 (final review, Minor look-and-feel #3): the label's own measured width, cached
+      // alongside it -- the ×N badge below anchors off THIS (the text's real on-screen extent), not
+      // the fixed 200px offscreen canvas it happens to be centered in, which is what let the badge
+      // "hang unanchored" well past the visible text for any label shorter than the canvas (i.e.
+      // always -- "VIEWERS 12,340" is nowhere near 200px wide at 10px monospace).
+      hc.viewersLabelWidth=vx.measureText(label).width;
       vx.fillText(label,vc.width/2,10);hc.viewersLabel=label}
     c.drawImage(hc.viewersCanvas,W/2-hc.viewersCanvas.width/2,92);
     if(Broadcast.state.mult>1){
       c.save();c.font='bold 10px ui-monospace,monospace';c.fillStyle='#f4c542';
       c.textAlign='left';c.textBaseline='alphabetic';
-      c.fillText('×'+Broadcast.state.mult,W/2+hc.viewersCanvas.width/2+4,102);
+      c.fillText('×'+Broadcast.state.mult,W/2+hc.viewersLabelWidth/2+4,102);
       c.restore()}},
   // Quad looks have no legLen/torsoLen (see LOOKS.donut/grub/mother_rat in 68_rig.js) — hipH+neckLen
   // stands in for legLen+torsoLen as "how tall the body's base is off the ground before the head".

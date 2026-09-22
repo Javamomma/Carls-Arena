@@ -1594,6 +1594,28 @@ Test.add('HUD viewers counter is a cached label, updated only when the rounded v
   Render.frame(G.fight);
   eq(Render.hudCache().viewersLabel,'VIEWERS 5,000');
   G.toTitle()});
+// Fix-wave item 7 (final review, Minor look-and-feel #3): the ×N multiplier badge used to anchor off
+// the fixed 200px offscreen viewersCanvas width, not the actual rendered label's width -- since
+// "VIEWERS n" is always far narrower than 200px at 10px monospace, the badge always hung well clear
+// of the visible text, unanchored to it. It must now sit a fixed 4px past the label's own measured
+// right edge (Render.hudCache().viewersLabelWidth), whatever that width happens to be.
+Test.add('the ×N viewers multiplier badge anchors off the label\'s own measured width, not the fixed offscreen canvas width',()=>{
+  Broadcast.reset();Broadcast.state.viewers=42;Broadcast.state.mult=1.5;
+  const c=document.createElement('canvas').getContext('2d');
+  const calls=[];
+  const origFillText=c.fillText.bind(c);
+  c.fillText=(text,x,y)=>{calls.push({text,x,y});return origFillText(text,x,y)};
+  Render.viewersHud(c);
+  const hc=Render.hudCache();
+  eq(hc.viewersLabel,'VIEWERS 42');
+  ok(hc.viewersLabelWidth>0&&hc.viewersLabelWidth<hc.viewersCanvas.width,
+    'the cached label width ('+hc.viewersLabelWidth+') must be the text\'s real extent, narrower than the '
+    +hc.viewersCanvas.width+'px offscreen canvas it used to anchor off of');
+  const badge=calls.find(cl=>cl.text==='×1.5');
+  ok(badge,'the ×N badge must be drawn');
+  eq(badge.x,W/2+hc.viewersLabelWidth/2+4,'badge x must anchor off the measured label width, with a fixed 4px gap');
+  ok(Math.abs(badge.x-(W/2+hc.viewersCanvas.width/2+4))>1,'sanity: must differ from the old canvas-width anchor');
+  Broadcast.reset()});
 Test.add('the arena screen renders the top 5 leaderboard rows (viewers, champ, floor/streak, date)',()=>{
   Save.data=Meta.defaults();
   Save.data.leaderboard=[
