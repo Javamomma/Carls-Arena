@@ -62,6 +62,11 @@ ignored until the first lifts.
 - **Swipe right** (≥44 px within 260 ms) — dashes in with a **medium**; keep holding for another
   200 ms after the swipe and it starts charging a **heavy** — release after a short charge to swing
   it, or keep holding through the full charge and it fires automatically.
+- **Combo chain**: landing a light or medium opens a window (release and press again during its
+  recovery) to chain up to five hits, light or medium in any order. On the fourth hit specifically,
+  swipe right and keep holding through that hit's own recovery instead — release any time before the
+  recovery ends for the usual medium finisher (with a knockdown), or keep holding right up to when it
+  ends for a quicker in-combo **heavy** finisher instead.
 - **Swipe left** — **DASH BACK** (with a moment of invulnerability); keep holding through the dash
   and it rolls straight into **BLOCK** once the dash ends.
 - **POWER** (bottom-right, always on screen) taps to fire your strongest affordable special; hold it

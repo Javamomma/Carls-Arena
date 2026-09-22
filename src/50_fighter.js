@@ -112,6 +112,19 @@ class Fighter{
   activeSpan(){const m=this.move,n=m.hits||1;return n*m.active+(n-1)*(m.gap||0)}
   phase(){const m=this.move;if(!m||this.state!=='ATTACK')return null;const su=this.effStartup,act=this.activeSpan();
     return this.f<su?'startup':this.f<su+act?'active':this.f<su+act+m.recovery?'recovery':'done'}
+  // Fix round 2 (verdict-7.2-fix1 I1): a read-only helper Input's pointermove/tick use (never mutating
+  // sim state -- same boundary as everything else Input reads off G.fight.p1) to decide the in-combo
+  // heavy ender's own gesture at the chainNode-4 recovery window's NATURAL close instead of a fixed
+  // hold-frame count (fix round 1's own GESTURE.ENDER_HOLD_FRAMES, deleted -- it sat inside the
+  // natural human flick-release band and misfired intended mediums into heavies). Returns null outside
+  // an ATTACK's own recovery phase; otherwise the count of FURTHER recovery frames after this one --
+  // 0 means THIS is the last frame phase() will still report 'recovery' (the very next tick() call
+  // flips it to 'done' and resets chainNode to 0), which is exactly the frame Input arms held.heavy on
+  // so this same frame's act() call (already past, this tick -- Input.tick() runs before Fighter.act in
+  // Fight.step's own ordering) still reads intent.heavy while chainNode is still 4.
+  recoveryLeft(){const m=this.move;if(!m||this.state!=='ATTACK')return null;
+    const su=this.effStartup,act=this.activeSpan();if(this.f<su+act)return null;
+    const left=su+act+m.recovery-1-this.f;return left>=0?left:null}
   hitIndex(){const m=this.move,k=this.f-this.effStartup,span=m.active+(m.gap||0);if(k<0)return-1;const i=Math.floor(k/span);return(k%span)<m.active&&i<(m.hits||1)?i:-1}
   hitbox(){if(this.phase()!=='active')return null;const a=this.front,b=this.front+this.face*this.move.range;return{x0:Math.min(a,b),x1:Math.max(a,b)}}
   hurtbox(){return{x0:this.x-this.width/2,x1:this.x+this.width/2}}

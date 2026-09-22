@@ -420,20 +420,25 @@ function reachNode4Recovery(){
     if(p1.state==='ATTACK'&&p1.chainNode===4&&p1.phase()==='recovery'&&p1.landed)return;
     G.tick()}
   throw new Error('never reached chainNode-4 recovery')}
-Test.add('gesture (real Input pipeline): four taps then swipe-right-and-hold at chainNode 4 produces the in-combo heavy ender, not medium',()=>{
+// Fix round 2 (verdict-7.2-fix1 I1): the in-combo heavy ender's own gesture decision is no longer a
+// fixed hold-frame count (fix round 1's own GESTURE.ENDER_HOLD_FRAMES sat inside the natural human
+// flick-release band and misfired intended mediums into heavies) -- it now decides at node 4's own
+// recovery window's NATURAL close, read via Fighter.recoveryLeft() (50_fighter.js). The four tests
+// below drive that decision from every angle the controller's ruling asks for: held through the
+// window's own close (a), released with the window still open (b, c), and crossing on the window's
+// very last valid frame (its own dedicated "must not drop the input" test, right after these four).
+Test.add('gesture (real Input pipeline): swipe-right-and-hold through node 4\'s recovery window close produces the in-combo heavy ender, not medium',()=>{
   Save.data=Meta.defaults();
   G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
   G.sim=true;G.fight.p2.x=G.fight.p1.x+58; // stationary target, well within light range
   reachNode4Recovery();
   const p=tap(1,300,240);
-  p.down();p.move(360,240); // swipe-right crosses SWIPE_PX on this move
+  p.down();p.move(360,240); // swipe-right crosses SWIPE_PX at the window's first recovery frame
   eq(Input.q.includes('medium'),false,'must NOT queue medium immediately while sitting in chainNode-4 recovery');
-  // Fix round 1: a chainNode-4 ("pendingEnder") swipe arms on GESTURE.ENDER_HOLD_FRAMES, not the
-  // generic HEAVY_HOLD_FRAMES -- see that constant's own comment (30_input.js) for why: node 4's own
-  // recovery window (8 frames for a light-reached node 4, this test's own case) is shorter than
-  // HEAVY_HOLD_FRAMES(12), so that threshold can never arm before the window closes on its own.
-  for(let i=0;i<Input.GESTURE.ENDER_HOLD_FRAMES+2;i++)G.tick(); // keep holding well past ENDER_HOLD_FRAMES
-  ok(Input.held.heavy,'held.heavy must arm once the hold clears ENDER_HOLD_FRAMES');
+  // Ride the window out (pointer still down) -- Input arms held.heavy on its own, right as
+  // Fighter.recoveryLeft() reaches 0 (the window's own natural close), no fixed hold count involved.
+  for(let i=0;i<20&&!Input.held.heavy;i++)G.tick();
+  ok(Input.held.heavy,'held.heavy must arm as the recovery window naturally closes');
   eq(G.fight.p1.state,'CHARGE','the in-combo heavy ender must be charging by now');
   eq(G.fight.p1.chainNode,CHAIN.nodes,'charging counts as the chain\'s own node 5');
   // Keep the pointer down (held.heavy stays true) through the full CHAIN.enders.heavy.charge(14) so
@@ -446,19 +451,53 @@ Test.add('gesture (real Input pipeline): four taps then swipe-right-and-hold at 
   ok(G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='heavy'),'the in-combo heavy ender must actually land');
   ok(!G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='medium'),'must never have landed a medium ender instead');
   G.toTitle();G.sim=false});
-Test.add('gesture (real Input pipeline): four taps then a swipe-right released BEFORE ENDER_HOLD_FRAMES still produces the medium ender',()=>{
+Test.add('gesture (real Input pipeline): a swipe-right released 2 frames before node 4\'s recovery window closes still produces the medium ender',()=>{
   Save.data=Meta.defaults();
   G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
   G.sim=true;G.fight.p2.x=G.fight.p1.x+58;
   reachNode4Recovery();
   const p=tap(1,300,240);
   p.down();p.move(360,240);
-  for(let i=0;i<Input.GESTURE.ENDER_HOLD_FRAMES-2;i++)G.tick(); // released well short of the hold
-  ok(!Input.held.heavy,'sanity: released before the hold ever armed held.heavy');
+  for(let i=0;i<20&&G.fight.p1.recoveryLeft()>2;i++)G.tick(); // ride down to exactly 2 frames left
+  eq(G.fight.p1.recoveryLeft(),2,'sanity: releasing with exactly 2 recovery frames still left on the window');
+  ok(!Input.held.heavy,'sanity: held.heavy must not have armed yet -- there\'s still time left');
   p.up();
   for(let i=0;i<200&&!G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='medium');i++)G.tick();
-  ok(G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='medium'),'a released-early swipe at node 4 must still land the medium ender');
+  ok(G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='medium'),'releasing before the window closes must still land the medium ender');
   ok(!G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='heavy'),'must never have charged/landed a heavy instead');
+  G.toTitle();G.sim=false});
+Test.add('gesture (real Input pipeline): a swipe-right released on the very crossing frame still produces the medium ender',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  G.sim=true;G.fight.p2.x=G.fight.p1.x+58;
+  reachNode4Recovery();
+  const p=tap(1,300,240);
+  p.down();p.move(360,240); // swipe crosses
+  p.up(); // released immediately -- no G.tick() ever ran between crossing and release
+  ok(!Input.held.heavy,'sanity: held.heavy never had a chance to arm');
+  for(let i=0;i<200&&!G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='medium');i++)G.tick();
+  ok(G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='medium'),'an instantly-released swipe at node 4 must still land the medium ender');
+  ok(!G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='heavy'),'must never have charged/landed a heavy instead');
+  G.toTitle();G.sim=false});
+Test.add('gesture (real Input pipeline): a swipe-right crossing exactly on node 4\'s last recovery frame still resolves to some ender (does not drop the input)',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  G.sim=true;G.fight.p2.x=G.fight.p1.x+58;
+  reachNode4Recovery();
+  for(let i=0;i<20&&G.fight.p1.recoveryLeft()>0;i++)G.tick();
+  eq(G.fight.p1.recoveryLeft(),0,'sanity: sitting on the window\'s own last valid recovery frame');
+  const p=tap(1,300,240);
+  p.down();p.move(360,240); // swipe crosses on the very last frame -- no runway left at all
+  let released=false;
+  for(let i=0;i<250;i++){
+    G.tick();
+    // Release the instant it's clear this did NOT become the heavy charge (so the medium-on-release
+    // path gets its turn); if it DID become CHARGE, keep holding so the auto-fire below can land it.
+    if(!released&&G.fight.p1.state!=='CHARGE'){p.up();released=true}
+    if(G.fight.log.some(e=>e.type==='hit'&&e.who===1&&(e.move==='medium'||e.move==='heavy')))break}
+  if(!released)p.up();
+  ok(G.fight.log.some(e=>e.type==='hit'&&e.who===1&&(e.move==='medium'||e.move==='heavy')),
+    'a swipe crossing on the window\'s last frame must resolve to SOME ender (either is acceptable), never silently drop the input');
   G.toTitle();G.sim=false});
 Test.add('gesture (real Input pipeline): Shift+K at chainNode 4 produces the in-combo heavy ender (keyboard alias, no hold needed)',()=>{
   Save.data=Meta.defaults();

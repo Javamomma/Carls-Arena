@@ -19,6 +19,12 @@
 //   defers the medium/heavy decision to release/hold-time instead of queuing medium immediately -- see
 //   pointermove's own comment below for the exact mechanism. Every other swipe-right (not mid a node-4
 //   recovery) is untouched.
+//   Fix round 2 (verdict-7.2-fix1 I1): that deferred decision no longer arms on any fixed hold-frame
+//   count for the chainNode-4 case specifically -- a short fixed threshold sat inside the natural human
+//   flick-release band, misfiring intended mediums into heavies. It now decides at the node-4 recovery
+//   window's own natural close (Fighter.recoveryLeft(), 50_fighter.js): swipe right and keep holding
+//   through the fourth hit's own recovery -- release any time before that and it's a medium; still down
+//   as that window closes and it's the heavy ender. See tick()'s own comment for the exact mechanism.
 //   swipe left  (>= SWIPE_PX within SWIPE_FRAMES, dx>|dy|)      -> 'dashBack', pushed the frame it fires
 //   ...then still held DASH_BACK.frames SIM FRAMES after that  -> held.block, until release (counted
 //     by tick(), called once per sim frame from Ctrl.player -- see its own comment below)
@@ -44,22 +50,7 @@
 // withInputClock, 90_tests.js) -- only its default implementation and what its return value now means
 // (frames, not ms) changed.
 const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
-  GESTURE:{TAP_FRAMES:8,TAP_DRIFT:24,SWIPE_PX:44,SWIPE_FRAMES:16,HEAVY_HOLD_FRAMES:12,BLOCK_HOLD_FRAMES:8,
-    // Fix round 1 (verdict-7.2 C1): a SEPARATE, shorter hold threshold for the in-combo heavy ender's
-    // own pendingEnder decision (tick(), below) -- HEAVY_HOLD_FRAMES(12) is tuned for "swipe into a
-    // fresh full heavy from neutral", where there's no clock running against the player. A chainNode-4
-    // window has a hard ceiling: it's just that node's own MOVES.light/medium recovery (8 frames for a
-    // light-reached node 4, the shortest and most common case; 14 for a medium-reached one), after
-    // which chainNode resets to 0 whether or not the player ever acted. Measured directly (driving the
-    // real Input/Fighter pipeline four taps deep, then a swipe held past 12 frames): HEAVY_HOLD_FRAMES
-    // never gets a chance to arm inside an 8-frame window -- node 4 has already reset to IDLE by frame
-    // 8, so held.heavy arming at frame 12 instead starts a bare 22-frame heavy from neutral (chainNode
-    // 0), not the shortened ender. ENDER_HOLD_FRAMES=4 leaves comfortable margin under the tightest
-    // (8-frame, light-reached) window on both sides: enough runway after it fires for the hold to
-    // register, and enough of the window still left after it fires for the charge itself (which only
-    // needs to START within the window -- CHAIN.enders.heavy's own 14-frame charge runs on the fighter's
-    // OWN new ATTACK/CHARGE instance, independent of node 4's now-finished one) to begin.
-    ENDER_HOLD_FRAMES:4},
+  GESTURE:{TAP_FRAMES:8,TAP_DRIFT:24,SWIPE_PX:44,SWIPE_FRAMES:16,HEAVY_HOLD_FRAMES:12,BLOCK_HOLD_FRAMES:8},
   // Injectable clock (default G.frameNow, the sim's own frame counter) so tests can drive gesture
   // timing deterministically by overriding Input.now instead of racing the real sim. G is defined
   // later in the concatenated build (80_game.js) -- safe here since this arrow function's body only
@@ -101,9 +92,11 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
           // chainNode/phase read-only (the same G.fight.p1 read Input.drain()'s own powerAuto
           // resolution already makes below -- Input never mutates sim state) and, only in that one
           // window, defer the decision: don't queue medium yet (P.pendingEnder), let `up` below queue
-          // it on release if the hold never reaches HEAVY_HOLD_FRAMES, or let tick()'s existing
-          // held.heavy arm (unchanged) win if it does. Every OTHER swipe-right (not mid a node-4
-          // recovery) keeps firing 'medium' immediately, exactly as before.
+          // it on release if the recovery window closes with the pointer still up (medium), or let
+          // tick()'s own recoveryLeft()===0 check (fix round 2 -- see tick()'s own comment) arm
+          // held.heavy right as that window naturally closes if the pointer is still down (heavy).
+          // Every OTHER swipe-right (not mid a node-4 recovery) keeps firing 'medium' immediately,
+          // exactly as before.
           const f=typeof G!=='undefined'&&G.fight&&G.fight.p1;
           const atNode4Recovery=!!(f&&f.state==='ATTACK'&&f.chainNode===4&&f.phase&&f.phase()==='recovery'&&f.landed);
           P.pendingEnder=atNode4Recovery;
@@ -113,11 +106,12 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
     const up=e=>{const P=this._ptr;if(!P||P.id!==e.pointerId)return;this._ptr=null;
       if(P.blockOn){this.held.block=false;return} // hold-block or dash-back-hold-block, either way
       if(P.dashDir==='R'){
-        // Fix round 1: a pending ender (the swipe began mid a chainNode-4 recovery, see pointermove
-        // above) that never reached the hold-timer resolves to the medium ender HERE, on release --
-        // the immediate push above was suppressed specifically so this frame's chainNode/phase could
-        // decide, not the swipe-cross frame's. P.heavyOn true means tick() already armed held.heavy (a
-        // genuine hold to HEAVY_HOLD_FRAMES); that's the heavy ender's own path, nothing to push here.
+        // Fix round 1/2: a pending ender (the swipe began mid a chainNode-4 recovery, see pointermove
+        // above) that's released before the recovery window's own close resolves to the medium ender
+        // HERE, on release -- the immediate push above was suppressed specifically so this frame's
+        // chainNode/phase could decide, not the swipe-cross frame's. P.heavyOn true means tick() already
+        // armed held.heavy (the pointer was still down as the window naturally closed, fix round 2's
+        // recoveryLeft()===0 check); that's the heavy ender's own path, nothing to push here.
         if(P.pendingEnder&&!P.heavyOn)this.q.push('medium');
         this.held.heavy=false;return} // clears whether or not heavy ever engaged
       if(P.dashDir==='L')return; // dashBack already fired on the swipe; nothing more on release
@@ -181,11 +175,23 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
     if(P){
       if(!P.dashDir&&!P.blockOn&&!P.drifted&&this.now()-P.t0>=this.GESTURE.BLOCK_HOLD_FRAMES){
         P.blockOn=true;this.held.block=true;this._log('hold')}
-      // Fix round 1: a pendingEnder swipe (see pointermove's own comment) arms on the shorter
-      // ENDER_HOLD_FRAMES instead of the generic HEAVY_HOLD_FRAMES -- see GESTURE.ENDER_HOLD_FRAMES'
-      // own comment for why the normal 12-frame threshold can't fit inside a chainNode-4 window.
-      if(P.dashDir==='R'&&!P.heavyOn&&this.now()-P.actAt>=(P.pendingEnder?this.GESTURE.ENDER_HOLD_FRAMES:this.GESTURE.HEAVY_HOLD_FRAMES)){
-        P.heavyOn=true;this.held.heavy=true;this._log('swipeRHold')}
+      // Fix round 2 (verdict-7.2-fix1 I1): a pendingEnder swipe (see pointermove's own comment) no
+      // longer arms on ANY fixed hold-frame count -- fix round 1's own GESTURE.ENDER_HOLD_FRAMES(4)
+      // sat inside the natural human flick-release band (the controller's own estimate: an ordinary
+      // flick releases 2-6 frames after crossing SWIPE_PX), so a real fraction of INTENDED mediums
+      // misfired into heavies. Decided at the recovery window's own natural close instead: this
+      // fighter's read-only Fighter.recoveryLeft() (50_fighter.js) reports 0 on the exact last frame
+      // Fighter.act will still read this ATTACK as 'recovery' -- arm held.heavy only then, so the
+      // player gets nearly the WHOLE window (8 frames for a light-reached node 4, 14 for a medium-
+      // reached one) to simply release for medium; only a hold still down as the window itself expires
+      // resolves to heavy. A plain (non-pendingEnder) swipe-into-a-fresh-full-heavy from neutral is
+      // unaffected -- it still arms on the generic HEAVY_HOLD_FRAMES, unchanged.
+      if(P.dashDir==='R'&&!P.heavyOn){
+        if(P.pendingEnder){
+          const f=typeof G!=='undefined'&&G.fight&&G.fight.p1;
+          if(f&&f.recoveryLeft&&f.recoveryLeft()===0){P.heavyOn=true;this.held.heavy=true;this._log('swipeRHold')}
+        }else if(this.now()-P.actAt>=this.GESTURE.HEAVY_HOLD_FRAMES){
+          P.heavyOn=true;this.held.heavy=true;this._log('swipeRHold')}}
       if(P.dashDir==='L'&&!P.blockOn){
         P.dashFrames++;
         if(P.dashFrames>=DASH_BACK.frames){P.blockOn=true;this.held.block=true;this._log('swipeLHold')}}}
