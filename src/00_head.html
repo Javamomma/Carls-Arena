@@ -50,7 +50,12 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
    a 2-column grid of tall cards -- a 2-column layout could only fit 3 stacked action buttons at
    26px each; a single wide row fits the same 3 actions SIDE BY SIDE at a real 44px+ touch height,
    and still stacks up to 4 champions (carl/katia/donut/mongo) at 854x480 with no scroll. */
-.cards{display:flex;flex-direction:column;gap:8px;overflow:hidden;flex:1;justify-content:flex-start}
+/* Task 4.6: was justify-content:flex-start, which left 1-2 champions pinned to the top of the
+   panel with a large dead gap below -- centering the column instead means 1 card sits mid-panel,
+   4 cards still stack top-to-bottom with no scroll (unchanged from the fix-round-1 comment above),
+   and the transition between those two densities is smooth (no snap from "centered" to "top-anchored"
+   at some champion-count threshold). */
+.cards{display:flex;flex-direction:column;gap:8px;overflow:hidden;flex:1;justify-content:center}
 .card{box-sizing:border-box;background:#181c2b;border:2px solid #333;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:10px;text-align:left}
 .card.active{border-color:#f4c542}
 .card canvas{width:52px;height:52px;flex:none;background:#101422;border-radius:4px}
