@@ -1028,12 +1028,17 @@ Test.add('Quest.complete on floor 2\'s boss does not create a floor 3 (FLOORS on
   ok(Quest.complete(2,'boss',true));
   eq(Quest.floor(2).boss.state,'done');
   eq(Save.data.floors[3],undefined)});
-Test.add('Rewards.forNode gives gold/iso/xp scaled by floor and node position',()=>{
+// Fix-wave item 8 (ruled): node gold raised from 100*n+40*k to 160*n+60*k -- floor 1 only yielded
+// ~1200 gold total under the old numbers, while one roster star costs ~5 dupes worth of crystals
+// (~10000 gold at 500g/basic), gating floor-2 progression almost entirely behind a wall unrelated to
+// actual play (final-review-verdict.md UX/balance note 3). iso/xp are unchanged; boss k stays
+// def.nodes.length, as before.
+Test.add('Rewards.forNode gives gold/iso/xp scaled by floor and node position (fix-wave item 8: gold 160*n+60*k)',()=>{
   const r0=Rewards.forNode(1,0);
-  eq(r0.gold,100*1+40*0);eq(r0.iso,20);eq(r0.xp,30);
+  eq(r0.gold,160*1+60*0);eq(r0.iso,20);eq(r0.xp,30);
   ok(!('units' in r0));ok(!('cats' in r0));
   const r3=Rewards.forNode(1,3);
-  eq(r3.gold,100*1+40*3)});
+  eq(r3.gold,160*1+60*3)});
 Test.add('Rewards.forNode boss adds units and one catalyst of the enemy class',()=>{
   const r=Rewards.forNode(1,'boss');
   eq(r.iso,20);eq(r.xp,30);eq(r.units,50);

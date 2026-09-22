@@ -216,7 +216,11 @@ const Rewards={
     if(!def)throw new Error('unknown floor: '+n);
     const isBoss=k==='boss';
     const idx=isBoss?def.nodes.length:k;
-    const r={gold:100*n+40*idx,iso:20*n,xp:30*n};
+    // Fix-wave item 8 (ruled): gold raised from 100*n+40*k to 160*n+60*k -- floor 1 only paid out
+    // ~1200 gold total under the old numbers, while a single roster star costs roughly 5 dupes
+    // (~10000 gold at 500g/basic), gating floor-2 progression almost entirely behind a currency wall
+    // unrelated to play (final-review-verdict.md UX/balance note 3). iso/xp unchanged.
+    const r={gold:160*n+60*idx,iso:20*n,xp:30*n};
     if(isBoss){
       r.units=50*n;
       const enemyId=ENCOUNTERS[def.boss].enemy;
