@@ -10,8 +10,8 @@ const FLOORS=[
   {floor:1,name:'THE DEPTHS',nodes:['f1_goblin','f1_skel','f1_hob','f1_shaman','f1_goblin2'],boss:'f1_grull'},
   {floor:2,name:'THE SEWERS',nodes:['f2_grub','f2_skel2','f2_shaman2','f2_hob2','f2_grub2'],boss:'f2_mother'}];
 const ENCOUNTERS={
-  f1_goblin:{floor:1,name:'THE DEPTHS',enemy:'goblin',tier:'basic',hpMul:1,atkMul:1},
-  f1_hob:   {floor:1,name:'THE DEPTHS',enemy:'hobgoblin',tier:'brute',hpMul:1,atkMul:1},
+  f1_goblin:{floor:1,name:'THE DEPTHS',enemy:'goblin',tier:'basic',hpMul:floorMul(1),atkMul:floorMul(1)},
+  f1_hob:   {floor:1,name:'THE DEPTHS',enemy:'hobgoblin',tier:'brute',hpMul:floorMul(1),atkMul:floorMul(1)},
   f1_skel:    {floor:1,name:'THE DEPTHS',enemy:'skeleton', tier:'t2',hpMul:floorMul(1),atkMul:floorMul(1)},
   f1_shaman:  {floor:1,name:'THE DEPTHS',enemy:'shaman',   tier:'t3',hpMul:floorMul(1),atkMul:floorMul(1)},
   f1_goblin2: {floor:1,name:'THE DEPTHS',enemy:'goblin',   tier:'t3',hpMul:floorMul(1),atkMul:floorMul(1)},

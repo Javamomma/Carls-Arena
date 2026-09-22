@@ -22,7 +22,7 @@ const CHAMPS={
 const MOBS={
   goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:300,atk:38,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',
     moves:{heavy:{charge:14,dmg:2.0}}},
-  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:700,atk:55,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human', // fix round 2: 1.2->1.1, see LOOKS.hobgoblin
+  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:700,atk:55,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human', // Phase 2 fix round 2: 1.2->1.1, see LOOKS.hobgoblin
     moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}},
   skeleton: {id:'skeleton',name:'SKELETON',cls:'rogue', hp:260,atk:34,color:'#d8d0c0',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.95,rig:'human'},
   // s1 override: a longer 6-hit flurry (base s1 is 3 hits) — the shaman's signature multi-hit special.
@@ -38,7 +38,7 @@ const BOSSES={
   // docs/shots/p3-floor1-boss.png). At the time, the only HUD safety net was a fixed test against
   // heavyCharge/s3, which happen to be Grull's *shortest* poses (a deep crouch by design), so scale
   // was the only lever available and got tuned down until the visible clipping stopped.
-  // Fix round 1 (controller review): that fixed-pose test was replaced with a per-fight camera zoom
+  // Task 3.5 fix round 1 (controller review): that fixed-pose test was replaced with a per-fight camera zoom
   // cap computed from Rig.extent's true worst case across every pose and prop (G.startFight,
   // 68_rig.js/65_stage.js) — the camera itself now stays out of any look's way at whatever scale it's
   // set to, which is the real fix for this class of bug. Left at .94 rather than re-tuned back up,

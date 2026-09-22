@@ -12,7 +12,13 @@ const Render={ctx:canvas.getContext('2d'),
     // squeeze already applied, so the frame draw is a single drawImage at (0,0).
     const title=mk(W,60),tc=title.getContext('2d');
     tc.save();tc.translate(W/2,30);tc.scale(.82,1.12);tc.textAlign='center';tc.lineWidth=4;tc.strokeStyle='#000';
-    tc.font='900 24px ui-monospace,monospace';tc.strokeText('FIGHTER',0,0);tc.fillStyle='#f4c542';tc.fillText('FIGHTER',0,0);tc.restore();
+    tc.font='900 24px ui-monospace,monospace';
+    // Measured (not eyeballed) so bossPlate can keep clear of the title's actual glyph bounds
+    // regardless of font/string changes: in this local (pre-scale) space the centered text spans
+    // ±width/2, and the .82 x-scale above carries straight into main-canvas pixels since this
+    // offscreen canvas is later drawn at (0,0) unscaled — see bossPlate's own comment.
+    const titleRightEdge=W/2+(tc.measureText('FIGHTER').width/2)*.82;
+    tc.strokeText('FIGHTER',0,0);tc.fillStyle='#f4c542';tc.fillText('FIGHTER',0,0);tc.restore();
     // Chevron cells: the only thing that varies per frame is how many of the 3 cells are "filled"
     // (0..3), so bake all four variants once instead of rebuilding each skewed polygon path per frame.
     const cellW=90,cellH=14,gap=6,total=cellW*3+gap*2;
@@ -24,7 +30,7 @@ const Render={ctx:canvas.getContext('2d'),
         cc.beginPath();cc.moveTo(x+skew,0);cc.lineTo(x+cellW,0);cc.lineTo(x+cellW-skew,cellH);cc.lineTo(x,cellH);cc.closePath();
         cc.fill();cc.strokeStyle='#000';cc.lineWidth=1.2;cc.stroke()}
       chevrons.push(cv)}
-    return this._hudCache={title,chevrons,cellW,cellH,gap,total,
+    return this._hudCache={title,titleRightEdge,chevrons,cellW,cellH,gap,total,
       // Floor line text is rebuilt only when the label string changes (once per fight/encounter, not
       // per frame): cached on a fixed-size canvas keyed by the last label drawn onto it.
       floorCanvas:mk(400,16),floorLabel:null}},
@@ -94,7 +100,15 @@ const Render={ctx:canvas.getContext('2d'),
   // over the portrait's near corner. Only drawn when G.encounter.boss (see hud()). Presentation-only
   // (reads G.encounter, never mutates it) — the sim has no notion of "boss", per Phase 3 ruling #4.
   bossPlate(c,p2x,p2barX,barW){
-    const plateX=p2barX-6,plateY=11,plateW=barW+16,plateH=18;
+    // Left edge clamped to clear the baked title's measured right edge (hudCache().titleRightEdge)
+    // plus an 8px gap, instead of the plain p2barX-6 overhang: at the default HUD layout that
+    // overhang (plateX 464) landed inside "FIGHTER"'s own glyph bounds (title right edge ~468-474
+    // depending on font metrics), so the plate's red border and the title's last letter visually
+    // collided every boss fight. The right edge (crown side) is unaffected — only the left edge
+    // moves in, never further right than its own un-clamped position, so a narrow name/HUD layout
+    // where the two never would have collided draws identically to before this fix.
+    const plateY=11,plateW0=barW+16,rightEdge=p2barX-6+plateW0,
+      plateX=Math.max(p2barX-6,this.hudCache().titleRightEdge+8),plateW=rightEdge-plateX,plateH=18;
     c.strokeStyle='#c62828';c.lineWidth=2.5;c.strokeRect(plateX+.5,plateY+.5,plateW-1,plateH-1);
     const cx=p2x+28,cy=6,w=9,h=8;
     c.fillStyle='#f4c542';c.strokeStyle='#000';c.lineWidth=1;

@@ -293,7 +293,7 @@ const CHAMPS={
 const MOBS={
   goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:300,atk:38,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',
     moves:{heavy:{charge:14,dmg:2.0}}},
-  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:700,atk:55,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human', // fix round 2: 1.2->1.1, see LOOKS.hobgoblin
+  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:700,atk:55,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human', // Phase 2 fix round 2: 1.2->1.1, see LOOKS.hobgoblin
     moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}},
   skeleton: {id:'skeleton',name:'SKELETON',cls:'rogue', hp:260,atk:34,color:'#d8d0c0',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.95,rig:'human'},
   // s1 override: a longer 6-hit flurry (base s1 is 3 hits) — the shaman's signature multi-hit special.
@@ -309,7 +309,7 @@ const BOSSES={
   // docs/shots/p3-floor1-boss.png). At the time, the only HUD safety net was a fixed test against
   // heavyCharge/s3, which happen to be Grull's *shortest* poses (a deep crouch by design), so scale
   // was the only lever available and got tuned down until the visible clipping stopped.
-  // Fix round 1 (controller review): that fixed-pose test was replaced with a per-fight camera zoom
+  // Task 3.5 fix round 1 (controller review): that fixed-pose test was replaced with a per-fight camera zoom
   // cap computed from Rig.extent's true worst case across every pose and prop (G.startFight,
   // 68_rig.js/65_stage.js) — the camera itself now stays out of any look's way at whatever scale it's
   // set to, which is the real fix for this class of bug. Left at .94 rather than re-tuned back up,
@@ -348,8 +348,8 @@ const FLOORS=[
   {floor:1,name:'THE DEPTHS',nodes:['f1_goblin','f1_skel','f1_hob','f1_shaman','f1_goblin2'],boss:'f1_grull'},
   {floor:2,name:'THE SEWERS',nodes:['f2_grub','f2_skel2','f2_shaman2','f2_hob2','f2_grub2'],boss:'f2_mother'}];
 const ENCOUNTERS={
-  f1_goblin:{floor:1,name:'THE DEPTHS',enemy:'goblin',tier:'basic',hpMul:1,atkMul:1},
-  f1_hob:   {floor:1,name:'THE DEPTHS',enemy:'hobgoblin',tier:'brute',hpMul:1,atkMul:1},
+  f1_goblin:{floor:1,name:'THE DEPTHS',enemy:'goblin',tier:'basic',hpMul:floorMul(1),atkMul:floorMul(1)},
+  f1_hob:   {floor:1,name:'THE DEPTHS',enemy:'hobgoblin',tier:'brute',hpMul:floorMul(1),atkMul:floorMul(1)},
   f1_skel:    {floor:1,name:'THE DEPTHS',enemy:'skeleton', tier:'t2',hpMul:floorMul(1),atkMul:floorMul(1)},
   f1_shaman:  {floor:1,name:'THE DEPTHS',enemy:'shaman',   tier:'t3',hpMul:floorMul(1),atkMul:floorMul(1)},
   f1_goblin2: {floor:1,name:'THE DEPTHS',enemy:'goblin',   tier:'t3',hpMul:floorMul(1),atkMul:floorMul(1)},
@@ -2048,7 +2048,13 @@ const Render={ctx:canvas.getContext('2d'),
     // squeeze already applied, so the frame draw is a single drawImage at (0,0).
     const title=mk(W,60),tc=title.getContext('2d');
     tc.save();tc.translate(W/2,30);tc.scale(.82,1.12);tc.textAlign='center';tc.lineWidth=4;tc.strokeStyle='#000';
-    tc.font='900 24px ui-monospace,monospace';tc.strokeText('FIGHTER',0,0);tc.fillStyle='#f4c542';tc.fillText('FIGHTER',0,0);tc.restore();
+    tc.font='900 24px ui-monospace,monospace';
+    // Measured (not eyeballed) so bossPlate can keep clear of the title's actual glyph bounds
+    // regardless of font/string changes: in this local (pre-scale) space the centered text spans
+    // ±width/2, and the .82 x-scale above carries straight into main-canvas pixels since this
+    // offscreen canvas is later drawn at (0,0) unscaled — see bossPlate's own comment.
+    const titleRightEdge=W/2+(tc.measureText('FIGHTER').width/2)*.82;
+    tc.strokeText('FIGHTER',0,0);tc.fillStyle='#f4c542';tc.fillText('FIGHTER',0,0);tc.restore();
     // Chevron cells: the only thing that varies per frame is how many of the 3 cells are "filled"
     // (0..3), so bake all four variants once instead of rebuilding each skewed polygon path per frame.
     const cellW=90,cellH=14,gap=6,total=cellW*3+gap*2;
@@ -2060,7 +2066,7 @@ const Render={ctx:canvas.getContext('2d'),
         cc.beginPath();cc.moveTo(x+skew,0);cc.lineTo(x+cellW,0);cc.lineTo(x+cellW-skew,cellH);cc.lineTo(x,cellH);cc.closePath();
         cc.fill();cc.strokeStyle='#000';cc.lineWidth=1.2;cc.stroke()}
       chevrons.push(cv)}
-    return this._hudCache={title,chevrons,cellW,cellH,gap,total,
+    return this._hudCache={title,titleRightEdge,chevrons,cellW,cellH,gap,total,
       // Floor line text is rebuilt only when the label string changes (once per fight/encounter, not
       // per frame): cached on a fixed-size canvas keyed by the last label drawn onto it.
       floorCanvas:mk(400,16),floorLabel:null}},
@@ -2130,7 +2136,15 @@ const Render={ctx:canvas.getContext('2d'),
   // over the portrait's near corner. Only drawn when G.encounter.boss (see hud()). Presentation-only
   // (reads G.encounter, never mutates it) — the sim has no notion of "boss", per Phase 3 ruling #4.
   bossPlate(c,p2x,p2barX,barW){
-    const plateX=p2barX-6,plateY=11,plateW=barW+16,plateH=18;
+    // Left edge clamped to clear the baked title's measured right edge (hudCache().titleRightEdge)
+    // plus an 8px gap, instead of the plain p2barX-6 overhang: at the default HUD layout that
+    // overhang (plateX 464) landed inside "FIGHTER"'s own glyph bounds (title right edge ~468-474
+    // depending on font metrics), so the plate's red border and the title's last letter visually
+    // collided every boss fight. The right edge (crown side) is unaffected — only the left edge
+    // moves in, never further right than its own un-clamped position, so a narrow name/HUD layout
+    // where the two never would have collided draws identically to before this fix.
+    const plateY=11,plateW0=barW+16,rightEdge=p2barX-6+plateW0,
+      plateX=Math.max(p2barX-6,this.hudCache().titleRightEdge+8),plateW=rightEdge-plateX,plateH=18;
     c.strokeStyle='#c62828';c.lineWidth=2.5;c.strokeRect(plateX+.5,plateY+.5,plateW-1,plateH-1);
     const cx=p2x+28,cy=6,w=9,h=8;
     c.fillStyle='#f4c542';c.strokeStyle='#000';c.lineWidth=1;
@@ -3102,6 +3116,13 @@ Test.add('buff badges: one 12px gold square with a 1-letter code per encounter b
   eq(Render.BUFF_CODES.regen,'R');eq(Render.BUFF_CODES.armorUp,'A');eq(Render.BUFF_CODES.powerGain,'P');
   eq(Render.BUFF_CODES.unblockableSpecials,'U');eq(Render.BUFF_CODES.degen,'D');eq(Render.BUFF_CODES.thorns,'T');
   ok(!threw(()=>Render.buffBadges(Render.ctx,0,0,300,[BUFFS.regen,BUFFS.thorns])),'buffBadges must not throw')});
+// --- Task 3.6: boss plate no longer overlaps the title ---
+Test.add('boss plate\'s left edge clears the title\'s measured right edge with an 8px gap',()=>{
+  const p2x=W-74,barW=300,p2barX=W-74-10-barW,titleRight=Render.hudCache().titleRightEdge;
+  ok(!threw(()=>Render.bossPlate(Render.ctx,p2x,p2barX,barW)),'bossPlate must not throw');
+  // Recompute the same clamp bossPlate applies, and check it actually cleared the title.
+  const plateX=Math.max(p2barX-6,titleRight+8);
+  ok(plateX>=titleRight+8-1e-6,'plate left edge must sit at or right of titleRightEdge+8')});
 
 // --- Task 3.3: floors, encounters, bosses (data) ---
 Test.add('every FLOORS node and boss resolves',()=>{

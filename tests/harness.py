@@ -138,6 +138,8 @@ def main():
                           "in the page-evaluate only; prints {ms_per_frame, ms_step, ms_render} and "
                           "exits 1 if ms_per_frame >= 6")
     a = ap.parse_args()
+    if a.floor is not None and a.node is None:
+        ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2
     if a.matrix:
         sys.exit(run_matrix())
     if a.perf is not None:

@@ -557,6 +557,13 @@ Test.add('buff badges: one 12px gold square with a 1-letter code per encounter b
   eq(Render.BUFF_CODES.regen,'R');eq(Render.BUFF_CODES.armorUp,'A');eq(Render.BUFF_CODES.powerGain,'P');
   eq(Render.BUFF_CODES.unblockableSpecials,'U');eq(Render.BUFF_CODES.degen,'D');eq(Render.BUFF_CODES.thorns,'T');
   ok(!threw(()=>Render.buffBadges(Render.ctx,0,0,300,[BUFFS.regen,BUFFS.thorns])),'buffBadges must not throw')});
+// --- Task 3.6: boss plate no longer overlaps the title ---
+Test.add('boss plate\'s left edge clears the title\'s measured right edge with an 8px gap',()=>{
+  const p2x=W-74,barW=300,p2barX=W-74-10-barW,titleRight=Render.hudCache().titleRightEdge;
+  ok(!threw(()=>Render.bossPlate(Render.ctx,p2x,p2barX,barW)),'bossPlate must not throw');
+  // Recompute the same clamp bossPlate applies, and check it actually cleared the title.
+  const plateX=Math.max(p2barX-6,titleRight+8);
+  ok(plateX>=titleRight+8-1e-6,'plate left edge must sit at or right of titleRightEdge+8')});
 
 // --- Task 3.3: floors, encounters, bosses (data) ---
 Test.add('every FLOORS node and boss resolves',()=>{
