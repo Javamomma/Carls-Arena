@@ -2469,13 +2469,24 @@ POSES_QUAD.light5=pawSwipe('fl',{peakU:104,peakL:-20,peakOffX:28,spinePeak:16,st
 // satisfies for all three rig kinds — donut/mother_rat's reach budget (EDGE_PAD, see their own LOOKS
 // comments) is already close to its ceiling from OTHER poses (light5/s2/s3), so this kick was tuned to
 // land well inside that existing budget rather than becoming the new worst case.
+// Fix round 1 (controller review): the first pass tuned blU/blL down (76/14 -> 60/0) purely to keep
+// the strike paw's own y from disappearing under the body capsule's painted footprint, since drawQuad
+// used to draw the hind legs BEFORE that capsule (i.e. behind/under it) regardless of pose — the kick
+// passed the numeric pose test with room to spare but was nearly invisible in a real screenshot.
+// drawQuad now draws the striking hind legs AFTER the capsule during this pose specifically (see its
+// own comment), which removes the occlusion problem entirely — so the angles are back to the original,
+// more dramatic 76/14 (blU/blL) for a clearer, further-reaching kick silhouette now that nothing hides
+// it. The strike keyframe's off.y:6 (new) is the "slight hip drop" the review asked for: it lowers the
+// whole rear during the kick, which costs nothing in reach (Rig.extent's reach formula excludes off.y
+// entirely, see its own comment) and keeps the front paws planted almost exactly at their idle y
+// (verified: -1.0 vs idle's own -3.6 for donut) despite the hip itself sitting lower.
 POSES_QUAD.medium=[
   {t:0, ang:{spine:D(2),chest:D(2),neck:D(30),tail1:D(34),tail2:D(-20),
              flU:D(-4),flL:D(5),frU:D(6),frL:D(-6),
              blU:D(-66),blL:D(50),brU:D(-58),brL:D(44)},off:{x:-4,y:2}},
   {t:.43,ang:{spine:D(2),chest:D(2),neck:D(28),tail1:D(18),tail2:D(-8),
              flU:D(2),flL:D(-2),frU:D(4),frL:D(-4),
-             blU:D(60),blL:D(0),brU:D(54),brL:D(4)},off:{x:6,y:0}},
+             blU:D(76),blL:D(14),brU:D(70),brL:D(18)},off:{x:6,y:6}},
   {t:1, ang:{spine:D(2),chest:D(2),neck:D(32),tail1:D(10),tail2:D(-4),
              flU:D(-2),flL:D(4),frU:D(2),frL:D(-2),
              blU:D(-4),blL:D(5),brU:D(6),brL:D(-6)},off:{x:0,y:0}}];
@@ -2604,6 +2615,13 @@ POSES_BIG.dash=[
 // static formula, caught light4/light5's hand reaching ~240-300 world units at Mongo's scale — a light
 // jab should not out-reach his own s3. Trimmed to roughly a third of the original swing so the torso
 // still visibly rotates into a hook without the long lever arm blowing the reach budget.
+// Note (Task 6.5 review, big-rig legs during arm moves): jab()'s keyframes never set lHip/rHip/
+// lKnee/rKnee, so samplePose's per-pose angKeys union has no leg entries for light1 (or light2-5,
+// heavy, s1-3, every other jab()/flurry()-built POSES_BIG move) and the legs render at angle 0
+// ("attention") instead of holding POSES_BIG.idle's own small stance angles during any of them —
+// pre-existing, not introduced by this task, and out of this task's scope to fix (see the "light1
+// keeps legs near idle" contrast test in 90_tests.js, which only checks the human/quad rigs because
+// of this).
 POSES_BIG.light1=jab('r',{startSh:-10,startEl:36,peakSh:66,peakEl:22,peakOffX:12,torsoPeak:6});
 POSES_BIG.light2=jab('l',{startSh:-10,startEl:36,peakSh:72,peakEl:22,peakOffX:14,torsoPeak:7});
 POSES_BIG.light3=jab('r',{startSh:-10,startEl:38,peakSh:78,peakEl:20,peakOffX:16,torsoPeak:8});
@@ -3416,18 +3434,37 @@ const Rig={
     const scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solveQuad(look,key,t01,face);
     const skinDark=shade(look.skin,-.35);
+    // Fix round 1 (controller review, Task 6.5): the medium kick's hind legs used to be drawn in the
+    // same fixed spot as every other pose -- BEHIND the body capsule below, since that's simply the
+    // order this function always drew in -- so no pose data could ever make the kick clear the body's
+    // own paint; it read as invisible in a real screenshot despite passing the numeric pose test with
+    // room to spare. `kicking` gates a second, later draw of the hind legs (after the body/front legs,
+    // see below) specifically for this one pose, instead of reordering the whole function for every
+    // pose (which would put the hind legs in front of the body during idle/walk/light1/etc too, where
+    // nothing asked for that and it would read as a rendering regression, not a fix).
+    const kicking=key==='medium';
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
     const limb=(p,q,w,col)=>{c.lineCap='round';
       c.lineWidth=w+3;c.strokeStyle=shade(col||look.skin,-.35);c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke();
       c.lineWidth=w;c.strokeStyle=col||look.skin;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke()};
-    const paw=(p)=>{const r=look.legW*.58;c.fillStyle=look.skin;c.strokeStyle=skinDark;c.lineWidth=1.2;
-      c.beginPath();c.ellipse(p.x,p.y,r,r*.72,0,0,Math.PI*2);c.fill();c.stroke()};
-    // back legs first (behind the body), then the tail (base tucks under the hip). Upper legs
-    // noticeably thicker than lower (.55 taper, was .78 in round 1 — art review called the whole rig
-    // "wire-bodied" and this taper is part of giving it real limb volume, matching the human rig's
-    // own thigh/shin taper).
-    limb(j.blHip,j.bl1,look.legW);limb(j.bl1,j.bl2,look.legW*.55);paw(j.bl2);
-    limb(j.brHip,j.br1,look.legW);limb(j.br1,j.br2,look.legW*.55);paw(j.br2);
+    // pad (Fix round 1): an optional second arg draws a bigger, tinted "kick paw" -- a visible paw pad
+    // (a smaller lighter oval set into the fill, the same "shade a highlight into a flat fill" trick
+    // drawBig's own scars/brow-ridge props already use) instead of the ordinary flat ellipse, so the
+    // striking paw itself reads as a deliberate foot, not just a leg-end. col overrides the fill/
+    // stroke entirely (the kicking limbs' own darker tint, see below); undefined keeps the ordinary look.
+    const paw=(p,col,pad)=>{const r=look.legW*(pad?.68:.58);
+      c.fillStyle=col||look.skin;c.strokeStyle=shade(col||look.skin,-.35);c.lineWidth=1.2;
+      c.beginPath();c.ellipse(p.x,p.y,r,r*.72,0,0,Math.PI*2);c.fill();c.stroke();
+      if(pad){c.fillStyle=look.earInner||shade(col||look.skin,.32);
+        c.beginPath();c.ellipse(p.x,p.y+r*.06,r*.46,r*.32,0,0,Math.PI*2);c.fill()}};
+    // back legs first (behind the body), then the tail (base tucks under the hip), UNLESS this is the
+    // kick (see `kicking` above) -- then they're skipped here and drawn again, in front, after the
+    // body/front legs below. Upper legs noticeably thicker than lower (.55 taper, was .78 in round 1 —
+    // art review called the whole rig "wire-bodied" and this taper is part of giving it real limb
+    // volume, matching the human rig's own thigh/shin taper).
+    if(!kicking){
+      limb(j.blHip,j.bl1,look.legW);limb(j.bl1,j.bl2,look.legW*.55);paw(j.bl2);
+      limb(j.brHip,j.br1,look.legW);limb(j.br1,j.br2,look.legW*.55);paw(j.br2)}
     limb(j.hip,j.tail1,look.legW*.6,look.tailTint);limb(j.tail1,j.tail2,look.legW*.42,look.tailTint);
     c.fillStyle=look.tailTint||look.skin;c.beginPath();c.arc(j.tail2.x,j.tail2.y,look.legW*.26,0,Math.PI*2);c.fill();
     // Filled body: art review (Fix round 1) called the original hip->chest stroke (width
@@ -3473,6 +3510,15 @@ const Rig={
     // front legs, drawn last of the limbs so they sit in front of the body
     limb(j.flHip,j.fl1,look.legW);limb(j.fl1,j.fl2,look.legW*.55);paw(j.fl2);
     limb(j.frHip,j.fr1,look.legW);limb(j.fr1,j.fr2,look.legW*.55);paw(j.fr2);
+    // Fix round 1 (controller review, Task 6.5): the kick's hind legs, drawn here instead of their
+    // usual spot above (see `kicking`'s own comment) so the body capsule and front legs can never hide
+    // them -- a shade darker than the body fill (kickCol) so the striking limb visually separates from
+    // the body even where it overlaps it, plus the bigger, pad-marked paw() variant, both per the
+    // review's "make the strike more legible" ask.
+    if(kicking){
+      const kickCol=shade(look.skin,-.22);
+      limb(j.blHip,j.bl1,look.legW,kickCol);limb(j.bl1,j.bl2,look.legW*.55,kickCol);paw(j.bl2,kickCol,true);
+      limb(j.brHip,j.br1,look.legW,kickCol);limb(j.br1,j.br2,look.legW*.55,kickCol);paw(j.br2,kickCol,true)}
     for(const p of look.props||[]){
       if(p==='tiara'){ // a small gold crown resting between the ears
         const w=look.headR*.7,h=look.headR*.42,cx=j.head.x,cy=j.head.y-look.headR*.9;
