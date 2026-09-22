@@ -108,19 +108,27 @@ const Stage={cache:{},
       c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
       c.fillStyle=`rgba(255,${210+Math.floor(20*flick)},150,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
 const Camera={
-  // override, when given, replaces fight.camTarget for the lerp (G passes {x:attacker.x,zoom:1.28}
-  // while fight.cinematic>0 for the S3 punch-in — CINEMATIC_ZOOM, fix round 2 down from 1.6; Fight
-  // itself never knows about this, it only ever exposes camTarget).
-  update(cam,f,override){const t=override||f.camTarget;cam.x+=(t.x-cam.x)*.12;cam.zoom+=(t.zoom-cam.zoom)*.12;
-    const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
   // Anchor moved .62 -> .74 (round 1) -> .90 (fix round 2): at zoom 1.0 a character's SCREEN size
   // is anchor-independent (world px == screen px at zoom 1), so this doesn't cost any of round 1's
   // frame-height win — fighters still fill >55% of frame height at zoom 1.0 (measured; see
-  // docs/ARENA.md). What the anchor buys is headroom for the CINEMATIC_ZOOM (1.28) punch-in during
-  // an S3, where a raised-arm/leaning pose's topmost joint can otherwise land above the HUD bars —
-  // see the 'tallest pose stays under the HUD at max zoom' test (90_tests.js), which needed .90
-  // (not .74 or .80) to pass once combined with the round-2 heavyCharge pose trim and hobgoblin rescale.
-  // The floor strip this leaves is thin (~48px at zoom 1) but still reads as a real floor, not a
-  // sliver — verified in docs/shots/p2-idle.png.
-  apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.90);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
-  toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.90+(y-FLOOR)*cam.zoom}}};
+  // docs/ARENA.md). What the anchor buys is headroom for zoomed-in poses, where a raised-arm/leaning
+  // pose's topmost joint can otherwise land above the HUD bars. Exposed as Camera.anchorY (not just
+  // inlined in apply/toScreen) so G's per-fight zoom-cap calc (80_game.js) and its regression test
+  // (90_tests.js) read the exact same anchor apply()/toScreen() actually use, instead of a copy that
+  // could drift. The floor strip this leaves is thin (~48px at zoom 1) but still reads as a real
+  // floor, not a sliver — verified in docs/shots/p2-idle.png.
+  anchorY:H*.90,
+  // override, when given, replaces fight.camTarget for the lerp (G passes {x:attacker.x,zoom:1.28}
+  // while fight.cinematic>0 for the S3 punch-in; Fight itself never knows about this, it only ever
+  // exposes camTarget). zoomCap, when given, additionally clamps the target zoom this call lerps
+  // toward (not cam.zoom itself, so the lerp still eases smoothly into the capped value) — computed
+  // by G per-fight from Rig.extent (see G.startFight) so a tall rig's own topmost joint, across every
+  // pose and prop it can strike, never gets zoomed in past where it clears HUD_LINE. Fight/camTarget
+  // stay scale-of-the-fighters-agnostic; this is purely a presentation-side clamp, passed in rather
+  // than read off a global here so Camera itself stays a pure function of its arguments.
+  update(cam,f,override,zoomCap){const t=override||f.camTarget;
+    const z=zoomCap!==undefined?Math.min(t.zoom,zoomCap):t.zoom;
+    cam.x+=(t.x-cam.x)*.12;cam.zoom+=(z-cam.zoom)*.12;
+    const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
+  apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,this.anchorY);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
+  toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:this.anchorY+(y-FLOOR)*cam.zoom}}};

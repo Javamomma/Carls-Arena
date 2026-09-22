@@ -32,17 +32,17 @@ const MOBS={
   // drawn as a segmented larva with stubby leg nubs instead of a cat.
   grub:     {id:'grub',    name:'GRUB',    cls:'beast', hp:380,atk:40,color:'#8a9a4f',armor:.05,crit:.05,critMul:1.6,blockProf:0,  scale:.8, rig:'quad'}};
 const BOSSES={
-  // rig:'big' — Task 3.5's brute bone set (see LOOKS.grull, 68_rig.js). scale reduced from the
-  // Task 3.4-era placeholder's 1.3 to .94 per the Task 3.5 brief's own allowance ("if Grull at boss
-  // scale cannot fit under the HUD at the cap, reduce his scale... and document it"): LOOKS.grull's
-  // proportions alone (a big-rig look is already >=1.25x a human's idle height, per the "big rig idle
-  // height" test) clear the 1.28-zoom HUD test and EDGE_PAD at 1.3 scale with room to spare, so that
-  // specific test never forced a reduction on its own — but at both 1.3 and an intermediate 1.1, his
-  // head/horns went off the TOP of the canvas once the fight camera zoomed in past debugPose's default
-  // 1.0 during a real --sim run (see docs/shots/p3-floor1-boss.png), which no unit test catches but the
-  // brief's own shot review does ("Grull must read as a horned club-wielding brute" — not if his head
-  // isn't on screen). At scale:.94 the look's own proportions alone (no extra def-level multiplier
-  // stacked on top) are enough to read as clearly bigger than Carl while actually fitting the frame.
+  // rig:'big' — Task 3.5's brute bone set (see LOOKS.grull, 68_rig.js). scale is .94, trimmed down
+  // from the Task 3.4-era placeholder's 1.3 during Task 3.5 (a real --sim screenshot showed his head/
+  // horns going off the top of the canvas at both 1.3 and an intermediate 1.1 — see
+  // docs/shots/p3-floor1-boss.png). At the time, the only HUD safety net was a fixed test against
+  // heavyCharge/s3, which happen to be Grull's *shortest* poses (a deep crouch by design), so scale
+  // was the only lever available and got tuned down until the visible clipping stopped.
+  // Fix round 1 (controller review): that fixed-pose test was replaced with a per-fight camera zoom
+  // cap computed from Rig.extent's true worst case across every pose and prop (G.startFight,
+  // 68_rig.js/65_stage.js) — the camera itself now stays out of any look's way at whatever scale it's
+  // set to, which is the real fix for this class of bug. Left at .94 rather than re-tuned back up,
+  // since nothing in this task required changing it further.
   // s3 override + buffs are his boss-signature mechanics per Phase 3 ruling #4 (a mob def with
   // boss:true, a bigger rig, a unique S3, and one signature buff — no boss-only engine).
   grull:{id:'grull',name:'GRULL',cls:'tank',hp:1600,atk:70,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',

@@ -281,15 +281,19 @@ preparePoses(POSES_QUAD);
 // head, lShoulder/rShoulder, lElbow/rElbow, lHip/rHip, lKnee/rKnee) — Task 3.5's frozen interface has
 // 'big' reuse the human skeleton, not a new bone set, so jab()/flurry() (already generic over those
 // field names) are reused as-is below. What makes 'big' its own rig kind is proportions (Rig.solveBig's
-// look.hunch, added to every torso angle here, plus LOOKS.mongo/grull's own numbers: wider shoulders,
-// a longer barrel torso, arms longer than legs, a short thick neck via a small headR) and its own
-// pose data — every key here is authored heavier/wider than its POSES counterpart, not copied.
-// heavyCharge and s3 are the two keys the "tallest pose stays under the HUD at max zoom" test checks
-// (90_tests.js) against the def's *actual* scale (1.25 mongo / 1.3 grull); both are authored as a deep
-// forward crouch (torso pose angle 62-76deg, stacking with look.hunch) so the topmost joint stays low
-// even though 'idle' (near-upright) stands well over 1.25x a human's height at scale 1 — see that
-// test's own comment and the "big rig idle height" test. 'heavy' (the actual two-hand overhead smash,
-// unconstrained by that test) is where the arms genuinely go overhead.
+// look.hunch, added to every torso angle here, plus LOOKS.mongo/grull's own numbers) and its own pose
+// data — every key here is authored heavier/wider than its POSES counterpart, not copied.
+// Every key here is now walked by TWO gates, not one: Rig.extent (68_rig.js) samples every keyframe
+// (and its neighbors' midpoint) of every key for both the per-fight camera zoom cap (top; see
+// G.startFight, 80_game.js) and the EDGE_PAD reach check (90_tests.js) — not just heavyCharge/s3, and
+// not via a fixed formula. That's a Task 3.5 fix-round-1 change (a controller review caught heavyCharge/
+// s3 being the wrong poses to assume were tallest — see LOOKS.grull's comment) with a direct
+// consequence for how poses are authored: a "low crouch" now has to come from off.y (translating the
+// whole rig down, which costs nothing in reach) rather than a big torso rotation, because torsoLen*
+// sin(angle) is a reach cost as much as a height one, and Mongo/Grull's necessarily-long torsoLen (for
+// the 1.25x-height floor) made that cost severe — see heavyCharge/s3's own comments below for the
+// specific redesign, and LOOKS.mongo's Fix round 3 for why the look's own armLen/shoulderW also had to
+// shrink on top of that.
 const POSES_BIG={};
 POSES_BIG.idle=[
   {t:0,ang:{torso:D(4), lShoulder:D(8), rShoulder:D(12),lElbow:D(60),rElbow:D(70),
@@ -301,34 +305,53 @@ POSES_BIG.walk=[ // a heavy plod, not a human trot: bigger hip/knee swing, slowe
   {t:.5,ang:{torso:D(-5),lHip:D(24), rHip:D(-24),lKnee:D(-12),rKnee:D(22), lShoulder:D(-16),rShoulder:D(16)},off:{x:0,y:0}},
   {t:1, ang:{torso:D(5), lHip:D(-24),rHip:D(24), lKnee:D(22),rKnee:D(-12), lShoulder:D(16),rShoulder:D(-16)},off:{x:0,y:0}}];
 POSES_BIG.dash=[
-  {t:0,ang:{torso:D(-8), lHip:D(-14),rHip:D(24),lKnee:D(24),rKnee:D(-12),lShoulder:D(24),rShoulder:D(-24)},off:{x:0,y:-2}},
-  {t:1,ang:{torso:D(-12),lHip:D(-22),rHip:D(32),lKnee:D(30),rKnee:D(-8), lShoulder:D(30),rShoulder:D(-30)},off:{x:-10,y:0}}];
+  {t:0,ang:{torso:D(-4), lHip:D(-14),rHip:D(24),lKnee:D(24),rKnee:D(-12),lShoulder:D(24),rShoulder:D(-24)},off:{x:0,y:6}},
+  {t:1,ang:{torso:D(-8), lHip:D(-22),rHip:D(32),lKnee:D(30),rKnee:D(-8), lShoulder:D(30),rShoulder:D(-30)},off:{x:-10,y:8}}];
 // Lights read as hooks, not jabs: jab() is reused (it's generic over the same bone-name fields) but
 // with a wide elbow bend held through the swing and a much bigger torsoPeak than POSES.light* ever
 // uses, so the silhouette sweeps around instead of extending straight out.
-POSES_BIG.light1=jab('r',{startSh:-10,startEl:36,peakSh:66,peakEl:22,peakOffX:12,torsoPeak:16});
-POSES_BIG.light2=jab('l',{startSh:-10,startEl:36,peakSh:72,peakEl:22,peakOffX:14,torsoPeak:18});
-POSES_BIG.light3=jab('r',{startSh:-10,startEl:38,peakSh:78,peakEl:20,peakOffX:16,torsoPeak:20});
-POSES_BIG.light4=jab('l',{startSh:-10,startEl:38,peakSh:84,peakEl:20,peakOffX:18,torsoPeak:22});
-POSES_BIG.light5=jab('r',{startSh:-12,startEl:42,peakSh:94,peakEl:12,peakOffX:24,torsoPeak:28});
+// Fix round 1 (controller review): torsoPeak was originally 16-28deg here (roughly matching the human
+// rig's own light1-5 torsoPeak range), but for a look with a torso this long (needed for the height
+// floor — see LOOKS.mongo's Fix round 1 comment), the SAME torso-lean angle sweeps the far shoulder/
+// hand sideways by torsoLen*sin(angle) — a much bigger absolute distance than it does on a short human
+// torso. Rig.extent's reach (90_tests.js/68_rig.js), which now walks the actual FK peak instead of a
+// static formula, caught light4/light5's hand reaching ~240-300 world units at Mongo's scale — a light
+// jab should not out-reach his own s3. Trimmed to roughly a third of the original swing so the torso
+// still visibly rotates into a hook without the long lever arm blowing the reach budget.
+POSES_BIG.light1=jab('r',{startSh:-10,startEl:36,peakSh:66,peakEl:22,peakOffX:12,torsoPeak:6});
+POSES_BIG.light2=jab('l',{startSh:-10,startEl:36,peakSh:72,peakEl:22,peakOffX:14,torsoPeak:7});
+POSES_BIG.light3=jab('r',{startSh:-10,startEl:38,peakSh:78,peakEl:20,peakOffX:16,torsoPeak:8});
+POSES_BIG.light4=jab('l',{startSh:-10,startEl:38,peakSh:84,peakEl:20,peakOffX:18,torsoPeak:9});
+POSES_BIG.light5=jab('r',{startSh:-12,startEl:42,peakSh:94,peakEl:12,peakOffX:24,torsoPeak:10});
 // Medium: a driving shoulder charge — big forward off.x, guard held tight (not a reaching arm like
 // the human lunge), torso rolling hard into the hit.
+// Fix round 1 (controller review): t:.5's torso trimmed 46->34 — Rig.extent's reach now walks every
+// pose (not a fixed formula), and torsoLen*sin(46deg) alone was already most of the trimmed reach
+// budget (see LOOKS.mongo's Fix round 3) before the arm added anything.
 POSES_BIG.medium=[
   {t:0, ang:{torso:D(8), rShoulder:D(6), rElbow:D(50),lShoulder:D(10),lElbow:D(50),rHip:D(-10),lHip:D(10),rKnee:D(18),lKnee:D(-8)},off:{x:-8,y:0}},
-  {t:.5,ang:{torso:D(46),rShoulder:D(24),rElbow:D(40),lShoulder:D(20),lElbow:D(40),rHip:D(30), lHip:D(-40),rKnee:D(-30),lKnee:D(10)},off:{x:38,y:4}},
+  {t:.5,ang:{torso:D(34),rShoulder:D(24),rElbow:D(40),lShoulder:D(20),lElbow:D(40),rHip:D(30), lHip:D(-40),rKnee:D(-30),lKnee:D(10)},off:{x:38,y:4}},
   {t:1, ang:{torso:D(20),rShoulder:D(14),rElbow:D(46),lShoulder:D(14),lElbow:D(46),rHip:D(12), lHip:D(-14)},off:{x:14,y:0}}];
-// Heavy charge: the gather — a deep forward crouch (torsoA stacks with look.hunch to well past 60deg),
-// NOT the raised-overhead windup the human rig uses. Kept low so it clears the HUD test at boss scale;
-// the raise happens in 'heavy' below instead.
+// Heavy charge: the gather. Fix round 1 (controller review): originally a deep torso-rotation crouch
+// (64-76deg pose angle, past 60deg once stacked with look.hunch) to keep the pose's TOP low for the
+// old fixed heavyCharge/s3-only HUD test — but rotating a torso this long by that much is exactly what
+// also blew the reach budget (torsoLen*sin(angle) is a reach cost, not just a height one), and once
+// Rig.extent started walking every pose for BOTH top and reach, that crouch strategy stopped paying
+// for itself. Now a much shallower torso lean (22-26deg) carries the "coiled, gathering" read almost
+// entirely via a big off.y (translating the whole rig down, which costs nothing in reach) instead —
+// still reads as a low, weighted-down gather, without the reach penalty of the old design.
 POSES_BIG.heavyCharge=[
-  {t:0,ang:{torso:D(64),head:D(-8), lShoulder:D(26),rShoulder:D(26),lElbow:D(55),rElbow:D(55),lHip:D(10),rHip:D(-10),lKnee:D(22),rKnee:D(-22)},off:{x:-4,y:6}},
-  {t:1,ang:{torso:D(76),head:D(-10),lShoulder:D(34),rShoulder:D(34),lElbow:D(62),rElbow:D(62),lHip:D(16),rHip:D(-16),lKnee:D(28),rKnee:D(-28)},off:{x:-8,y:10}}];
+  {t:0,ang:{torso:D(22),head:D(-8), lShoulder:D(26),rShoulder:D(26),lElbow:D(55),rElbow:D(55),lHip:D(10),rHip:D(-10),lKnee:D(22),rKnee:D(-22)},off:{x:-4,y:60}},
+  {t:1,ang:{torso:D(26),head:D(-10),lShoulder:D(34),rShoulder:D(34),lElbow:D(62),rElbow:D(62),lHip:D(16),rHip:D(-16),lKnee:D(28),rKnee:D(-28)},off:{x:-8,y:85}}];
 // Heavy release: coiled crouch -> both fists thrown overhead (torso arches back, shoulders to 150deg)
 // -> smashed down through impact into a forward-driving crouch. The genuine "two-hand overhead smash".
+// Fix round 1 (controller review): t:0 continues straight from heavyCharge's own end state (torso
+// ~26deg + a big off.y, not the original 58deg lean) for the same reach-budget reason — see
+// heavyCharge's own comment.
 POSES_BIG.heavy=[
-  {t:0,  ang:{torso:D(58), lShoulder:D(20), rShoulder:D(20), lElbow:D(50),rElbow:D(50),lHip:D(14), rHip:D(-14)},off:{x:-6,y:8}},
-  {t:.45,ang:{torso:D(-28),lShoulder:D(150),rShoulder:D(150),lElbow:D(-8),rElbow:D(-8),lHip:D(-22),rHip:D(22),lKnee:D(-10),rKnee:D(10)},off:{x:6,y:-6}},
-  {t:1,  ang:{torso:D(30), lShoulder:D(60), rShoulder:D(60), lElbow:D(28),rElbow:D(28),lHip:D(14), rHip:D(-12)},off:{x:22,y:12}}];
+  {t:0,  ang:{torso:D(26), lShoulder:D(20), rShoulder:D(20), lElbow:D(50),rElbow:D(50),lHip:D(14), rHip:D(-14)},off:{x:-6,y:85}},
+  {t:.45,ang:{torso:D(-28),lShoulder:D(150),rShoulder:D(150),lElbow:D(-8),rElbow:D(-8),lHip:D(-22),rHip:D(22),lKnee:D(-10),rKnee:D(10)},off:{x:6,y:60}},
+  {t:1,  ang:{torso:D(18), lShoulder:D(60), rShoulder:D(60), lElbow:D(28),rElbow:D(28),lHip:D(14), rHip:D(-12)},off:{x:22,y:12}}];
 POSES_BIG.block=[ // a forearm wall: both arms raised and crossed in front, wide stance underneath
   {t:0,ang:{torso:D(6),lShoulder:D(62),rShoulder:D(72),lElbow:D(66),rElbow:D(62),lHip:D(8),rHip:D(-8)},off:{x:2,y:2}},
   {t:1,ang:{torso:D(6),lShoulder:D(68),rShoulder:D(78),lElbow:D(70),rElbow:D(66),lHip:D(8),rHip:D(-8)},off:{x:2,y:2}}];
@@ -347,31 +370,46 @@ POSES_BIG.getup=[
 POSES_BIG.stunned=[
   {t:0,ang:{torso:D(4), head:D(12), lShoulder:D(6),rShoulder:D(-4), lElbow:D(32),rElbow:D(28)},off:{x:0,y:0}},
   {t:1,ang:{torso:D(-8),head:D(-8), lShoulder:D(2),rShoulder:D(-8), lElbow:D(36),rElbow:D(32)},off:{x:0,y:0}}];
-// s1/s2: overhand forearm smashes (upright, unlike s3) — not tested by the HUD zoom-cap check, so
-// free to swing more upright than heavyCharge/s3.
+// s1/s2: overhand forearm smashes (upright, unlike s3). Fix round 1 (controller review): peak
+// shoulder swing trimmed (96-114deg -> 76-92deg) and peak torso trimmed (18-34deg -> 12-22deg) — with
+// Rig.extent now walking every pose for reach, a peak this close to a full horizontal arm extension
+// (shoulder near 90deg = arm pointing straight out) combined with even a moderate torso lean already
+// used most of the trimmed reach budget (see LOOKS.mongo's Fix round 3); still swings well past the
+// human rig's own s1/s2 peaks, just short of the previous near-maximum reach.
 POSES_BIG.s1=flurry(
   {t:0,  ang:{torso:D(2), rShoulder:D(-16),rElbow:D(34),lShoulder:D(18),lElbow:D(24)},off:{x:-4,y:0}},
-  {t:.3, ang:{torso:D(18),rShoulder:D(96), rElbow:D(2)},off:{x:12,y:0}},
-  {t:.6, ang:{torso:D(10),lShoulder:D(-96),lElbow:D(2)},off:{x:18,y:0}},
-  {t:1,  ang:{torso:D(30),rShoulder:D(112),rElbow:D(-8),lShoulder:D(-18),lElbow:D(20)},off:{x:30,y:0}});
+  {t:.3, ang:{torso:D(14),rShoulder:D(76), rElbow:D(2)},off:{x:12,y:0}},
+  {t:.6, ang:{torso:D(8), lShoulder:D(-76),lElbow:D(2)},off:{x:18,y:0}},
+  {t:1,  ang:{torso:D(22),rShoulder:D(88), rElbow:D(-8),lShoulder:D(-18),lElbow:D(20)},off:{x:30,y:0}});
 POSES_BIG.s2=flurry(
   {t:0,  ang:{torso:D(2), rShoulder:D(-18),rElbow:D(36),lShoulder:D(20),lElbow:D(26)},off:{x:-6,y:0}},
-  {t:.25,ang:{torso:D(20),rShoulder:D(100),rElbow:D(2)},off:{x:14,y:0}},
-  {t:.5, ang:{torso:D(8), lShoulder:D(-100),lElbow:D(2)},off:{x:20,y:0}},
-  {t:.75,ang:{torso:D(22),rShoulder:D(108),rElbow:D(-6)},off:{x:26,y:0}},
-  {t:1,  ang:{torso:D(34),lShoulder:D(-114),lElbow:D(-12),rShoulder:D(22),rElbow:D(22)},off:{x:38,y:0}});
-// s3: the ground-pound flurry. Torso stays bent well forward (62-74deg pose angle, stacking with
-// look.hunch) through every keyframe — thematically a crouched pound into the floor, and the reason
-// this reads well under the HUD zoom-cap test (see the table-level comment above).
+  {t:.25,ang:{torso:D(15),rShoulder:D(80), rElbow:D(2)},off:{x:14,y:0}},
+  {t:.5, ang:{torso:D(6), lShoulder:D(-80),lElbow:D(2)},off:{x:20,y:0}},
+  {t:.75,ang:{torso:D(16),rShoulder:D(86), rElbow:D(-6)},off:{x:26,y:0}},
+  {t:1,  ang:{torso:D(24),lShoulder:D(-92),lElbow:D(-12),rShoulder:D(22),rElbow:D(22)},off:{x:38,y:0}});
+// s3: the ground-pound flurry. Fix round 1 (controller review): originally a deep torso-rotation
+// crouch (58-74deg) for the same reason — and with the same fix — as heavyCharge above: a shallower
+// torso lean (18-26deg) plus a big off.y carries the "bent-over, pounding down" read at a fraction of
+// the reach cost. shoulder peaks also trimmed (92-112deg -> 68-80deg) for the same reason as s1/s2.
 POSES_BIG.s3=flurry(
-  {t:0,  ang:{torso:D(68),rShoulder:D(-14),rElbow:D(40),lShoulder:D(24),lElbow:D(30)},off:{x:-8,y:6}},
-  {t:.2, ang:{torso:D(70),rShoulder:D(92), rElbow:D(4)},off:{x:14,y:8}},
-  {t:.45,ang:{torso:D(62),lShoulder:D(-92),lElbow:D(4)},off:{x:22,y:6}},
-  {t:.7, ang:{torso:D(70),rShoulder:D(100),rElbow:D(-4)},off:{x:30,y:8}},
-  {t:1,  ang:{torso:D(74),rShoulder:D(112),rElbow:D(-14),lShoulder:D(-28),lElbow:D(-8),lHip:D(16),rHip:D(-16)},off:{x:42,y:10}});
+  {t:0,  ang:{torso:D(18),rShoulder:D(-14),rElbow:D(40),lShoulder:D(24),lElbow:D(30)},off:{x:-8,y:70}},
+  {t:.2, ang:{torso:D(22),rShoulder:D(68), rElbow:D(4)},off:{x:14,y:80}},
+  {t:.45,ang:{torso:D(16),lShoulder:D(-68),lElbow:D(4)},off:{x:22,y:65}},
+  {t:.7, ang:{torso:D(22),rShoulder:D(74), rElbow:D(-4)},off:{x:30,y:80}},
+  {t:1,  ang:{torso:D(26),rShoulder:D(80), rElbow:D(-14),lShoulder:D(-28),lElbow:D(-8),lHip:D(16),rHip:D(-16)},off:{x:42,y:85}});
+// Fix round 1 (controller review): a fully vertical arm raise (was -140/-150 shoulder deg, matching
+// the human rig's own win pose) plus a held weapon (Grull's spikedclub prop, which extends further
+// past whichever hand holds it — see propExtra) pushed the club tip to the single tallest point across
+// either character's whole pose set, forcing the fight's cineZoomCap just under the 0.85 floor. Capped
+// the raise well short of vertical so a still-clearly-triumphant "arms up" read doesn't carry a raised
+// club any higher than the rest of the roster's tallest poses. Fix round 2 (same review pass): once
+// the club was no longer the tallest point, Mongo's own head at this near-full-height standing pose
+// took over as the tallest point across his whole pose set — a slight forward lean + a small positive
+// off.y (a satisfied, grounded stance, not a ramrod-straight one) trims a few more units off the top
+// of an otherwise-natural standing pose, just enough to clear the 0.85 floor for a Mongo/Grull pairing.
 POSES_BIG.win=[
-  {t:0,ang:{torso:D(-6),lShoulder:D(-140),rShoulder:D(140),lElbow:D(14),rElbow:D(-14)},off:{x:0,y:-4}},
-  {t:1,ang:{torso:D(-2),lShoulder:D(-150),rShoulder:D(150),lElbow:D(10), rElbow:D(-10)},off:{x:0,y:-6}}];
+  {t:0,ang:{torso:D(4),lShoulder:D(-108),rShoulder:D(100),lElbow:D(18),rElbow:D(-14)},off:{x:0,y:16}},
+  {t:1,ang:{torso:D(8),lShoulder:D(-112),rShoulder:D(106),lElbow:D(14), rElbow:D(-10)},off:{x:0,y:20}}];
 POSES_BIG.ko=[
   {t:0,ang:{torso:D(-100),head:D(10),lHip:D(-28),rHip:D(-32),lKnee:D(42),rKnee:D(46),lShoulder:D(18),rShoulder:D(-28)},off:{x:-10,y:24}},
   {t:1,ang:{torso:D(-118),head:D(6), lHip:D(-36),rHip:D(-42),lKnee:D(50),rKnee:D(54),lShoulder:D(10),rShoulder:D(-18)},off:{x:-14,y:28}}];
@@ -444,11 +482,22 @@ const LOOKS={
   // the camera's widest (zoom 1.0, debugPose's default) Mongo's head crowded the FIGHTER title — no
   // test catches this (only heavyCharge/s3 at the 1.28 cinematic zoom are graded), but it read badly
   // in the p3-mongo-idle.png review shot. Trimmed torsoLen to the smallest value that still clears
-  // 1.25x with a safety margin (ratio 1.261) — total height (and therefore idle framing) is set by
-  // the height floor either way, so this is about minimizing margin, not changing the torso:shoulderW
-  // shape ratio. Still clears every numeric gate — see task-3.5-report.md for the verified numbers.
+  // 1.25x with a safety margin.
+  // Fix round 3 (controller review): with Rig.extent walking the real FK peak across every pose
+  // (90_tests.js/68_rig.js), shoulderW/2+armLen alone (56+97=153) was already 87% of EDGE_PAD's
+  // scale-adjusted budget (220/1.25=176) — leaving essentially no room for ANY pose's own torso lean
+  // or shoulder swing on top of just standing still, so light5, s1-s3, and medium all failed once
+  // walked pose-by-pose. armLen/shoulderW/limb trimmed further (down to a standing 56+74+15=... no:
+  // 84/2+74+15=131, a real ~45-unit margin) at the direct cost of "arms longer than legs" — legLen is
+  // now the bigger number (150 vs armLen 74), the opposite of the original spec, because legLen is
+  // the one dimension that adds height without ANY reach cost (legs barely leave the vertical near
+  // idle/attack poses) while torsoLen/shoulderW/armLen all cost reach directly. torsoLen also cut
+  // (172->120) for the same reason — every POSES_BIG key's torso angle now gets walked by Rig.extent
+  // too, not just heavyCharge/s3, so a long torso's sin(angle) reach penalty had to shrink across the
+  // board, not just in the two poses it used to matter for. See POSES_BIG's per-key comments for how
+  // heavyCharge/s3/medium/s1/s2 were retuned to fit the new, much tighter reach budget.
   mongo:{rig:'big',skin:'#7a8a6a',hair:null,primary:'#2a2a24',secondary:'#4a3a28',
-    limb:22,legLen:95,armLen:97,torsoLen:172,headR:27,shoulderW:112,hipW:60,waistW:80,hunch:D(4),
+    limb:15,legLen:147,armLen:74,torsoLen:120,headR:26,shoulderW:84,hipW:52,waistW:59,hunch:D(4),
     props:['trousers','scars']},
   // PLACEHOLDER (Task 3.4/3.5): a copy of Katia's lean proportions with a bone-white palette and
   // rig:'human' set explicitly.
@@ -482,17 +531,27 @@ const LOOKS={
     hipH:40,legLen:40,bodyLen:119,neckLen:15,headR:17,tailLen:36,
     frontW:13,backW:13,legW:14,
     props:['segments']},
-  // Grull (boss): Task 3.5's RigBig brute rig, same bone set and Fix-round-1/2 reasoning as Mongo (see
+  // Grull (boss): Task 3.5's RigBig brute rig, same bone set and Fix-round-1 reasoning as Mongo (see
   // LOOKS.mongo's comment — a long torso can't carry a big permanent lean without reading as a
   // diagonal slab, and margin above the 1.25x height floor should be minimized to keep idle framing
-  // reasonable, since only heavyCharge/s3 are HUD-tested) but darker olive skin, horns (the 'horns'
-  // prop) instead of hair, and a spiked club in the right hand ('spikedclub'). A slightly bigger hunch
-  // than Mongo's (6 vs 4deg) reads as a touch more stooped/feral for the boss without reintroducing
-  // the lean problem. Every EDGE_PAD/height/zoom-cap number here holds at his def.scale even at 1.3,
-  // but 40_movedata.js's BOSSES.grull sets scale:1.1 anyway — a real fight camera crops his head above
-  // debugPose's default zoom=1.0, which no unit test catches; see that file's comment for why.
+  // reasonable) but darker olive skin, horns (the 'horns' prop) instead of hair, and a spiked club in
+  // the right hand ('spikedclub'). A slightly bigger hunch than Mongo's (6 vs 4deg) reads as a touch
+  // more stooped/feral for the boss without reintroducing the lean problem.
+  // Fix round 1 (controller review, follow-up): the original "reduce scale until HUD-tested poses
+  // pass" reasoning here was itself the bug — heavyCharge/s3 (a deep crouch by design) are Grull's
+  // *shortest* poses, not his tallest, so tuning scale against only those two let a real --sim
+  // screenshot catch his idle/stunned head+horns crossing HUD_LINE at 1.3, at 1.1, and still (barely)
+  // at .94. The actual fix is no longer a scale number at all: G.startFight now computes a per-fight
+  // camera zoom cap from Rig.extent's true worst case across every pose and prop (see 80_game.js,
+  // 65_stage.js's Camera.update), so the camera itself is what stays out of Grull's way, at whatever
+  // scale he's set to. His scale stays at .94 (40_movedata.js's BOSSES.grull) — kept, not re-tuned.
+  // Fix round 2 (same review pass, reach): same armLen/shoulderW/torsoLen trim as Mongo (see that
+  // comment) and for the same reason — Rig.extent's reach now walks every pose, and standing
+  // shoulderW/2+armLen alone was most of the scale-adjusted EDGE_PAD budget before any pose even
+  // moved. Grull's own budget (220/.94=234) is looser than Mongo's (220/1.25=176), so he keeps a
+  // slightly longer torso/taller stance than Mongo while using the same trimmed shoulderW/armLen/limb.
   grull:{rig:'big',skin:'#4a5c34',hair:null,primary:'#2a2420',secondary:'#5c3a22',
-    limb:19,legLen:95,armLen:97,torsoLen:179,headR:23,shoulderW:104,hipW:56,waistW:74,hunch:D(6),
+    limb:15,legLen:135,armLen:76,torsoLen:140,headR:24,shoulderW:84,hipW:52,waistW:59,hunch:D(6),
     props:['trousers','horns','spikedclub']},
   // Mother Rat (boss): Task 3.4's RigQuad bone set at boss scale (def.scale:1.3, applied on top of
   // these already-large numbers). Grey-brown fur, a long pink tail, big rounded ears, and yellow
@@ -519,6 +578,72 @@ function lookFor(def){
 const Rig={
   bones:['hip','torso','neck','head','lShoulder','lElbow','lHand','rShoulder','rElbow','rHand','lHip','lKnee','lFoot','rHip','rKnee','rFoot'],
   bonesQuad:QUAD_BONES,
+  // A prop draws geometry beyond any joint solve() returns (a dagger's blade tip, a horn's curl, a
+  // club's head) — Rig.extent (below) needs those extremes too, or a look wearing one could still
+  // clip the HUD even though every *joint* is accounted for. Duplicates just the tip/extent math from
+  // each prop's drawing code in draw()/drawBig()/drawQuad() (not full rendering — extent only cares
+  // about the furthest point(s) a prop's stroke/fill reaches), keyed by the same prop id string
+  // look.props uses. face is passed through rather than assumed 1 so a caller iterating both facings
+  // could in principle use this directly, though Rig.extent itself only ever samples face=1 (the FK
+  // is symmetric under a face flip, so the magnitude — what extent cares about — doesn't change).
+  propExtra(propId,look,j,face){
+    if(propId==='dagger'){ // human rig: blade tip off j.rHand, same direction math as draw()'s dagger
+      const h=j.rHand,len=look.armLen*.46,n=Math.hypot(face,-.32),dx=face/n,dy=-.32/n;
+      return[{x:h.x+dx*len,y:h.y+dy*len}]}
+    if(propId==='club'){const h=j.rHand;return[{x:h.x+face*10,y:h.y-30}]} // human rig: goblin/hobgoblin's club
+    if(propId==='spikedclub'){const h=j.rHand,len=look.armLen*.6;return[{x:h.x+face*len*.3,y:h.y-len}]}
+    if(propId==='horns'){const r=look.headR;
+      return[-1,1].map(s=>({x:j.head.x+s*r*1.05,y:j.head.y-r*2.1}))}
+    if(propId==='tiara'){const w=look.headR*.7,h=look.headR*.42,cy=j.head.y-look.headR*.9;
+      return[{x:j.head.x,y:cy-h*.2},{x:j.head.x-w,y:cy+h},{x:j.head.x+w,y:cy+h}]}
+    if(propId==='whiskers'){const wx=j.head.x+face*look.headR*.68,wy=j.head.y+look.headR*.12;
+      return[{x:wx+face*look.headR*1.35,y:wy}]}
+    if(propId==='teeth'){const tx=j.head.x+face*look.headR*.85;
+      return[{x:tx+face*7,y:j.head.y+look.headR*.25}]}
+    return[]}, // 'vest','boxers','bandages','gear','rags','trousers','scars','segments': stay within
+               // joint bounds (torso/hip/limb strokes), no separate extent contribution.
+  // Worst-case {top, reach} (both positive) a look can strike across EVERY pose it can reach, sampled
+  // at every keyframe and its neighbors' midpoint (not just t=0/.5/1 globally — a multi-keyframe
+  // flurry like s3 has real peaks at interior keyframes a coarse global sample could straddle and
+  // miss), plus every prop's own geometry via propExtra above. Computed once per (look, scale) and
+  // cached on the look itself — this walks every pose key's full FK plus props, so it's not free, but
+  // it never changes for a given look/scale pair.
+  // top = height above the floor, INCLUDING each pose's own off.y (a crouch/lunge genuinely changes
+  // how high the rig's own base sits, and that's exactly the real screen-space clipping G's zoom cap
+  // (80_game.js) needs to know about — see the "big rig idle height"/HUD zoom-cap tests, where this
+  // is the whole point of the fix).
+  // reach = max |x| from the fighter's own x, EXCLUDING each pose's own off.x. EDGE_PAD's own
+  // definition (see its comment in 40_movedata.js) has always meant "how far the rig's limbs reach
+  // from the fighter's actual sim x" — a static, proportion-driven number the wall-clamp sizes itself
+  // against — not "how far a specific attack's cosmetic forward-lean animation (POSES.s3's off.x:46,
+  // purely a render-time flourish; the sim's own x for s3 never moves, unlike a dash-tagged move) can
+  // fling the rendered hand." Including off.x here was tried first and made carl/hobgoblin/donut/
+  // mother_rat/mongo/grull *all* fail this test at 1.5-2x EDGE_PAD — a real (and probably worth its
+  // own future task) latent gap between how far s3's pose art reaches and how much wall margin the sim
+  // reserves, but not something this rig/camera fix round should silently paper over by inflating
+  // EDGE_PAD or rewriting other characters' frozen pose data. Subtracting each sample's own off.x
+  // before folding it into reach is valid because off.x only ever enters the FK once, as a straight
+  // additive shift to hip.x that every other joint's position is built from (sin/cos terms all compose
+  // on top of it) — so undoing it after the fact is exactly equivalent to solving with off.x=0.
+  extent(look,scale){
+    scale=scale||1;
+    look._extentCache=look._extentCache||{};
+    if(look._extentCache[scale])return look._extentCache[scale];
+    const table=look.rig==='quad'?POSES_QUAD:look.rig==='big'?POSES_BIG:POSES;
+    let minY=0,maxReach=0;
+    for(const key in table){
+      const kf=table[key];
+      for(let i=0;i<kf.length-1;i++){
+        const ta=kf[i].t,tb=kf[i+1].t;
+        for(const t of[ta,(ta+tb)/2,tb]){
+          const offX=samplePose(table,key,t).off.x||0;
+          const j=this.solve(look,key,t,1);
+          const fold=(x,y)=>{if(y<minY)minY=y;const rx=Math.abs(x-offX);if(rx>maxReach)maxReach=rx};
+          for(const b in j)fold(j[b].x,j[b].y);
+          for(const propId of look.props||[])
+            for(const ep of this.propExtra(propId,look,j,1))fold(ep.x,ep.y)}}}
+    const result={top:-minY*scale,reach:maxReach*scale};
+    return look._extentCache[scale]=result},
   poseFor(f){
     const st=f.state;
     // A fighter has no dedicated locomotion state; the only x movement while IDLE comes from

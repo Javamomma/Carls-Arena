@@ -1,6 +1,12 @@
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
   cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
+  zoomCap:1.12,cineZoomCap:1.28, // per-fight caps on Camera.update's target zoom; recomputed in startFight from
+  // Rig.extent(p1) / Rig.extent(p2) so a tall rig's topmost joint (any pose, any prop) never gets
+  // zoomed in past HUD_LINE. Default to the game's own normal ceilings (sim's own camTarget.zoom
+  // already caps gameplay at 1.12; 1.28 is the S3 cinematic punch-in) so a Camera.update before any
+  // startFight (shouldn't happen, but tests instantiate G without always calling it) behaves exactly
+  // as it did before this existed.
   fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast()},
   // Positions #toast off the canvas's own box (canvas.getBoundingClientRect()), not #wrap, so it
   // tracks the actual displayed game area exactly even when #wrap letterboxes the canvas at an
@@ -61,6 +67,16 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // ids, not enc.buffs' resolved objects, so the sim's Buffs.apply does its own resolution instead
     // of trusting a reference that passed through the encounter/presentation layer.
     if(this.encounter&&this.encounter.buffIds&&this.encounter.buffIds.length)Buffs.apply(this.fight,this.fight.p2,this.encounter.buffIds);
+    // Per-fight camera zoom cap: the worst-case topmost point (any pose, any prop — see Rig.extent)
+    // either fighter can strike, scaled by their own def.scale, determines how far in the camera may
+    // zoom before that point crosses HUD_LINE. Two ceilings share the same ratio: 1.12 is the normal
+    // gameplay cap (matches Fight.tick's own camTarget.zoom clamp), 1.28 the S3 cinematic punch-in —
+    // both get clamped down together if a tall-enough pairing needs it, never independently.
+    {const p1ext=Rig.extent(lookFor(this.fight.p1.def),this.fight.p1.def.scale||1);
+     const p2ext=Rig.extent(lookFor(this.fight.p2.def),this.fight.p2.def.scale||1);
+     const tallestTop=Math.max(p1ext.top,p2ext.top);
+     const ratio=(Camera.anchorY-HUD_LINE)/tallestTop;
+     this.zoomCap=Math.min(1.12,ratio);this.cineZoomCap=Math.min(1.28,ratio)}
     this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
@@ -162,7 +178,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       this.syncSpecials()}
     FX.pushAll(f.fx);f.fx.length=0;
     const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.28}:null; // fix round 2: 1.6->1.28
-    Camera.update(this.cam,f,punchIn);
+    Camera.update(this.cam,f,punchIn,punchIn?this.cineZoomCap:this.zoomCap);
     FX.update();
     // f.over flips true inside f.step() the instant a KO/timeout resolves, well before slow-mo has
     // played; f.slowmo (armed to 90 by Fight.finish) is what keeps this branch re-entering FIGHT and
