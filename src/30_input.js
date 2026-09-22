@@ -109,7 +109,11 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
           // Every OTHER swipe-right (not mid a node-4 recovery) keeps firing 'medium' immediately,
           // exactly as before.
           const f=typeof G!=='undefined'&&G.fight&&G.fight.p1;
-          const atNode4Recovery=!!(f&&f.state==='ATTACK'&&f.chainNode===4&&f.phase&&f.phase()==='recovery'&&f.landed);
+          // Fix-wave item 5 (final review M4): derived from CHAIN.nodes-1 (40_movedata.js), not a
+          // hardcoded 4 -- the sim side of this exact decision (Fighter.act's own node-4 branch,
+          // 50_fighter.js) already reads cn===CHAIN.nodes-1; if CHAIN.nodes ever changes, the sim
+          // moves and this gesture would otherwise silently not.
+          const atNode4Recovery=!!(f&&f.state==='ATTACK'&&f.chainNode===CHAIN.nodes-1&&f.phase&&f.phase()==='recovery'&&f.landed);
           P.pendingEnder=atNode4Recovery;
           if(!atNode4Recovery)this.q.push('medium');
           this._log('swipeR')}

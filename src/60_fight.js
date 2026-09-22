@@ -268,6 +268,12 @@ class Fight{
   finish(){this.over=true;const a=this.p1,b=this.p2;
     this.winner=a.hp<=0?b:b.hp<=0?a:(a.hp/a.maxHp>=b.hp/b.maxHp?a:b);
     a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');
+    // Fix-wave item 5 (final review M6): `over` stops Fight.step, and with it Effects.tick -- a
+    // fighter KO'd holding a live effect kept it forever (nothing left in the fight ever ticks it
+    // back down), so the HUD kept drawing a frozen badge/duration ring through the 90-frame slow-mo
+    // and into the result overlay. Cleared here rather than skipped in the HUD, since nothing ever
+    // reads a post-finish effect for anything sim-side either.
+    Effects.clear(a);Effects.clear(b);
     this.slowmo=90;this.fx.push({kind:'flash',frames:6});
     this.emit('ko',this.winner,null,0)}
   // move is only meaningful (and only passed) for 'hit'/'block'; other event types leave it

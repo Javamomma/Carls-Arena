@@ -688,6 +688,19 @@ Test.add('Fight never calls Audio directly; G.onEvent dispatches sound per event
   const orig=Audio.recipes.light1;let called=false;Audio.recipes.light1=()=>{called=true};
   try{G.onEvent('hit',{moveName:'light1',combo:1})}finally{Audio.recipes.light1=orig}
   ok(called,'G.onEvent must dispatch hit to Audio.recipes[moveName]')});
+// Fix-wave item 5 (final review M6): finish() sets `over`, which stops Fight.step (and therefore
+// Effects.tick) -- a fighter KO'd while holding a live effect kept it forever (nothing in the fight
+// ever ticks it back down), which meant the HUD kept drawing a frozen badge/duration ring through the
+// 90-frame slow-mo and into the result overlay. finish() now clears both fighters' effects outright.
+Test.add('fix-wave M6: Fight.finish() clears both fighters\' effects -- no frozen badge survives KO',()=>{
+  const f=mkFight();
+  Effects.apply(f,f.p1,'fury',{stacks:2});
+  Effects.apply(f,f.p2,'bleed',{stacks:1});
+  ok(f.p1.effects.length>0&&f.p2.effects.length>0,'sanity: both fighters must actually be holding an effect');
+  f.p2.hp=0;
+  f.finish();
+  eq(f.p1.effects.length,0,'the winner\'s own effects must be cleared too, not just the loser\'s');
+  eq(f.p2.effects.length,0,'the loser\'s effects must be cleared')});
 Test.add('stage builds offscreen layers with parallax factors',()=>{const s=Stage.build('depths');ok(s.layers.length>=4,'>=4 layers');for(const L of s.layers){ok(L.canvas&&L.canvas.width>0);ok(L.parallax>=0&&L.parallax<=1)}ok(s.torches.length>=2)});
 Test.add('camera target sits at the fighters midpoint and zooms in when close',()=>{const f=mkFight();run(f,1);const mid=(f.p1.x+f.p2.x)/2;ok(Math.abs(f.camTarget.x-mid)<1);const far=f.camTarget.zoom;closeIn(f);run(f,1);ok(f.camTarget.zoom>far,'zoom increases when close');ok(f.camTarget.zoom<=1.35&&far>=1)});
 Test.add('camera lerps toward target and clamps to stage edges',()=>{const cam={x:0,zoom:1};const f=mkFight();run(f,1);Camera.update(cam,f);ok(cam.x>0&&cam.x<f.camTarget.x,'moved toward target');for(let i=0;i<200;i++)Camera.update(cam,f);ok(Math.abs(cam.x-f.camTarget.x)<0.5);cam.x=-999;f.camTarget.x=-999;Camera.update(cam,f);ok(cam.x>=W/2/cam.zoom-1,'clamped left')});
@@ -1057,7 +1070,11 @@ Test.add('encounter resolves floor, name and enemy def',()=>{const e=Encounter.r
 // raised DEFS.goblin.hp to 360, so the expected scaled value is computed off the live def instead of
 // re-pinning another literal that the next balance pass would just have to re-derive again.
 Test.add('startFight with an encounter sets p2 to the mob and scales hp',()=>{G.startFight({encounter:{floor:2,name:'T',enemy:'goblin',tier:'dummy',hpMul:2,atkMul:1},ctrl1:Ctrl.idle()});eq(G.fight.p2.def.id,'goblin');eq(G.fight.p2.maxHp,DEFS.goblin.hp*2);eq(G.encounter.floor,2);G.toTitle()});
-Test.add('every move has a sound recipe and announcer lines exist per kind',()=>{for(const k in MOVES)ok(typeof Audio.recipes[k]==='function',k);for(const k of ['start','streak3','streak5','streak10','parry','special','win','loss'])ok(Lines[k]&&Lines[k].length>=8,k)});
+// Fix-wave item 5 (final review M1): 'light' is deliberately excluded -- G.onEvent (80_game.js)
+// routes moveName==='light' through G.nodeRecipe(chainNode), which only ever resolves to
+// Audio.recipes.light1..light5 (tested separately below), never Audio.recipes.light itself. That
+// direct-lookup entry was dead code (nothing could reach it) and has been deleted.
+Test.add('every move has a sound recipe and announcer lines exist per kind',()=>{for(const k in MOVES)if(k!=='light')ok(typeof Audio.recipes[k]==='function',k);for(const k of ['light1','light2','light3','light4','light5'])ok(typeof Audio.recipes[k]==='function',k);for(const k of ['start','streak3','streak5','streak10','parry','special','win','loss'])ok(Lines[k]&&Lines[k].length>=8,k)});
 Test.add('announce picks deterministically from any RNG and throttles',()=>{const r1=RNG(5),r2=RNG(5);eq(Audio.pickLine('parry',r1),Audio.pickLine('parry',r2));G._sayAt=-999;G.frameNow=100;G.say('a');eq(document.getElementById('toast').textContent,'a');G.say('b');eq(document.getElementById('toast').textContent,'a');G.frameNow=200;G.say('b');eq(document.getElementById('toast').textContent,'b')});
 Test.add('announcer lines do not change the fight',()=>{
   // Same seed/scripts, the only difference is whether onEvent is wired to G.onEvent (so every
@@ -2629,6 +2646,29 @@ Test.add('G.startFight threads the crowd perk\'s viewersMul into Broadcast.reset
   Save.data.gold=Sponsors.PERKS.crowd.cost;Sponsors.buy('crowd');
   G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
   eq(Broadcast._viewersMul,1.2);
+  G.toTitle()});
+// Fix-wave item 5 (final review M2): G.dilate/G._dilateN (Task 7.4's intercept time-dilation
+// counters, 80_game.js) survived across fights -- a fight that ended with an intercept still in its
+// own dilation window left the NEXT fight starting at half speed for up to 12 real ticks, and
+// _dilateN's own parity carrying over made that stutter non-deterministic with respect to how the
+// previous fight ended.
+Test.add('fix-wave M2: G.startFight resets G.dilate/G._dilateN -- an intercept still dilating when one fight ends must not stutter the next',()=>{
+  Save.data=Meta.defaults();
+  G.dilate=4;G._dilateN=1;
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(G.dilate,0,'G.dilate must reset to 0 on every G.startFight');
+  eq(G._dilateN,0,'G._dilateN must reset alongside it');
+  G.toTitle()});
+// Fix-wave item 5 (final review M5): Input._ptr (the live canvas pointer record, including its own
+// pendingEnder/dashDir/heavyOn) was not cleared on G.startFight -- a thumb still down across a fight
+// boundary could resolve a stale gesture into the new fight (releasing pushes a medium; reaching a
+// node-4 recovery in the new fight while that old pointer is still down arms held.heavy off a swipe
+// made in the PREVIOUS fight).
+Test.add('fix-wave M5: G.startFight clears Input._ptr -- a pointer held across the fight boundary cannot resolve into the new fight',()=>{
+  Save.data=Meta.defaults();
+  Input._ptr={id:1,x0:0,y0:0,t0:0,drifted:false,dashDir:'R',blockOn:false,heavyOn:false,dashFrames:0,actAt:0,pendingEnder:true};
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(Input._ptr,null,'Input._ptr must be null right after G.startFight, however it was left by the previous fight');
   G.toTitle()});
 Test.add('G.startFight applies an owned perk\'s buff (secondWind) to p1 via the same Buffs.apply path as playerBuffs',()=>{
   Save.data=Meta.defaults();Save.data.gold=Sponsors.PERKS.secondWind.cost;Sponsors.buy('secondWind');

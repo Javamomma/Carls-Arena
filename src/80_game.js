@@ -429,6 +429,16 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // Broadcast.reset -- see its own comment (13_broadcast.js) for why it's stashed there once per
     // fight instead of read live.
     this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();Broadcast.reset({viewersMul:perkOpts.viewersMul});
+    // Fix-wave item 5 (final review M2): dilate/_dilateN (Task 7.4's intercept time-dilation counters,
+    // this object's own top -- see their comment there) survived across fights -- a fight that ended
+    // with an intercept still in its own dilation window left the NEXT fight starting at half speed
+    // for up to 12 real ticks, non-deterministically (_dilateN's own parity carried over too).
+    this.dilate=0;this._dilateN=0;
+    // Fix-wave item 5 (final review M5): a thumb still down across a fight boundary could otherwise
+    // resolve a stale gesture (P.pendingEnder/dashDir/heavyOn) into the new fight -- releasing pushes
+    // a medium, or reaching a node-4 recovery in the new fight while that old pointer is still down
+    // arms held.heavy off a swipe made in the PREVIOUS fight.
+    Input._ptr=null;
     // Fix-wave item 3 (final review I3): Input._buf (the intent buffer drain() re-presents from --
     // see its own comment, 30_input.js) must reset alongside the raw queue it's folded from, or a
     // buffered action still alive from the instant the previous fight ended could resolve into this
