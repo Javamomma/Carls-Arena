@@ -149,4 +149,29 @@ Test.add('crit rolls from the fight rng and multiplies damage; noCrit disables',
 Test.add('block proficiency reduces chip',()=>{const f=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});f.p2.def=Object.assign({},CHAMPS.carl,{blockProf:.5});closeIn(f);run(f,15);eq(f.p2.hp,Math.round(1000-5*.5))});
 Test.add('a missed parry locks out re-parry for PARRY_LOCKOUT frames',()=>{const mash=Ctrl.script(Array.from({length:40},(_,i)=>({f:i*7,until:i*7+5,intent:{block:true}})));const f=mkFight({ctrl1:Ctrl.script([L(0,300)]),ctrl2:mash});closeIn(f);run(f,300);const parries=f.log.filter(e=>e.type==='parry').length;ok(parries<=2,'mash parries: '+parries);const hold=mkFight({ctrl1:Ctrl.script([L(0,300)]),ctrl2:Ctrl.hold({block:true})});closeIn(hold);run(hold,300);ok(hold.p2.hp>=f.p2.hp-50,'holding is not much worse than mashing')});
 Test.add('per-champion move overrides merge over MOVES',()=>{const F=new Fighter(DEFS.goblin,-1,Ctrl.idle());eq(F.moveDef('heavy').charge,14);eq(F.moveDef('light1').startup,MOVES.light1.startup);const H=new Fighter(DEFS.hobgoblin,-1,Ctrl.idle());eq(H.moveDef('heavy').hitstop,12)});
-Test.add('medium as a combo ender pushes the defender out of light range',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0,40),{f:41,intent:{medium:true}}])});closeIn(f);run(f,120);const gap=f.p2.x-f.p1.x-f.p1.width;ok(gap>MOVES.light1.range,'gap '+gap)});
+Test.add('medium as a combo ender pushes the defender out of light range',()=>{
+  // Chain 3 lights (light1/2/3 all have a non-null .chain) then, from light3's recovery, cancel
+  // into a medium (script: light only through frame 23, medium from frame 24 on — the frame light3
+  // enters recovery, verified against the fight's own frame counter, not guessed) so the ender
+  // branch (att.moveName==='medium'&&att.combo>=3) is actually exercised, not just incidentally
+  // satisfied by prior pushback. Capture the landing hit's attacker via a wrapped onEvent (Fight.emit
+  // hands it the live Fighter, so a.moveName/a.combo reflect that exact hit) and diff its knockback
+  // against a plain medium thrown from IDLE with combo 0. Both scenarios share identical dash/
+  // separate() contamination on the hit-landing step (medium's approach dash runs through
+  // f<=startup, which is also its first active frame, so the last dash increment and the hit
+  // resolve in the same step), so the *difference* between the two deltas isolates the push
+  // (90 vs MOVES.medium.push) exactly, independent of that shared collision noise.
+  let capture=null;
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,until:23,intent:{light:true}},{f:24,until:60,intent:{medium:true}}]),
+    onEvent:(type,a)=>{if(type==='hit'&&a.moveName==='medium'&&!capture)capture={moveName:a.moveName,combo:a.combo}}});
+  f.p2.x=STAGE_W/2;closeIn(f); // room to be pushed; hitstop pauses Fight.frame for a few steps per landed hit, so budget generously
+  let dx=0;
+  for(let i=0;i<70&&dx===0;i++){const before=f.p2.x;f.step();const last=f.log[f.log.length-1];
+    if(capture&&last&&last.type==='hit'&&last.f===f.frame&&last.who===1)dx=f.p2.x-before}
+  ok(capture,'medium landed as the chain-cancel finisher');eq(capture.moveName,'medium');ok(capture.combo>=4,'combo at ender: '+capture.combo);
+  const g=mkFight();closeIn(g);g.p1.combo=0;g.p1.startMove('medium');
+  let dx2=0;
+  for(let i=0;i<40&&dx2===0;i++){const before=g.p2.x;g.step();const last=g.log[g.log.length-1];
+    if(last&&last.type==='hit'&&last.f===g.frame)dx2=g.p2.x-before}
+  ok(dx2<60,'non-ender medium push stays well under 90, got '+dx2);
+  eq(dx-dx2,90-MOVES.medium.push,'ender push (90) vs normal push ('+MOVES.medium.push+') differential; dx='+dx+' dx2='+dx2)});

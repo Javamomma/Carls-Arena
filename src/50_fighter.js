@@ -3,7 +3,7 @@ class Fighter{
     this.x=side===1?STAGE_W/2-160:STAGE_W/2+160;this.width=48;this.hp=def.hp;this.maxHp=def.hp;this.power=0;
     this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
     this.combo=0;this.stun=0;this.inv=0;this.blockAge=0;
-    this.parryLock=0;this.blockPressedAt=0;this._parried=false;this._mdCache=null}
+    this.parryLock=0;this.blockPressedAt=0;this.pressTick=0;this._parried=false;this._mdCache=null}
   get front(){return this.x+this.face*this.width/2}
   busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
   setState(s,f=0){this.state=s;this.f=f}
@@ -20,10 +20,11 @@ class Fighter{
   hitbox(){if(this.phase()!=='active')return null;const a=this.front,b=this.front+this.face*this.move.range;return{x0:Math.min(a,b),x1:Math.max(a,b)}}
   hurtbox(){return{x0:this.x-this.width/2,x1:this.x+this.width/2}}
   // Consume one frame of intent. Called before tick().
-  act(intent){const prevAge=this.blockAge;this.blockAge=intent.block?this.blockAge+1:0;
+  act(intent){this.pressTick++; // monotonic frame counter (Fighter has no fight-frame ref of its own); stamps blockPressedAt
+    const prevAge=this.blockAge;this.blockAge=intent.block?this.blockAge+1:0;
     // Parry lockout bookkeeping: a block press that closes its PARRY_WINDOW (or ends) without a
     // parry arms a PARRY_LOCKOUT-frame lock; a successful parry (flagged by Fight.resolve) clears it.
-    if(prevAge===0&&this.blockAge===1){this.blockPressedAt=this.blockAge;this._parried=false}
+    if(prevAge===0&&this.blockAge===1){this.blockPressedAt=this.pressTick;this._parried=false}
     if(intent.block&&this.blockAge===PARRY_WINDOW+1&&!this._parried)this.parryLock=PARRY_LOCKOUT;
     if(!intent.block&&prevAge>0&&prevAge<=PARRY_WINDOW&&!this._parried)this.parryLock=PARRY_LOCKOUT;
     const S=this.state;
