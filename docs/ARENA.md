@@ -22,7 +22,11 @@ Rubric table lands in Phase 5 (same format as Carls-Dash docs/PARITY.md: criteri
 | Fighters stay under the HUD at max zoom | `'tallest pose stays under the HUD at max zoom'` unit test (every look × heavyCharge/s3 × t) | `python3 tests/harness.py --unit` |
 | Screenshot set present | 10 shots in `docs/shots/`: `p2-idle.png` (Carl, braced idle stance), `p2-light3.png` (Carl, light-3 jab extended), `p2-heavy.png` (Carl, heavy overhead wind-up), `p2-block.png` (Carl, guard raised, parry-window indicator lit), `p2-hit.png` (Carl, hitstun recoil), `p2-s3.png` (Carl, S3 flurry mid-swing), `p2-goblin.png` (Carl vs. Goblin Scavenger, `FLOOR 1 • THE DEPTHS`, both HP bars damaged from a real 6 s fight), `p2-card.png` (S3 cinematic name card at the 1.28 punch-in, "CARL / SPECIAL 3"), `p2-close.png` (Carl vs. Goblin Scavenger at close range/near-max gameplay zoom), `p2-close-hob.png` (Carl vs. Hobgoblin Brute at close range — the tallest look, in the worst-case zoom scenario) | `python3 tests/harness.py --sim --seconds 1 --pose <key> --shot docs/shots/p2-<key>.png`; `--sim --seconds 4 --encounter f1_goblin --shot docs/shots/p2-close.png`; `--sim --seconds 4 --encounter f1_hob --shot docs/shots/p2-close-hob.png`; `--sim --seconds 6 --encounter f1_goblin --shot docs/shots/p2-goblin.png`; `--cinematic --shot docs/shots/p2-card.png` |
 
-## Phase 2 soak matrix (2026-09-21, re-run after fix round 2)
+## Phase 2 soak matrix (historical — 2026-09-21, re-run after fix round 2)
+
+Superseded by the fix-wave soak matrix below (2026-09-22), which extends `--matrix`'s own P1S/P2S/AIS
+to Phase 3's new rigs/defs/tiers (this table's own coverage — carl/katia x goblin/hobgoblin/carl x
+basic/brawl/brute — predates every Task 3.x addition). Kept for reference, not superseded numbers.
 
 `python3 tests/harness.py --matrix`: p1 in {carl, katia} x p2 in {goblin, hobgoblin, carl} x ai in {basic, brawl, brute} x seed in {1, 2}, 36 cells, each a restart-on-KO soak over 120 simulated seconds (7200 frames requested). Ran in one Chromium instance, a fresh page per cell. Exit 0; no page or console errors; every cell's `frames_total` cleared the 90%-of-requested floor once `ko_ticks` (wall-clock ticks legitimately spent in the KO slow-mo grace period, which don't advance `Fight.frame`) is credited back — see the fix-wave note on `tests/harness.py`'s soak-floor check. Total wall time 2.5 s for all 36 cells.
 
@@ -67,6 +71,241 @@ katia  carl       brawl  2     6       4       5066          0
 katia  carl       brute  1     6       2       5048          0
 katia  carl       brute  2     7       3       4704          0
 # 36 cells, 2.5s total wall time
+```
+
+## Fix-wave soak matrix (2026-09-22, item 7 — extended P1S/P2S/AIS)
+
+`python3 tests/harness.py --matrix`: p1 in {carl, katia, donut, mongo} x p2 in {goblin, hobgoblin,
+skeleton, shaman, grub, grull, mother_rat, donut, mongo} x ai in {t1, t3, t5} x seed in {1, 2} —
+216 cells (was 36; the old set never covered Phase 3's new rigs/defs/tiers, which the Phase 3 exit
+criteria required explicitly — see the final review's Important findings). Real tiers (t1/t3/t5)
+replace the old `basic`/`brawl`/`brute` aliases; P2S now covers every non-boss rig kind (human
+placeholders skeleton/shaman, quad grub, quad/big champs donut/mongo as mob-slot stand-ins) plus both
+bosses (grull, mother_rat) so their own buff/s3 get soak coverage too; P1S adds donut/mongo so a
+quad/big-rig PLAYER side is soaked as well. Each cell restart-on-KO soaks 60s of simulated frames (not
+120s — kept fast given 6x the cells). Ran in one Chromium instance, a fresh page per cell. Exit 0; no
+page or console errors; every cell's `frames_total`+`ko_ticks` cleared the 90%-of-requested floor.
+Total wall time 15.2s for all 216 cells.
+
+```
+p1     p2         ai     seed  fights  p1wins  frames_total  errors 
+carl   goblin     t1     1     7       6       1373          0      
+carl   goblin     t1     2     7       6       1371          0      
+carl   goblin     t3     1     5       4       1982          0      
+carl   goblin     t3     2     5       4       1978          0      
+carl   goblin     t5     1     5       4       1701          0      
+carl   goblin     t5     2     5       4       1608          0      
+carl   hobgoblin  t1     1     3       2       2728          0      
+carl   hobgoblin  t1     2     3       2       2614          0      
+carl   hobgoblin  t3     1     4       0       2301          0      
+carl   hobgoblin  t3     2     4       0       2281          0      
+carl   hobgoblin  t5     1     5       0       1902          0      
+carl   hobgoblin  t5     2     5       0       1870          0      
+carl   skeleton   t1     1     7       6       1377          0      
+carl   skeleton   t1     2     7       6       1174          0      
+carl   skeleton   t3     1     4       3       2243          0      
+carl   skeleton   t3     2     4       3       2303          0      
+carl   skeleton   t5     1     6       5       1592          0      
+carl   skeleton   t5     2     5       4       1594          0      
+carl   shaman     t1     1     7       6       1377          0      
+carl   shaman     t1     2     7       6       1174          0      
+carl   shaman     t3     1     5       3       1993          0      
+carl   shaman     t3     2     5       2       1969          0      
+carl   shaman     t5     1     6       4       1558          0      
+carl   shaman     t5     2     6       3       1556          0      
+carl   grub       t1     1     5       4       2054          0      
+carl   grub       t1     2     5       4       1823          0      
+carl   grub       t3     1     4       3       2310          0      
+carl   grub       t3     2     4       2       2287          0      
+carl   grub       t5     1     4       1       2191          0      
+carl   grub       t5     2     4       1       1979          0      
+carl   grull      t1     1     2       0       2876          0      
+carl   grull      t1     2     2       1       3053          0      
+carl   grull      t3     1     4       0       2226          0      
+carl   grull      t3     2     4       0       2020          0      
+carl   grull      t5     1     5       0       1902          0      
+carl   grull      t5     2     5       0       1715          0      
+carl   mother_rat t1     1     2       0       3076          0      
+carl   mother_rat t1     2     2       1       3053          0      
+carl   mother_rat t3     1     4       0       2303          0      
+carl   mother_rat t3     2     4       0       2282          0      
+carl   mother_rat t5     1     5       0       1907          0      
+carl   mother_rat t5     2     5       0       1881          0      
+carl   donut      t1     1     3       1       2727          0      
+carl   donut      t1     2     3       2       2614          0      
+carl   donut      t3     1     5       0       1972          0      
+carl   donut      t3     2     5       0       1761          0      
+carl   donut      t5     1     5       0       1636          0      
+carl   donut      t5     2     6       0       1567          0      
+carl   mongo      t1     1     2       0       2743          0      
+carl   mongo      t1     2     3       1       2702          0      
+carl   mongo      t3     1     4       0       2086          0      
+carl   mongo      t3     2     5       0       1940          0      
+carl   mongo      t5     1     5       0       1902          0      
+carl   mongo      t5     2     5       0       1646          0      
+katia  goblin     t1     1     6       5       1423          0      
+katia  goblin     t1     2     7       6       1361          0      
+katia  goblin     t3     1     5       4       1858          0      
+katia  goblin     t3     2     5       4       1938          0      
+katia  goblin     t5     1     6       5       1590          0      
+katia  goblin     t5     2     6       4       1551          0      
+katia  hobgoblin  t1     1     4       2       2386          0      
+katia  hobgoblin  t1     2     4       3       2357          0      
+katia  hobgoblin  t3     1     4       3       2046          0      
+katia  hobgoblin  t3     2     5       2       1939          0      
+katia  hobgoblin  t5     1     5       0       1902          0      
+katia  hobgoblin  t5     2     5       0       1688          0      
+katia  skeleton   t1     1     7       6       1380          0      
+katia  skeleton   t1     2     7       6       1156          0      
+katia  skeleton   t3     1     5       4       1871          0      
+katia  skeleton   t3     2     6       5       1649          0      
+katia  skeleton   t5     1     6       5       1264          0      
+katia  skeleton   t5     2     6       4       1286          0      
+katia  shaman     t1     1     7       6       1380          0      
+katia  shaman     t1     2     7       6       1156          0      
+katia  shaman     t3     1     5       4       1752          0      
+katia  shaman     t3     2     6       4       1643          0      
+katia  shaman     t5     1     7       4       1251          0      
+katia  shaman     t5     2     7       4       1246          0      
+katia  grub       t1     1     5       4       2046          0      
+katia  grub       t1     2     5       4       1775          0      
+katia  grub       t3     1     4       3       2022          0      
+katia  grub       t3     2     4       2       2113          0      
+katia  grub       t5     1     5       2       1669          0      
+katia  grub       t5     2     6       2       1561          0      
+katia  grull      t1     1     3       1       2729          0      
+katia  grull      t1     2     3       1       2699          0      
+katia  grull      t3     1     4       0       2136          0      
+katia  grull      t3     2     5       0       1956          0      
+katia  grull      t5     1     5       0       1899          0      
+katia  grull      t5     2     5       0       1654          0      
+katia  mother_rat t1     1     3       1       2736          0      
+katia  mother_rat t1     2     3       1       2700          0      
+katia  mother_rat t3     1     4       0       2192          0      
+katia  mother_rat t3     2     4       0       2004          0      
+katia  mother_rat t5     1     5       0       1899          0      
+katia  mother_rat t5     2     5       0       1662          0      
+katia  donut      t1     1     3       1       2500          0      
+katia  donut      t1     2     4       3       2362          0      
+katia  donut      t3     1     5       1       1965          0      
+katia  donut      t3     2     5       1       1808          0      
+katia  donut      t5     1     5       0       1652          0      
+katia  donut      t5     2     6       0       1564          0      
+katia  mongo      t1     1     3       1       2735          0      
+katia  mongo      t1     2     3       1       2711          0      
+katia  mongo      t3     1     5       0       1982          0      
+katia  mongo      t3     2     5       0       1944          0      
+katia  mongo      t5     1     5       0       1878          0      
+katia  mongo      t5     2     6       0       1555          0      
+donut  goblin     t1     1     7       6       1372          0      
+donut  goblin     t1     2     7       6       1361          0      
+donut  goblin     t3     1     5       4       1858          0      
+donut  goblin     t3     2     5       4       1978          0      
+donut  goblin     t5     1     6       3       1568          0      
+donut  goblin     t5     2     6       2       1552          0      
+donut  hobgoblin  t1     1     3       1       2497          0      
+donut  hobgoblin  t1     2     4       3       2363          0      
+donut  hobgoblin  t3     1     4       1       2239          0      
+donut  hobgoblin  t3     2     5       1       1941          0      
+donut  hobgoblin  t5     1     5       0       1899          0      
+donut  hobgoblin  t5     2     5       0       1636          0      
+donut  skeleton   t1     1     7       6       1380          0      
+donut  skeleton   t1     2     7       6       1156          0      
+donut  skeleton   t3     1     5       3       1990          0      
+donut  skeleton   t3     2     5       3       1974          0      
+donut  skeleton   t5     1     6       4       1350          0      
+donut  skeleton   t5     2     6       3       1372          0      
+donut  shaman     t1     1     7       6       1380          0      
+donut  shaman     t1     2     7       6       1156          0      
+donut  shaman     t3     1     6       5       1662          0      
+donut  shaman     t3     2     5       4       1674          0      
+donut  shaman     t5     1     7       4       1256          0      
+donut  shaman     t5     2     7       4       1251          0      
+donut  grub       t1     1     5       4       1736          0      
+donut  grub       t1     2     6       5       1638          0      
+donut  grub       t3     1     5       3       1985          0      
+donut  grub       t3     2     4       2       2113          0      
+donut  grub       t5     1     6       3       1573          0      
+donut  grub       t5     2     6       2       1549          0      
+donut  grull      t1     1     3       1       2728          0      
+donut  grull      t1     2     3       1       2697          0      
+donut  grull      t3     1     4       0       2125          0      
+donut  grull      t3     2     5       0       1934          0      
+donut  grull      t5     1     5       0       1906          0      
+donut  grull      t5     2     6       0       1555          0      
+donut  mother_rat t1     1     2       0       2767          0      
+donut  mother_rat t1     2     2       1       2944          0      
+donut  mother_rat t3     1     4       0       2216          0      
+donut  mother_rat t3     2     4       0       2000          0      
+donut  mother_rat t5     1     5       0       1902          0      
+donut  mother_rat t5     2     5       0       1671          0      
+donut  donut      t1     1     3       1       2389          0      
+donut  donut      t1     2     4       3       2363          0      
+donut  donut      t3     1     5       1       1867          0      
+donut  donut      t3     2     6       1       1622          0      
+donut  donut      t5     1     5       0       1603          0      
+donut  donut      t5     2     6       0       1541          0      
+donut  mongo      t1     1     3       0       2728          0      
+donut  mongo      t1     2     3       0       2701          0      
+donut  mongo      t3     1     5       0       1977          0      
+donut  mongo      t3     2     5       0       1891          0      
+donut  mongo      t5     1     5       0       1661          0      
+donut  mongo      t5     2     6       0       1558          0      
+mongo  goblin     t1     1     6       5       1571          0      
+mongo  goblin     t1     2     7       6       1372          0      
+mongo  goblin     t3     1     5       4       1982          0      
+mongo  goblin     t3     2     5       4       1978          0      
+mongo  goblin     t5     1     5       4       1701          0      
+mongo  goblin     t5     2     5       4       1789          0      
+mongo  hobgoblin  t1     1     3       2       2720          0      
+mongo  hobgoblin  t1     2     4       3       2364          0      
+mongo  hobgoblin  t3     1     4       2       2292          0      
+mongo  hobgoblin  t3     2     4       2       2277          0      
+mongo  hobgoblin  t5     1     4       0       2226          0      
+mongo  hobgoblin  t5     2     4       0       2232          0      
+mongo  skeleton   t1     1     7       6       1377          0      
+mongo  skeleton   t1     2     7       6       1174          0      
+mongo  skeleton   t3     1     4       3       2243          0      
+mongo  skeleton   t3     2     4       3       2303          0      
+mongo  skeleton   t5     1     6       5       1592          0      
+mongo  skeleton   t5     2     5       4       1849          0      
+mongo  shaman     t1     1     7       6       1377          0      
+mongo  shaman     t1     2     7       6       1174          0      
+mongo  shaman     t3     1     5       4       1996          0      
+mongo  shaman     t3     2     4       3       1993          0      
+mongo  shaman     t5     1     6       5       1583          0      
+mongo  shaman     t5     2     5       4       1576          0      
+mongo  grub       t1     1     5       4       1736          0      
+mongo  grub       t1     2     6       5       1638          0      
+mongo  grub       t3     1     4       3       2307          0      
+mongo  grub       t3     2     4       3       2287          0      
+mongo  grub       t5     1     5       4       1909          0      
+mongo  grub       t5     2     5       4       1873          0      
+mongo  grull      t1     1     2       1       3076          0      
+mongo  grull      t1     2     2       1       3053          0      
+mongo  grull      t3     1     3       0       2620          0      
+mongo  grull      t3     2     3       0       2420          0      
+mongo  grull      t5     1     4       0       2238          0      
+mongo  grull      t5     2     4       0       2223          0      
+mongo  mother_rat t1     1     2       1       3064          0      
+mongo  mother_rat t1     2     2       1       3033          0      
+mongo  mother_rat t3     1     3       0       2620          0      
+mongo  mother_rat t3     2     3       0       2590          0      
+mongo  mother_rat t5     1     3       0       2287          0      
+mongo  mother_rat t5     2     4       0       2222          0      
+mongo  donut      t1     1     3       2       2720          0      
+mongo  donut      t1     2     4       3       2364          0      
+mongo  donut      t3     1     4       1       2308          0      
+mongo  donut      t3     2     4       1       2291          0      
+mongo  donut      t5     1     4       0       2000          0      
+mongo  donut      t5     2     4       0       1898          0      
+mongo  mongo      t1     1     2       1       3067          0      
+mongo  mongo      t1     2     2       1       3051          0      
+mongo  mongo      t3     1     3       0       2624          0      
+mongo  mongo      t3     2     3       0       2282          0      
+mongo  mongo      t5     1     4       0       2221          0      
+mongo  mongo      t5     2     4       0       2068          0      
+# 216 cells, 15.2s total wall time
 ```
 
 ## Deferred from the Phase 1 final review (2026-09-21)

@@ -67,9 +67,22 @@ def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
             'req_frames': sim_seconds * 60}
 
 def run_matrix():
-    P1S, P2S, AIS, SEEDS = ['carl', 'katia'], ['goblin', 'hobgoblin', 'carl'], ['basic', 'brawl', 'brute'], [1, 2]
+    # Fix-wave item 7: extended from the Phase 2 set (2 p1 x 3 p2 x 3 AI-alias x 2 seed = 36 cells,
+    # 'basic'/'brawl'/'brute' aliases) to cover Phase 3's new rigs/defs/tiers, which the exit criteria
+    # required explicitly and the Phase 2 set never touched (no quad/big rig, no boss, no t2/t4/t5).
+    # P2S adds every non-boss mob rig kind (skeleton/shaman: human placeholders, grub: quad,
+    # donut/mongo: quad/big champs as mob-slot stand-ins) plus both bosses (grull, mother_rat) so a
+    # boss's own buff (armorUp/regen) and unique s3 get restart-on-KO soak coverage too. P1S adds
+    # donut/mongo so a quad/big-rig PLAYER side gets the same soak. AIS switches from the old
+    # aliases to real tiers spanning the curve (t1/t3/t5) rather than three adjacent-difficulty ones.
+    # 4*9*3*2 = 216 cells — 6x the old 36 — so each cell runs 60s of simulated frames (not the old
+    # 120s-then-auto-reduce-to-60s) to keep total wall time reasonable; see the printed total below.
+    P1S = ['carl', 'katia', 'donut', 'mongo']
+    P2S = ['goblin', 'hobgoblin', 'skeleton', 'shaman', 'grub', 'grull', 'mother_rat', 'donut', 'mongo']
+    AIS = ['t1', 't3', 't5']
+    SEEDS = [1, 2]
     cells = [(p1n, p2n, ain, sd) for p1n in P1S for p2n in P2S for ain in AIS for sd in SEEDS]
-    sim_seconds = 120
+    sim_seconds = 60
     rows = []
     with sync_playwright() as p:
         b = p.chromium.launch()
@@ -78,10 +91,6 @@ def run_matrix():
             row = run_matrix_cell(b, p1n, p2n, ain, sd, sim_seconds)
             row['wall'] = time.time() - t0
             rows.append(row)
-            if i == 0 and row['wall'] > 40:
-                print('# first cell took %.1fs wall (> 40s); reducing remaining cells to 60s sim'
-                      % row['wall'], file=sys.stderr)
-                sim_seconds = 60
         b.close()
     hdr = '%-6s %-10s %-6s %-5s %-7s %-7s %-13s %-7s' % (
         'p1', 'p2', 'ai', 'seed', 'fights', 'p1wins', 'frames_total', 'errors')
