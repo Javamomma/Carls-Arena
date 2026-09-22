@@ -1267,34 +1267,73 @@ const Ctrl={
   //   1. continue holding a heavy already armed by step 8 below (charge moves need intent.heavy held
   //      every frame — see Fighter.act's CHARGE branch — checked ahead of the busy() gate the same
   //      way AI.make's decideHeavy 'hold' phase does, since CHARGE itself counts as busy)
-  //   2. finish a light chain already open (Fighter.act's own recovery+chain+landed window)
+  //   2. finish a light chain already open (Fighter.act's own recovery+chain+landed window) --
+  //      Task 7.5: `openedMedium` (armed by step 9's own medium opener, cleared by step 8's light
+  //      opener) makes this the mixed M-L-L-L-M grammar the controller ruling asks for, not a flat
+  //      all-light follow: nodes 1-3 still press light (three L's), but the node-4->5 transition
+  //      (me.chainNode===CHAIN.nodes-1, the chain's last regular continuation) presses medium instead
+  //      when the chain was opened by one, landing CHAIN.enders.medium's push/knockdown same as a
+  //      player-thrown M-L-L-L-M. A light-opened chain (openedMedium false) keeps the old flat
+  //      all-light follow through node 5, unchanged from before this task.
   //   3. otherwise, if busy, do nothing (can't act)
-  //   4. react to a visible medium/heavy: block once its startup clock has run REACT frames (leaves
+  //   4. Task 7.5 (dash-back read): read a foe's medium dash-in DASH_READ_LEAD frames before its
+  //      hitbox goes active and dash back through it instead of blocking -- DASH_BACK's own 8 frames
+  //      of i-frames (50_fighter.js) comfortably cover the foe's active window at this lead, at any
+  //      gap (effStartup 10..14, see 40_movedata.js's own dash-in cap comment), so this always lands a
+  //      real dexterity dodge (Task 7.3) rather than merely eating chip damage -- verified empirically
+  //      (see the task report) across the full close/far effStartup range, not a single seed pick.
+  //      Only ever a SINGLE exact-frame trigger (foe.f steps through every integer, never skipping
+  //      DASH_READ_LEAD frames-before-active), so this can't re-fire or stack with itself. Checked
+  //      ahead of the plain block-react below so it wins that frame's decision outright; block may
+  //      still have fired on earlier frames of the same startup (BLOCK doesn't count as busy() --
+  //      Fighter.busy() only excludes IDLE/BLOCK -- so switching from holding block into DASH here is
+  //      a normal act() transition, not an interruption) -- riding out the early, harmless part of the
+  //      startup in block and finishing with the timed dodge is strictly better than either alone.
+  //      Scoped to 'medium' only (never heavy/specials), the same scope decideIntercept (55_ai.js)
+  //      uses for the offensive read this dodge mirrors -- mediums are the grammar's own dash-in/
+  //      approach tool, the move type this read is meant to punish.
+  //   5. react to a visible medium/heavy: block once its startup clock has run REACT frames (leaves
   //      the move's last couple of startup frames as a buffer, mirroring the AI tiers' 'react' field)
-  //   5. bail out of a telegraphed heavy charge while low on hp
-  //   6. fire the strongest special affordable
-  //   7. chain lights whenever in light range
-  //   8. Fix-wave item 8: every 5th time the foe enters blockstun (a mix-up, not spam — counted on
+  //   6. bail out of a telegraphed heavy charge while low on hp
+  //   7. fire the strongest special affordable
+  //   8. chain lights whenever in light range -- also where `openedMedium` clears to false (a
+  //      light-range opener always starts the plain all-light plan, whether or not the foe was just
+  //      mixed off a previous medium-opened chain)
+  //   9. Fix-wave item 8: every 5th time the foe enters blockstun (a mix-up, not spam — counted on
   //      the rising edge of BLOCKSTUN so one long blockstun window only counts once), arm a heavy
   //      instead of continuing the light chain
-  //   9. Fix-wave item 8: close distance with a medium (its own startup dash covers real ground) when
+  //   10. Fix-wave item 8: close distance with a medium (its own startup dash covers real ground) when
   //      out of light range and the foe isn't mid-attack, on a 40-frame cooldown — the bot used to
   //      just stand there outside light range forever, which is why intercept/medium-punish never
   //      fired in the run that certified the tiers (final review, Important) and the monotone curve
-  //      was driven almost entirely by `attack`.
-  competent:seed=>{const REACT=6,LOW_HP=0.3,CLOSE_CD=40,MIXUP_EVERY=5;
-    let closeCd=0,openings=0,wasBlockstun=false,heavyHold=0;
+  //      was driven almost entirely by `attack`. Task 7.5: this is also the M-L-L-L-M chain's own
+  //      opener -- arms `openedMedium=true` so step 2's own chain-continuation read presses the mixed
+  //      pattern once this medium actually lands and the chain opens.
+  competent:seed=>{const REACT=6,LOW_HP=0.3,CLOSE_CD=40,MIXUP_EVERY=5,DASH_READ_LEAD=2;
+    let closeCd=0,openings=0,wasBlockstun=false,heavyHold=0,openedMedium=false;
     return{next(fight,me,foe){
     const it=Ctrl.EMPTY();
     if(heavyHold>0){heavyHold--;it.heavy=true;return it}
     // Task 7.2: me.move.chain is gone (the fixed ladder no longer exists) -- me.chainNode>=1 &&
     // <CHAIN.nodes is the grammar's own "still inside an open chain window" check, same one AI.make's
-    // decidePunish 'follow' phase uses. Ctrl.competent keeps the old flat all-light follow (not the
-    // mixed M-L-L-L-M grammar AI.make's t3+ tiers learn) -- it's the fixed win-rate yardstick bot, so
-    // minimizing its own behavior change keeps the tier-gate retune isolated to what the grammar/
-    // damage changes themselves actually shift, not an unrelated bot-behavior change on top.
-    if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){it.light=true;return it}
+    // decidePunish 'follow' phase uses. Task 7.5: Ctrl.competent now learns the same mixed M-L-L-L-M
+    // grammar AI.make's comboMix tiers (t3+) learn -- see comboPlanFor's own comment in 55_ai.js for
+    // the frozen shape this mirrors -- rather than the old flat all-light follow every node, so the
+    // yardstick bot the tier gate is measured against actually exercises the grammar it's gating.
+    // me.chainNode===CHAIN.nodes-1 is the chain's last regular continuation (the node-4->5 transition,
+    // Fighter.act's own boundary for offering the ender) -- only THAT node swaps to medium, and only
+    // when the chain now in progress was opened by one (openedMedium, armed/cleared by steps 8/10
+    // below); nodes 1..CHAIN.nodes-2 always press light regardless, and a light-opened chain
+    // (openedMedium false) keeps the old flat all-light follow through node 5, unchanged.
+    if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){
+      if(openedMedium&&me.chainNode===CHAIN.nodes-1){it.medium=true;return it}
+      it.light=true;return it}
     if(me.busy())return it;
+    // Task 7.5 (dash-back read): see this controller's own numbered comment above for the full
+    // reasoning -- foe.effStartup is always set once foe.state==='ATTACK' (setupDash runs inside the
+    // same startMove() call that sets it), the || fallback only guards a hand-built ATTACK state that
+    // skipped startMove entirely, same fallback decideBlock (55_ai.js) already uses for the same field.
+    if(foe.state==='ATTACK'&&foe.moveName==='medium'&&foe.f===(foe.effStartup||foe.move.startup)-DASH_READ_LEAD){it.dashBack=true;return it}
     if(foe.state==='ATTACK'&&(foe.moveName==='medium'||foe.moveName==='heavy')&&foe.f>=REACT){it.block=true;return it}
     if(foe.state==='CHARGE'&&foe.moveName==='heavy'&&me.hp/me.maxHp<LOW_HP){it.dashBack=true;return it}
     if(me.power>=100){it.special=me.power>=300?3:me.power>=200?2:1;return it}
@@ -1305,8 +1344,8 @@ const Ctrl={
       if(openings%MIXUP_EVERY===0){heavyHold=me.moveDef('heavy').charge+1;it.heavy=true;return it}}
     else if(!foeBlockstun)wasBlockstun=false;
     const dist=Math.abs(foe.x-me.x)-me.width,lightRange=me.moveDef('light').range+20;
-    if(dist<lightRange){it.light=true;return it}
-    if(foe.state!=='ATTACK'&&closeCd===0){it.medium=true;closeCd=CLOSE_CD;return it}
+    if(dist<lightRange){openedMedium=false;it.light=true;return it}
+    if(foe.state!=='ATTACK'&&closeCd===0){openedMedium=true;it.medium=true;closeCd=CLOSE_CD;return it}
     return it}}},
   // Task 5.3/6.4: the tutorial's own dummy AI -- stands in for AI.make(enc.tier,...) as ctrl2
   // (G.startTutorial passes this directly, bypassing AI.make/AI_TIERS entirely) so the goblin's one
@@ -8047,6 +8086,112 @@ Test.add('Ctrl.competent mixes in a heavy on the 5th distinct blockstun opening'
     ctrl.next(f,me,foe)} // a real call while foe reads IDLE — the rising-edge reset the controller
                           // itself needs to see before the next opening counts as a NEW one
   eq(heavyFires,1)});
+// Task 7.5: Ctrl.competent learns the mixed M-L-L-L-M chain grammar (AI.make's comboMix tiers already
+// had it; the yardstick bot the tier gate measures against now does too) and a dash-back read against
+// a foe's medium dash-in. Driven by hand through each node (mirrors the mixup test just above's own
+// "call ctrl.next() directly, then act() on its result" style) rather than a full organic run, so
+// each node's own pressed move is checked in isolation instead of inferred from the final fight log.
+Test.add('Ctrl.competent follows a medium chain opener with the mixed M-L-L-L-M pattern',()=>{
+  const ctrl=Ctrl.competent(10),f=mkFight({ctrl1:ctrl,ctrl2:Ctrl.idle()}); // default spacing: out of light range, foe idle
+  const me=f.p1,foe=f.p2;
+  const opener=ctrl.next(f,me,foe);
+  ok(opener.medium,'out of range against a non-attacking foe must open with a medium');
+  me.act(opener);
+  eq(me.chainNode,1,'the medium opener must start the chain at node 1');
+  const seq=[];
+  for(let node=1;node<=4;node++){
+    me.landed=true;me.setState('ATTACK',me.effStartup+me.activeSpan()+me.move.recovery-1); // last recovery frame
+    eq(me.phase(),'recovery','sanity: node '+node+' must actually be in its own recovery window');
+    const it=ctrl.next(f,me,foe);
+    seq.push(it.light?'light':it.medium?'medium':null);
+    ok(seq[seq.length-1],'node '+node+' must press a chain continuation');
+    me.act(it)}
+  eq(JSON.stringify(seq),JSON.stringify(['light','light','light','medium']),
+    'a medium-opened chain must follow M-L-L-L-M (nodes 2-4 light, node 5 medium), not the old flat all-light follow');
+  eq(me.chainNode,CHAIN.nodes,'the mixed follow must actually reach node 5 (the ender)')});
+Test.add('Ctrl.competent keeps the old flat all-light follow when the chain opener is a light',()=>{
+  const ctrl=Ctrl.competent(11),f=mkFight({ctrl1:ctrl,ctrl2:Ctrl.idle()});closeIn(f); // in light range
+  const me=f.p1,foe=f.p2;
+  const opener=ctrl.next(f,me,foe);
+  ok(opener.light,'in range against a non-attacking foe must open with a light');
+  me.act(opener);
+  eq(me.chainNode,1);
+  const seq=[];
+  for(let node=1;node<=4;node++){
+    me.landed=true;me.setState('ATTACK',me.effStartup+me.activeSpan()+me.move.recovery-1);
+    const it=ctrl.next(f,me,foe);
+    seq.push(it.light?'light':it.medium?'medium':null);
+    me.act(it)}
+  eq(JSON.stringify(seq),JSON.stringify(['light','light','light','light']),
+    'a light-opened chain must stay all-light through every node, unchanged from before this task')});
+// A medium opener that whiffed (or was blocked/parried) never even reaches recovery+landed, so a
+// stale openedMedium from an earlier chain must never leak a medium ender into a LATER, light-opened
+// chain -- this is what actually proves openedMedium is reset on every opener, not just set once.
+Test.add('a light opener after an earlier medium-opened chain does not inherit its openedMedium flag',()=>{
+  const ctrl=Ctrl.competent(12),f=mkFight({ctrl1:ctrl,ctrl2:Ctrl.idle()});
+  const me=f.p1,foe=f.p2;
+  me.act(ctrl.next(f,me,foe)); // medium opener, out of range
+  eq(me.moveName,'medium');
+  me.clearMove();me.chainNode=0;me.setState('IDLE'); // the chain ended without ever landing a follow-up
+  f.p1.x=f.p2.x-f.p1.width-10; // now in light range
+  const opener2=ctrl.next(f,me,foe);
+  ok(opener2.light,'in range now, the next opener must be a light');
+  me.act(opener2);
+  me.landed=true;me.setState('ATTACK',me.effStartup+me.activeSpan()+me.move.recovery-1);
+  ok(ctrl.next(f,me,foe).light,'node 1 of this fresh light-opened chain must press light, not a leftover medium ender')});
+// Task 7.5 (dash-back read): DASH_READ_LEAD is 2 frames before the foe's own hitbox goes active
+// (foe.effStartup||foe.move.startup) -- a single exact-frame trigger, checked ahead of the plain
+// block-react so it wins that frame's decision.
+Test.add('Ctrl.competent dash-back reads a foe medium exactly 2 frames before its hitbox goes active, not before',()=>{
+  const ctrl=Ctrl.competent(13),f=mkFight({ctrl1:ctrl,ctrl2:Ctrl.idle()});
+  const me=f.p1,foe=f.p2;
+  foe.act(Object.assign(Ctrl.EMPTY(),{medium:true})); // foeDist is null here -- effStartup stays at base (10)
+  const trigger=foe.effStartup-2;
+  foe.setState('ATTACK',trigger-1);
+  ok(!ctrl.next(f,me,foe).dashBack,'must not dash back one frame before the trigger frame');
+  foe.setState('ATTACK',trigger);
+  ok(ctrl.next(f,me,foe).dashBack,'must dash back exactly DASH_READ_LEAD frames before the hitbox goes active')});
+// Integration: driven through real f.step() calls (not hand-set state), covering both effStartup
+// bands. Case 1 (base effStartup=10): foeDist is left unwired (mirrors the pre-existing "blocks a
+// foe's medium" test's own convention) so def's medium neither travels nor needs to -- p1 sits at a
+// fixed gap (dist=100, i.e. between Ctrl.competent's own 90px "chain lights in range" threshold and
+// medium's own 120px reach, empirically verified) the whole time. Case 2 (capped effStartup=14): a
+// real, MOVING 300px dash-in (foeDist wired, same as Fight.step's own per-frame write) -- 300px
+// leaves enough margin that even after ~8 frames of the dash-in closing the gap at its own scaled
+// rate, the remaining distance is still comfortably past Ctrl.competent's own 90px threshold (see the
+// task report's own before/after probe measurements for both bands).
+Test.add('a real dash-back read lands a full dexterity dodge against a foe medium, at both a base and a capped (far) dash-in gap',()=>{
+  {
+    const f=mkFight({ctrl1:Ctrl.competent(14),ctrl2:Ctrl.idle()});
+    f.p1.x=f.p2.x-(100+f.p1.width); // dist (Ctrl.competent's own |dx|-width reading) = 100
+    f.p2.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
+    eq(f.p2.effStartup,10,'sanity: an unwired foeDist must leave effStartup at the base');
+    run(f,40);
+    ok(Effects.has(f.p1,'dexterity'),'a base-effStartup medium must still land a real dodge');
+    ok(!f.log.some(e=>e.type==='hit'&&e.who===-1),'must never actually take the medium\'s damage')}
+  {
+    const gap=300,f=mkFight({ctrl1:Ctrl.competent(15),ctrl2:Ctrl.idle()});
+    f.p1.x=f.p2.x-gap-f.p1.width/2-f.p2.width/2;
+    f.p1.foeDist=f.p2.foeDist=gap;
+    f.p2.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
+    eq(f.p2.effStartup,14,'sanity: a 300px gap must cap effStartup at 14');
+    run(f,40);
+    ok(Effects.has(f.p1,'dexterity'),'a capped (far) dash-in must still land a real dodge');
+    ok(!f.log.some(e=>e.type==='hit'&&e.who===-1),'must never actually take the medium\'s damage')}});
+// Review follow-up (Task 7.3 review): a batch of seeded fights against a real AI tier must exercise
+// both the offensive read (intercept, AI.make's own decideIntercept catching p1's medium dash-in
+// opener) and the new defensive read (dexterity, Ctrl.competent's dash-back catching AI's own medium)
+// -- t3 is the lowest comboMix tier with intercept>0 (.3), so it's the cheapest real tier that can
+// produce both in the same sweep.
+Test.add('a batch of seeded Ctrl.competent vs AI t3 fights produces at least one real intercept and one real dexterity event',()=>{
+  let sawIntercept=false,sawDexterity=false;
+  for(let seed=1;seed<=30&&!(sawIntercept&&sawDexterity);seed++){
+    const f=mkFight({ctrl1:Ctrl.competent(seed),ctrl2:AI.make('t3',seed+1000),seed});
+    run(f,600);
+    if(f.log.some(e=>e.type==='intercept'))sawIntercept=true;
+    if(f.log.some(e=>e.type==='dexterity'))sawDexterity=true}
+  ok(sawIntercept,'at least one of the 30 seeded fights must log an intercept event');
+  ok(sawDexterity,'at least one of the 30 seeded fights must log a dexterity event')});
 
 // Task 4.1: Meta data layer (save v2, migrate, stats, energy) ------------------------------------
 Test.add('Meta.defaults has every top-level key and carl at 1-star/1-rank/1-level',()=>{
