@@ -1033,3 +1033,43 @@ doors 3-5 and the boss), no clipping.
 `src/40_movedata.js`, `src/90_tests.js`, `docs/shots/p4-map.png`. `tests/batch.py` needed no source
 change (its per-floor-node sweep already reads `FLOORS`/`ENCOUNTERS` live, so the new door order/table
 just fell out of the existing tool).
+
+### Fix round 0 (controller ruling, 2026-09-22): shaman reverted to plan stats
+
+The controller ruled out the shaman's first tuning pass (hp 300→820, armor 0→.15, blockProf 0→.25,
+tier t3→t5) before review: it hit the 40-70% bot win-rate band, but only by changing the character's
+own identity — a squishy caster becoming a tanky blocker — purely to satisfy `Ctrl.competent`, the
+batch tool's scripted bot. Reverted to the plan's own ±15%-ceiling numbers (hp 345, atk 36, armor 0,
+blockProf 0, tier t3 — its original). The hobgoblin's tuning (hp 736/atk 52/tier t4, landing at 70%)
+was kept as-is; the controller confirmed 70% is fine there.
+
+**Ruling recorded**: door 4's actual target is "a level-3 human (its own `recLevel`) should find it
+fair," not the bot's 40-70% win-rate band. `tests/batch.py`'s number for `f1_shaman` is reported below
+as information only, not a pass/fail gate for that one encounter — doors 1-3 (≥85%) and door 5
+(40-70%) stay real gates.
+
+**Updated batch table** (`python3 tests/batch.py --n 20 --p1 carl --encounter <id>`):
+```
+f1_goblin      20      100.0     1.62       0   (target: doors 1-3 >= 85%)
+f1_skel        20      100.0     1.56       0
+f1_goblin2     20      100.0     1.62       0
+f1_shaman      20      100.0     2.25       0   (informational only -- see ruling above)
+f1_hob         20      70.0      8.98       0   (target: door 5 in 40-70%)
+```
+
+**Gate re-run, all exit 0, 0 page/console errors**:
+- `python3 tools/build.py && python3 tests/harness.py --unit` — 312/312 passing (two tests amended:
+  the mob-tuning test's shaman assertions back to 345/36/0/0, and the floor-1-order test gained an
+  assertion that `f1_shaman`'s tier is back at `t3`).
+- `python3 tests/harness.py --sim --seconds 60` — 0 errors.
+- `python3 tests/harness.py --matrix` — 216/216 cells, 0 errors.
+- `python3 tests/harness.py --e2e --seed 1` — full floor-1 clear (all 5 doors + boss won), 0 errors.
+- `python3 tests/harness.py --tutorial --seed 1` — unaffected (goblin, which the dummy derives from,
+  untouched by this ruling), 0 errors.
+- Wider `--n 30 --p1 carl` (default tier sweep + full floor table): AI_TIERS monotonicity gate still
+  holds (t1 100% >= 80, t5 23.3% <= 30); floor 2 stayed healthy (100/100/96.7/70/96.7%, boss 16.7% —
+  `f2_shaman2` returned to 96.7% now that `MOBS.shaman` is back to plan stats, expected and not a gate
+  for this task).
+
+**Files touched this round**: `src/40_movedata.js` (shaman reverted; comment rewritten), `src/45_encounter.js`
+(`f1_shaman.tier` t5→t3; comments updated), `src/90_tests.js` (two tests amended per above).

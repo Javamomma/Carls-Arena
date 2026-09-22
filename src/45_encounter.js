@@ -36,16 +36,20 @@ const ENCOUNTERS={
   // ENCOUNTERS entry gets from Encounter.resolve's own `o.buffs||[]` default.
   tutorial:{floor:0,name:'THE WAITING ROOM',enemy:'goblin',tier:'dummy',hpMul:.5,atkMul:.3,buffs:[]},
   // recLevel: Task 6.1's map-door hint ("REC. LVL n", Screens.renderMap) -- floor 1 ramps 1,1,2,3,4
-  // (boss 4) so a level-1 human clears doors 1-3 at ≥85% and doors 4-5 in the 40-70% band (see
-  // tests/batch.py and docs/ARENA.md's Task 6.1 entry); floor 2 continues the ramp at 4,5,5,6,6, boss 7.
+  // (boss 4) so a level-1 human clears doors 1-3 at ≥85%, door 5 lands in the 40-70% bot-win-rate band,
+  // and door 4 (shaman, recLevel 3) targets human fairness at that level rather than a bot number --
+  // see 40_movedata.js's MOBS comment and docs/ARENA.md's Task 6.1 entry ("Fix round 0") for why.
+  // Floor 2 continues the ramp at 4,5,5,6,6, boss 7.
   f1_goblin:{floor:1,name:'THE DEPTHS',enemy:'goblin',tier:'basic',hpMul:floorMul(1),atkMul:floorMul(1),recLevel:1},
   f1_skel:    {floor:1,name:'THE DEPTHS',enemy:'skeleton', tier:'t2',hpMul:floorMul(1),atkMul:floorMul(1),buffs:['thorns'],recLevel:1},
   // Task 6.1: tier dropped t3->t2 (door 3 needs an easy fight now that door order puts the harder
   // hobgoblin last) -- 'degen' buff kept, it doesn't push the AI's own difficulty, only the fight's pace.
   f1_goblin2: {floor:1,name:'THE DEPTHS',enemy:'goblin',   tier:'t2',hpMul:floorMul(1),atkMul:floorMul(1),buffs:['degen'],recLevel:2},
-  // Task 6.1: tier raised to the max (t3->t5) as part of hitting the door-4 40-70% win-rate band --
-  // see 40_movedata.js's MOBS comment for the full tuning trail (hp/atk/armor/blockProf all moved too).
-  f1_shaman:  {floor:1,name:'THE DEPTHS',enemy:'shaman',   tier:'t5',hpMul:floorMul(1),atkMul:floorMul(1),buffs:['powerGain'],recLevel:3},
+  // Fix round 0 (controller ruling): tier reverted to its original t3 -- a t5 bump (plus hp/armor/
+  // blockProf changes, all reverted in 40_movedata.js too) had forced door 4 under a 70% bot win rate
+  // at the cost of the shaman's own character identity; door 4's target is human fairness at recLevel
+  // 3, not a bot number, so this stays at the plan's own values regardless of what the bot scores.
+  f1_shaman:  {floor:1,name:'THE DEPTHS',enemy:'shaman',   tier:'t3',hpMul:floorMul(1),atkMul:floorMul(1),buffs:['powerGain'],recLevel:3},
   // Task 6.1: tier raised from 'brute' (a t3 clone) to 't4' -- alone enough, alongside hp/atk within
   // ±15%, to land door 5 in the 40-70% band; see 40_movedata.js's MOBS comment for the numbers.
   f1_hob:   {floor:1,name:'THE DEPTHS',enemy:'hobgoblin',tier:'t4',hpMul:floorMul(1),atkMul:floorMul(1),buffs:['armorUp'],recLevel:4},

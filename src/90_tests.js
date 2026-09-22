@@ -815,19 +815,25 @@ Test.add('floor 1 door order is goblin, skeleton, goblin2, shaman, hobgoblin, ea
   eq(FLOORS[0].nodes.join(','),'f1_goblin,f1_skel,f1_goblin2,f1_shaman,f1_hob');
   const want={f1_goblin:1,f1_skel:1,f1_goblin2:2,f1_shaman:3,f1_hob:4,f1_grull:4};
   for(const id in want)eq(ENCOUNTERS[id].recLevel,want[id],id+' recLevel');
-  eq(ENCOUNTERS.f1_goblin2.tier,'t2','door 3 must be an easy tier so a level-1 human can clear it')});
+  eq(ENCOUNTERS.f1_goblin2.tier,'t2','door 3 must be an easy tier so a level-1 human can clear it');
+  // Fix round 0 (controller ruling): door 4 (shaman) stays at its original AI tier -- its target is
+  // human fairness at recLevel 3, not a bot win-rate band; see 40_movedata.js's MOBS comment.
+  eq(ENCOUNTERS.f1_shaman.tier,'t3','door 4 keeps its original tier -- tuned for human fairness, not the bot')});
 Test.add('floor 2 encounters carry a sensible recLevel ramp (4,5,5,6,6, boss 7)',()=>{
   const want={f2_grub:4,f2_skel2:5,f2_shaman2:5,f2_hob2:6,f2_grub2:6,f2_mother:7};
   for(const id in want)eq(ENCOUNTERS[id].recLevel,want[id],id+' recLevel')});
 // Task 6.1, ruling 3: playtest-note tuning -- goblin/skeleton hp raised and atk lowered exactly to
-// the plan's given numbers (longer, safer early fights instead of fast trades). hobgoblin/shaman
-// needed MORE than the plan's own ±15% hp/atk latitude to actually land in the door-4/5 40-70%
-// win-rate band against tests/batch.py's Ctrl.competent bot -- see 40_movedata.js's MOBS comment
-// (and docs/ARENA.md's Task 6.1 entry) for the documented tuning trail this pins the destination of.
+// the plan's given numbers (longer, safer early fights instead of fast trades). hobgoblin's hp/atk
+// raised within ±15% of the plan's 640/46, plus an AI tier bump, to land door 5 in the 40-70%
+// bot-win-rate band -- see 40_movedata.js's MOBS comment for the documented tuning trail.
+// Fix round 0 (controller ruling): shaman reverted to the plan's own ±15%-ceiling numbers (hp 345,
+// atk 36) with armor/blockProf back at 0 -- an earlier pass had pushed it to 820hp/.15 armor/.25
+// blockProf specifically to force it under a bot win-rate target, which changed the character's own
+// identity; door 4's target is human fairness at recLevel 3, not a bot number (docs/ARENA.md).
 Test.add('floor-1 mob tuning: goblin/skeleton/shaman/hobgoblin hp and atk match the Phase 6 rebalance',()=>{
   eq(DEFS.goblin.hp,360);eq(DEFS.goblin.atk,30);
   eq(DEFS.skeleton.hp,320);eq(DEFS.skeleton.atk,28);
-  eq(DEFS.shaman.hp,820);eq(DEFS.shaman.atk,36);eq(DEFS.shaman.armor,.15);eq(DEFS.shaman.blockProf,.25);
+  eq(DEFS.shaman.hp,345);eq(DEFS.shaman.atk,36);eq(DEFS.shaman.armor,0);eq(DEFS.shaman.blockProf,0);
   eq(DEFS.hobgoblin.hp,736);eq(DEFS.hobgoblin.atk,52)});
 Test.add('G.startFight({...,playerBuffs}) applies to p1 via the same Buffs.apply the enemy path uses',()=>{
   G.startFight({p1:'carl',p2:'donut',ai:'dummy',playerBuffs:['powerGain','armorUp']});

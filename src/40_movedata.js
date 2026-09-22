@@ -22,22 +22,19 @@ const CHAMPS={
 // Task 6.1, ruling 3 (playtest note: "Hobgoblin Brute is impossible to defeat" at floor 1 door 3,
 // level 1): goblin/skeleton hp raised and atk lowered exactly to the plan's given numbers (360/30,
 // 320/28) -- longer, safer early fights instead of fast trades a level-1 player can lose to a bad
-// opening. hobgoblin/shaman needed MORE than the plan's ±15% hp/atk tuning latitude to actually land
-// in the doors-4-5 40-70%-win-rate band against tests/batch.py's Ctrl.competent bot -- documented
-// deviation below, per the task brief's own "tune within ±15%... if a target is missed and document":
-// - hobgoblin: hp 700->736 (+5.1%) and atk 55->52 (-5.5%) are both within ±15% of the plan's own
-//   640/46; ENCOUNTERS.f1_hob's AI tier (45_encounter.js) also moved from 'brute' (a t3 clone) to
-//   't4' -- a data-only, in-scope lever, not a stat -- which alone brought it from 100% (at
-//   640/46/'brute') to 86.7% (at 736/52/'brute') to 70% (at 736/52/'t4', n=20 seed 1): in band.
-// - shaman needed much more: at the plan's own ±15% ceiling (hp 345, atk 36) PLUS AI tier 't5' (max)
-//   it still won 96.7% (n=30) -- probed with a one-off harness eval: Ctrl.competent's opening medium
-//   alone deals ~131 dmg, over a third of a 345hp shaman's health, before its own (already-maximal,
-//   react:2) AI can do anything about it -- a pre-existing Carl-vs-squishy-mob damage ratio, not a
-//   Phase 6 regression (the pre-Phase-6 f1_shaman batch row was ALSO 100%, docs/ARENA.md). hp raised
-//   well past ±15% (to 820, +173% over the plan's 300) plus armor 0->.15 and blockProf 0->.25 (a caster
-//   surviving on wards/parries reads in-genre, unlike just inflating hp further) was what it actually
-//   took to reach 55% (n=20, seed 1) -- see docs/ARENA.md's Task 6.1 entry for the full paste and the
-//   step-by-step tuning trail (this comment states the destination, that entry states the journey).
+// opening. hobgoblin's hp/atk raised within ±15% of the plan's 640/46 (to 700->736/-5.5%->52), plus
+// ENCOUNTERS.f1_hob's AI tier (45_encounter.js) moved from 'brute' (a t3 clone) to 't4' -- both
+// together land it at 70% (n=20 seed 1, tests/batch.py --encounter f1_hob) against Ctrl.competent.
+//
+// Fix round 0 (controller ruling, post-review): shaman was first tuned to 820hp/36atk/.15 armor/.25
+// blockProf/tier t5 to force it under 70% against Ctrl.competent (the batch tool's scripted bot) --
+// reverted. That combination changes the character's own identity (a squishy caster becoming a tanky
+// blocker) just to satisfy a bot yardstick, which the controller ruled out of scope for this task.
+// shaman is back to the plan's own ±15%-ceiling numbers (hp 345, atk 36, armor/blockProf/tier
+// untouched at their originals) and stays there regardless of what tests/batch.py's Ctrl.competent
+// prints for it -- door 4's actual target is "a level-3 human (this door's recLevel) should find it
+// fair," not a 40-70% bot win rate; the batch table below is recorded as information, not a gate, for
+// this one encounter. See docs/ARENA.md's Task 6.1 entry, "Fix round 0" section, for the full context.
 const MOBS={
   goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:360,atk:30,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',
     moves:{heavy:{charge:14,dmg:2.0}}},
@@ -45,9 +42,7 @@ const MOBS={
     moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}},
   skeleton: {id:'skeleton',name:'SKELETON',cls:'rogue', hp:320,atk:28,color:'#d8d0c0',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.95,rig:'human'},
   // s1 override: a longer 6-hit flurry (base s1 is 3 hits) — the shaman's signature multi-hit special.
-  // armor/blockProf (Task 6.1, see the tuning-deviation note above) are new nonzero fields for shaman
-  // specifically -- every other MOBS entry with armor:0/blockProf:0 above/below is unaffected.
-  shaman:   {id:'shaman',  name:'SHAMAN',  cls:'caster',hp:820,atk:36,color:'#6a4c93',armor:.15,crit:.1, critMul:1.6,blockProf:.25,scale:.95,rig:'human',
+  shaman:   {id:'shaman',  name:'SHAMAN',  cls:'caster',hp:345,atk:36,color:'#6a4c93',armor:0,  crit:.1, critMul:1.6,blockProf:0,  scale:.95,rig:'human',
     moves:{s1:{hits:6,gap:4,dmg:1.1}}},
   // rig:'quad' — Task 3.4's four-legged bone set, same as Donut above (LOOKS.grub, 68_rig.js) but
   // drawn as a segmented larva with stubby leg nubs instead of a cat.
