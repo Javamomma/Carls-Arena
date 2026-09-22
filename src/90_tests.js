@@ -735,6 +735,24 @@ Test.add('t1 AI approaches (presses medium) within 90 frames when stuck beyond l
   let fired=false;
   for(let i=0;i<90&&!fired;i++){f.step();if(f.p2.state==='ATTACK'&&f.p2.moveName==='medium')fired=true}
   ok(fired,'t1 must press medium within 90 frames at neutral distance')});
+// Fix-wave item 3 (final review, Important): the test just above passed even with `approach` entirely
+// disabled -- t1's own `attack:.03` roll fires inside 90 frames anyway, so it was never actually
+// exercising `approach`. This one forces `attack` to 0 for the duration (save/restore) so the ONLY way
+// a medium can fire is decideApproach's own guaranteed press -- it fails outright if `approach` (or
+// its debounce) is broken, which the guarding test above could not catch. Default Fighter spawn
+// positions (STAGE_W/2+-160) already put p1/p2 320px apart, the same neutral gap decideApproach's own
+// comment and docs/ARENA.md both reference.
+Test.add('t1 still presses a medium within 90 frames from 320px neutral even with `attack` forced to 0 -- approach, not attack, must be the guaranteed lever',()=>{
+  const origAttack=AI.TIERS.t1.attack;
+  AI.TIERS.t1.attack=0;
+  try{
+    const f=mkFight({ctrl2:AI.make('t1',7)});
+    eq(Math.abs(f.p2.x-f.p1.x),320,'sanity: default spawn must be the 320px neutral gap');
+    let fired=false;
+    for(let i=0;i<90&&!fired;i++){f.step();if(f.p2.state==='ATTACK'&&f.p2.moveName==='medium')fired=true}
+    ok(fired,'t1 must press a medium within 90 frames from 320px even with attack forced to 0 -- '+
+      'approach must be the guaranteed fallback, not a dead knob')
+  }finally{AI.TIERS.t1.attack=origAttack}});
 Test.add('AI vs random bot stays deterministic with the new approach field wired in (self-comparison, not a fixed snapshot)',()=>{
   const a=mkFight({ctrl1:Ctrl.random(3),ctrl2:AI.make('basic',9)}),b=mkFight({ctrl1:Ctrl.random(3),ctrl2:AI.make('basic',9)});run(a,900);run(b,900);
   eq(a.p1.hp,b.p1.hp);eq(a.p2.hp,b.p2.hp);eq(a.log.length,b.log.length)});

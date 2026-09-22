@@ -1202,3 +1202,46 @@ curve. Investigated (disposable git worktrees, no working-tree changes survived)
   task (not discovered after the fact) for a ruling: either a dedicated fix-round task (proper TDD
   iteration + review, same process Task 6.1 used for the shaman tuning) or an accepted, documented gap
   — this table records the real numbers either way rather than a green result that didn't happen.
+
+**Correction (2026-09-22 fix wave, item 3): the root-cause paragraph above was wrong.** The Phase 6
+final review measured `approach` directly — forcing every tier's `approach` to 0, 60, or 90 left the
+n=60 sweep byte-identical (100.0 / 51.7 / 50.0 / 61.7 / 36.7 in every case) — and instrumented the real
+run: the longest stretch of consecutive non-busy, out-of-range frames against `Ctrl.competent` is 10
+(t3) and 6 (t4), never enough to clear the old 60-frame debounce. `approach` never fired at all; it was
+a dead knob, not the cause. The actual lever, found by swapping t4's fields onto t3's one at a time:
+`react` is overloaded as BOTH the shared action cooldown and the AI's own block-hold length
+(`st.hold=p.react+r.int(10)`), so a "faster" (lower-`react`) tier held block for FEWER frames — and
+Task 6.2's medium (an 18-22-frame tracking dash-in) is beaten by holding block longer, so the faster
+tier ate the exact move the phase added. See the fix-wave tier-gate section below for the actual fix
+(a decoupled `hold` field) and its measured tables.
+
+## Fix-wave tier-gate retune (2026-09-22, item 3)
+
+`hold` (frames an AI holds block after a reactive block roll lands) is a new per-tier `AI_TIERS` field,
+decoupled from `react` (the shared action cooldown, unchanged in meaning): t1 26, t2 16, t3 10, t4 10,
+t5 8, dummy 0 — `decideBlock`'s reactive roll now sets `st.hold=p.hold+r.int(10)` instead of
+`st.hold=p.react+r.int(10)`. `decideApproach`'s neutral debounce is also lowered 60→12 frames (the
+review's own measured runs above never cleared 60; 12 does, without making the press instant).
+
+The `hold` decoupling alone (react/dash unchanged) passed the canonical `--n 30` command but still
+broke `t5<=30` at `--n 60` (31.7%). Applied the review's own measured fallback on top: `t4.react 5→8`
+(still the action cooldown only) and `t5.dash .08→.04`.
+
+| command | t1 | t2 | t3 | t4 | t5 | gate |
+|---|---|---|---|---|---|---|
+| `--n 30` (seed-base 1) | 100.0 | 66.7 | 43.3 | 40.0 | 13.3 | pass |
+| `--n 60` (seed-base 1) | 100.0 | 61.7 | 51.7 | 38.3 | 18.3 | pass |
+| `--n 30` seed-base 101 | 100.0 | 86.7 | 56.7 | 36.7 | 23.3 | pass |
+| `--n 60` seed-base 101 | 100.0 | 81.7 | 56.7 | 33.3 | 20.0 | pass |
+| `--n 30` seed-base 201 | 100.0 | 60.0 | 56.7 | 36.7 | 16.7 | pass |
+| `--n 60` seed-base 201 | 100.0 | 70.0 | 55.0 | 38.3 | 21.7 | pass |
+
+Monotone non-increasing, t1≥80 and last-tier≤30 in every one of the six cells above. `approach` is no
+longer inert: a new regression test forces `attack:0` on t1 at the 320px neutral spawn gap and still
+gets a medium pressed within 90 frames (`approach` is the only remaining lever once `attack` is
+disabled) — see `src/90_tests.js`, the test right after the pre-existing "t1 AI approaches..." one.
+
+Floor-1 doors/bosses re-run at `--n 30` after this retune: doors 1-3 (`f1_goblin`/`f1_skel`/
+`f1_goblin2`) all still 100% (≥85% target); `f1_grull` (floor 1 boss) 30.0% and `f2_mother` (floor 2
+boss) 30.0% (both inside the 10-35% band). `f1_hob` (door 5) moved 70.0%→53.3% (still inside its own
+40-70% band). `f1_shaman` (door 4, informational only per Task 6.1's ruling) 93.3% unchanged.

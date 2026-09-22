@@ -16,20 +16,43 @@
 // retuning any AI_TIERS field; see docs/ARENA.md's fix-wave batch tables for the exact numbers.
 // approach (Task 6.2): frames between approach presses at neutral -- see decideApproach's own
 // comment below for the full mechanism. t1's 90 down to t5's 30 mirrors every other field's curve
-// (higher tier = shorter interval = closes distance faster).
+// (higher tier = shorter interval = closes distance faster). Fix-wave item 3 (final review):
+// decideApproach's own 60-frame neutral debounce is lowered to 12 below -- the review measured the
+// longest real run of consecutive non-busy, out-of-range frames at 10 (t3) and 6 (t4) against the old
+// 60-frame bar, so `approach` never actually fired in a real fight; see decideApproach's own comment.
+// Fix-wave item 3 (final review, Important): `hold` is a NEW per-tier field -- the frames an AI holds
+// block after a reactive block roll lands (decideBlock's 'react' phase below). It used to reuse
+// `react` for this (`st.hold=p.react+r.int(10)`), which double-duties `react` as both the shared
+// action cooldown AND the block-hold length. The final review found this is what actually broke the
+// tier gate's monotonicity after Task 6.2's medium became an 18-22-frame tracking dash-in: holding
+// block longer is what beats that move, so the "faster" (lower `react`) tiers held block LESS and ate
+// the very move the phase added, not `approach` (measured provably inert -- see the review's issue 3).
+// `hold` now decouples the two: t1 26 down to t5 8 (still monotone, mirrors every other field's
+// curve), t3/t4 both at 10 rather than sharing `react`'s flattened-at-8 curve. `react` itself is
+// UNCHANGED here as the shared action cooldown (st.cd=p.react, every decideX 'trigger' phase) --
+// see docs/ARENA.md's fix-wave tier-gate section for the measured n=30/60/seed-base tables this
+// change (plus the review's own measured fallback) was checked against.
 const AI_TIERS={
-  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0, approach:90},
-  t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70},
-  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5,approach:50},
-  t4:{react:5, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8,approach:40},
-  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.08,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1, approach:30}};
+  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0, approach:90,hold:26},
+  t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70,hold:16},
+  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5,approach:50,hold:10},
+  // Fix-wave item 3 (measured fallback -- see docs/ARENA.md's fix-wave tier-gate table): the `hold`
+  // decoupling alone (react/dash unchanged) passed n=30 but still broke t5<=30 at n=60 (31.7%). The
+  // final review's own measured retune -- react 5->8 here (still the shared action cooldown, not
+  // block-hold; hold above already carries that meaning) -- restores it.
+  t4:{react:8, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8,approach:40,hold:10},
+  // Fix-wave item 3 (measured fallback): dash .08->.04, same reasoning/source as t4.react above.
+  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.04,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1, approach:30,hold:8}};
 const AI={
   TIERS:AI_TIERS,
   // profiles IS the alias table (not a copy of it) so old direct reads like AI.profiles.brute and
   // AI.profiles.brawl keep resolving to the right objects. basic->t2 and brawl->t3 reuse the exact
   // tier objects (not clones) so AI.resolveProfile('basic')===AI.TIERS.t2.
   profiles:{
-    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0,approach:0},
+    // Fix-wave item 3: hold:0 added for completeness (p.block:0 already means decideBlock's react
+    // roll can never fire for the dummy, so p.hold is never actually read) -- matches AI_TIERS' own
+    // new field so every AI_TIERS-shaped profile carries it.
+    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0,approach:0,hold:0},
     basic:AI_TIERS.t2,
     brawl:AI_TIERS.t3,
     // brute keeps its Task 2.8 identity (a heavy-happy brawler) as a t3 clone with a higher heavy
@@ -168,7 +191,10 @@ const AI={
       const su=foe.state==='ATTACK'?(foe.effStartup||foe.move.startup):0;
       if(foe.state==='ATTACK'&&foe.f===1&&(su>PARRY_WINDOW+2||p.punish>0)&&r.next()<p.block){
         if(r.next()<p.parry){st.plan='parry';return true}
-        st.hold=p.react+r.int(10);it.block=true;return true}
+        // Fix-wave item 3 (final review, Important): p.hold (block-hold length), not p.react (the
+        // shared action cooldown) -- see AI_TIERS' own comment for why the two were conflated and what
+        // decoupling them fixes.
+        st.hold=p.hold+r.int(10);it.block=true;return true}
       return false}
 
     // Attack: a spontaneous swing (phase:'attack') when nothing else applies, arming comboFollow
@@ -192,15 +218,20 @@ const AI={
     // before it ever touches farFrames/approachCd makes it a total no-op for the tutorial dummy
     // (approach 0): no rng draw (there was never going to be one), no state touched that anything else
     // reads, so Ctrl.tutorialDummy and every dummy-profile test stay bit-identical to before this
-    // task. For everyone else: dist>lightRange has to hold for more than 60 CONSECUTIVE frames (a
+    // task. For everyone else: dist>lightRange has to hold for more than 12 CONSECUTIVE frames (a
     // debounce against a foe that's merely drifting in and out of range) before the first press, then
     // its own approachCd (set to p.approach, t1's 90 down to t5's 30) paces the repeats -- "at neutral
     // distance" in the ruling means from a stand-still, which is exactly what farFrames measures.
+    // Fix-wave item 3 (final review, Important): the debounce was 60 frames -- the review measured the
+    // longest real run of consecutive non-busy, out-of-range frames at 10 (t3) and 6 (t4) against that
+    // bar in an actual fight against Ctrl.competent, so `approach` never fired at all: a dead knob.
+    // Lowered to 12 so it can actually clear those real runs (still a real debounce against a foe
+    // that's merely drifting in and out of range for a couple of frames, not an instant trigger).
     function decideApproach(it,dist,lightRange){
       if(p.approach<=0)return false;
       if(dist<=lightRange){st.farFrames=0;return false}
       st.farFrames++;
-      if(st.farFrames>60&&st.approachCd<=0){it.medium=true;st.approachCd=p.approach;st.farFrames=0;return true}
+      if(st.farFrames>12&&st.approachCd<=0){it.medium=true;st.approachCd=p.approach;st.farFrames=0;return true}
       return false}
 
     return{next(fight,me,foe){
