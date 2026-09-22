@@ -121,6 +121,9 @@ def main():
                      help="start via G.startFight({floor,node}) instead of --p2/--ai/--encounter; "
                           "requires --node")
     ap.add_argument('--node', default=None, help="node index (int) or 'boss', used with --floor")
+    ap.add_argument('--player-buffs', default=None,
+                     help="comma list of buff ids applied to p1 via G.startFight's playerBuffs "
+                          "(fix-wave item 5's player-side buff path)")
     ap.add_argument('--cinematic', action='store_true',
                      help="run G.debugCinematic() (starts its own fight, arms an s3, sim-steps past "
                           "the card trigger, advances FX) and screenshot; skips the normal --p2/--ai "
@@ -204,6 +207,8 @@ def main():
             enc = ",floor:%d,node:%s" % (a.floor, node_val)
         else:
             enc = ",encounter:'%s'" % a.encounter if a.encounter else ''
+        if a.player_buffs:
+            enc += ",playerBuffs:%s" % json.dumps(a.player_buffs.split(','))
         pg.evaluate("G.sim=%s;G.startFight({seed:%d,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s%s})"
                     % ('true' if a.sim else 'false', a.seed, a.p1, a.p2, a.ai, ctrl, enc))
         if a.pose:

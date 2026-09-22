@@ -603,6 +603,20 @@ Test.add('boss encounter buffIds include the def\'s signature buff',()=>{
   eq(grull.buffs.length,grull.buffIds.length);
   const mother=Encounter.resolve('f2_mother');
   ok(mother.buffIds.includes('regen'),'mother_rat encounter must carry regen from its def')});
+// Fix-wave item 5: node buffs were dead content (no ENCOUNTERS entry carried a buffs list) — see
+// 45_encounter.js's own comment for which two nodes are the deliberate exceptions.
+Test.add('every FLOORS node except two has at least one buff',()=>{
+  let noBuff=0;
+  for(const fl of FLOORS){
+    for(const nid of fl.nodes){if(Encounter.resolve(nid).buffIds.length===0)noBuff++}
+    ok(Encounter.resolve(fl.boss).buffIds.length>=1,fl.boss+' (boss) must have at least one buff')}
+  eq(noBuff,2,'exactly two FLOORS nodes should ship with no buff')});
+Test.add('G.startFight({...,playerBuffs}) applies to p1 via the same Buffs.apply the enemy path uses',()=>{
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy',playerBuffs:['powerGain','armorUp']});
+  eq(G.fight.p1.buffs.length,2);
+  ok(G.fight.p1.buffs.some(b=>b.id==='powerGain'));ok(G.fight.p1.buffs.some(b=>b.id==='armorUp'));
+  eq(G.fight.p2.buffs.length,0,'playerBuffs must never leak onto p2');
+  G.toTitle()});
 Test.add('G.startFight({floor,node:"boss"}) resolves the boss encounter and sets G.encounter.boss',()=>{
   G.startFight({floor:2,node:'boss'});
   ok(G.encounter&&G.encounter.boss,'G.encounter.boss must be true');

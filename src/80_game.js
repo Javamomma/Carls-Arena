@@ -67,6 +67,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // ids, not enc.buffs' resolved objects, so the sim's Buffs.apply does its own resolution instead
     // of trusting a reference that passed through the encounter/presentation layer.
     if(this.encounter&&this.encounter.buffIds&&this.encounter.buffIds.length)Buffs.apply(this.fight,this.fight.p2,this.encounter.buffIds);
+    // Fix-wave item 5: player-side buff path (o.playerBuffs — a plain id list, same shape as
+    // enc.buffIds above) applied to p1 via the exact same Buffs.apply the encounter/enemy path
+    // already uses. No caller in this codebase sets it yet (Phase 4's crystals are the intended
+    // consumer); tests/harness.py's --player-buffs exercises it in the meantime.
+    if(o.playerBuffs&&o.playerBuffs.length)Buffs.apply(this.fight,this.fight.p1,o.playerBuffs);
     // Per-fight camera zoom cap: the worst-case topmost point (any pose, any prop — see Rig.extent)
     // either fighter can strike, scaled by their own def.scale, determines how far in the camera may
     // zoom before that point crosses HUD_LINE. Two ceilings share the same ratio: 1.12 is the normal
