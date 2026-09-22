@@ -428,10 +428,21 @@ class Fighter{
     this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
     this.combo=0;this.stun=0;this.inv=0;this.blockAge=0;this.dx=0; // last tick's x delta; Rig.poseFor reads it to pick idle vs walk
     this.parryLock=0;this.blockPressedAt=0;this.pressTick=0;this._parried=false;this._mdCache=null;
-    this.buffs=[]} // resolved BUFFS objects (Buffs.apply sets this once; Fight never re-resolves ids per frame)
+    this.buffs=[]; // resolved BUFFS objects (Buffs.apply sets this once; Fight never re-resolves ids per frame)
+    // wasKnockedDown (Task 3.6 refactor): set true the instant this fighter enters KNOCKDOWN
+    // (setState below), stays true through the knockdown timer and the post-getup invulnerable
+    // window, then self-clears in tick() the frame after inv actually reaches 0 — giving AI.make's
+    // 'punish' behavior a one-frame window to catch "just got up" that's scoped to real knockdowns
+    // only. Previously that same one-frame window was inferred from a plain inv 1->0 edge, which
+    // happened to also work for KNOCKDOWN's own get-up i-frames (10) only because they outlast
+    // DASH_BACK's own i-frames (8) relative to its 12-frame duration — a coincidence of those two
+    // constants, not a real invariant, so nothing stopped a future DASH_BACK retune from making a
+    // plain dash-back misread as a knockdown get-up. This flag is scoped to KNOCKDOWN specifically
+    // and never touches DASH at all.
+    this.wasKnockedDown=false}
   get front(){return this.x+this.face*this.width/2}
   busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
-  setState(s,f=0){this.state=s;this.f=f}
+  setState(s,f=0){if(s==='KNOCKDOWN')this.wasKnockedDown=true;this.state=s;this.f=f}
   // MOVES[name] shallow-merged with this.def.moves?.[name]; cached per fighter instance (no per-frame alloc).
   moveDef(name){let c=this._mdCache;if(!c)c=this._mdCache=new Map();let d=c.get(name);
     if(!d){d=Object.assign({},MOVES[name],this.def.moves&&this.def.moves[name]);c.set(name,d)}
@@ -465,7 +476,15 @@ class Fighter{
       if(intent.medium&&this.moveName!=='medium')return this.startMove('medium')}
     else if(S==='CHARGE'&&!intent.heavy){this.move=null;this.moveName=null;this.setState('IDLE')}}
   // Advance one frame of the state machine.
-  tick(){const prevX=this.x;this.f++;if(this.inv>0)this.inv--;if(this.parryLock>0)this.parryLock--;
+  tick(){
+    // Self-clear wasKnockedDown one full tick after inv actually reached 0 (checked here, before
+    // this tick's own decrement, against the state left over from the END of the previous tick —
+    // exactly the state a controller's next() call for THIS step already read). That one-tick delay
+    // is what gives AI.make's 'punish' behavior its single-frame "just got up" window: the frame
+    // wasKnockedDown&&inv===0 is visible to next() is the same frame this check clears it for next
+    // time. AI.make also clears it directly the moment it acts on that window (see decidePunish).
+    if(this.wasKnockedDown&&this.state==='IDLE'&&this.inv===0)this.wasKnockedDown=false;
+    const prevX=this.x;this.f++;if(this.inv>0)this.inv--;if(this.parryLock>0)this.parryLock--;
     switch(this.state){
       case'CHARGE':if(this.f>=this.move.charge)this.setState('ATTACK');break;
       case'ATTACK':{const m=this.move;if(m.dash&&this.f<=m.startup)this.x+=this.face*m.dash/m.startup;
@@ -507,104 +526,159 @@ const AI={
     if(AI_TIERS[name])return AI_TIERS[name];
     if(AI.profiles[name])return AI.profiles[name];
     throw new Error('unknown AI profile: '+name)},
+  // Task 3.6 refactor: next()'s single linear if-chain regrouped into six named per-behaviour
+  // functions sharing one `st` state object, called from the orchestrator in `next()` below in
+  // EXACTLY the same relative order the original if-chain attempted them — that order is what
+  // determines which r.next()/r.int() call happens on a given frame (JS's && short-circuits before
+  // touching r unless a check's own non-rng pre-conditions already hold), so preserving it is what
+  // keeps this refactor rng-for-rng identical to the pre-refactor next() (compare the determinism
+  // test and --matrix table before/after this commit — both are unchanged). Two of the six
+  // (decideHeavy, decideBait) cover a "continuation" check that has to run ahead of the busy() gate
+  // (mirrors hHold's own comment below) and a separate "trigger" check that runs much later once
+  // dist is known — always the SAME original call sites, just named and grouped by behaviour rather
+  // than left as bare inline ifs. A `phase` string selects which of a function's own call sites is
+  // active; every phase argument below is a literal, so which branch runs is fixed at the call site,
+  // not data-dependent.
   make(profile,seed){
     const p=AI.resolveProfile(profile),r=RNG(seed);
-    let hold=0,cd=0,plan=null,hHold=0;
-    // Bait feint state: baitHold counts the remaining held-heavy frames (the trigger below sets it
-    // to 5 and also sends the first true frame itself, for 6 total). baitDashPending survives the
-    // one busy() frame the charge-cancel needs (Fighter.act only cancels CHARGE on a frame it reads
-    // intent.heavy===false, and that same frame can't also start a DASH — the CHARGE branch never
-    // looks at intent.dashBack) and fires the feint's dashBack the next time this fighter isn't busy.
-    let baitHold=0,baitDashPending=false;
-    // Combo follow-through state (Task 3.6 balance pass): comboFollow counts remaining chain-cancel
-    // presses after ANY of this fighter's own landed moves opens a chain window — a punish medium
-    // (as in Phase 3.1) or, new here, an ordinary spontaneous attack. Deliberately a blind countdown
-    // (no rng draw), the same shape as hHold/baitHold above, so arming it at a new site never shifts
-    // the rng sequence a tier already drew at that site — only the busy-frame timing around it
-    // changes. Checked ahead of busy() (a chain-cancel window is still state==='ATTACK', i.e. busy)
-    // but cleared the moment the fighter goes non-busy without ever seeing that window again (the
-    // move whiffed, or the chain simply ended) so a mid-combo hit/knockdown can't leave this AI stuck
-    // waiting on a chain window that will never come. Without this, a scripted opponent that
-    // blocks/dodges everything except a bare light1 ate the rest of any chain for free once that
-    // first light landed (see tests/batch.py's win-rate gate).
-    let comboFollow=0;
-    // Tracks the foe's invulnerability frames across calls (cheap, no rng) so 'punish' can catch the
-    // single decision frame the KNOCKDOWN get-up i-frames end on, not just the frames still inv>0.
-    let prevFoeInv=0;
+    // st: every closure local the six functions below read or write, grouped into one object instead
+    // of one local per behaviour (same fields, same meanings, as the pre-refactor next()): hold
+    // (block-hold countdown), cd (shared action cooldown), plan (parry timing state machine), hHold
+    // (heavy-charge hold countdown), baitHold/baitDashPending (bait feint state), comboFollow (combo
+    // follow-through countdown — Task 3.6 balance pass, chases either a punish medium or a landed
+    // spontaneous attack; see decidePunish/decideAttack).
+    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboFollow:0};
+
+    // Heavy: charge-hold continuation (phase:'hold') has to run before the busy() gate in next()
+    // below — once startMove('heavy') has put `me` into CHARGE, Fighter.busy() reports true (it only
+    // excludes IDLE/BLOCK), so returning an empty intent while charging would read intent.heavy as
+    // false on Fighter.act's CHARGE branch and cancel the charge. The hold is blind to interruption:
+    // once armed it decrements and keeps pressing heavy for its full charge+1 span even if `me` gets
+    // hit, parried, or knocked down mid-charge and never actually reaches CHARGE/ATTACK — fine today
+    // since Fighter.act only reads intent.heavy in IDLE/BLOCK/CHARGE, so a stale hold just wastes a
+    // few frames of "would-be" input.
+    // The trigger (phase:'trigger') is brute-style profiles' slow, telegraphed swing at
+    // close-but-not-point-blank range, held for moveDef('heavy').charge+2 frames total (this frame
+    // plus the hold's own decrements). p.heavy>0 short-circuits before touching rng for profiles that
+    // don't use it. The dist>=lightRange floor keeps a punish-capable tier from blindly committing a
+    // slow charge point-blank against an already-swinging foe.
+    function decideHeavy(it,me,dist,lightRange,heavyRange,phase){
+      if(phase==='hold'){
+        if(st.hHold>0){st.hHold--;it.heavy=true;return true}
+        return false}
+      if(p.heavy>0&&st.cd===0&&dist>=lightRange&&dist<heavyRange&&r.next()<p.heavy){
+        st.hHold=me.moveDef('heavy').charge+1;it.heavy=true;st.cd=p.react;return true}
+      return false}
+
+    // Bait: a feint — hold heavy (the telegraphed swing) at mid-range just long enough to look
+    // committed (phase:'trigger' arms it, phase:'hold' is the same blind-countdown shape as heavy's
+    // hold above), then cancel and dash back (phase:'dash', fired the next frame `me` isn't busy —
+    // baitDashPending survives the one busy() frame the charge-cancel needs, since Fighter.act only
+    // cancels CHARGE on a frame it reads intent.heavy===false, and that same frame can't also start a
+    // DASH). p.bait>0 short-circuits before touching rng for profiles that don't use it.
+    function decideBait(it,me,dist,phase){
+      if(phase==='hold'){
+        if(st.baitHold>0){st.baitHold--;it.heavy=true;if(st.baitHold===0)st.baitDashPending=true;return true}
+        return false}
+      if(phase==='dash'){
+        if(st.baitDashPending){st.baitDashPending=false;it.dashBack=true;return true}
+        return false}
+      if(p.bait>0&&me.state==='IDLE'&&st.cd===0&&dist>=140&&dist<=220&&r.next()<p.bait){
+        st.baitHold=5;it.heavy=true;st.cd=p.react;return true}
+      return false}
+
+    // Punish: comboFollow continuation (phase:'follow') chases ANY of this fighter's own landed
+    // moves through a chain window — a punish medium (below) or, since Task 3.6's balance pass, an
+    // ordinary spontaneous attack (see decideAttack) — cleared the moment `me` goes non-busy without
+    // ever seeing that window again, so a mid-combo hit/knockdown can't leave this stuck waiting on a
+    // window that will never come. Deliberately a blind countdown (no rng draw), so arming it from
+    // decideAttack too never shifts the rng sequence a tier already drew there.
+    // The trigger (phase:'trigger') capitalizes when the foe is stunned (parried), just cleared its
+    // KNOCKDOWN get-up i-frames (justGotUp — see Fighter.wasKnockedDown), or is still locked out from
+    // a missed parry (parryLock>0), with a medium that arms comboFollow=3. p.punish>0 short-circuits
+    // before touching rng for profiles that don't use it (dummy, t1).
+    function decidePunish(it,me,foe,justGotUp,phase){
+      if(phase==='follow'){
+        if(st.comboFollow>0){
+          if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){st.comboFollow--;it.light=true;return true}
+          if(me.busy())return true; // still mid-move (startup/active, or a recovery that isn't a chain window yet) — keep waiting
+          st.comboFollow=0} // fully back to IDLE/BLOCK without ever seeing a chain window: the combo is over
+        return false}
+      if(p.punish>0&&st.cd===0&&(foe.state==='STUNNED'||justGotUp||foe.parryLock>0)&&r.next()<p.punish){
+        foe.wasKnockedDown=false; // consumed: see Fighter.tick's own self-clear for the other path (missed)
+        it.medium=true;st.cd=p.react;st.comboFollow=3;return true}
+      return false}
+
+    // Intercept: read the dash-in medium's startup and punish it with a light before it lands,
+    // checked ahead of the slower reactive-block check (decideBlock's 'react' phase) so it gets first
+    // crack at the same frame's rng roll instead of that check eating it and holding block. p.intercept>0
+    // short-circuits before touching rng for profiles that don't use it (dummy, t1).
+    function decideIntercept(it,foe){
+      if(p.intercept>0&&foe.state==='ATTACK'&&foe.moveName==='medium'&&foe.f<=2&&r.next()<p.intercept){
+        it.light=true;st.cd=p.react;return true}
+      return false}
+
+    // Block/parry: hold continuation (phase:'hold') takes priority over firing a pending bait dash.
+    // Timed-parry continuation (phase:'plan') waits until the foe's hit is 2 frames out, then presses
+    // block. The reactive roll (phase:'react') fires on a visible startup — normally only moves slow
+    // enough that an immediate hold is a block, not an accidental parry; punish-capable tiers
+    // (p.punish>0 — t2 and up) also react to fast moves (lights included), since catching one of
+    // those in the parry window is exactly what their punish behavior exists to capitalize on.
+    function decideBlock(it,foe,phase){
+      if(phase==='hold'){
+        if(st.hold>0){st.hold--;it.block=true;return true}
+        return false}
+      if(phase==='plan'){
+        if(st.plan!=='parry')return false;
+        if(foe.state!=='ATTACK'){st.plan=null;return false}
+        if(foe.f>=foe.move.startup-2){st.plan=null;st.hold=8+r.int(8);it.block=true;return true}
+        return true} // still waiting for the foe's hit to close to 2 frames out — 'handled' (do nothing)
+      if(foe.state==='ATTACK'&&foe.f===1&&(foe.move.startup>PARRY_WINDOW+2||p.punish>0)&&r.next()<p.block){
+        if(r.next()<p.parry){st.plan='parry';return true}
+        st.hold=p.react+r.int(10);it.block=true;return true}
+      return false}
+
+    // Attack: a spontaneous swing (phase:'attack') when nothing else applies, arming comboFollow
+    // (gated on p.punish>0 — the same "capitalizes on an opening" knob decidePunish's trigger uses)
+    // so a landed hit gets to chase its own chain. The fallback dash-away (phase:'dash') backs off
+    // when caught at point-blank range without anything better to do.
+    function decideAttack(it,dist,lightRange,phase){
+      if(phase==='dash'){
+        if(dist<lightRange&&r.next()<p.dash){it.dashBack=true;return true}
+        return false}
+      if(st.cd===0&&r.next()<p.attack){
+        if(dist<lightRange)it.light=true;else it.medium=true;
+        st.cd=p.react;if(p.punish>0)st.comboFollow=3;return true}
+      return false}
+
     return{next(fight,me,foe){
       const it=Ctrl.EMPTY();
-      const justGotUp=foe.state==='IDLE'&&foe.inv===0&&prevFoeInv>0;
-      prevFoeInv=foe.inv;
-      // Heavy charge-hold has to run before the busy() gate below: once startMove('heavy') has put
-      // `me` into CHARGE, Fighter.busy() reports true (it only excludes IDLE/BLOCK), so if this
-      // returned an empty intent while charging, Fighter.act's CHARGE branch would read intent.heavy
-      // as false on the next frame and cancel the charge. Mirrors the block `hold` pattern below,
-      // just ahead of the short-circuit that pattern relies on BLOCK not being "busy".
-      // This countdown is blind to interruption: once armed it decrements and keeps pressing heavy
-      // for its full charge+1 span even if `me` gets hit, parried, or knocked down mid-charge and
-      // never actually reaches CHARGE/ATTACK. That's fine today because Fighter.act only reads
-      // intent.heavy while in IDLE/BLOCK (to start the charge) or CHARGE (to sustain it); in every
-      // other state (HITSTUN, KNOCKDOWN, STUNNED, ...) the intent bit is simply ignored, so a stale
-      // hHold countdown wastes a few frames of "would-be" input rather than corrupting behavior. It
-      // would need to actually reset on interruption before an AI tier that reacts mid-swing (Phase 3)
-      // could rely on hHold reflecting "still trying to land this heavy".
-      if(hHold>0){hHold--;it.heavy=true;return it}
-      // Same blind-countdown shape as hHold, for the bait feint's short 6-frame hold.
-      if(baitHold>0){baitHold--;it.heavy=true;if(baitHold===0)baitDashPending=true;return it}
-      if(comboFollow>0){
-        if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){comboFollow--;it.light=true;return it}
-        if(me.busy())return it; // still mid-move (startup/active, or a recovery that isn't a chain window yet) — keep waiting
-        comboFollow=0} // fully back to IDLE/BLOCK without ever seeing a chain window: the combo is over
+      // justGotUp: the single frame the foe's real KNOCKDOWN get-up i-frames end (Fighter.wasKnockedDown
+      // is scoped to KNOCKDOWN specifically — see its own comment in 50_fighter.js — so this can never
+      // misfire off a plain dash-back's unrelated i-frames the way an inv-edge check alone could).
+      const justGotUp=foe.state==='IDLE'&&foe.inv===0&&foe.wasKnockedDown;
+      if(decideHeavy(it,me,0,0,0,'hold'))return it;
+      if(decideBait(it,me,0,'hold'))return it;
+      if(decidePunish(it,me,foe,justGotUp,'follow'))return it;
       if(me.busy())return it;
       // An established block hold takes priority over firing a pending bait dash.
-      if(hold>0){hold--;it.block=true;return it}
-      if(baitDashPending){baitDashPending=false;it.dashBack=true;return it}
+      if(decideBlock(it,foe,'hold'))return it;
+      if(decideBait(it,me,0,'dash'))return it;
       const dist=Math.abs(foe.x-me.x)-me.width;
       // Derived from move data instead of hard-coded: light1.range(70)+20=90 and heavy.range(130)+10
       // =140 reproduce the old flat thresholds for the stock movesets while tracking per-move/per-
       // character overrides (none currently touch .range, but moveDef merges them if one ever does).
       const lightRange=me.moveDef('light1').range+20,heavyRange=me.moveDef('heavy').range+10;
-      if(cd>0)cd--;
-      // A timed parry: wait until the foe's hit is 2 frames out, then press block.
-      if(plan==='parry'){if(foe.state!=='ATTACK'){plan=null}else if(foe.f>=foe.move.startup-2){plan=null;hold=8+r.int(8);it.block=true;return it}else return it}
-      // Intercept: read the dash-in medium's startup and punish it with a light before it lands,
-      // checked ahead of the slower reactive-block check below so it gets first crack at the same
-      // frame's rng roll instead of that check eating it and holding block. Gated on p.intercept>0
-      // so dummy/t1 (both 0) draw the exact same rng sequence as before this behavior existed.
-      if(p.intercept>0&&foe.state==='ATTACK'&&foe.moveName==='medium'&&foe.f<=2&&r.next()<p.intercept){it.light=true;cd=p.react;return it}
-      // React to a visible startup: normally only moves slow enough that an immediate hold is a
-      // block, not an accidental parry. Punish-capable tiers (p.punish>0 — t2 and up) also react to
-      // fast moves (lights included), since catching one of those in the parry window is exactly
-      // what their punish behavior exists to capitalize on; profiles with punish===0 (dummy, t1) see
-      // the exact same condition as before this behavior existed.
-      if(foe.state==='ATTACK'&&foe.f===1&&(foe.move.startup>PARRY_WINDOW+2||p.punish>0)&&r.next()<p.block){
-        if(r.next()<p.parry){plan='parry';return it}hold=p.react+r.int(10);it.block=true;return it}
-      // Punish: the foe is stunned (parried), just cleared its KNOCKDOWN get-up i-frames, or is still
-      // locked out from a missed parry (parryLock>0) — capitalize with a medium, then chain a couple
-      // of lights via comboFollow above. Gated on p.punish>0 so dummy never draws this roll.
-      if(p.punish>0&&cd===0&&(foe.state==='STUNNED'||justGotUp||foe.parryLock>0)&&r.next()<p.punish){it.medium=true;cd=p.react;comboFollow=3;return it}
-      if(cd===0&&me.power>=100&&r.next()<p.special*STEP){it.special=me.power>=300?3:me.power>=200?2:1;cd=20;return it}
-      // Heavy: brute-style profiles favor a slow, telegraphed swing at close-but-not-point-blank
-      // range. Held for moveDef('heavy').charge+2 frames total (this frame plus hHold's decrements
-      // below) so the sim's CHARGE->ATTACK transition always sees intent.heavy through the whole
-      // charge window. p.heavy>0 short-circuits before touching the rng for profiles that don't use
-      // it (heavy:0), so dummy/basic draw the exact same rng sequence as before this behavior
-      // existed. The dist>=lightRange floor (new in Phase 3, alongside intercept/bait/punish) keeps
-      // a punish-capable tier from blindly committing a slow charge point-blank against an
-      // already-swinging foe, where it can't help but eat a faster hit first; brute (heavy>0 but
-      // punish inherited from its t3 base) and brawl/t3 (heavy newly nonzero) both fall under this,
-      // which is fine since neither's heavy-triggered behavior is required to match pre-Phase-3 brute.
-      if(p.heavy>0&&cd===0&&dist>=lightRange&&dist<heavyRange&&r.next()<p.heavy){hHold=me.moveDef('heavy').charge+1;it.heavy=true;cd=p.react;return it}
-      // Bait: hold heavy (the telegraphed swing) at mid-range just long enough to look committed,
-      // then cancel and dash back — a feint. Gated on p.bait>0 so dummy/basic (both 0) draw the
-      // exact same rng sequence as before this behavior existed.
-      if(p.bait>0&&me.state==='IDLE'&&cd===0&&dist>=140&&dist<=220&&r.next()<p.bait){baitHold=5;it.heavy=true;cd=p.react;return it}
-      // A spontaneous attack that lands also gets to chase the combo (Task 3.6 balance pass), gated
-      // on p.punish>0 (the tiers' "capitalizes on an opening" knob, already monotonic: t1's 0 keeps
-      // it a pushover, t5's 1 always chases) so this new site arms the exact same blind countdown as
-      // the punish branch above, with zero extra rng draws of its own.
-      if(cd===0&&r.next()<p.attack){if(dist<lightRange)it.light=true;else it.medium=true;cd=p.react;if(p.punish>0)comboFollow=3;return it}
-      if(dist<lightRange&&r.next()<p.dash){it.dashBack=true;return it}
+      if(st.cd>0)st.cd--;
+      if(decideBlock(it,foe,'plan'))return it;
+      if(decideIntercept(it,foe))return it;
+      if(decideBlock(it,foe,'react'))return it;
+      if(decidePunish(it,me,foe,justGotUp,'trigger'))return it;
+      if(st.cd===0&&me.power>=100&&r.next()<p.special*STEP){it.special=me.power>=300?3:me.power>=200?2:1;st.cd=20;return it}
+      if(decideHeavy(it,me,dist,lightRange,heavyRange,'trigger'))return it;
+      if(decideBait(it,me,dist,'trigger'))return it;
+      if(decideAttack(it,dist,lightRange,'attack'))return it;
+      if(decideAttack(it,dist,lightRange,'dash'))return it;
       return it}}}};
 
 class Fight{
@@ -2563,6 +2637,38 @@ Test.add('brawl AI blocks a medium at least once in 20 seconds',()=>{
 Test.add('tiers t1..t5 exist, aliases resolve, dummy stays inert',()=>{for(const t of ['t1','t2','t3','t4','t5'])ok(AI.TIERS[t]);eq(AI.resolveProfile('basic'),AI.TIERS.t2);eq(AI.resolveProfile('brawl'),AI.TIERS.t3);ok(AI.resolveProfile('brute').heavy>=.5);const f=mkFight({ctrl2:AI.make('dummy',3)});run(f,600);eq(f.log.filter(e=>e.type==='hit'&&e.who===-1).length,0)});
 Test.add('t5 intercepts a dash-in medium with a light',()=>{const f=mkFight({ctrl1:Ctrl.script(Array.from({length:20},(_,i)=>({f:i*40,intent:{medium:true}}))),ctrl2:AI.make('t5',4)});f.p1.x=f.p2.x-260;run(f,800);const ai=f.log.filter(e=>e.type==='hit'&&e.who===-1);ok(ai.length>0,'ai landed');ok(f.log.some(e=>e.type==='hit'&&e.who===-1&&e.move==='light1'),'a light interrupted')});
 Test.add('t4 punishes a parried (stunned) player',()=>{const f=mkFight({ctrl1:Ctrl.script([{f:0,until:600,intent:{light:true}}]),ctrl2:AI.make('t4',5)});closeIn(f);run(f,900);ok(f.log.some((e,i)=>e.type==='parry'&&f.log.slice(i+1,i+30).some(h=>h.type==='hit'&&h.who===-1)),'hit within 30 frames after a parry')});
+// --- Task 3.6 refactor: Fighter.wasKnockedDown ---
+Test.add('wasKnockedDown is set on KNOCKDOWN and self-clears exactly one tick after i-frames expire',()=>{
+  const F=mkFighter();F.setState('KNOCKDOWN');eq(F.wasKnockedDown,true);
+  for(let i=0;i<KNOCKDOWN.frames-1;i++)F.tick();
+  eq(F.wasKnockedDown,true,'still true through the knockdown timer');
+  F.tick(); // the tick that flips state IDLE and arms the get-up i-frames (inv=KNOCKDOWN.inv)
+  eq(F.state,'IDLE');eq(F.inv,KNOCKDOWN.inv);eq(F.wasKnockedDown,true,'still true — i-frames just armed, not yet spent');
+  for(let i=0;i<KNOCKDOWN.inv-1;i++)F.tick();
+  eq(F.inv,1);eq(F.wasKnockedDown,true,'still true with one i-frame left');
+  F.tick(); // inv 1->0 this tick
+  eq(F.inv,0);eq(F.wasKnockedDown,true,'still true the tick inv reaches 0 — AI.make reads it here');
+  F.tick(); // the NEXT tick self-clears it
+  eq(F.wasKnockedDown,false,'cleared one tick after i-frames actually expired')});
+Test.add('wasKnockedDown is never set by an ordinary dash-back, however DASH_BACK is tuned',()=>{
+  const F=mkFighter();F.act(Object.assign(Ctrl.EMPTY(),{dashBack:true}));eq(F.state,'DASH');
+  for(let i=0;i<DASH_BACK.frames+DASH_BACK.inv+2;i++)F.tick();
+  eq(F.wasKnockedDown,false,'a plain dash-back must never look like a knockdown get-up')});
+Test.add('AI.make punishes exactly on the frame wasKnockedDown+inv0 line up (justGotUp)',()=>{
+  // Drives foe's own state machine directly (not a full Fight.step loop) so the single-frame
+  // justGotUp window lines up deterministically with one ctrl.next() call under test, instead of
+  // depending on the AI's own cd/busy cadence happening to poll on that exact fight frame by luck.
+  // t5's punish is 1 (100%), so the roll itself is not what's under test — the wiring is.
+  const ctrl=AI.make('t5',6),f=mkFight({ctrl2:ctrl});closeIn(f);
+  const me=f.p2,foe=f.p1;
+  foe.setState('KNOCKDOWN');
+  for(let i=0;i<KNOCKDOWN.frames+KNOCKDOWN.inv-1;i++)foe.tick();
+  eq(foe.inv,1,'one i-frame left');
+  foe.tick(); // inv 1->0 this tick
+  eq(foe.inv,0);eq(foe.state,'IDLE');eq(foe.wasKnockedDown,true,'flag still set on the frame AI.make must read it');
+  const it=ctrl.next(f,me,foe);
+  eq(it.medium,true,'t5 must punish on the exact justGotUp frame');
+  eq(foe.wasKnockedDown,false,'decidePunish consumes the flag once it acts on it')});
 Test.add('t1 loses to t5 head to head over 5 seeds',()=>{let w5=0;for(let s=1;s<=5;s++){const f=mkFight({ctrl1:AI.make('t1',s),ctrl2:AI.make('t5',s+100),clock:120});run(f,7200);if(f.winner===f.p2)w5++}ok(w5>=4,'t5 wins '+w5+'/5')});
 Test.add('Input.drain folds the action queue into one intent and clears it',()=>{
   Input.q.push('light','special2','dashBack');Input.held.block=true;const it=Input.drain();

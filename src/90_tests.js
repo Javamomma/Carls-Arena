@@ -92,6 +92,38 @@ Test.add('brawl AI blocks a medium at least once in 20 seconds',()=>{
 Test.add('tiers t1..t5 exist, aliases resolve, dummy stays inert',()=>{for(const t of ['t1','t2','t3','t4','t5'])ok(AI.TIERS[t]);eq(AI.resolveProfile('basic'),AI.TIERS.t2);eq(AI.resolveProfile('brawl'),AI.TIERS.t3);ok(AI.resolveProfile('brute').heavy>=.5);const f=mkFight({ctrl2:AI.make('dummy',3)});run(f,600);eq(f.log.filter(e=>e.type==='hit'&&e.who===-1).length,0)});
 Test.add('t5 intercepts a dash-in medium with a light',()=>{const f=mkFight({ctrl1:Ctrl.script(Array.from({length:20},(_,i)=>({f:i*40,intent:{medium:true}}))),ctrl2:AI.make('t5',4)});f.p1.x=f.p2.x-260;run(f,800);const ai=f.log.filter(e=>e.type==='hit'&&e.who===-1);ok(ai.length>0,'ai landed');ok(f.log.some(e=>e.type==='hit'&&e.who===-1&&e.move==='light1'),'a light interrupted')});
 Test.add('t4 punishes a parried (stunned) player',()=>{const f=mkFight({ctrl1:Ctrl.script([{f:0,until:600,intent:{light:true}}]),ctrl2:AI.make('t4',5)});closeIn(f);run(f,900);ok(f.log.some((e,i)=>e.type==='parry'&&f.log.slice(i+1,i+30).some(h=>h.type==='hit'&&h.who===-1)),'hit within 30 frames after a parry')});
+// --- Task 3.6 refactor: Fighter.wasKnockedDown ---
+Test.add('wasKnockedDown is set on KNOCKDOWN and self-clears exactly one tick after i-frames expire',()=>{
+  const F=mkFighter();F.setState('KNOCKDOWN');eq(F.wasKnockedDown,true);
+  for(let i=0;i<KNOCKDOWN.frames-1;i++)F.tick();
+  eq(F.wasKnockedDown,true,'still true through the knockdown timer');
+  F.tick(); // the tick that flips state IDLE and arms the get-up i-frames (inv=KNOCKDOWN.inv)
+  eq(F.state,'IDLE');eq(F.inv,KNOCKDOWN.inv);eq(F.wasKnockedDown,true,'still true — i-frames just armed, not yet spent');
+  for(let i=0;i<KNOCKDOWN.inv-1;i++)F.tick();
+  eq(F.inv,1);eq(F.wasKnockedDown,true,'still true with one i-frame left');
+  F.tick(); // inv 1->0 this tick
+  eq(F.inv,0);eq(F.wasKnockedDown,true,'still true the tick inv reaches 0 — AI.make reads it here');
+  F.tick(); // the NEXT tick self-clears it
+  eq(F.wasKnockedDown,false,'cleared one tick after i-frames actually expired')});
+Test.add('wasKnockedDown is never set by an ordinary dash-back, however DASH_BACK is tuned',()=>{
+  const F=mkFighter();F.act(Object.assign(Ctrl.EMPTY(),{dashBack:true}));eq(F.state,'DASH');
+  for(let i=0;i<DASH_BACK.frames+DASH_BACK.inv+2;i++)F.tick();
+  eq(F.wasKnockedDown,false,'a plain dash-back must never look like a knockdown get-up')});
+Test.add('AI.make punishes exactly on the frame wasKnockedDown+inv0 line up (justGotUp)',()=>{
+  // Drives foe's own state machine directly (not a full Fight.step loop) so the single-frame
+  // justGotUp window lines up deterministically with one ctrl.next() call under test, instead of
+  // depending on the AI's own cd/busy cadence happening to poll on that exact fight frame by luck.
+  // t5's punish is 1 (100%), so the roll itself is not what's under test — the wiring is.
+  const ctrl=AI.make('t5',6),f=mkFight({ctrl2:ctrl});closeIn(f);
+  const me=f.p2,foe=f.p1;
+  foe.setState('KNOCKDOWN');
+  for(let i=0;i<KNOCKDOWN.frames+KNOCKDOWN.inv-1;i++)foe.tick();
+  eq(foe.inv,1,'one i-frame left');
+  foe.tick(); // inv 1->0 this tick
+  eq(foe.inv,0);eq(foe.state,'IDLE');eq(foe.wasKnockedDown,true,'flag still set on the frame AI.make must read it');
+  const it=ctrl.next(f,me,foe);
+  eq(it.medium,true,'t5 must punish on the exact justGotUp frame');
+  eq(foe.wasKnockedDown,false,'decidePunish consumes the flag once it acts on it')});
 Test.add('t1 loses to t5 head to head over 5 seeds',()=>{let w5=0;for(let s=1;s<=5;s++){const f=mkFight({ctrl1:AI.make('t1',s),ctrl2:AI.make('t5',s+100),clock:120});run(f,7200);if(f.winner===f.p2)w5++}ok(w5>=4,'t5 wins '+w5+'/5')});
 Test.add('Input.drain folds the action queue into one intent and clears it',()=>{
   Input.q.push('light','special2','dashBack');Input.held.block=true;const it=Input.drain();

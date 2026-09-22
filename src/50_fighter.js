@@ -4,10 +4,21 @@ class Fighter{
     this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
     this.combo=0;this.stun=0;this.inv=0;this.blockAge=0;this.dx=0; // last tick's x delta; Rig.poseFor reads it to pick idle vs walk
     this.parryLock=0;this.blockPressedAt=0;this.pressTick=0;this._parried=false;this._mdCache=null;
-    this.buffs=[]} // resolved BUFFS objects (Buffs.apply sets this once; Fight never re-resolves ids per frame)
+    this.buffs=[]; // resolved BUFFS objects (Buffs.apply sets this once; Fight never re-resolves ids per frame)
+    // wasKnockedDown (Task 3.6 refactor): set true the instant this fighter enters KNOCKDOWN
+    // (setState below), stays true through the knockdown timer and the post-getup invulnerable
+    // window, then self-clears in tick() the frame after inv actually reaches 0 — giving AI.make's
+    // 'punish' behavior a one-frame window to catch "just got up" that's scoped to real knockdowns
+    // only. Previously that same one-frame window was inferred from a plain inv 1->0 edge, which
+    // happened to also work for KNOCKDOWN's own get-up i-frames (10) only because they outlast
+    // DASH_BACK's own i-frames (8) relative to its 12-frame duration — a coincidence of those two
+    // constants, not a real invariant, so nothing stopped a future DASH_BACK retune from making a
+    // plain dash-back misread as a knockdown get-up. This flag is scoped to KNOCKDOWN specifically
+    // and never touches DASH at all.
+    this.wasKnockedDown=false}
   get front(){return this.x+this.face*this.width/2}
   busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
-  setState(s,f=0){this.state=s;this.f=f}
+  setState(s,f=0){if(s==='KNOCKDOWN')this.wasKnockedDown=true;this.state=s;this.f=f}
   // MOVES[name] shallow-merged with this.def.moves?.[name]; cached per fighter instance (no per-frame alloc).
   moveDef(name){let c=this._mdCache;if(!c)c=this._mdCache=new Map();let d=c.get(name);
     if(!d){d=Object.assign({},MOVES[name],this.def.moves&&this.def.moves[name]);c.set(name,d)}
@@ -41,7 +52,15 @@ class Fighter{
       if(intent.medium&&this.moveName!=='medium')return this.startMove('medium')}
     else if(S==='CHARGE'&&!intent.heavy){this.move=null;this.moveName=null;this.setState('IDLE')}}
   // Advance one frame of the state machine.
-  tick(){const prevX=this.x;this.f++;if(this.inv>0)this.inv--;if(this.parryLock>0)this.parryLock--;
+  tick(){
+    // Self-clear wasKnockedDown one full tick after inv actually reached 0 (checked here, before
+    // this tick's own decrement, against the state left over from the END of the previous tick —
+    // exactly the state a controller's next() call for THIS step already read). That one-tick delay
+    // is what gives AI.make's 'punish' behavior its single-frame "just got up" window: the frame
+    // wasKnockedDown&&inv===0 is visible to next() is the same frame this check clears it for next
+    // time. AI.make also clears it directly the moment it acts on that window (see decidePunish).
+    if(this.wasKnockedDown&&this.state==='IDLE'&&this.inv===0)this.wasKnockedDown=false;
+    const prevX=this.x;this.f++;if(this.inv>0)this.inv--;if(this.parryLock>0)this.parryLock--;
     switch(this.state){
       case'CHARGE':if(this.f>=this.move.charge)this.setState('ATTACK');break;
       case'ATTACK':{const m=this.move;if(m.dash&&this.f<=m.startup)this.x+=this.face*m.dash/m.startup;
