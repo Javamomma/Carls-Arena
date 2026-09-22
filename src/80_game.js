@@ -9,13 +9,20 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // top was landing squarely across the now-much-taller fighters' heads in nearly every shot.
   // TOAST_BOTTOM_GAP is canvas-local (854x480) px from the bottom of the canvas up to the toast's
   // bottom edge: the chevron power bar sits at canvas y=H-24, so H-(H-24)+8 = 32 clears it by 8px.
-  // Width is capped at 62% of the displayed canvas width (narrower than round 1's 70%, since there's
-  // less horizontal room to work with down here between the on-screen buttons).
-  TOAST_BOTTOM_GAP:32,
-  positionToast(){const r=canvas.getBoundingClientRect(),el=document.getElementById('toast');
-    el.style.left=(r.left+r.width/2)+'px';
+  // Fix round 3: round 2's 62%-of-canvas width still ran the pill's right edge over the PUNCH
+  // button's label. BLOCK_RIGHT/PUNCH_LEFT are canvas-local x's for the BLOCK button's right edge
+  // and the PUNCH button's left edge, computed from the same numbers 00_head.html's CSS positions
+  // them with (#btnBlock left:22/width:76, #btnPunch right:198/width:76) rather than read off their
+  // DOM rects — #btns (and everything under it) collapses to a zero getBoundingClientRect() while
+  // hidden pre-fight (TITLE/RESULT), and positionToast runs then too (from G.fit at init/resize).
+  // The toast is centered in that gap, capped at 88% of its width, so it can never reach either
+  // button's label regardless of content.
+  TOAST_BOTTOM_GAP:32,BLOCK_RIGHT:22+76,PUNCH_LEFT:W-(198+76),
+  positionToast(){const r=canvas.getBoundingClientRect(),el=document.getElementById('toast'),sx=r.width/W;
+    const gapL=r.left+this.BLOCK_RIGHT*sx,gapR=r.left+this.PUNCH_LEFT*sx;
+    el.style.left=((gapL+gapR)/2)+'px';
     el.style.bottom=(innerHeight-r.bottom+this.TOAST_BOTTOM_GAP/H*r.height)+'px';
-    el.style.maxWidth=Math.round(r.width*.62)+'px'},
+    el.style.maxWidth=Math.round((gapR-gapL)*.88)+'px'},
   // Caps the toast at 2 lines by dropping from 13px to 12px if the current text would wrap to 3+ at
   // 13px (measuring via the laid-out scrollHeight against the computed line-height, so it accounts
   // for the actual maxWidth positionToast() set, not an estimate). Called after every text change

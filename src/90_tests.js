@@ -301,3 +301,24 @@ Test.add('FX ages once per sim tick in sim mode, deterministically (not off wall
   const a=runOnce(),b=runOnce();
   eq(a,b,'identical script/seed -> identical FX state after the same tick count');
   G.fight=null;G.state='TITLE';G.sim=false});
+Test.add('toast never overlaps the BLOCK/PUNCH button labels',()=>{
+  // Fix round 3: round 2's centered-at-62%-of-canvas-width toast still ran its right edge over the
+  // PUNCH label. Drives a worst-case (long, guaranteed-to-wrap) line through the real Audio.say ->
+  // G.fitToastText path and checks the actual laid-out DOM rects, in canvas-local units (via the
+  // same canvas.getBoundingClientRect() scale G.positionToast itself uses), against BLOCK/PUNCH.
+  G.startFight();
+  G.say('x'.repeat(120));
+  const cr=canvas.getBoundingClientRect(),sx=W/cr.width,sy=H/cr.height;
+  const toCanvas=r=>({x0:(r.left-cr.left)*sx,x1:(r.right-cr.left)*sx,y0:(r.top-cr.top)*sy,y1:(r.bottom-cr.top)*sy});
+  const intersects=(a,b)=>a.x0<b.x1&&a.x1>b.x0&&a.y0<b.y1&&a.y1>b.y0;
+  // getBoundingClientRect() only covers the button circle itself, not its ::after data-label (a
+  // generated pseudo-element, which has no standard geometry query) — the actual reported bug is the
+  // label, which sits directly below the circle (top:100%, margin-top:4px, 10px text), so extend the
+  // circle's rect down by 20 canvas-local px to cover it too.
+  const withLabel=r=>({x0:r.x0,x1:r.x1,y0:r.y0,y1:r.y1+20});
+  const t=toCanvas(document.getElementById('toast').getBoundingClientRect());
+  const block=withLabel(toCanvas(document.getElementById('btnBlock').getBoundingClientRect()));
+  const punch=withLabel(toCanvas(document.getElementById('btnPunch').getBoundingClientRect()));
+  ok(!intersects(t,block),'toast rect '+JSON.stringify(t)+' must not intersect BLOCK+label '+JSON.stringify(block));
+  ok(!intersects(t,punch),'toast rect '+JSON.stringify(t)+' must not intersect PUNCH+label '+JSON.stringify(punch));
+  G.toTitle()});
