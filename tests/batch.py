@@ -11,9 +11,26 @@
       # skip the per-floor-node/boss sweep (it runs by default alongside the tier sweep).
   python3 tests/batch.py --selftest
       # smoke test: runs one tiny batch cell and asserts the JS builder's returned object has the
-      # fields callers depend on (wins, fights, framesTotal per result). Exit 1 on any mismatch.
+      # fields callers depend on (win, frames, ticks per result). Exit 1 on any mismatch.
 
 Exit 1 on any page/console error, or (tier-sweep mode) a failed monotonicity/bound gate.
+
+Ruling (fix-wave item 10, on the brief's "reuse the in-page soak builder from harness.py" — never
+satisfied and never disclosed as a deviation in the original Task 3.6 report, per the 3.6 re-review):
+build_batch_js below does NOT call tests/harness.py's build_soak_js, and this file still doesn't
+import harness.py. The two loops are shaped for genuinely different callers, not just styled
+differently: build_soak_js runs ONE continuous restart-on-KO loop against a fixed TIME budget and
+returns aggregate counters (fights, framesTotal, p1wins, koTicks) — right for a soak whose job is
+"did anything break, and did we make reasonable progress." batch.py needs a fixed N independent
+seeded fights with a PER-FIGHT win/frame record (the frozen interface's own win-rate table, and the
+monotonicity/bound gate, both need "fight i won or lost", not a running total) — a shape
+build_soak_js's return value doesn't carry and can't be adapted to without changing what it returns
+for its own callers (run_matrix_cell, the plain --sim path), which is out of scope for a batch tool.
+Sharing at the JS-string level (e.g. factoring the `G.startFight({...})` construction both use into
+one Python helper) was considered and rejected: the two builders splice fundamentally different
+things into that call (batch's per-seed encounter/ai pair vs harness's own enc/floor sugar plus probe
+sampling), so a shared fragment would save a handful of characters at the cost of a coupling neither
+side needs. Kept separate, with this ruling recorded instead of a silent, undisclosed divergence.
 """
 import argparse, json, os, sys, time
 from playwright.sync_api import sync_playwright

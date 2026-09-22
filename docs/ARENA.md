@@ -500,9 +500,49 @@ chain for free. Every other `AI_TIERS` field is unchanged from the frozen Phase 
 never pinned this number, but its history moved twice without a screenshot check each time — 175
 (original) → 128 (Task 3.5 fix round 2, documented) → 96 (the "pin ordinary-pair caps" commit,
 undocumented, over-trimmed). At 96 the wind-up read as a level forward reach nearly identical to
-`light3`'s own peak shoulder angle (95). Binary-searched back up to 118, the largest value that still
-keeps the `'carl/hobgoblin/katia/donut/goblin pairings pin the zoom cap at exactly 1.12/1.28'` test
-green (119 fails it) — a hard ceiling set by Carl's own reach against the dynamic zoom cap
-(`Rig.extent`), not an aesthetic choice. A more vertical wind-up would need either a shorter reach
-elsewhere in this pose or slack in the 1.12/1.28 pin itself; flagged here as a concern rather than
-silently reworked, since loosening that pin is outside this task's scope.
+`light3`'s own peak shoulder angle (95). Binary-searched back up to 118 for the final review (the
+largest value that still kept the OLD per-fight worst-case zoom cap pinned at exactly 1.12/1.28), but
+even 118 still read as marginal ("the fist sits 11px above light3's, same forward-lean silhouette" —
+final review, balance note 2) — a hard ceiling set by Carl's own reach against a single fight-wide
+cap, not an aesthetic choice.
+**Resolved in the 2026-09-22 fix wave (item 4):** the structural fix was making the zoom cap
+per-frame (`Rig.topAt`/`G.topNow`, 68_rig.js/80_game.js) instead of a per-fight worst case — one tall
+pose no longer taxes every other frame of the fight. `rShoulder` is back at its original 175° (a real
+near-vertical overhead, clearly distinct from `light3`'s level jab — see `docs/shots/p2-heavy.png`);
+Hobgoblin's held club is back to its real length for the same reason. The old exact-1.12/1.28 pin is
+no longer a meaningful invariant (nothing renders against the per-fight bound directly anymore) and
+was relaxed to a loose sanity check — see 90_tests.js's own comments on both tests for the detail.
+
+## Phase 3 plan defects (fixed) — 2026-09-22 fix wave
+
+Four defects in the frozen Phase 3 plan's own interfaces/gate, surfaced by the final review and fixed
+in this fix wave rather than worked around in the implementation:
+
+1. **`regen`'s frozen rate (0.05% maxHp/frame) is 3%/s** — 360% of max hp over a 120s fight clock;
+   fine for the plan's own 600-frame (10s) test, unusable on a boss with a multi-second fight length.
+   Fixed: retuned to 0.017%/frame (~1%/s) in item 2, as part of making Mother Rat winnable.
+2. **The `AI_TIERS` table mixes scales without saying so** — `special` is a per-second probability,
+   `attack` (and every other field) is per-frame; multiplying `special` by `STEP` (matching the
+   table's own implicit per-second intent) made bosses almost never throw their signature S3 once
+   Task 3.6 raised `attack`. Fixed in item 1: dropped the `*STEP`, `special` now reads as per-frame
+   like everything else in the table.
+3. **The batch gate never required the bot to close distance or throw a medium**, so it couldn't
+   certify `intercept` (0 firings across 75 fights and all five tiers in the run that certified the
+   tiers) — `Ctrl.competent` just stood still once out of light range if nothing else applied. Fixed
+   in item 8: closes with a medium out of range, mixes in a heavy on the 5th blockstun opening.
+4. **`ENCOUNTERS` had to gain a `buffs:[]` field for the interface to typecheck, but no node had to
+   use one** — the plan's headline "node buffs" goal shipped as a framework with no content. Fixed in
+   item 5: every FLOORS node except two now carries at least one buff.
+
+## Fix wave close-out (2026-09-22)
+
+Ten-item final-review fix wave (items 1-10, one commit each except item 10) complete. Headline
+outcomes: both bosses winnable (0/20 -> 16.7-25% at n=20/30, comfortably in the 10-35% target band);
+the per-fight zoom cap replaced with a per-frame one (Carl's heavy wind-up restored to its real 175°
+overhead, the S3 punch-in now genuinely exceeds gameplay zoom for big-rig pairs); `--matrix` extended
+6x (36 -> 216 cells) to cover every Phase 3 rig/def/tier; `Ctrl.competent` closes distance and mixes
+in heavies; node buffs are live content on 8 of 10 non-boss nodes plus a player-side path; `Rig.extent`
+folds the drawn head and every quad-rig look fits `EDGE_PAD` with the carve-out removed;
+`wasKnockedDown` is Fighter-owned end to end; Grub/Mongo/Grull read as themselves (segmented portrait,
+thick neck + brow ridge, own palette/horns/club) and the boss plate is a tight frame around the name.
+Full detail per item is in `.superpowers/sdd/2026-09-21-phase3-ai-encounters/task-fixwave-p3-report.md`.

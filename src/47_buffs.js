@@ -37,8 +37,16 @@ const BUFFS={
     onFrame(fight,holder,foe){if(!foe||holder.hp<=0)return;foe.hp=Math.max(0,foe.hp-foe.maxHp*0.0003)}},
   thorns:{id:'thorns',
     // On block, the attacker takes 20% of the chip damage back. Only ever wired to the defender's
-    // (the blocker's) onBlock call — see Fight.resolve's 'block' branch.
-    onBlock(fight,att,def,ref,holder){att.hp=Math.max(0,att.hp-Math.round(ref.chip*0.2))}}};
+    // (the blocker's) onBlock call — see Fight.resolve's 'block' branch. Fix-wave item 10: thorns
+    // damage used to have no log entry and no FX (silent, unlike every other source of damage in the
+    // sim) — now emits a 'thorns' fight event (fight.emit, the same log/onEvent path every other hit
+    // uses) and a small red popup, skipped when the chip itself rounds to 0 so a near-zero-atk
+    // matchup doesn't spam empty-looking popups.
+    onBlock(fight,att,def,ref,holder){
+      const dmg=Math.round(ref.chip*0.2);if(dmg<=0)return;
+      att.hp=Math.max(0,att.hp-dmg);
+      fight.emit('thorns',holder,att,dmg);
+      fight.fx.push({kind:'popup',x:att.x,y:FLOOR-100,text:String(dmg),col:'#ff4444',big:false})}}};
 const Buffs={
   // Resolves ids[] to BUFFS objects and sets holder.buffs (replacing whatever was there). Called
   // once at fight/encounter setup, never per frame, so there's no per-frame allocation on the hot

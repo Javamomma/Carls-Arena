@@ -994,6 +994,14 @@ const Rig={
     c.fillStyle=shade(look.skin,.16);c.beginPath();
     c.ellipse((j.lShoulder.x+j.rShoulder.x)/2,(j.lShoulder.y+j.rShoulder.y)/2+look.torsoLen*.08,
       look.shoulderW*.26,look.torsoLen*.1,0,0,Math.PI*2);c.fill();
+    // Thick neck: a short wide stroke from the neck joint up to the head, drawn UNDER the head fill
+    // (so only its width past the head's own radius reads) — the human rig's own neckNeckLen leaves
+    // nothing at all drawn between shoulders and head, which for a brute reads as a floating head
+    // rather than "thick neck" (final review, look-and-feel note 4, on Mongo specifically).
+    c.lineCap='round';c.lineWidth=look.headR*1.15;c.strokeStyle=skinDark;
+    c.beginPath();c.moveTo(j.neck.x,j.neck.y);c.lineTo(j.head.x,j.head.y);c.stroke();
+    c.lineWidth=look.headR*.85;c.strokeStyle=look.skin;
+    c.beginPath();c.moveTo(j.neck.x,j.neck.y);c.lineTo(j.head.x,j.head.y);c.stroke();
     c.fillStyle=look.skin;c.beginPath();c.arc(j.head.x,j.head.y,look.headR,0,Math.PI*2);c.fill();
     c.lineWidth=1.6;c.strokeStyle=skinDark;c.stroke();
     // Heavy brow ridge: a thick dark arc across the upper-front third of the head.
@@ -1135,6 +1143,12 @@ const Rig={
     c.fillStyle=look.skin;c.beginPath();c.arc(cx,headY,headR,0,Math.PI*2);c.fill();
     c.lineWidth=1.5;c.strokeStyle=skinDark;c.stroke();
     if(look.hair){c.fillStyle=look.hair;c.beginPath();c.arc(cx,headY-headR*.3,headR*1.05,Math.PI*1.05,Math.PI*1.95);c.fill()}
+    // Fix-wave item 10: the 'big' rig (Mongo/Grull) shared this exact plain human bust — no brow, no
+    // hair (both have hair:null) — so a recolored circle read as "a generic green head" in the HUD
+    // (final review, look-and-feel note 4, on Mongo specifically). Mirrors drawBig's own unconditional
+    // brow-ridge arc so the portrait reads as the same brute the fight sprite does.
+    if(look.rig==='big'){c.strokeStyle=shade(look.skin,-.42);c.lineWidth=headR*.32;c.lineCap='round';
+      c.beginPath();c.arc(cx,headY-headR*.08,headR*.76,D(195),D(345));c.stroke()}
     c.fillStyle='#141414';
     c.beginPath();c.arc(cx-headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
     c.beginPath();c.arc(cx+headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
@@ -1148,6 +1162,27 @@ const Rig={
     const c=cnv.getContext('2d'),skinDark=shade(look.skin,-.35);
     const cx=S/2,headR=Math.min(18,look.headR*.72),headY=S*0.46,shW=Math.min(S*0.85,look.bodyLen*.3),shY=S*0.7;
     const headFill=look.headFill||look.skin,props=look.props||[];
+    // Fix-wave item 10: Grub's HUD portrait used to fall through to the generic cat/rat-shaped bust
+    // (a plain wedge body + round head), which for a species with neither ears nor ear-adjacent props
+    // read as "a generic green head" (final review, look-and-feel note 4) — nothing distinguished it
+    // as a grub. Drawn as its own shape instead: a low, elongated segmented capsule (echoing
+    // drawQuad's own body-drawing language for grub) with a small dark head-end, not the human/cat
+    // silhouette other quads share.
+    if(look.species==='grub'){
+      const capW=S*.8,capH=S*.32,capY=S*.6;
+      c.fillStyle=look.skin;c.strokeStyle=skinDark;c.lineWidth=1.4;
+      c.beginPath();
+      if(c.roundRect)c.roundRect(cx-capW/2,capY-capH/2,capW,capH,capH/2);
+      else c.ellipse(cx,capY,capW/2,capH/2,0,0,Math.PI*2);
+      c.fill();c.stroke();
+      c.strokeStyle=look.segDark||skinDark;c.lineWidth=1.6;
+      for(const fx of[-.18,.1,.36])/* segment lines, head-end excluded */{
+        c.beginPath();c.moveTo(cx+fx*capW,capY-capH*.4);c.lineTo(cx+fx*capW,capY+capH*.4);c.stroke()}
+      const hx=cx-capW*.34,hr=Math.min(headR,capH*.62);
+      c.fillStyle=headFill;c.beginPath();c.arc(hx,capY,hr,0,Math.PI*2);c.fill();
+      c.lineWidth=1.4;c.strokeStyle=shade(headFill,-.3);c.stroke();
+      c.fillStyle=look.eye||'#141414';c.beginPath();c.arc(hx-hr*.2,capY-1,1.3,0,Math.PI*2);c.fill();
+      look._portrait=cnv;return cnv}
     if(look.species==='cat'||look.species==='rat'){ // drawn behind the head so the head fill covers each ear's base
       const big=look.species==='rat',er=headR*(big?.7:.55),ex=headR*(big?.62:.65),ey=-headR*.82;
       for(const s of[-1,1]){const bx=cx+s*ex,by=headY+ey;

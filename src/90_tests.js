@@ -557,6 +557,16 @@ Test.add('thorns returns 20% of block chip to the attacker',()=>{
   run(f,15);
   eq(f.p2.hp,995,'chip itself is unchanged by thorns');
   eq(f.p1.hp,1000-Math.round(5*0.2),'attacker takes 20% of the chip back')});
+// Fix-wave item 10: thorns damage had no log entry and no FX (silent, unlike every other source of
+// damage in the sim) — now emits a 'thorns' event and a small popup, mirroring a normal hit.
+Test.add('thorns emits a fight event and an fx popup',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});
+  closeIn(f);Buffs.apply(f,f.p2,['thorns']);
+  run(f,15);
+  const ev=f.log.find(e=>e.type==='thorns');
+  ok(ev,'a thorns event must be logged');
+  eq(ev.val,Math.round(5*0.2),'the logged value must be the thorns damage dealt');
+  ok(f.fx.some(x=>x.kind==='popup'&&x.col==='#ff4444'),'a red popup must be queued for thorns damage')});
 Test.add('Buffs.apply resolves ids to BUFFS objects on holder.buffs, and throws on an unknown id',()=>{
   const f=mkFight();
   Buffs.apply(f,f.p2,['regen','armorUp']);
@@ -586,12 +596,20 @@ Test.add('buff badges: one 12px gold square with a 1-letter code per encounter b
   eq(Render.BUFF_CODES.unblockableSpecials,'U');eq(Render.BUFF_CODES.degen,'D');eq(Render.BUFF_CODES.thorns,'T');
   ok(!threw(()=>Render.buffBadges(Render.ctx,0,0,300,[BUFFS.regen,BUFFS.thorns])),'buffBadges must not throw')});
 // --- Task 3.6: boss plate no longer overlaps the title ---
-Test.add('boss plate\'s left edge clears the title\'s measured right edge with an 8px gap',()=>{
+// Fix-wave item 10: the plate used to be HP-bar-width (plus 16px), clamped off the title's own
+// measured right edge so the two didn't collide — technically not clipping, but still read as "a
+// wide empty red-outlined box" (final review, look-and-feel note 4). Now sized off the name's own
+// measured text width (same font/right-alignment the name itself renders in), tight enough around
+// either boss name that the title-collision clamp is unreachable and was dropped.
+Test.add('boss plate is sized tight to the name and clears the title with real margin',()=>{
   const p2x=W-74,barW=300,p2barX=W-74-10-barW,titleRight=Render.hudCache().titleRightEdge;
-  ok(!threw(()=>Render.bossPlate(Render.ctx,p2x,p2barX,barW)),'bossPlate must not throw');
-  // Recompute the same clamp bossPlate applies, and check it actually cleared the title.
-  const plateX=Math.max(p2barX-6,titleRight+8);
-  ok(plateX>=titleRight+8-1e-6,'plate left edge must sit at or right of titleRightEdge+8')});
+  for(const name of['GRULL','MOTHER RAT']){
+    ok(!threw(()=>Render.bossPlate(Render.ctx,p2x,p2barX,barW,name)),'bossPlate must not throw for '+name);
+    Render.ctx.font='bold 14px ui-monospace,monospace';
+    const nameW=Render.ctx.measureText(name).width;
+    const pad=10,rightEdge=p2barX+barW,plateW=nameW+pad*2,plateX=rightEdge-plateW;
+    ok(plateX>titleRight+8,name+'\'s plate must clear the title with real margin');
+    ok(plateW<barW,name+'\'s plate must be tighter than the full HP-bar width, not span it')}});
 
 // --- Task 3.3: floors, encounters, bosses (data) ---
 Test.add('every FLOORS node and boss resolves',()=>{

@@ -96,25 +96,30 @@ const Render={ctx:canvas.getContext('2d'),
       c.fillStyle='#f4c542';c.fillRect(bx,y,size,size);
       c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(bx+.5,y+.5,size-1,size-1);
       c.fillStyle='#000';c.fillText(this.BUFF_CODES[b.id]||'?',bx+size/2,y+size/2+1)})},
-  // Boss name plate: a wider red-bordered field around p2's name, plus a small gold crown glyph
-  // over the portrait's near corner. Only drawn when G.encounter.boss (see hud()). Presentation-only
-  // (reads G.encounter, never mutates it) — the sim has no notion of "boss", per Phase 3 ruling #4.
-  bossPlate(c,p2x,p2barX,barW){
-    // Left edge clamped to clear the baked title's measured right edge (hudCache().titleRightEdge)
-    // plus an 8px gap, instead of the plain p2barX-6 overhang: at the default HUD layout that
-    // overhang (plateX 464) landed inside "FIGHTER"'s own glyph bounds (title right edge ~468-474
-    // depending on font metrics), so the plate's red border and the title's last letter visually
-    // collided every boss fight. The right edge (crown side) is unaffected — only the left edge
-    // moves in, never further right than its own un-clamped position, so a narrow name/HUD layout
-    // where the two never would have collided draws identically to before this fix.
-    const plateY=11,plateW0=barW+16,rightEdge=p2barX-6+plateW0,
-      plateX=Math.max(p2barX-6,this.hudCache().titleRightEdge+8),plateW=rightEdge-plateX,plateH=18;
+  // Boss name plate: a red-bordered field tight around p2's own name (not the whole HP-bar width),
+  // plus a small gold crown glyph immediately to its left. Only drawn when G.encounter.boss (see
+  // hud()). Presentation-only (reads G.encounter, never mutates it) — the sim has no notion of
+  // "boss", per Phase 3 ruling #4.
+  // Fix-wave item 10: was a wide box (HP-bar-width plus 16px) stretching most of the way back toward
+  // the FIGHTER title, clamped off the title's own measured right edge so the two didn't visually
+  // collide (caab728/8e25ec4) — technically not clipping anymore, but still read as "a wide empty
+  // red-outlined box" (final review, look-and-feel note 4), since most of that width was blank. Sized
+  // off the name's own measured text width instead (same font the name itself renders in, right-
+  // aligned at the same p2barX+barW the name uses, so the box and the text share a right edge exactly)
+  // — tight enough around "GRULL"/"MOTHER RAT" that the title-collision clamp is no longer reachable
+  // at this HUD's own name-column width and was dropped. Crown moved from a fixed spot over the
+  // portrait to directly left of the (now name-sized) plate.
+  bossPlate(c,p2x,p2barX,barW,name){
+    const savedFont=c.font;c.font='bold 14px ui-monospace,monospace';
+    const nameW=c.measureText(name).width;c.font=savedFont;
+    const pad=10,plateY=11,plateH=18,rightEdge=p2barX+barW,
+      plateW=nameW+pad*2,plateX=rightEdge-plateW;
     c.strokeStyle='#c62828';c.lineWidth=2.5;c.strokeRect(plateX+.5,plateY+.5,plateW-1,plateH-1);
-    const cx=p2x+28,cy=6,w=9,h=8;
+    const cx=plateX-11,cy=plateY+plateH/2,w=8,h=7;
     c.fillStyle='#f4c542';c.strokeStyle='#000';c.lineWidth=1;
     c.beginPath();
     c.moveTo(cx-w,cy+h);c.lineTo(cx-w,cy+h*.2);c.lineTo(cx-w*.5,cy+h*.6);
-    c.lineTo(cx,cy);c.lineTo(cx+w*.5,cy+h*.6);c.lineTo(cx+w,cy+h*.2);c.lineTo(cx+w,cy+h);
+    c.lineTo(cx,cy-h*.4);c.lineTo(cx+w*.5,cy+h*.6);c.lineTo(cx+w,cy+h*.2);c.lineTo(cx+w,cy+h);
     c.closePath();c.fill();c.stroke()},
   pauseGlyph(c){const r=this.pauseRect,rr=6;
     c.fillStyle='rgba(0,0,0,.4)';c.strokeStyle='#f4c542';c.lineWidth=1.5;
@@ -144,7 +149,7 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p1barX,39);
     c.font='bold 14px ui-monospace,monospace';c.textAlign='right';c.fillStyle='#fff';c.fillText(b.def.name,p2barX+barW,25);
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39);
-    if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW);
+    if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW,b.def.name);
     this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22');
     this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp);
     if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);

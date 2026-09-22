@@ -473,8 +473,16 @@ const BUFFS={
     onFrame(fight,holder,foe){if(!foe||holder.hp<=0)return;foe.hp=Math.max(0,foe.hp-foe.maxHp*0.0003)}},
   thorns:{id:'thorns',
     // On block, the attacker takes 20% of the chip damage back. Only ever wired to the defender's
-    // (the blocker's) onBlock call — see Fight.resolve's 'block' branch.
-    onBlock(fight,att,def,ref,holder){att.hp=Math.max(0,att.hp-Math.round(ref.chip*0.2))}}};
+    // (the blocker's) onBlock call — see Fight.resolve's 'block' branch. Fix-wave item 10: thorns
+    // damage used to have no log entry and no FX (silent, unlike every other source of damage in the
+    // sim) — now emits a 'thorns' fight event (fight.emit, the same log/onEvent path every other hit
+    // uses) and a small red popup, skipped when the chip itself rounds to 0 so a near-zero-atk
+    // matchup doesn't spam empty-looking popups.
+    onBlock(fight,att,def,ref,holder){
+      const dmg=Math.round(ref.chip*0.2);if(dmg<=0)return;
+      att.hp=Math.max(0,att.hp-dmg);
+      fight.emit('thorns',holder,att,dmg);
+      fight.fx.push({kind:'popup',x:att.x,y:FLOOR-100,text:String(dmg),col:'#ff4444',big:false})}}};
 const Buffs={
   // Resolves ids[] to BUFFS objects and sets holder.buffs (replacing whatever was there). Called
   // once at fight/encounter setup, never per frame, so there's no per-frame allocation on the hot
@@ -2022,6 +2030,14 @@ const Rig={
     c.fillStyle=shade(look.skin,.16);c.beginPath();
     c.ellipse((j.lShoulder.x+j.rShoulder.x)/2,(j.lShoulder.y+j.rShoulder.y)/2+look.torsoLen*.08,
       look.shoulderW*.26,look.torsoLen*.1,0,0,Math.PI*2);c.fill();
+    // Thick neck: a short wide stroke from the neck joint up to the head, drawn UNDER the head fill
+    // (so only its width past the head's own radius reads) — the human rig's own neckNeckLen leaves
+    // nothing at all drawn between shoulders and head, which for a brute reads as a floating head
+    // rather than "thick neck" (final review, look-and-feel note 4, on Mongo specifically).
+    c.lineCap='round';c.lineWidth=look.headR*1.15;c.strokeStyle=skinDark;
+    c.beginPath();c.moveTo(j.neck.x,j.neck.y);c.lineTo(j.head.x,j.head.y);c.stroke();
+    c.lineWidth=look.headR*.85;c.strokeStyle=look.skin;
+    c.beginPath();c.moveTo(j.neck.x,j.neck.y);c.lineTo(j.head.x,j.head.y);c.stroke();
     c.fillStyle=look.skin;c.beginPath();c.arc(j.head.x,j.head.y,look.headR,0,Math.PI*2);c.fill();
     c.lineWidth=1.6;c.strokeStyle=skinDark;c.stroke();
     // Heavy brow ridge: a thick dark arc across the upper-front third of the head.
@@ -2163,6 +2179,12 @@ const Rig={
     c.fillStyle=look.skin;c.beginPath();c.arc(cx,headY,headR,0,Math.PI*2);c.fill();
     c.lineWidth=1.5;c.strokeStyle=skinDark;c.stroke();
     if(look.hair){c.fillStyle=look.hair;c.beginPath();c.arc(cx,headY-headR*.3,headR*1.05,Math.PI*1.05,Math.PI*1.95);c.fill()}
+    // Fix-wave item 10: the 'big' rig (Mongo/Grull) shared this exact plain human bust — no brow, no
+    // hair (both have hair:null) — so a recolored circle read as "a generic green head" in the HUD
+    // (final review, look-and-feel note 4, on Mongo specifically). Mirrors drawBig's own unconditional
+    // brow-ridge arc so the portrait reads as the same brute the fight sprite does.
+    if(look.rig==='big'){c.strokeStyle=shade(look.skin,-.42);c.lineWidth=headR*.32;c.lineCap='round';
+      c.beginPath();c.arc(cx,headY-headR*.08,headR*.76,D(195),D(345));c.stroke()}
     c.fillStyle='#141414';
     c.beginPath();c.arc(cx-headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
     c.beginPath();c.arc(cx+headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
@@ -2176,6 +2198,27 @@ const Rig={
     const c=cnv.getContext('2d'),skinDark=shade(look.skin,-.35);
     const cx=S/2,headR=Math.min(18,look.headR*.72),headY=S*0.46,shW=Math.min(S*0.85,look.bodyLen*.3),shY=S*0.7;
     const headFill=look.headFill||look.skin,props=look.props||[];
+    // Fix-wave item 10: Grub's HUD portrait used to fall through to the generic cat/rat-shaped bust
+    // (a plain wedge body + round head), which for a species with neither ears nor ear-adjacent props
+    // read as "a generic green head" (final review, look-and-feel note 4) — nothing distinguished it
+    // as a grub. Drawn as its own shape instead: a low, elongated segmented capsule (echoing
+    // drawQuad's own body-drawing language for grub) with a small dark head-end, not the human/cat
+    // silhouette other quads share.
+    if(look.species==='grub'){
+      const capW=S*.8,capH=S*.32,capY=S*.6;
+      c.fillStyle=look.skin;c.strokeStyle=skinDark;c.lineWidth=1.4;
+      c.beginPath();
+      if(c.roundRect)c.roundRect(cx-capW/2,capY-capH/2,capW,capH,capH/2);
+      else c.ellipse(cx,capY,capW/2,capH/2,0,0,Math.PI*2);
+      c.fill();c.stroke();
+      c.strokeStyle=look.segDark||skinDark;c.lineWidth=1.6;
+      for(const fx of[-.18,.1,.36])/* segment lines, head-end excluded */{
+        c.beginPath();c.moveTo(cx+fx*capW,capY-capH*.4);c.lineTo(cx+fx*capW,capY+capH*.4);c.stroke()}
+      const hx=cx-capW*.34,hr=Math.min(headR,capH*.62);
+      c.fillStyle=headFill;c.beginPath();c.arc(hx,capY,hr,0,Math.PI*2);c.fill();
+      c.lineWidth=1.4;c.strokeStyle=shade(headFill,-.3);c.stroke();
+      c.fillStyle=look.eye||'#141414';c.beginPath();c.arc(hx-hr*.2,capY-1,1.3,0,Math.PI*2);c.fill();
+      look._portrait=cnv;return cnv}
     if(look.species==='cat'||look.species==='rat'){ // drawn behind the head so the head fill covers each ear's base
       const big=look.species==='rat',er=headR*(big?.7:.55),ex=headR*(big?.62:.65),ey=-headR*.82;
       for(const s of[-1,1]){const bx=cx+s*ex,by=headY+ey;
@@ -2307,25 +2350,30 @@ const Render={ctx:canvas.getContext('2d'),
       c.fillStyle='#f4c542';c.fillRect(bx,y,size,size);
       c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(bx+.5,y+.5,size-1,size-1);
       c.fillStyle='#000';c.fillText(this.BUFF_CODES[b.id]||'?',bx+size/2,y+size/2+1)})},
-  // Boss name plate: a wider red-bordered field around p2's name, plus a small gold crown glyph
-  // over the portrait's near corner. Only drawn when G.encounter.boss (see hud()). Presentation-only
-  // (reads G.encounter, never mutates it) — the sim has no notion of "boss", per Phase 3 ruling #4.
-  bossPlate(c,p2x,p2barX,barW){
-    // Left edge clamped to clear the baked title's measured right edge (hudCache().titleRightEdge)
-    // plus an 8px gap, instead of the plain p2barX-6 overhang: at the default HUD layout that
-    // overhang (plateX 464) landed inside "FIGHTER"'s own glyph bounds (title right edge ~468-474
-    // depending on font metrics), so the plate's red border and the title's last letter visually
-    // collided every boss fight. The right edge (crown side) is unaffected — only the left edge
-    // moves in, never further right than its own un-clamped position, so a narrow name/HUD layout
-    // where the two never would have collided draws identically to before this fix.
-    const plateY=11,plateW0=barW+16,rightEdge=p2barX-6+plateW0,
-      plateX=Math.max(p2barX-6,this.hudCache().titleRightEdge+8),plateW=rightEdge-plateX,plateH=18;
+  // Boss name plate: a red-bordered field tight around p2's own name (not the whole HP-bar width),
+  // plus a small gold crown glyph immediately to its left. Only drawn when G.encounter.boss (see
+  // hud()). Presentation-only (reads G.encounter, never mutates it) — the sim has no notion of
+  // "boss", per Phase 3 ruling #4.
+  // Fix-wave item 10: was a wide box (HP-bar-width plus 16px) stretching most of the way back toward
+  // the FIGHTER title, clamped off the title's own measured right edge so the two didn't visually
+  // collide (caab728/8e25ec4) — technically not clipping anymore, but still read as "a wide empty
+  // red-outlined box" (final review, look-and-feel note 4), since most of that width was blank. Sized
+  // off the name's own measured text width instead (same font the name itself renders in, right-
+  // aligned at the same p2barX+barW the name uses, so the box and the text share a right edge exactly)
+  // — tight enough around "GRULL"/"MOTHER RAT" that the title-collision clamp is no longer reachable
+  // at this HUD's own name-column width and was dropped. Crown moved from a fixed spot over the
+  // portrait to directly left of the (now name-sized) plate.
+  bossPlate(c,p2x,p2barX,barW,name){
+    const savedFont=c.font;c.font='bold 14px ui-monospace,monospace';
+    const nameW=c.measureText(name).width;c.font=savedFont;
+    const pad=10,plateY=11,plateH=18,rightEdge=p2barX+barW,
+      plateW=nameW+pad*2,plateX=rightEdge-plateW;
     c.strokeStyle='#c62828';c.lineWidth=2.5;c.strokeRect(plateX+.5,plateY+.5,plateW-1,plateH-1);
-    const cx=p2x+28,cy=6,w=9,h=8;
+    const cx=plateX-11,cy=plateY+plateH/2,w=8,h=7;
     c.fillStyle='#f4c542';c.strokeStyle='#000';c.lineWidth=1;
     c.beginPath();
     c.moveTo(cx-w,cy+h);c.lineTo(cx-w,cy+h*.2);c.lineTo(cx-w*.5,cy+h*.6);
-    c.lineTo(cx,cy);c.lineTo(cx+w*.5,cy+h*.6);c.lineTo(cx+w,cy+h*.2);c.lineTo(cx+w,cy+h);
+    c.lineTo(cx,cy-h*.4);c.lineTo(cx+w*.5,cy+h*.6);c.lineTo(cx+w,cy+h*.2);c.lineTo(cx+w,cy+h);
     c.closePath();c.fill();c.stroke()},
   pauseGlyph(c){const r=this.pauseRect,rr=6;
     c.fillStyle='rgba(0,0,0,.4)';c.strokeStyle='#f4c542';c.lineWidth=1.5;
@@ -2355,7 +2403,7 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p1barX,39);
     c.font='bold 14px ui-monospace,monospace';c.textAlign='right';c.fillStyle='#fff';c.fillText(b.def.name,p2barX+barW,25);
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39);
-    if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW);
+    if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW,b.def.name);
     this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22');
     this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp);
     if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);
@@ -3317,6 +3365,16 @@ Test.add('thorns returns 20% of block chip to the attacker',()=>{
   run(f,15);
   eq(f.p2.hp,995,'chip itself is unchanged by thorns');
   eq(f.p1.hp,1000-Math.round(5*0.2),'attacker takes 20% of the chip back')});
+// Fix-wave item 10: thorns damage had no log entry and no FX (silent, unlike every other source of
+// damage in the sim) — now emits a 'thorns' event and a small popup, mirroring a normal hit.
+Test.add('thorns emits a fight event and an fx popup',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});
+  closeIn(f);Buffs.apply(f,f.p2,['thorns']);
+  run(f,15);
+  const ev=f.log.find(e=>e.type==='thorns');
+  ok(ev,'a thorns event must be logged');
+  eq(ev.val,Math.round(5*0.2),'the logged value must be the thorns damage dealt');
+  ok(f.fx.some(x=>x.kind==='popup'&&x.col==='#ff4444'),'a red popup must be queued for thorns damage')});
 Test.add('Buffs.apply resolves ids to BUFFS objects on holder.buffs, and throws on an unknown id',()=>{
   const f=mkFight();
   Buffs.apply(f,f.p2,['regen','armorUp']);
@@ -3346,12 +3404,20 @@ Test.add('buff badges: one 12px gold square with a 1-letter code per encounter b
   eq(Render.BUFF_CODES.unblockableSpecials,'U');eq(Render.BUFF_CODES.degen,'D');eq(Render.BUFF_CODES.thorns,'T');
   ok(!threw(()=>Render.buffBadges(Render.ctx,0,0,300,[BUFFS.regen,BUFFS.thorns])),'buffBadges must not throw')});
 // --- Task 3.6: boss plate no longer overlaps the title ---
-Test.add('boss plate\'s left edge clears the title\'s measured right edge with an 8px gap',()=>{
+// Fix-wave item 10: the plate used to be HP-bar-width (plus 16px), clamped off the title's own
+// measured right edge so the two didn't collide — technically not clipping, but still read as "a
+// wide empty red-outlined box" (final review, look-and-feel note 4). Now sized off the name's own
+// measured text width (same font/right-alignment the name itself renders in), tight enough around
+// either boss name that the title-collision clamp is unreachable and was dropped.
+Test.add('boss plate is sized tight to the name and clears the title with real margin',()=>{
   const p2x=W-74,barW=300,p2barX=W-74-10-barW,titleRight=Render.hudCache().titleRightEdge;
-  ok(!threw(()=>Render.bossPlate(Render.ctx,p2x,p2barX,barW)),'bossPlate must not throw');
-  // Recompute the same clamp bossPlate applies, and check it actually cleared the title.
-  const plateX=Math.max(p2barX-6,titleRight+8);
-  ok(plateX>=titleRight+8-1e-6,'plate left edge must sit at or right of titleRightEdge+8')});
+  for(const name of['GRULL','MOTHER RAT']){
+    ok(!threw(()=>Render.bossPlate(Render.ctx,p2x,p2barX,barW,name)),'bossPlate must not throw for '+name);
+    Render.ctx.font='bold 14px ui-monospace,monospace';
+    const nameW=Render.ctx.measureText(name).width;
+    const pad=10,rightEdge=p2barX+barW,plateW=nameW+pad*2,plateX=rightEdge-plateW;
+    ok(plateX>titleRight+8,name+'\'s plate must clear the title with real margin');
+    ok(plateW<barW,name+'\'s plate must be tighter than the full HP-bar width, not span it')}});
 
 // --- Task 3.3: floors, encounters, bosses (data) ---
 Test.add('every FLOORS node and boss resolves',()=>{
