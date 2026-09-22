@@ -715,6 +715,9 @@ const BOSSES={
   // ~11 (see docs/ARENA.md's fix-wave boss notes for the log breakdown). atk retuned further, 60->42,
   // once items 1/8 were in (per item 2's own deferred plan) — lands 16.7-25% (n=30/n=20) in the
   // 10-35% target band.
+  // Task 4.6 re-check: `python3 tests/batch.py --n 30 --p1 carl --encounter f1_grull` still lands at
+  // 13.3% (n=30) against the current Ctrl.competent/AI_TIERS — inside the 10-35% band, no retune
+  // triggered (see docs/ARENA.md's Phase 4 exit table for the full command output).
   grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:42,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
     boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
@@ -726,6 +729,10 @@ const BOSSES={
   // Fix-wave item 9: scale 1.3->1.15 (paired with a LOOKS.mother_rat bodyLen trim — see that look's
   // own comment) to close the quad-rig reach gap past EDGE_PAD; a presentation-side number, doesn't
   // touch the balance numbers above.
+  // Task 4.6 re-check (the progress ledger flagged a quick n=10 run coming back 0/10, against the
+  // wave table's own 5/30, as variance worth re-checking here): `python3 tests/batch.py --n 30 --p1
+  // carl --encounter f2_mother` lands at 16.7% (n=30) — the retune trigger was "under 10% at n=30",
+  // not hit, so no further change; see docs/ARENA.md's Phase 4 exit table for the full command output.
   mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1100,atk:35,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
