@@ -99,6 +99,12 @@ const BOSSES={
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
+// Fix-wave item 5 (final review, Important): the minimum CHARGE frames a released heavy still swings
+// at, instead of cancelling outright -- see Fighter.act's own CHARGE branch comment (50_fighter.js).
+// A flat frame count, independent of any per-champion moves.heavy.charge override (goblin 14, hobgoblin
+// 30) -- it's well under every one of those (a full charge is still what auto-fires the swing; this
+// only decides what an EARLY release does).
+const HEAVY_MIN_CHARGE=8;
 const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,POWER_MAX=300,PARRY_LOCKOUT=20,CRIT_MUL_DEFAULT=1.6;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
 const STAGE_W=1400;

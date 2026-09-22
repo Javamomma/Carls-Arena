@@ -60,7 +60,8 @@ ignored until the first lifts.
   release.
 - **Hold in place** (≥140 ms, no drift) — **BLOCK**; release right before a hit lands to **PARRY** it.
 - **Swipe right** (≥44 px within 260 ms) — dashes in with a **medium**; keep holding for another
-  200 ms after the swipe and it charges into a **heavy**, released on lift.
+  200 ms after the swipe and it starts charging a **heavy** — release after a short charge to swing
+  it, or keep holding through the full charge and it fires automatically.
 - **Swipe left** — **DASH BACK** (with a moment of invulnerability); keep holding through the dash
   and it rolls straight into **BLOCK** once the dash ends.
 - **POWER** (bottom-right, always on screen) taps to fire your strongest affordable special; hold it

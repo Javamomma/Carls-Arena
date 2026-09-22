@@ -116,7 +116,22 @@ class Fighter{
     else if(S==='ATTACK'&&this.phase()==='recovery'&&this.move.chain&&this.landed){
       if(intent.light)return this.startMove(this.move.chain);
       if(intent.medium&&this.moveName!=='medium')return this.startMove('medium')}
-    else if(S==='CHARGE'&&!intent.heavy){this.clearMove();this.setState('IDLE')}}
+    // Fix-wave item 5 (final review, Important): releasing heavy early used to always cancel to IDLE
+    // outright (clearMove, no swing) -- the README (and the swipe-and-hold gesture's own naming)
+    // promised "release after a short charge to swing", which this branch never actually did; only a
+    // FULL hold (tick()'s own CHARGE case, this.f>=this.move.charge) ever fired the swing. Now: once
+    // this.f (frames already spent charging, same counter setupDash/tick's own CHARGE case reads) has
+    // reached HEAVY_MIN_CHARGE, releasing transitions straight to ATTACK (the swing fires from
+    // whatever startup/active/recovery the move already has -- setState's own f=0 default restarts
+    // that timing fresh, exactly like the full-charge auto-fire already does) instead of cancelling;
+    // below HEAVY_MIN_CHARGE it still cancels to IDLE exactly as before (a too-early tap/twitch is
+    // still a no-op, not a free swing). A full hold through this.move.charge frames still auto-fires
+    // via tick()'s own CHARGE case, untouched by this branch. Gesture layer (30_input.js) and keyboard
+    // (L key) are both unaffected -- both already just toggle intent.heavy true/false; this is the only
+    // place that reads what releasing it actually does.
+    else if(S==='CHARGE'&&!intent.heavy){
+      if(this.f>=HEAVY_MIN_CHARGE)this.setState('ATTACK');
+      else{this.clearMove();this.setState('IDLE')}}}
   // Advance one frame of the state machine.
   tick(){
     // Self-clear wasKnockedDown the tick after _kdCounter (armed to KNOCKDOWN.frames+KNOCKDOWN.inv

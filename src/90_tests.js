@@ -61,11 +61,47 @@ Test.add('fighter light attack walks startup/active/recovery then idles',()=>{
   for(let i=0;i<5;i++)F.tick();eq(F.phase(),'active');ok(F.hitbox(),'hitbox during active');
   for(let i=0;i<3;i++)F.tick();eq(F.phase(),'recovery');eq(F.hitbox(),null);
   for(let i=0;i<8;i++)F.tick();eq(F.state,'IDLE');eq(F.move,null)});
-Test.add('heavy charges while held and cancels when released early',()=>{
-  const F=mkFighter();const held=Object.assign(Ctrl.EMPTY(),{heavy:true});F.act(held);eq(F.state,'CHARGE');
-  for(let i=0;i<10;i++){F.act(held);F.tick()}eq(F.state,'CHARGE');
-  F.act(Ctrl.EMPTY());eq(F.state,'IDLE');
-  const G2=mkFighter();G2.act(held);for(let i=0;i<MOVES.heavy.charge;i++){G2.act(held);G2.tick()}eq(G2.state,'ATTACK')});
+// Fix-wave item 5 (final review, Important): releasing heavy early used to always cancel outright,
+// which never matched the README's ("keep holding... it charges into a heavy, released on lift")
+// or the swipe-and-hold gesture's own promise -- only a full hold (this.move.charge frames) ever
+// fired a swing. Now a release at/after HEAVY_MIN_CHARGE (8) frames swings; below it still cancels
+// (see Fighter.act's own CHARGE branch comment, 50_fighter.js); a full hold still auto-fires.
+Test.add('heavy charges while held; releasing below HEAVY_MIN_CHARGE cancels, at/above it swings, and a full hold still auto-fires',()=>{
+  const held=Object.assign(Ctrl.EMPTY(),{heavy:true});
+  const early=mkFighter();early.act(held);eq(early.state,'CHARGE');
+  for(let i=0;i<HEAVY_MIN_CHARGE-1;i++){early.act(held);early.tick()} // f=HEAVY_MIN_CHARGE-1, still below the bar
+  early.act(Ctrl.EMPTY());
+  eq(early.state,'IDLE','releasing below HEAVY_MIN_CHARGE must still cancel to IDLE, no swing');
+  eq(early.move,null,'a cancelled charge must clear the move');
+  const swing=mkFighter();swing.act(held);
+  for(let i=0;i<HEAVY_MIN_CHARGE;i++){swing.act(held);swing.tick()} // f=HEAVY_MIN_CHARGE, at the bar
+  swing.act(Ctrl.EMPTY());
+  eq(swing.state,'ATTACK','releasing at/above HEAVY_MIN_CHARGE must swing the heavy, not cancel');
+  eq(swing.moveName,'heavy');eq(swing.f,0,'the swing restarts its own startup/active/recovery timing fresh');
+  const full=mkFighter();full.act(held);
+  for(let i=0;i<MOVES.heavy.charge;i++){full.act(held);full.tick()}
+  eq(full.state,'ATTACK','a full hold through the move\'s own charge frames must still auto-fire')});
+// Fix-wave item 5: keyboard L (Ctrl.player -> Input.held.heavy, same boolean the gesture layer's own
+// swipe-and-hold sets/clears) must behave identically to the gesture path above -- driven through a
+// real G.startFight/Ctrl.player fight and real KeyboardEvent dispatch, not a hand-built intent, so any
+// future keyboard-specific special-casing would actually be caught here.
+Test.add('keyboard L: releasing heavy below/at HEAVY_MIN_CHARGE cancels/swings, matching the gesture release path',()=>{
+  const down=k=>dispatchEvent(new KeyboardEvent('keydown',{key:k}));
+  const up=k=>dispatchEvent(new KeyboardEvent('keyup',{key:k}));
+  Save.data=Meta.defaults();
+  G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  G.sim=true;
+  down('l');
+  for(let i=0;i<HEAVY_MIN_CHARGE-1;i++)G.tick(); // p1.f reaches HEAVY_MIN_CHARGE-1, still below the bar
+  eq(G.fight.p1.state,'CHARGE','sanity: still charging');
+  up('l');G.tick();
+  eq(G.fight.p1.state,'IDLE','releasing L below HEAVY_MIN_CHARGE must cancel, same as the gesture path');
+  down('l');
+  for(let i=0;i<HEAVY_MIN_CHARGE;i++)G.tick(); // p1.f reaches HEAVY_MIN_CHARGE
+  up('l');G.tick();
+  eq(G.fight.p1.state,'ATTACK','releasing L at/above HEAVY_MIN_CHARGE must swing, same as the gesture path');
+  eq(G.fight.p1.moveName,'heavy');
+  G.toTitle();G.sim=false});
 Test.add('dash back grants invulnerable frames and moves away from facing',()=>{
   const F=mkFighter();const x0=F.x;F.act(Object.assign(Ctrl.EMPTY(),{dashBack:true}));eq(F.state,'DASH');eq(F.inv,DASH_BACK.inv);
   for(let i=0;i<DASH_BACK.frames;i++)F.tick();eq(F.state,'IDLE');ok(F.x<x0,'moved back')});
