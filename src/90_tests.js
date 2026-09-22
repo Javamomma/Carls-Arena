@@ -498,10 +498,10 @@ Test.add('toast never overlaps the BLOCK/PUNCH button labels',()=>{
   G.toTitle()});
 
 // --- Task 3.2: buffs framework ---
-Test.add('regen heals the holder 0.05% maxHp per frame, capped at maxHp',()=>{
+Test.add('regen heals the holder 0.017% maxHp per frame, capped at maxHp',()=>{
   const f=mkFight();Buffs.apply(f,f.p2,['regen']);
   f.p2.hp=f.p2.maxHp*0.5;
-  let hp=f.p2.hp;for(let i=0;i<600;i++)hp=Math.min(f.p2.maxHp,hp+f.p2.maxHp*0.0005);
+  let hp=f.p2.hp;for(let i=0;i<600;i++)hp=Math.min(f.p2.maxHp,hp+f.p2.maxHp*0.00017);
   run(f,600);
   eq(f.p2.hp,hp);ok(f.p2.hp>f.p2.maxHp*0.5,'holder healed');
   f.p2.hp=f.p2.maxHp-1;run(f,20);eq(f.p2.hp,f.p2.maxHp,'capped at maxHp')});

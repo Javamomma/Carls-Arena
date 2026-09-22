@@ -45,10 +45,16 @@ const BOSSES={
   // since nothing in this task required changing it further.
   // s3 override + buffs are his boss-signature mechanics per Phase 3 ruling #4 (a mob def with
   // boss:true, a bigger rig, a unique S3, and one signature buff — no boss-only engine).
-  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1600,atk:70,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
+  // Fix-wave item 2: hp 1600->1300, atk 70->60 (armorUp kept) — both bosses were a hard 0/20 vs
+  // Ctrl.competent before this pass (see docs/ARENA.md's boss balance notes for the before/after
+  // batch tables); tuned to land the competent bot in the 10-35% band once items 1 and 8 both land.
+  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:60,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
     boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
-  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1400,atk:62,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.3,rig:'quad',
+  // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
+  // 47_buffs.js, since disabling it entirely still left her a 20/20 wall — her offense, not the
+  // heal, was the problem).
+  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1400,atk:50,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.3,rig:'quad',
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};

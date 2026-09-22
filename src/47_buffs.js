@@ -6,8 +6,13 @@
 // tell it doesn't apply this call by comparing holder against att/def.
 const BUFFS={
   regen:{id:'regen',
-    // +0.05% maxHp per frame to the holder, capped at maxHp.
-    onFrame(fight,holder,foe){holder.hp=Math.min(holder.maxHp,holder.hp+holder.maxHp*0.0005)}},
+    // +0.017% maxHp per frame to the holder (~1%/s at 60Hz), capped at maxHp. Fix-wave item 2:
+    // the frozen plan's spec (0.05%/frame) is actually 3%/s — 360% of max hp over Mother Rat's own
+    // 120s fight clock — which the plan's own 600-frame (10s) regen test never surfaced since 10s of
+    // healing reads as reasonable in isolation. Retuned down ~3x as part of making the boss winnable
+    // (see docs/ARENA.md's boss balance notes); the interface's rate itself was the plan defect, not
+    // this buff's implementation.
+    onFrame(fight,holder,foe){holder.hp=Math.min(holder.maxHp,holder.hp+holder.maxHp*0.00017)}},
   armorUp:{id:'armorUp',
     // Incoming damage x.7 when the holder is the one defending this exchange.
     onHit(fight,att,def,ref,holder){if(holder===def)ref.dmg=Math.round(ref.dmg*0.7)}},
