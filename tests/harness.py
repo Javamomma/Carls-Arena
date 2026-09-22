@@ -10,6 +10,10 @@
       # prints {ms_per_frame, ms_step, ms_render, perf:{ms_per_frame, ms_step, ms_render}} -- the
       # same three numbers both flat (unchanged, for any old reader) and nested under a top-level
       # `perf` key (Task 4.6: the controller's gate read d.get('perf'), which was None before this).
+  python3 tests/harness.py --e2e --seed 1                            # Task 4.6: full crystals->roster->
+      # quest->rewards->level-up->arena loop, headless; exit 1 on any assertion/page/console error
+  python3 tests/harness.py --e2e --seed 1 --loops 20                 # --e2e plus a menu+fight soak:
+      # N extra cycles of Screens renders + one quest-node fight + one arena fight
 
 Exit 1 on any page error, console error, or if the game never left TITLE.
 """
@@ -52,6 +56,117 @@ def build_soak_js(seed, p1n, p2n, ain, ctrl_expr, ticks, enc='', probes=(), pre=
             "framesTotal+=G.fight.frame;"
             "return{fights,framesTotal,p1wins,probes,koTicks}})()"
             ) % (pre, seed, ticks, probe_init, p1n, p2n, ain, ctrl_expr, enc, probe_push)
+
+def build_e2e_js(seed, loops):
+    """Task 4.6: the whole crystals -> roster -> quest -> rewards -> level-up -> arena loop, run as
+    one in-page evaluate() (same one-round-trip shape as build_soak_js/build_batch_js above) instead
+    of a Python-side loop making a page round trip per fight. Grants gold via the new G.debugGrant
+    debug hook, opens 2 basic Crystal.open() pulls, sets carl active, then clears every node on
+    floor 1 (index 0..len-1) followed by the boss through the real {floor,node} G.startFight sugar
+    with Ctrl.competent -- up to 5 attempts per node (energy refilled via G.debugEnergy(999) before
+    each attempt so a loss doesn't starve the retry), asserting on every WIN that: the gold/iso/xp
+    deltas exactly match an independently-computed Rewards.forNode(floor,node) (xp is tracked via a
+    cumulative-xp helper so a mid-run level-up, which moves value from entry.xp into consumed levels
+    without discarding any of it, doesn't look like a shortfall), energy actually decreased, and the
+    node/next-node state flips to done/open. Losing all 5 attempts at a node (recorded as
+    {attempts:5, won:false}, not itself an error -- see the docstring's --e2e entry and
+    docs/ARENA.md's Phase 4 exit notes for why: the floor 1 boss's own measured win rate against
+    Ctrl.competent is ~13-17% at n=30, so a single seed's 5 retries are not guaranteed to land one)
+    simply leaves that node (and anything chained after it) not attempted further in the main pass.
+    One Roster.levelUp() on the active champion, then 3 G.startArena() fights (win/loss both fine;
+    only the aggregate streak/best/gold are asserted monotone-non-decreasing plus "a win banks
+    gold"). `loops` (0 for a plain --e2e) repeats an extra Screens-render + one real quest-node fight
+    (always at whatever node Quest.floor reports 'open' right now, via the nextOpen() scan below, so
+    a loop never re-targets an already-'done' node, which {floor,node} sugar would just refuse) + one
+    arena fight, for a sustained menu+fight soak. Returns
+    {seed, crystals:[{champId,stars,dup,shards?},...], nodes:[{id,attempts,won},...], roster:{...},
+    arena:{before,wins,streak,best,goldDelta}, energy, currencies:{gold,iso,units}, errors:[...]}.
+    """
+    return r"""(()=>{
+G.sim=true;
+const summary={seed:%d,crystals:[],nodes:[],roster:{},arena:{},errors:[]};
+const push=m=>summary.errors.push(m);
+const cumXp=e=>{let s=e.xp;for(let l=2;l<=e.level;l++)s+=Stats.xpToLevel(l);return s};
+const runTo=cap=>{let t=0;while(G.state==='FIGHT'&&t<cap){G.tick();t++}return t};
+const nextOpen=()=>{
+  for(const fn in Save.data.floors){
+    const n=+fn,f=Quest.floor(n);if(!f)continue;
+    for(let i=0;i<f.nodes.length;i++)if(f.nodes[i].state==='open')return{floor:n,node:i};
+    if(f.boss.state==='open')return{floor:n,node:'boss'}}
+  return null};
+try{
+  Save.data.seed=%d;Save.put();
+  G.debugGrant({gold:1200});
+  for(let i=0;i<2;i++)summary.crystals.push(Crystal.open('basic'));
+  Roster.setActive('carl');
+  const runNode=(floor,node)=>{
+    let attempts=0,won=false;
+    while(attempts<5&&!won){
+      attempts++;
+      G.debugEnergy(999);
+      const energyBefore=Save.data.energy.n;
+      const goldBefore=Save.data.gold||0,isoBefore=Save.data.iso||0;
+      const active=Save.data.active,entryBefore=Save.data.roster[active];
+      const xpBefore=cumXp(entryBefore);
+      const fseed=%d*100+floor*20+(node==='boss'?19:node)*5+attempts;
+      const ok=G.startFight({seed:fseed,floor,node,ctrl1:Ctrl.competent(fseed)});
+      if(ok===false){push('quest refused floor '+floor+' node '+node+' attempt '+attempts);break}
+      runTo(9000);
+      won=!!(G.fight.winner&&G.fight.winner.side===1);
+      if(won){
+        const exp=Rewards.forNode(floor,node);
+        const goldDelta=(Save.data.gold||0)-goldBefore,isoDelta=(Save.data.iso||0)-isoBefore;
+        const entryAfter=Save.data.roster[active];
+        const xpDelta=cumXp(entryAfter)-xpBefore;
+        if(goldDelta!==exp.gold)push('gold delta '+goldDelta+' != '+exp.gold+' at '+floor+'/'+node);
+        if(isoDelta!==exp.iso)push('iso delta '+isoDelta+' != '+exp.iso+' at '+floor+'/'+node);
+        if(xpDelta!==exp.xp)push('xp delta '+xpDelta+' != '+exp.xp+' at '+floor+'/'+node);
+        if(!(Save.data.energy.n<energyBefore))push('energy did not decrease at '+floor+'/'+node);
+        const f=Quest.floor(floor),st=node==='boss'?f.boss.state:f.nodes[node].state;
+        if(st!=='done')push('node not done after win: '+floor+'/'+node+' -> '+st);
+        if(node!=='boss'){
+          const nxt=node+1<f.nodes.length?f.nodes[node+1].state:f.boss.state;
+          if(nxt==='locked')push('next not open after '+floor+'/'+node)}}}
+    summary.nodes.push({id:floor+'/'+node,attempts,won});
+    return won};
+  const fl=FLOORS[0];
+  for(let i=0;i<fl.nodes.length;i++)runNode(1,i);
+  runNode(1,'boss');
+  const activeId=Save.data.active;
+  if(!Roster.levelUp(activeId))push('Roster.levelUp refused');
+  const arenaBefore={streak:Save.data.arena.streak,best:Save.data.arena.best,gold:Save.data.gold||0};
+  let arenaWins=0;
+  for(let i=0;i<3;i++){
+    const fseed=%d*13+i;
+    G.startArena({seed:fseed,ctrl1:Ctrl.competent(fseed)});
+    runTo(9000);
+    if(G.fight.winner&&G.fight.winner.side===1)arenaWins++}
+  summary.arena={before:arenaBefore,wins:arenaWins,
+    streak:Save.data.arena.streak,best:Save.data.arena.best,goldDelta:(Save.data.gold||0)-arenaBefore.gold};
+  if(summary.arena.best<arenaBefore.best)push('arena best decreased');
+  if(arenaWins>0&&summary.arena.goldDelta<=0)push('arena gold did not increase despite a win');
+  const loops=%d;
+  for(let L=0;L<loops;L++){
+    Screens.title();Screens.map(1);Screens.roster();Screens.arena();Screens.title();
+    const t=nextOpen();
+    if(t){
+      G.debugEnergy(999);
+      const fseed=%d*1000+9000+L;
+      const ok=G.startFight({seed:fseed,floor:t.floor,node:t.node,ctrl1:Ctrl.competent(fseed)});
+      if(ok===false)push('loop '+L+' quest refused at '+t.floor+'/'+t.node);
+      else runTo(9000)}
+    const afseed=%d*1000+9500+L;
+    G.startArena({seed:afseed,ctrl1:Ctrl.competent(afseed)});
+    runTo(9000)}
+  // The 3-arena-fight assertions above (wins/goldDelta) are measured over that fixed window; a
+  // --loops soak runs more arena fights afterward, so streak/best are refreshed here to the final
+  // post-loop values instead of quietly going stale in the printed summary.
+  summary.arena.streak=Save.data.arena.streak;summary.arena.best=Save.data.arena.best;
+  summary.roster=JSON.parse(JSON.stringify(Save.data.roster));
+  summary.energy=Save.data.energy.n;
+  summary.currencies={gold:Save.data.gold,iso:Save.data.iso,units:Save.data.units};
+}catch(e){push(String(e&&e.stack||e))}
+return summary})()""" % (seed, seed, seed, seed, loops, seed, seed)
 
 def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
     """One soak cell: a fresh page, p1 on Ctrl.random(seed), p2 on AI.make(ain). The whole
@@ -163,8 +278,21 @@ def main():
     ap.add_argument('--perf', type=int, default=None, metavar='N',
                      help="run N frames of G.stepFrame()+Render.frame(G.fight) under G.sim=true on a "
                           "started fight (Ctrl.random bot vs brawl AI), timing with performance.now() "
-                          "in the page-evaluate only; prints {ms_per_frame, ms_step, ms_render} and "
-                          "exits 1 if ms_per_frame >= 6")
+                          "in the page-evaluate only; prints {ms_per_frame, ms_step, ms_render, "
+                          "perf:{ms_per_frame, ms_step, ms_render}} and exits 1 if ms_per_frame >= 6")
+    ap.add_argument('--e2e', action='store_true',
+                     help="Task 4.6: reset the save, seed Save.data.seed from --seed, grant gold via "
+                          "the debug-only G.debugGrant, open 2 basic Crystal.open() pulls, set carl "
+                          "active, clear floor 1 (every node then the boss) via the real {floor,node} "
+                          "G.startFight sugar with Ctrl.competent (up to 5 attempts per node, energy "
+                          "refilled via G.debugEnergy between attempts), asserting node state/reward-"
+                          "deltas/energy on every win, one Roster.levelUp, then 3 G.startArena() "
+                          "fights; prints a JSON summary (see build_e2e_js's docstring for the exact "
+                          "shape) and exits 1 on any assertion/page/console error")
+    ap.add_argument('--loops', type=int, default=None, metavar='N',
+                     help="with --e2e: after the main run, repeat a Screens-render + one real "
+                          "quest-node fight (at whatever node is currently open) + one G.startArena() "
+                          "fight N more times, for a sustained menu+fight soak")
     a = ap.parse_args()
     if a.floor is not None and a.node is None:
         ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2
@@ -203,6 +331,25 @@ def main():
         out['perf'] = r
         print(json.dumps(out, indent=1))
         sys.exit(1 if perf_errors or r['ms_per_frame'] >= 6 else 0)
+    if a.e2e:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page(viewport={'width': 854, 'height': 480})
+            e2e_errors = []
+            pg.on('pageerror', lambda e: e2e_errors.append(str(e)))
+            pg.on('console', lambda m: e2e_errors.append(m.text) if m.type == 'error' else None)
+            pg.goto(INDEX)
+            pg.wait_for_function('typeof G!=="undefined"')
+            # Same reset as --reset-save: re-migrate from empty localStorage onto Meta.defaults()
+            # so the run starts from full energy / floor 1 node 0 open / only carl owned, regardless
+            # of whatever a previous harness invocation left in this browser profile.
+            pg.evaluate('localStorage.clear();Save.load()')
+            js = build_e2e_js(a.seed, a.loops or 0)
+            r = pg.evaluate(js)
+            b.close()
+        out = {'page_errors': e2e_errors, 'summary': r}
+        print(json.dumps(out, indent=1))
+        sys.exit(1 if e2e_errors or r.get('errors') else 0)
     errors, console = [], []
     with sync_playwright() as p:
         b = p.chromium.launch()

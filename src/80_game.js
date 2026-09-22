@@ -194,6 +194,16 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // loop that restarts many quest fights in a row (tests/harness.py --sim --floor/--node) top energy
   // up once instead of hitting Quest.start's refusal mid-run. Never called from real gameplay code.
   debugEnergy(n){Save.data.energy.n=n;Save.put()},
+  // Debug/test-only currency grant (Task 4.6, mirrors debugEnergy's role): lets tests/harness.py
+  // --e2e fund a couple of Crystal.open('basic') calls (500 gold each) deterministically, without
+  // threading a whole Rewards.grant-shaped object through a real fight just to seed starting
+  // currency. Never called from real gameplay code.
+  debugGrant(o){
+    if(o.gold)Save.data.gold=(Save.data.gold||0)+o.gold;
+    if(o.units)Save.data.units=(Save.data.units||0)+o.units;
+    if(o.iso)Save.data.iso=(Save.data.iso||0)+o.iso;
+    if(o.cats)for(const c in o.cats)Save.data.cats[c]=(Save.data.cats[c]||0)+o.cats[c];
+    Save.put()},
   // Formats a Rewards.grant-shaped object into the #result overlay's reward line, e.g.
   // "+100 G  +20 ISO  +30 XP" -- only the currencies/xp actually present are shown.
   rewardsText(r){
