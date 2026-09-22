@@ -598,6 +598,25 @@ Test.add('Render/Rig fall back to LOOKS.carl for a def missing .look instead of 
     ok(!threw(()=>Render.overlayY(F)),'overlayY must not throw on a look-less def');
     ok(!threw(()=>Rig.draw(Render.ctx,F,{x:0,zoom:1},0)),'Rig.draw must not throw on a look-less def')
   }finally{F.def.look=savedLook}});
+// Fix-wave item 1: unit-level reproduction of the final-review repro
+// (`--sim --seconds 4 --encounter f1_grull`) — Grull (rig:'big', a tall boss) as p2 in CHARGE, camera
+// at its own hard zoom ceiling (1.12, the ordinary gameplay cap — see G.tick's capNow), which is
+// exactly the situation the review found the bare overlayY(F) world-space point crossing HUD_LINE at
+// (screen y≈66, over "THE DEPTHS" in docs/shots/p3-floor1-boss.png). Same Camera.toScreen idiom the
+// per-frame zoom-cap test above uses, checking Render.overlayScreenY's clamped result directly rather
+// than re-driving a live fight into the exact lag window that triggers it.
+Test.add('the heavy-charge bar and the block/parry ring never cross HUD_LINE for a tall fighter at the zoom cap',()=>{
+  const cam={x:0,zoom:1.12};
+  const charging={x:0,def:DEFS.grull,state:'CHARGE',move:MOVES.heavy,f:5};
+  const barSy=Render.overlayScreenY(charging,cam,6);
+  ok(barSy>=HUD_LINE-1e-6,'heavy-charge bar top at screen y='+barSy.toFixed(2)+' must clear the HUD ('+HUD_LINE+')');
+  const blocking={x:0,def:DEFS.grull,state:'BLOCK'};
+  const ringSy=Render.overlayScreenY(blocking,cam,6);
+  ok(ringSy>=HUD_LINE-1e-6,'block ring top at screen y='+ringSy.toFixed(2)+' must clear the HUD ('+HUD_LINE+')');
+  // Sanity: the UNCLAMPED world-space point really would have crossed the line at this zoom — proves
+  // this test exercises the clamp, not a pairing that was never at risk.
+  const rawSy=Camera.toScreen(cam,0,Render.overlayY(charging)).sy;
+  ok(rawSy<HUD_LINE,'sanity check: the unclamped overlay point ('+rawSy.toFixed(2)+') must be the bug this test guards against')});
 Test.add('HUD statics are cached across frames',()=>{Render.frame(null);const a=Render._hudCache;Render.frame(null);ok(a&&a===Render._hudCache)});
 Test.add('FX ages once per sim tick in sim mode, deterministically (not off wall-clock rAF)',()=>{
   const runOnce=()=>{

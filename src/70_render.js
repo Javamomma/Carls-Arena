@@ -107,6 +107,20 @@ const Render={ctx:canvas.getContext('2d'),
   // stands in for legLen+torsoLen as "how tall the body's base is off the ground before the head".
   overlayY(F){const l=lookFor(F.def),h=l.rig==='quad'?(l.hipH+l.neckLen):(l.legLen+l.torsoLen);
     return FLOOR-(h+l.headR*2.4)*(F.def.scale||1)-14},
+  // Fix-wave item 1: overlayY above is a WORLD-space estimate of "just above this look's standing
+  // head height" — fine for framing the charge bar/block ring under ordinary zoom, but the per-frame
+  // camera cap (G.tick's capNow, 80_game.js) is sized off whichever POSE is actually on screen this
+  // frame, not this fixed standing estimate, and eases toward it rather than snapping — so a tall
+  // rig (Grull/rig:'big') caught mid-transition into CHARGE, with cam.zoom still near the 1.12
+  // ceiling from the idle pose just before it, puts overlayY's world point at a screen y well above
+  // HUD_LINE (reproduced with `--sim --seconds 4 --encounter f1_grull`: the charge bar sat over "DE"
+  // in "THE DEPTHS", docs/shots/p3-floor1-boss.png). Converts overlayY(F) to screen space via the
+  // same Camera.toScreen the per-frame zoom-cap test (90_tests.js) already uses, then clamps it to
+  // never read closer than `height` (the overlay's own drawn size) + 2px above HUD_LINE — the caller
+  // draws in screen space at this clamped y instead of trusting the world-space point.
+  overlayScreenY(F,cam,height){
+    const sy=Camera.toScreen(cam,F.x,this.overlayY(F)).sy;
+    return Math.max(sy,HUD_LINE+height+2)},
   reflection(c,F,cam,frame){c.save();c.beginPath();c.rect(0,FLOOR,STAGE_W,90);c.clip();
     c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.12;Rig.draw(c,F,cam,frame);c.restore()},
   // A grounding contact shadow at the fighter's feet — the mirrored reflection alone reads as a
@@ -125,11 +139,21 @@ const Render={ctx:canvas.getContext('2d'),
     else{Rig.draw(c,F,cam,frame);
       if(flash){c.save();c.globalAlpha=.45;c.fillStyle='#fff';
         c.fillRect(F.x-F.width,FLOOR-140*(F.def.scale||1),F.width*2,140*(F.def.scale||1));c.restore()}}
-    if(F.state==='CHARGE'&&F.move){const y=this.overlayY(F);
-      c.fillStyle='#222';c.fillRect(F.x-20,y,40,6);
-      c.fillStyle='#fa4';c.fillRect(F.x-20,y,40*Math.min(1,F.f/F.move.charge),6)}
-    if(F.state==='BLOCK'||F.state==='BLOCKSTUN'){const y=this.overlayY(F);
-      c.fillStyle='#8cf';c.beginPath();c.arc(F.x,y+3,6,0,Math.PI*2);c.fill()}},
+    // Fix-wave item 1: both above-the-head overlays now draw in SCREEN space (this function runs
+    // inside Render.frame's still-applied camera transform; c.save/setTransform(identity)/c.restore
+    // scopes the reset to just this one draw) at overlayScreenY's clamped y, so neither can ever
+    // cross HUD_LINE regardless of the live camera zoom — see overlayScreenY's own comment above.
+    if(F.state==='CHARGE'&&F.move){
+      const sx=Camera.toScreen(cam,F.x,0).sx,sy=this.overlayScreenY(F,cam,6);
+      c.save();c.setTransform(1,0,0,1,0,0);
+      c.fillStyle='#222';c.fillRect(sx-20,sy,40,6);
+      c.fillStyle='#fa4';c.fillRect(sx-20,sy,40*Math.min(1,F.f/F.move.charge),6);
+      c.restore()}
+    if(F.state==='BLOCK'||F.state==='BLOCKSTUN'){
+      const sx=Camera.toScreen(cam,F.x,0).sx,sy=this.overlayScreenY(F,cam,6);
+      c.save();c.setTransform(1,0,0,1,0,0);
+      c.fillStyle='#8cf';c.beginPath();c.arc(sx,sy+3,6,0,Math.PI*2);c.fill();
+      c.restore()}},
   // Pause glyph rect in canvas space; G.hitPause tests pointerdown against this same rect, and
   // pauseGlyph below draws to it, so hit-test and visual stay in lockstep with a single source.
   pauseRect:{x:W/2-18,y:38,w:36,h:24},
