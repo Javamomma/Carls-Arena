@@ -68,4 +68,23 @@ $H --tutorial-shot 1 --shot "$S/p6-tutorial-1.png"
 $H --tutorial-shot 3 --shot "$S/p6-tutorial-3.png"
 $H --tutorial-shot shield --shot "$S/p6-tutorial-shield.png"
 
+# ---- Phase 7: hit-feel pass (Task 7.4) -- directional shake, camera punch-in, per-class impact fx.
+# Seeds/tick offsets below were found empirically (see the Task 7.4 report) by probing
+# G.fight.log/FX state with --eval at a handful of candidate --seconds values, then picking the
+# smallest --seconds whose exact tick count (--sim steps floor(seconds*60) ticks) lands a few frames
+# after the event so its own fx (popup/shake/punch/impact ring, each with its own short lifetime)
+# are still fresh on screen -- not a hand-picked "looks right" frame, a reproducible deterministic one.
+# p7-intercept.png: carl (t3 AI) vs goblin, seed 1 -- an intercept lands at sim frame 14 (hitstop then
+# freezes the sim frame counter there for 10 ticks, but FX still ages every real tick); 17 ticks
+# (0.28333s) is 3 ticks past the landed hit, well inside every fx kind's own lifetime, showing the
+# INTERCEPT! popup, the camera punch-in and the directional shake all still live.
+$H --sim --seconds 0.28333333333333333 --p1 carl --p2 goblin --ai t3 --seed 1 --shot "$S/p7-intercept.png"
+# p7-heavy.png: carl (t3 AI) vs goblin, seed 2 -- a heavy crits at sim frame 97; 99 ticks (1.65s) is
+# 2 ticks later, showing the crit damage popup, the spark burst, the new impactBlunt ring (carl's
+# own def.impact) and the directional shake together.
+$H --sim --seconds 1.65 --p1 carl --p2 goblin --ai t3 --seed 2 --shot "$S/p7-heavy.png"
+# p7-s3.png: the S3 cinematic card (same --cinematic convention as p2-card.png) -- Task 7.4 doesn't
+# touch the card itself, but this is the frozen "p7-s3" filename the task brief asked for.
+$H --cinematic --shot "$S/p7-s3.png"
+
 echo "shots.sh: regenerated $(ls "$S"/*.png | wc -l | tr -d ' ') PNGs in $S"

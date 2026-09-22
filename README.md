@@ -12,6 +12,10 @@ One-on-one tap-and-swipe fighter in the Dungeon Crawler Carl universe. Single HT
 | A fight in progress — one thumb, gestures-only HUD | The tutorial's own visible sparring session |
 | ![The campaign map: doors show a REC. LVL hint](docs/shots/p4-map.png) | ![Carl vs Mother Rat, Floor 2's boss](docs/shots/p3-floor2-boss.png) |
 | The campaign map, with a REC. LVL hint under every door | Floor 2's boss fight |
+| ![An intercept: INTERCEPT! popup, camera punch-in, directional shake](docs/shots/p7-intercept.png) | ![A crit heavy: damage popup, spark burst, the new impactBlunt ring](docs/shots/p7-heavy.png) |
+| Intercepting a foe's dash-in: punch-in camera + directional shake | A landed heavy, with its own per-class impact fx |
+
+The [S3 cinematic card](docs/shots/p7-s3.png) (Carl's SPECIAL 3) rounds out `docs/shots/p7-*.png`.
 
 ## How to play
 
