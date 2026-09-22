@@ -4104,6 +4104,32 @@ Test.add('stun sets STUNNED for 60 frames via the existing STUNNED handling in F
   eq(f.p2.state,'STUNNED');eq(f.p2.stun,60);
   run(f,59);eq(f.p2.state,'STUNNED','must still be stunned one frame early');
   run(f,1);eq(f.p2.state,'IDLE','must clear at exactly frame 60, via Fighter.tick\'s own f>=stun check')});
+// Fix-wave item 6 (final review M3): stun applied to a knocked-down fighter (or, more generally, any
+// mid-move holder -- nothing in EFFECTS.stun's own frozen interface guarantees onApply only ever
+// fires from Fight.resolve's own STUNNED-from-parry precedent) used to leave a stale holder.move and,
+// when it displaced a live KNOCKDOWN, a stale wasKnockedDown/_kdCounter that AI.make's decidePunish
+// 'just got up' read (55_ai.js) would still see even though this fighter is now STUNNED, not
+// mid-get-up. No producer ships this yet (no MOVES entry carries `applies`), but Phase 9's kits will.
+Test.add('fix-wave M3: stun onApply clears the move and undoes a live KNOCKDOWN it displaces',()=>{
+  const F=mkFighter();
+  F.move={startup:1,active:1,recovery:1};F.moveName='heavy'; // simulate a stale mid-move holder
+  F.setState('KNOCKDOWN');
+  ok(F.wasKnockedDown&&F._kdCounter>0,'sanity: setState(KNOCKDOWN) must arm both wasKnockedDown and _kdCounter');
+  const f=mkFight();
+  Effects.apply(f,F,'stun',{});
+  eq(F.state,'STUNNED','stun must override the live KNOCKDOWN state');
+  eq(F.wasKnockedDown,false,'wasKnockedDown must be undone -- AI.make\'s decidePunish must never read a live knockdown off a fighter that is actually STUNNED');
+  eq(F._kdCounter,0,'_kdCounter must be reset alongside wasKnockedDown');
+  eq(F.move,null,'the stale move must be cleared');
+  eq(F.moveName,null,'moveName must be cleared alongside it')});
+Test.add('fix-wave M3: stun onApply clears the move of a mid-move holder that was NOT knocked down (a plain ATTACK interrupt)',()=>{
+  const F=mkFighter();
+  F.move={startup:1,active:1,recovery:1};F.moveName='light';F.setState('ATTACK');
+  const f=mkFight();
+  Effects.apply(f,F,'stun',{});
+  eq(F.state,'STUNNED');
+  eq(F.move,null,'the stale move must be cleared even when there was no KNOCKDOWN to displace');
+  eq(F.moveName,null)});
 Test.add('powerGain adds +0.5 power per frame, capped at POWER_MAX',()=>{
   const f=mkFight();Effects.apply(f,f.p1,'powerGain',{});
   run(f,100);

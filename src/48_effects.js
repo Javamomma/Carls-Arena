@@ -25,8 +25,21 @@ const EFFECTS={
   // its own -- Fighter's own f>=this.stun check is what actually clears STUNNED; this effect's `left`
   // countdown (Effects.tick, below) only governs the HUD badge/expiry bookkeeping, and is kept equal
   // to dur so both clocks empty out together for an unpotency-scaled stun.
+  // Fix-wave item 6 (final review M3): onApply used to just set holder.stun/setState('STUNNED') and
+  // stop there, which left two things stale: a mid-move holder's own move/moveName (setState alone
+  // never clears those -- clearMove() is a separate, deliberate call every other STATE transition
+  // that leaves ATTACK/CHARGE already makes), and, when this displaces a live KNOCKDOWN specifically,
+  // wasKnockedDown/_kdCounter (setState('KNOCKDOWN')'s own arming has no matching disarm when a LATER
+  // setState call moves the fighter on -- every other KNOCKDOWN exit is Fighter.tick's own
+  // _kdCounter-driven self-clear, which a STUNNED fighter no longer reaches). Left stale, AI.make's
+  // decidePunish 'just got up' read (55_ai.js) would credit a punish window against a fighter that is
+  // actually STUNNED, not mid-get-up. clearMove() always runs (a stun from any source interrupts
+  // whatever this fighter was doing); the wasKnockedDown/_kdCounter reset is scoped to the KNOCKDOWN
+  // case specifically, since a plain ATTACK/CHARGE interrupt never armed them in the first place.
   stun:{id:'stun',dur:60,maxStacks:1,
-    onApply(fight,holder,e){holder.stun=EFFECTS.stun.dur;holder.setState('STUNNED')}},
+    onApply(fight,holder,e){
+      if(holder.state==='KNOCKDOWN'){holder.wasKnockedDown=false;holder._kdCounter=0}
+      holder.clearMove();holder.stun=EFFECTS.stun.dur;holder.setState('STUNNED')}},
   armorBreak:{id:'armorBreak',dur:480,maxStacks:3,
     mod(e,m){m.armorDelta-=0.15*e.stacks*e.potency}},
   fury:{id:'fury',dur:420,maxStacks:5,
