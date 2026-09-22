@@ -112,5 +112,7 @@ const Camera={
   // exposes camTarget).
   update(cam,f,override){const t=override||f.camTarget;cam.x+=(t.x-cam.x)*.12;cam.zoom+=(t.zoom-cam.zoom)*.12;
     const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
-  apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.62);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
-  toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.62+(y-FLOOR)*cam.zoom}}};
+  // Anchor moved from .62 to .74: fighters now get most of the frame height and the floor reads as
+  // a thin strip (the rendition target), instead of ~38% of the screen being empty floor.
+  apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.74);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
+  toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.74+(y-FLOOR)*cam.zoom}}};

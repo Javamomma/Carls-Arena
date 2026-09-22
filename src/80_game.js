@@ -1,7 +1,19 @@
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
   cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
-  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px'},
+  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast()},
+  // Positions #toast off the canvas's own box (canvas.getBoundingClientRect()), not #wrap, so it
+  // tracks the actual displayed game area exactly even when #wrap letterboxes the canvas at an
+  // aspect ratio other than W/H. TOAST_Y is a canvas-local (854x480) y — just under the HUD's
+  // 'FLOOR n • NAME' text (Render.floorLine, drawn at canvas y=80..~96) and well above the stage
+  // arch (its top is around canvas y=175 at zoom 1), so the toast can never cross the arch. Width is
+  // capped at 70% of the displayed canvas width so a long line wraps and pills, rather than running
+  // edge to edge.
+  TOAST_Y:98,
+  positionToast(){const r=canvas.getBoundingClientRect(),el=document.getElementById('toast');
+    el.style.left=(r.left+r.width/2)+'px';
+    el.style.top=(r.top+this.TOAST_Y/H*r.height)+'px';
+    el.style.maxWidth=Math.round(r.width*.7)+'px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   // Canvas hit-test for the HUD's pause glyph (drawn by Render.hud at Render.pauseRect), consulted
   // by Input's pointerdown handler before it does any zone/gesture handling.

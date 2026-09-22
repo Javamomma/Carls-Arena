@@ -17,7 +17,11 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 #powerPicker.show{display:flex}
 #powerPicker button{width:52px;height:52px;border-radius:50%;border:2px solid #f4c542;background:#1a1f33;color:#f4c542;font:inherit;font-size:13px;font-weight:bold}
 #powerPicker button:disabled{opacity:.3}
-#toast{position:absolute;left:50%;top:104px;transform:translateX(-50%);font-size:13px;color:#f4c542;pointer-events:none;text-shadow:0 1px 0 #000;white-space:nowrap}
+/* Positioned in JS (G.positionToast, called from G.fit on load/resize) off canvas.getBoundingClientRect()
+   so it tracks the canvas box exactly (not #wrap, which can letterbox at other aspect ratios); left/top/
+   max-width are set inline per call. */
+#toast{position:fixed;transform:translateX(-50%);font-size:14px;line-height:1.2;color:#f4c542;pointer-events:none;text-align:center;white-space:normal;background:rgba(10,11,18,.6);border-radius:10px;padding:4px 12px}
+#toast:empty{padding:0}
 #toast.hidden{visibility:hidden}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
@@ -583,8 +587,10 @@ const Camera={
   // exposes camTarget).
   update(cam,f,override){const t=override||f.camTarget;cam.x+=(t.x-cam.x)*.12;cam.zoom+=(t.zoom-cam.zoom)*.12;
     const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
-  apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.62);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
-  toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.62+(y-FLOOR)*cam.zoom}}};
+  // Anchor moved from .62 to .74: fighters now get most of the frame height and the floor reads as
+  // a thin strip (the rendition target), instead of ~38% of the screen being empty floor.
+  apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.74);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
+  toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.74+(y-FLOOR)*cam.zoom}}};
 
 // Stylized vector-rig renderer. Pure presentation: reads Fight/Fighter state, never writes it.
 // Forward-kinematics bone rig driven by keyframed joint-angle poses; per-character "looks" supply
@@ -615,10 +621,16 @@ function samplePose(poseKey,t01){
   const off={x:(aOff.x||0)+((bOff.x||0)-(aOff.x||0))*lt,y:(aOff.y||0)+((bOff.y||0)-(aOff.y||0))*lt};
   return{ang,off}}
 
-// idle: subtle breathing sway; legs stay put (angle 0) so feet never drift off the floor line.
+// idle: a braced fighting stance (wide bent-knee base, lead/right shoulder forward and raised)
+// instead of standing at attention, with a subtle breathing sway between the two keyframes. Hip and
+// knee angles are opposite-signed and close in magnitude per leg (e.g. lHip -12/lKnee 10) so the
+// lower leg's *total* angle from vertical stays small — the stance widens without the foot
+// wandering off the floor line (still verified by the 'feet at y≈0' rig test).
 POSES.idle=[
-  {t:0,ang:{torso:D(2), lShoulder:D(10),rShoulder:D(-8), lElbow:D(20),rElbow:D(16)},off:{x:0,y:0}},
-  {t:1,ang:{torso:D(-2),lShoulder:D(6), rShoulder:D(-12),lElbow:D(24),rElbow:D(12)},off:{x:0,y:0}}];
+  {t:0,ang:{torso:D(6), lShoulder:D(6), rShoulder:D(10),lElbow:D(52),rElbow:D(95),
+            lHip:D(-12),rHip:D(12),lKnee:D(10),rKnee:D(-6)},off:{x:0,y:0}},
+  {t:1,ang:{torso:D(2), lShoulder:D(2), rShoulder:D(14),lElbow:D(56),rElbow:D(90),
+            lHip:D(-14),rHip:D(14),lKnee:D(12),rKnee:D(-8)},off:{x:0,y:0}}];
 POSES.walk=[
   {t:0, ang:{torso:D(3), lHip:D(-20),rHip:D(20), lKnee:D(20),rKnee:D(-10), lShoulder:D(14),rShoulder:D(-14)},off:{x:0,y:0}},
   {t:.5,ang:{torso:D(-3),lHip:D(20), rHip:D(-20),lKnee:D(-10),rKnee:D(20), lShoulder:D(-14),rShoulder:D(14)},off:{x:0,y:0}},
@@ -707,24 +719,32 @@ POSES.ko=[
 preparePoses();
 
 // ---- looks: palette + proportions + props, per character id ----
+// Scaled up from Phase 2's original proportions (legLen most of all — the old legLen:limb ratio was
+// close to 1:1, reading as stubby blobs rather than legs) so a standing Carl is ~190 world px tall
+// at zoom 1 and fills the rendition's share of frame height once paired with Camera's lower anchor
+// (see 65_stage.js). Every look grew, not just Carl, keeping each character's relative proportions
+// (thin trickster/caster vs. bulky brawler/tank) the same as before.
 const LOOKS={
   // Muscular build: shoulders wide relative to limb thickness (~2.2x), waist pinched in well below
   // both shoulder and hip width for a V-taper, thick rounded limbs.
+  // Note: G.debugPose (used for every docs/shots/p2-<pose>.png except p2-goblin/p2-card) never
+  // calls G.tick(), so G.cam.zoom sits at its initial 1.0 for those shots — proportions below target
+  // ~55-65% of frame height at zoom 1.0 exactly, not at the fight camera's usual ~1.1-1.35.
   carl:{skin:'#d9a066',hair:'#241610',primary:'#3a3226',secondary:'#c0392b',
-    limb:18,legLen:46,armLen:48,torsoLen:44,headR:13,shoulderW:40,hipW:26,waistW:20,earLen:0,
+    limb:20,legLen:114,armLen:101,torsoLen:91,headR:25,shoulderW:83,hipW:53,waistW:40,earLen:0,bareFeet:true,
     props:['boxers','vest','bandages']},
   katia:{skin:'#c98a5e',hair:'#171310',primary:'#232f2b',secondary:'#48594f',
-    limb:8,legLen:48,armLen:44,torsoLen:38,headR:10,shoulderW:18,hipW:13,earLen:0,
+    limb:12,legLen:117,armLen:91,torsoLen:78,headR:20,shoulderW:38,hipW:28,earLen:0,
     props:['gear']},
   goblin:{skin:'#5f8a3f',hair:null,primary:'#4a3b28',secondary:'#7a6248',
-    limb:8,legLen:34,armLen:34,torsoLen:28,headR:9,shoulderW:16,hipW:10,earLen:14,
+    limb:13,legLen:82,armLen:72,torsoLen:58,headR:18,shoulderW:33,hipW:21,earLen:29,
     props:['rags','dagger']},
   hobgoblin:{skin:'#5c6b52',hair:null,primary:'#3d3428',secondary:'#6b5c46',
-    limb:18,legLen:50,armLen:54,torsoLen:48,headR:15,shoulderW:36,hipW:22,earLen:10,
+    limb:26,legLen:122,armLen:114,torsoLen:98,headR:29,shoulderW:74,hipW:45,earLen:21,
     props:['rags','club']},
   // Placeholder human-rig look for the Phase 1 caster opponent; her bespoke non-humanoid rig is Phase 3.
   donut:{skin:'#f2cfe0',hair:'#ffe7f5',primary:'#e8a0d8',secondary:'#b565a0',
-    limb:9,legLen:44,armLen:42,torsoLen:36,headR:11,shoulderW:19,hipW:14,earLen:0,
+    limb:14,legLen:107,armLen:88,torsoLen:74,headR:23,shoulderW:39,hipW:29,earLen:0,
     props:['gear']}};
 
 // ---- forward kinematics ----
@@ -776,9 +796,17 @@ const Rig={
     const limb=(p,q,w)=>{c.lineCap='round';
       c.lineWidth=w+3;c.strokeStyle=skinDark;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke();
       c.lineWidth=w;c.strokeStyle=look.skin;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke()};
+    // A small rounded rect at each ankle joint so legs end in feet instead of a bare round line cap:
+    // bare skin-toned for a barefoot look (Carl), a dark boot otherwise. Nudged slightly forward of
+    // the ankle (in the facing direction) for a heel-planted, toe-forward read.
+    const foot=(p)=>{const w=look.limb*1.05,h=look.limb*.62,fx=p.x+face*w*.3,fy=p.y+h*.22;
+      const bare=!!look.bareFeet;c.fillStyle=bare?look.skin:'#241a12';c.strokeStyle=bare?skinDark:'#120c08';
+      c.lineWidth=1.3;c.beginPath();
+      if(c.roundRect)c.roundRect(fx-w/2,fy-h/2,w,h,Math.min(w,h)*.45);else c.rect(fx-w/2,fy-h/2,w,h);
+      c.fill();c.stroke()};
     // back limbs first (behind the torso), then torso/head, then front limbs, then props on top.
     // Thighs/upper arms noticeably thicker than shins/forearms, per limb.
-    limb(j.lHip,j.lKnee,look.limb);limb(j.lKnee,j.lFoot,look.limb*.82);
+    limb(j.lHip,j.lKnee,look.limb);limb(j.lKnee,j.lFoot,look.limb*.82);foot(j.lFoot);
     limb(j.lShoulder,j.lElbow,look.limb*.85);limb(j.lElbow,j.lHand,look.limb*.68);
     // Torso as a waist-tapered hexagon (hip -> waist -> shoulder, mirrored) for a real V-taper build,
     // plus a chest highlight and ab-line shading for definition. Shading uses whatever the base torso
@@ -807,7 +835,7 @@ const Rig={
       c.lineTo(j.head.x+look.headR*.9+el*.9,j.head.y-el*.85);
       c.lineTo(j.head.x+look.headR*.3,j.head.y+look.headR*.3);c.closePath();c.fill();c.stroke()}
     c.fillStyle='#141414';c.beginPath();c.arc(j.head.x+face*look.headR*.35,j.head.y-1,1.6,0,Math.PI*2);c.fill();
-    limb(j.rHip,j.rKnee,look.limb);limb(j.rKnee,j.rFoot,look.limb*.82);
+    limb(j.rHip,j.rKnee,look.limb);limb(j.rKnee,j.rFoot,look.limb*.82);foot(j.rFoot);
     limb(j.rShoulder,j.rElbow,look.limb*.85);limb(j.rElbow,j.rHand,look.limb*.68);
     for(const p of look.props||[]){
       if(p==='vest'||p==='rags'){
@@ -923,7 +951,14 @@ const Render={ctx:canvas.getContext('2d'),
     c.drawImage(hc.floorCanvas,W/2-hc.floorCanvas.width/2,80)},
   overlayY(F){const l=F.def.look;return FLOOR-(l.legLen+l.torsoLen+l.headR*2.4)*(F.def.scale||1)-14},
   reflection(c,F,cam,frame){c.save();c.beginPath();c.rect(0,FLOOR,STAGE_W,90);c.clip();
-    c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.18;Rig.draw(c,F,cam,frame);c.restore()},
+    c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.12;Rig.draw(c,F,cam,frame);c.restore()},
+  // A grounding contact shadow at the fighter's feet — the mirrored reflection alone reads as a
+  // detached ghost. A flattened dark ellipse under the floor art, sized off shoulderW (a stand-in
+  // for the character's overall footprint) so bigger/scaled-up looks (the hobgoblin) get a bigger
+  // shadow than smaller ones (the goblin) without a dedicated per-look radius.
+  shadow(c,F){const look=F.def.look;if(!look)return;const scale=F.def.scale||1,w=look.shoulderW*1.6*scale;
+    c.save();c.globalAlpha=.35;c.fillStyle='#000';
+    c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore()},
   fighter(c,F,cam,frame){
     const flash=F.state==='HITSTUN'&&F.f<3;
     if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame);c.filter='none';c.restore()}
@@ -1006,6 +1041,7 @@ const Render={ctx:canvas.getContext('2d'),
     Stage.draw(c,cam,fr,Stage.build('depths'));
     if(f){
       this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
+      this.shadow(c,f.p1);this.shadow(c,f.p2);
       this.fighter(c,f.p1,cam,fr);this.fighter(c,f.p2,cam,fr)}
     FX.draw(c,cam,fr);
     c.setTransform(1,0,0,1,0,0);
@@ -1098,7 +1134,19 @@ const FX={list:[],shake:0,flash:0,card:null,
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
   cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
-  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px'},
+  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast()},
+  // Positions #toast off the canvas's own box (canvas.getBoundingClientRect()), not #wrap, so it
+  // tracks the actual displayed game area exactly even when #wrap letterboxes the canvas at an
+  // aspect ratio other than W/H. TOAST_Y is a canvas-local (854x480) y — just under the HUD's
+  // 'FLOOR n • NAME' text (Render.floorLine, drawn at canvas y=80..~96) and well above the stage
+  // arch (its top is around canvas y=175 at zoom 1), so the toast can never cross the arch. Width is
+  // capped at 70% of the displayed canvas width so a long line wraps and pills, rather than running
+  // edge to edge.
+  TOAST_Y:98,
+  positionToast(){const r=canvas.getBoundingClientRect(),el=document.getElementById('toast');
+    el.style.left=(r.left+r.width/2)+'px';
+    el.style.top=(r.top+this.TOAST_Y/H*r.height)+'px';
+    el.style.maxWidth=Math.round(r.width*.7)+'px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   // Canvas hit-test for the HUD's pause glyph (drawn by Render.hud at Render.pauseRect), consulted
   // by Input's pointerdown handler before it does any zone/gesture handling.

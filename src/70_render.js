@@ -37,7 +37,14 @@ const Render={ctx:canvas.getContext('2d'),
     c.drawImage(hc.floorCanvas,W/2-hc.floorCanvas.width/2,80)},
   overlayY(F){const l=F.def.look;return FLOOR-(l.legLen+l.torsoLen+l.headR*2.4)*(F.def.scale||1)-14},
   reflection(c,F,cam,frame){c.save();c.beginPath();c.rect(0,FLOOR,STAGE_W,90);c.clip();
-    c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.18;Rig.draw(c,F,cam,frame);c.restore()},
+    c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.12;Rig.draw(c,F,cam,frame);c.restore()},
+  // A grounding contact shadow at the fighter's feet — the mirrored reflection alone reads as a
+  // detached ghost. A flattened dark ellipse under the floor art, sized off shoulderW (a stand-in
+  // for the character's overall footprint) so bigger/scaled-up looks (the hobgoblin) get a bigger
+  // shadow than smaller ones (the goblin) without a dedicated per-look radius.
+  shadow(c,F){const look=F.def.look;if(!look)return;const scale=F.def.scale||1,w=look.shoulderW*1.6*scale;
+    c.save();c.globalAlpha=.35;c.fillStyle='#000';
+    c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore()},
   fighter(c,F,cam,frame){
     const flash=F.state==='HITSTUN'&&F.f<3;
     if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame);c.filter='none';c.restore()}
@@ -120,6 +127,7 @@ const Render={ctx:canvas.getContext('2d'),
     Stage.draw(c,cam,fr,Stage.build('depths'));
     if(f){
       this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
+      this.shadow(c,f.p1);this.shadow(c,f.p2);
       this.fighter(c,f.p1,cam,fr);this.fighter(c,f.p2,cam,fr)}
     FX.draw(c,cam,fr);
     c.setTransform(1,0,0,1,0,0);

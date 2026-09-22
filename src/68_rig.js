@@ -27,10 +27,16 @@ function samplePose(poseKey,t01){
   const off={x:(aOff.x||0)+((bOff.x||0)-(aOff.x||0))*lt,y:(aOff.y||0)+((bOff.y||0)-(aOff.y||0))*lt};
   return{ang,off}}
 
-// idle: subtle breathing sway; legs stay put (angle 0) so feet never drift off the floor line.
+// idle: a braced fighting stance (wide bent-knee base, lead/right shoulder forward and raised)
+// instead of standing at attention, with a subtle breathing sway between the two keyframes. Hip and
+// knee angles are opposite-signed and close in magnitude per leg (e.g. lHip -12/lKnee 10) so the
+// lower leg's *total* angle from vertical stays small — the stance widens without the foot
+// wandering off the floor line (still verified by the 'feet at y≈0' rig test).
 POSES.idle=[
-  {t:0,ang:{torso:D(2), lShoulder:D(10),rShoulder:D(-8), lElbow:D(20),rElbow:D(16)},off:{x:0,y:0}},
-  {t:1,ang:{torso:D(-2),lShoulder:D(6), rShoulder:D(-12),lElbow:D(24),rElbow:D(12)},off:{x:0,y:0}}];
+  {t:0,ang:{torso:D(6), lShoulder:D(6), rShoulder:D(10),lElbow:D(52),rElbow:D(95),
+            lHip:D(-12),rHip:D(12),lKnee:D(10),rKnee:D(-6)},off:{x:0,y:0}},
+  {t:1,ang:{torso:D(2), lShoulder:D(2), rShoulder:D(14),lElbow:D(56),rElbow:D(90),
+            lHip:D(-14),rHip:D(14),lKnee:D(12),rKnee:D(-8)},off:{x:0,y:0}}];
 POSES.walk=[
   {t:0, ang:{torso:D(3), lHip:D(-20),rHip:D(20), lKnee:D(20),rKnee:D(-10), lShoulder:D(14),rShoulder:D(-14)},off:{x:0,y:0}},
   {t:.5,ang:{torso:D(-3),lHip:D(20), rHip:D(-20),lKnee:D(-10),rKnee:D(20), lShoulder:D(-14),rShoulder:D(14)},off:{x:0,y:0}},
@@ -119,24 +125,32 @@ POSES.ko=[
 preparePoses();
 
 // ---- looks: palette + proportions + props, per character id ----
+// Scaled up from Phase 2's original proportions (legLen most of all — the old legLen:limb ratio was
+// close to 1:1, reading as stubby blobs rather than legs) so a standing Carl is ~190 world px tall
+// at zoom 1 and fills the rendition's share of frame height once paired with Camera's lower anchor
+// (see 65_stage.js). Every look grew, not just Carl, keeping each character's relative proportions
+// (thin trickster/caster vs. bulky brawler/tank) the same as before.
 const LOOKS={
   // Muscular build: shoulders wide relative to limb thickness (~2.2x), waist pinched in well below
   // both shoulder and hip width for a V-taper, thick rounded limbs.
+  // Note: G.debugPose (used for every docs/shots/p2-<pose>.png except p2-goblin/p2-card) never
+  // calls G.tick(), so G.cam.zoom sits at its initial 1.0 for those shots — proportions below target
+  // ~55-65% of frame height at zoom 1.0 exactly, not at the fight camera's usual ~1.1-1.35.
   carl:{skin:'#d9a066',hair:'#241610',primary:'#3a3226',secondary:'#c0392b',
-    limb:18,legLen:46,armLen:48,torsoLen:44,headR:13,shoulderW:40,hipW:26,waistW:20,earLen:0,
+    limb:20,legLen:114,armLen:101,torsoLen:91,headR:25,shoulderW:83,hipW:53,waistW:40,earLen:0,bareFeet:true,
     props:['boxers','vest','bandages']},
   katia:{skin:'#c98a5e',hair:'#171310',primary:'#232f2b',secondary:'#48594f',
-    limb:8,legLen:48,armLen:44,torsoLen:38,headR:10,shoulderW:18,hipW:13,earLen:0,
+    limb:12,legLen:117,armLen:91,torsoLen:78,headR:20,shoulderW:38,hipW:28,earLen:0,
     props:['gear']},
   goblin:{skin:'#5f8a3f',hair:null,primary:'#4a3b28',secondary:'#7a6248',
-    limb:8,legLen:34,armLen:34,torsoLen:28,headR:9,shoulderW:16,hipW:10,earLen:14,
+    limb:13,legLen:82,armLen:72,torsoLen:58,headR:18,shoulderW:33,hipW:21,earLen:29,
     props:['rags','dagger']},
   hobgoblin:{skin:'#5c6b52',hair:null,primary:'#3d3428',secondary:'#6b5c46',
-    limb:18,legLen:50,armLen:54,torsoLen:48,headR:15,shoulderW:36,hipW:22,earLen:10,
+    limb:26,legLen:122,armLen:114,torsoLen:98,headR:29,shoulderW:74,hipW:45,earLen:21,
     props:['rags','club']},
   // Placeholder human-rig look for the Phase 1 caster opponent; her bespoke non-humanoid rig is Phase 3.
   donut:{skin:'#f2cfe0',hair:'#ffe7f5',primary:'#e8a0d8',secondary:'#b565a0',
-    limb:9,legLen:44,armLen:42,torsoLen:36,headR:11,shoulderW:19,hipW:14,earLen:0,
+    limb:14,legLen:107,armLen:88,torsoLen:74,headR:23,shoulderW:39,hipW:29,earLen:0,
     props:['gear']}};
 
 // ---- forward kinematics ----
@@ -188,9 +202,17 @@ const Rig={
     const limb=(p,q,w)=>{c.lineCap='round';
       c.lineWidth=w+3;c.strokeStyle=skinDark;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke();
       c.lineWidth=w;c.strokeStyle=look.skin;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke()};
+    // A small rounded rect at each ankle joint so legs end in feet instead of a bare round line cap:
+    // bare skin-toned for a barefoot look (Carl), a dark boot otherwise. Nudged slightly forward of
+    // the ankle (in the facing direction) for a heel-planted, toe-forward read.
+    const foot=(p)=>{const w=look.limb*1.05,h=look.limb*.62,fx=p.x+face*w*.3,fy=p.y+h*.22;
+      const bare=!!look.bareFeet;c.fillStyle=bare?look.skin:'#241a12';c.strokeStyle=bare?skinDark:'#120c08';
+      c.lineWidth=1.3;c.beginPath();
+      if(c.roundRect)c.roundRect(fx-w/2,fy-h/2,w,h,Math.min(w,h)*.45);else c.rect(fx-w/2,fy-h/2,w,h);
+      c.fill();c.stroke()};
     // back limbs first (behind the torso), then torso/head, then front limbs, then props on top.
     // Thighs/upper arms noticeably thicker than shins/forearms, per limb.
-    limb(j.lHip,j.lKnee,look.limb);limb(j.lKnee,j.lFoot,look.limb*.82);
+    limb(j.lHip,j.lKnee,look.limb);limb(j.lKnee,j.lFoot,look.limb*.82);foot(j.lFoot);
     limb(j.lShoulder,j.lElbow,look.limb*.85);limb(j.lElbow,j.lHand,look.limb*.68);
     // Torso as a waist-tapered hexagon (hip -> waist -> shoulder, mirrored) for a real V-taper build,
     // plus a chest highlight and ab-line shading for definition. Shading uses whatever the base torso
@@ -219,7 +241,7 @@ const Rig={
       c.lineTo(j.head.x+look.headR*.9+el*.9,j.head.y-el*.85);
       c.lineTo(j.head.x+look.headR*.3,j.head.y+look.headR*.3);c.closePath();c.fill();c.stroke()}
     c.fillStyle='#141414';c.beginPath();c.arc(j.head.x+face*look.headR*.35,j.head.y-1,1.6,0,Math.PI*2);c.fill();
-    limb(j.rHip,j.rKnee,look.limb);limb(j.rKnee,j.rFoot,look.limb*.82);
+    limb(j.rHip,j.rKnee,look.limb);limb(j.rKnee,j.rFoot,look.limb*.82);foot(j.rFoot);
     limb(j.rShoulder,j.rElbow,look.limb*.85);limb(j.rElbow,j.rHand,look.limb*.68);
     for(const p of look.props||[]){
       if(p==='vest'||p==='rags'){
