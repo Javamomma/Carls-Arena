@@ -1393,6 +1393,30 @@ const MOVES={
   s1:{startup:8, active:4,recovery:22,dmg:1.5,hits:3,gap:6,range:130,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:100,knockdown:true,hitstop:6},
   s2:{startup:10,active:4,recovery:28,dmg:1.6,hits:5,gap:6,range:150,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:200,knockdown:true,hitstop:8},
   s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,knockdown:true,unblockable:true,hitstop:14}};
+// Task 7.4 fix round 1 (frozen ruling, exact values): per-class hit-feel magnitudes, read by
+// Fight.resolve's shake/punch push sites (60_fight.js) keyed off the landed move's own moveName
+// ('light'/'medium'/'heavy'/'s1'/'s2'/'s3'), or 'intercept' when the landed hit is itself an
+// intercept (overriding whatever the landing move's own class would otherwise have been -- an
+// intercepting hit always feels like an intercept). `stop` is NOT read by resolve() for hitstop
+// itself -- MOVES.*.hitstop (above) and the intercept's own hardcoded 10 (60_fight.js) stay the
+// sim's only source for that; `stop` is carried here purely so this table documents/cross-checks
+// against those same numbers in one place (every value below equals its matching MOVES.*.hitstop,
+// and 10 equals the intercept hitstop) -- a future hitstop retune that forgets to update this table
+// alongside MOVES would be a visible mismatch, not a silent drift. `shake`/`punch` are the actual
+// px/pct magnitudes resolve() pushes; `hold` is the punch envelope's own hold-frame count (FX.push's
+// 'punch' case, 72_fx.js, falls back to its own PUNCH_HOLD when a push carries none); `creep` (s1/s2
+// only) means the punch eases IN over `hold` instead of snapping straight to its target. light's
+// shake:0/punch:0 means neither fx is ever pushed for a plain light (see resolve()'s own `if(hf.
+// shake>0)`/`if(hf.punch>0)` guards); s3's punch:0 means s3 never gets a punch-in fx of its own (the
+// existing S3 cinematic dolly/card already owns that beat).
+const HITFEEL={
+  light:{stop:3, shake:0, punch:0,   hold:0},
+  medium:{stop:5, shake:4, punch:.02,hold:6},
+  heavy:{stop:9, shake:8, punch:.04, hold:10},
+  s1:{stop:6, shake:6, punch:.03,    hold:6, creep:true},
+  s2:{stop:8, shake:6, punch:.03,    hold:6, creep:true},
+  s3:{stop:14,shake:6, punch:0,      hold:0},
+  intercept:{stop:10,shake:10,punch:.05,hold:6}};
 // Task 7.2 (frozen interface, exact values): the five-node combo grammar. openers are the two moves
 // that can start a chain from IDLE/BLOCK; nodes is the chain's max length (Fighter.chainNode runs
 // 1..5); enders describes what the FINAL blow of the chain does, keyed by which move type actually
@@ -2667,18 +2691,32 @@ class Fight{
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
     // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
     this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
-    // Task 7.4: dir carries the attacker's own facing (att.face) so FX's own directional shake
-    // vector (72_fx.js) always kicks the camera the same way the exchange was actually facing.
-    this.fx.push({kind:'shake',amt:m.hitstop,dir:att.face});
-    // Task 7.3 (frozen interface, exact ruling): the intercept's own read/reward gets its own punch-
-    // in fx term (Task 7.4 composes fx.pct into the camera zoom) and its own INTERCEPT! callout, on
-    // top of (never instead of) the plain damage popup/spark just pushed above -- and its own event,
-    // carrying {who,dir} (dir is att's own facing, per the ruling) so Task 7.4's directional shake can
-    // tell which way to kick the camera. Presentation stays minimal here on purpose (Task 7.4 owns the
-    // full hit-feel pass); see emitTell's own comment for why this needs a dedicated event distinct
-    // from the plain 'hit' one just below.
+    // Task 7.4 fix round 1 (frozen ruling, exact table): HITFEEL[hfKey] (40_movedata.js) is the
+    // controller's own per-class shake/punch magnitudes -- intercept overrides the landed move's own
+    // class entirely (an intercepting hit always feels like an intercept, whatever move actually
+    // caught the foe); light carries shake:0/punch:0, so it pushes neither fx, matching the ruling
+    // "light: no shake/no punch". Gated by the exact same "single-hit move, or the LAST blow of a
+    // multi-hit special" condition (!m.hits||last) hitstop itself already uses just above -- a
+    // multi-hit special's own shake/punch fires once, off its final landed sub-hit, never per sub-hit
+    // (every sub-hit still gets its own popup/spark/impact fx just above, unaffected).
+    if(!m.hits||last){
+      const hfKey=intercept?'intercept':(HITFEEL[att.moveName]?att.moveName:null);
+      const hf=hfKey&&HITFEEL[hfKey];
+      if(hf){
+        // dir carries the attacker's own facing (att.face) so FX's own directional shake vector
+        // (72_fx.js) always kicks the camera the same way the exchange was actually facing.
+        if(hf.shake>0)this.fx.push({kind:'shake',amt:hf.shake,dir:att.face});
+        // hold/creep forward straight from the table -- the presentation side's own 'punch' push
+        // case (72_fx.js) reads both (hold overrides its own default per-push; creep eases the
+        // punch IN over that hold instead of snapping straight to it, the S1/S2 "final hit...
+        // creep" ruling).
+        if(hf.punch>0)this.fx.push({kind:'punch',pct:hf.punch,hold:hf.hold,creep:!!hf.creep})}}
+    // Task 7.3 (frozen interface, exact ruling): the intercept's own read/reward gets its own
+    // INTERCEPT! callout, on top of (never instead of) the plain damage popup/spark just pushed
+    // above -- and its own event, carrying {who,dir} (dir is att's own facing, per the ruling) so
+    // Task 7.4's directional shake can tell which way to kick the camera. Its own shake/punch fx are
+    // pushed by the HITFEEL block just above (keyed off 'intercept'), not here.
     if(intercept){
-      this.fx.push({kind:'punch',pct:.05});
       this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'INTERCEPT!',col:'#ff9d3b',big:true});
       this.emitTell('intercept',att,att.face)}
     this.emit('hit',att,def,dmg,att.moveName)}
@@ -4697,10 +4735,18 @@ const FX={list:[],
   shake:{x:0,y:0},
   // Task 7.4: FX.punch is the camera's own additive zoom term -- Camera.update (65_stage.js)
   // composes cam.zoom = min(base*(1+FX.punch), capNow), the frozen interface. Envelope shape is
-  // "jump to target, hold PUNCH_HOLD frames, then ease (decay) back to 0" -- see push()'s 'punch'
-  // case and update() below. PUNCH_HOLD/PUNCH_EASE are exposed as named constants (not just inlined
-  // numbers) so a test can assert the envelope's own shape without hardcoding a magic frame count.
-  punch:0,punchTarget:0,punchHold:0,PUNCH_HOLD:6,PUNCH_EASE:.82,
+  // "jump to target, hold `hold` frames, then ease (decay) back to 0" -- see push()'s 'punch' case
+  // and update() below. PUNCH_HOLD/PUNCH_EASE are named constants (not just inlined numbers) so a
+  // test can assert the envelope's own shape without hardcoding a magic frame count; PUNCH_HOLD is
+  // now only the FALLBACK hold length (fix round 1) -- Fight.resolve's own HITFEEL table
+  // (40_movedata.js) passes an explicit `hold` per push (heavy's own 10-frame hold vs. medium's 6),
+  // read here via ev.hold, with PUNCH_HOLD covering any push that omits one.
+  // Fix round 1: punchCreep/punchStart/punchHoldTotal back the 'creep' envelope (S1/S2's own "final
+  // hit... creep" ruling) -- a creep push eases the punch term IN, from wherever it currently sits
+  // toward its target, over its own `hold` window, instead of snapping to target immediately the
+  // way every other push (plain shake-only hits, medium, heavy, intercept) still does.
+  punch:0,punchTarget:0,punchHold:0,punchCreep:false,punchStart:0,punchHoldTotal:0,
+  PUNCH_HOLD:6,PUNCH_EASE:.82,
   flash:0,card:null,shieldDown:null,
   // Task 7.1: label + color per timed effect id, read only here (presentation) -- Effects.apply
   // (48_effects.js, sim-side) pushes a bare {kind:'effectPopup',x,y,id,stacks} descriptor with no
@@ -4718,6 +4764,7 @@ const FX={list:[],
     // below), since Effects.apply has no notion of a facing-direction streak.
     dexterity:{text:'DEXTERITY',col:'#4fc3f7'}},
   reset(){this.list.length=0;this.shake={x:0,y:0};this.punch=0;this.punchTarget=0;this.punchHold=0;
+    this.punchCreep=false;this.punchStart=0;this.punchHoldTotal=0;
     this.flash=0;this.card=null;this.shieldDown=null},
   _seed(i){const fr=(G.fight&&G.fight.frame)||0;return((fr*97+i*131+1)>>>0)||1},
   push(ev){
@@ -4822,14 +4869,25 @@ const FX={list:[],
           if(mag>24){const s=24/mag;this.shake.x*=s;this.shake.y*=s}}
         break;
       // Task 7.4 (frozen interface): the camera's own additive zoom term -- pushed by Fight.resolve
-      // on every intercept (fx.pct, currently always .05) alongside its own INTERCEPT! popup.
-      // Envelope: jump straight to the pushed pct (never below it -- a re-push while one is already
-      // easing re-holds at the higher of the two, same "louder wins" rule popups/flash already
-      // follow elsewhere in this file), hold for PUNCH_HOLD frames, then ease() decays it back to 0.
+      // per HITFEEL[hfKey] (40_movedata.js) on any hit whose class carries a nonzero punch (medium/
+      // heavy/S1/S2's final hit/intercept; light and S3 never push one at all). ev.hold overrides
+      // PUNCH_HOLD (fix round 1: heavy's own 10-frame hold vs. medium's 6 vs. the fallback 6), and
+      // ev.creep (S1/S2 only) switches the envelope from "jump straight to pct" to "ease IN toward
+      // pct over the hold window" -- see update()'s own comment for the two envelope shapes.
+      // Non-creep envelope: jump straight to the pushed pct (never below it -- a re-push while one
+      // is already easing re-holds at the higher of the two, same "louder wins" rule popups/flash
+      // already follow elsewhere in this file), hold for `hold` frames, then ease() decays to 0.
+      // Creep envelope: capture the CURRENT punch value as punchStart, then ramp from punchStart to
+      // pct over `hold` frames (update() does the interpolation); once the hold window ends, the
+      // same ease()-back-to-0 takes over, same as the non-creep case.
       // Gated by reduceMotion, same as shake/flash -- it's a camera-motion fx too.
       case'punch':
         if(!Save.data.settings.reduceMotion){
-          this.punchTarget=Math.max(this.punch,ev.pct||0);this.punch=this.punchTarget;this.punchHold=this.PUNCH_HOLD}
+          const hold=ev.hold!==undefined?ev.hold:this.PUNCH_HOLD,pct=ev.pct||0;
+          if(ev.creep){
+            this.punchStart=this.punch;this.punchTarget=pct;this.punchHoldTotal=hold;this.punchHold=hold;this.punchCreep=true}
+          else{
+            this.punchTarget=Math.max(this.punch,pct);this.punch=this.punchTarget;this.punchHold=hold;this.punchCreep=false}}
         break;
       case'flash':
         if(!Save.data.settings.reduceMotion)this.flash=Math.max(this.flash,ev.frames||0);
@@ -4851,11 +4909,19 @@ const FX={list:[],
     // once its magnitude is negligible -- same "decay then snap to exact 0" shape the old scalar had.
     this.shake.x*=.85;this.shake.y*=.85;
     if(Math.hypot(this.shake.x,this.shake.y)<.05){this.shake.x=0;this.shake.y=0}
-    // Task 7.4: punch's own hold-then-ease envelope -- holds flat at its pushed target for
-    // punchHold frames (armed by push()'s 'punch' case), then eases (multiplicative decay, same
-    // shape as shake) back to exactly 0.
-    if(this.punchHold>0){this.punch=this.punchTarget;this.punchHold--}
-    else{this.punch*=this.PUNCH_EASE;if(this.punch<.001)this.punch=0}
+    // Task 7.4: punch's own hold-then-ease envelope -- for punchHold frames (armed by push()'s
+    // 'punch' case) it either holds flat at its pushed target (the plain case) or, for a creep push
+    // (fix round 1: S1/S2's own ruling), ramps LINEARLY from punchStart toward punchTarget across
+    // punchHoldTotal frames, reaching punchTarget exactly on the hold window's last frame -- either
+    // way, once the hold frames run out, the same ease() (multiplicative decay, same shape as shake)
+    // takes it back to exactly 0.
+    if(this.punchHold>0){
+      if(this.punchCreep){
+        const elapsed=this.punchHoldTotal-this.punchHold,t=Math.min(1,(elapsed+1)/this.punchHoldTotal);
+        this.punch=this.punchStart+(this.punchTarget-this.punchStart)*t}
+      else this.punch=this.punchTarget;
+      this.punchHold--}
+    else{this.punch*=this.PUNCH_EASE;if(this.punch<.001){this.punch=0;this.punchCreep=false}}
     if(this.flash>0)this.flash--;
     // Card runs on its own clock (advanced only here, from the wall-clock/screenshot render loop),
     // independent of fight.cinematic (G.tick decrements that once per sim tick); both count down
@@ -7130,7 +7196,16 @@ Test.add('poseFor maps fighter state to pose key and progress',()=>{const F=mkFi
   F.act(Object.assign(Ctrl.EMPTY(),{light:true}));for(let i=0;i<3;i++)F.tick();const p=Rig.poseFor(F);eq(p.key,'light1');ok(p.t01>0&&p.t01<1);F.setState('KNOCKDOWN');F.f=35;eq(Rig.poseFor(F).key,'getup')});
 Test.add('mob defs have hp/atk/scale and resolve through DEFS',()=>{ok(DEFS.goblin.hp<DEFS.carl.hp);ok(DEFS.hobgoblin.scale>1);eq(DEFS.katia.cls,'trickster');ok(DEFS.goblin.rig==='human')});
 Test.add('hitstop is per move',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.hitstop,MOVES.light.hitstop);ok(MOVES.heavy.hitstop>MOVES.light.hitstop&&MOVES.s3.hitstop>MOVES.heavy.hitstop)});
-Test.add('a hit queues spark, popup and shake fx; a block queues dust',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);const kinds=f.fx.map(e=>e.kind);ok(kinds.includes('spark')&&kinds.includes('popup')&&kinds.includes('shake'),kinds.join());const g=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(g);run(g,15);ok(g.fx.some(e=>e.kind==='dust'))});
+// Task 7.4 fix round 1: a plain light no longer pushes shake (HITFEEL.light.shake===0, the frozen
+// "light: no shake/no punch" ruling) -- this test now checks spark+popup off a light (unaffected)
+// and shake off a medium (HITFEEL.medium.shake===4) instead, so it still proves "a landed hit queues
+// hit-feel fx" without asserting the one combination (light+shake) the ruling explicitly forbids.
+Test.add('a hit queues spark and popup fx; a medium also queues shake; a block queues dust',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);const kinds=f.fx.map(e=>e.kind);
+  ok(kinds.includes('spark')&&kinds.includes('popup'),kinds.join());
+  const m=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});closeIn(m);run(m,20);
+  ok(m.fx.some(e=>e.kind==='shake'),'a landed medium must queue shake: '+m.fx.map(e=>e.kind).join());
+  const g=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(g);run(g,15);ok(g.fx.some(e=>e.kind==='dust'))});
 Test.add('KO starts slow-mo and G steps the sim every 4th tick during it',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);f.p2.hp=1;run(f,5);ok(f.over&&f.slowmo>0);const before=f.slowmo;G.fight=f;G.state='FIGHT';G._tickN=0;for(let i=0;i<8;i++)G.tick();eq(f.slowmo,before-2);G.fight=null;G.state='TITLE'});
 Test.add('a parry works again after PARRY_LOCKOUT expires',()=>{
   const lightF=PARRY_LOCKOUT+10,blockF=lightF+2;
@@ -10472,11 +10547,78 @@ Test.add('an already-in-range medium keeps its old flat startup and speed (bit-i
 
 // --- Task 7.4: hit-feel pass (directional shake, camera punch-in, per-class impact fx, intercept
 // time dilation, per-node hit audio) -----------------------------------------------------------
-Test.add('a landed hit queues shake fx carrying the attacker\'s own facing as dir',()=>{
+// Task 7.4 fix round 1 (frozen ruling, exact HITFEEL table -- 40_movedata.js): per-class shake/punch
+// magnitudes, keyed off the landed move's own class (light/medium/heavy/s1/s2/s3), intercept
+// overriding whatever class the landing move actually was. p1 (carl) faces +1 in every mkFight/
+// closeIn fixture below; a second p2-attacks-p1 fixture (face -1) proves dir isn't hardcoded.
+Test.add('HITFEEL: a landed light pushes neither shake nor punch',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
-  const sh=f.fx.find(e=>e.kind==='shake');
-  ok(sh,'a landed hit must still queue a shake fx: '+f.fx.map(e=>e.kind).join());
-  eq(sh.dir,f.p1.face,"shake fx dir must equal the attacker's (p1's) own facing")});
+  const kinds=f.fx.map(e=>e.kind);
+  ok(!kinds.includes('shake'),'a plain light must push no shake fx: '+kinds.join());
+  ok(!kinds.includes('punch'),'a plain light must push no punch fx: '+kinds.join())});
+Test.add('HITFEEL: a landed medium pushes shake 4 (dir = attacker facing, both facings) and punch .02 hold 6',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});closeIn(f);run(f,20);
+  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
+  ok(sh,'a landed medium must push shake: '+f.fx.map(e=>e.kind).join());
+  eq(sh.amt,4,'medium shake amt must be 4');eq(sh.dir,f.p1.face,"shake dir must equal the attacker's own facing (+1 here)");
+  ok(pu,'a landed medium must push punch: '+f.fx.map(e=>e.kind).join());
+  eq(pu.pct,.02,'medium punch pct must be .02');eq(pu.hold,6,'medium punch hold must be 6');ok(!pu.creep,'medium punch must not creep');
+  // Flip who's attacking (p2 attacks p1, face -1) to prove dir tracks the actual attacker, not a
+  // hardcoded sign -- p2.face is always -1 (Fighter's own side-2 constructor convention).
+  const g=mkFight({ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});g.p1.x=500;g.p2.x=560;run(g,20);
+  const sh2=g.fx.find(e=>e.kind==='shake');
+  ok(sh2,'a landed medium (p2 attacking) must push shake: '+g.fx.map(e=>e.kind).join());
+  eq(sh2.dir,g.p2.face,"shake dir must equal p2's own facing (-1) when p2 is the attacker")});
+Test.add('HITFEEL: a landed heavy pushes shake 8 and punch .04 hold 10',()=>{
+  // A full continuous hold auto-fires once MOVES.heavy.charge frames elapse (same as the pre-
+  // existing "a full hold through the move's own charge frames must still auto-fire" test above).
+  const f=mkFight({ctrl1:Ctrl.hold({heavy:true})});closeIn(f);
+  for(let i=0;i<MOVES.heavy.charge+40&&!f.fx.some(e=>e.kind==='shake');i++)f.step();
+  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
+  ok(sh,'a landed heavy must push shake: '+f.fx.map(e=>e.kind).join());
+  eq(sh.amt,8,'heavy shake amt must be 8');eq(sh.dir,f.p1.face);
+  ok(pu,'a landed heavy must push punch: '+f.fx.map(e=>e.kind).join());
+  eq(pu.pct,.04,'heavy punch pct must be .04');eq(pu.hold,10,'heavy punch hold must be 10');ok(!pu.creep,'heavy punch must not creep')});
+Test.add('HITFEEL: a multi-hit S1 pushes shake/punch only on its final sub-hit, and the punch descriptor carries creep',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:1}}])});closeIn(f);f.p1.power=100;
+  const hitsSoFar=()=>f.log.filter(e=>e.type==='hit').length;
+  let sawShakeEarly=false,sawPunchEarly=false;
+  for(let i=0;i<40;i++){
+    f.fx.length=0; // isolate exactly what THIS tick's step pushed
+    const before=hitsSoFar();f.step();const after=hitsSoFar();
+    if(after>before&&after<MOVES.s1.hits){ // a sub-hit landed that is NOT the final one
+      if(f.fx.some(e=>e.kind==='shake'))sawShakeEarly=true;
+      if(f.fx.some(e=>e.kind==='punch'))sawPunchEarly=true}
+    if(after===MOVES.s1.hits)break}
+  ok(!sawShakeEarly,'an S1 sub-hit before the final one must never push shake');
+  ok(!sawPunchEarly,'an S1 sub-hit before the final one must never push punch');
+  eq(hitsSoFar(),MOVES.s1.hits,'sanity: all of S1\'s hits must have landed');
+  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
+  ok(sh,'the final S1 sub-hit must push shake: '+f.fx.map(e=>e.kind).join());
+  eq(sh.amt,6,'S1 shake amt must be 6');
+  ok(pu,'the final S1 sub-hit must push punch: '+f.fx.map(e=>e.kind).join());
+  eq(pu.pct,.03,'S1 punch pct must be .03');eq(pu.hold,6,'S1 punch hold must be 6');
+  ok(pu.creep,'S1\'s punch descriptor must carry creep:true')});
+Test.add('HITFEEL: intercept pushes shake 10 and punch .05 regardless of the intercepting move (overrides its own class)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});
+  closeIn(f);run(f,5);
+  ok(f.log.some(e=>e.type==='intercept'),'sanity: this must actually be an intercept');
+  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
+  ok(sh,'an intercept must push shake: '+f.fx.map(e=>e.kind).join());
+  eq(sh.amt,10,'intercept shake amt must be the fixed 10, not the intercepting light\'s own (0) HITFEEL.light.shake');
+  ok(pu,'an intercept must push punch: '+f.fx.map(e=>e.kind).join());
+  eq(pu.pct,.05,'intercept punch pct must be .05');eq(pu.hold,6,'intercept punch hold must be 6')});
+Test.add('FX.push honors a per-descriptor hold (heavy\'s own 10 vs PUNCH_HOLD\'s fallback 6), and the camera cap still holds throughout',()=>{
+  FX.reset();
+  FX.push({kind:'punch',pct:.04,hold:10}); // heavy's own HITFEEL entry, verbatim
+  for(let i=0;i<10;i++){eq(FX.punch,.04,'punch must stay flat at its target through all 10 of its own held frames, frame '+i);FX.update()}
+  FX.update(); // one more: the 10 held frames have now fully elapsed, so THIS update starts the ease
+  ok(FX.punch<.04,'punch must start easing once its own 10-frame hold (not the 6-frame PUNCH_HOLD fallback) has fully elapsed');
+  FX.reset();
+  const cam={x:0,zoom:1},f={camTarget:{x:0,zoom:1.0}};
+  FX.push({kind:'punch',pct:.04,hold:10});
+  for(let i=0;i<40;i++){FX.update();Camera.update(cam,f,null,1.03);ok(cam.zoom<=1.03+1e-9,'cam.zoom must never exceed capNow at any step, got '+cam.zoom)}
+  FX.reset()});
 Test.add('FX.shake is a decaying {x,y} vector whose x sign follows dir, and reduceMotion aside, y is always populated',()=>{
   FX.reset();FX.push({kind:'shake',amt:8,dir:1});
   ok(FX.shake.x>0,'dir:1 must kick the shake vector to a positive x, got '+FX.shake.x);

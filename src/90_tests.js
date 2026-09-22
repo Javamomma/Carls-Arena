@@ -675,7 +675,16 @@ Test.add('poseFor maps fighter state to pose key and progress',()=>{const F=mkFi
   F.act(Object.assign(Ctrl.EMPTY(),{light:true}));for(let i=0;i<3;i++)F.tick();const p=Rig.poseFor(F);eq(p.key,'light1');ok(p.t01>0&&p.t01<1);F.setState('KNOCKDOWN');F.f=35;eq(Rig.poseFor(F).key,'getup')});
 Test.add('mob defs have hp/atk/scale and resolve through DEFS',()=>{ok(DEFS.goblin.hp<DEFS.carl.hp);ok(DEFS.hobgoblin.scale>1);eq(DEFS.katia.cls,'trickster');ok(DEFS.goblin.rig==='human')});
 Test.add('hitstop is per move',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.hitstop,MOVES.light.hitstop);ok(MOVES.heavy.hitstop>MOVES.light.hitstop&&MOVES.s3.hitstop>MOVES.heavy.hitstop)});
-Test.add('a hit queues spark, popup and shake fx; a block queues dust',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);const kinds=f.fx.map(e=>e.kind);ok(kinds.includes('spark')&&kinds.includes('popup')&&kinds.includes('shake'),kinds.join());const g=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(g);run(g,15);ok(g.fx.some(e=>e.kind==='dust'))});
+// Task 7.4 fix round 1: a plain light no longer pushes shake (HITFEEL.light.shake===0, the frozen
+// "light: no shake/no punch" ruling) -- this test now checks spark+popup off a light (unaffected)
+// and shake off a medium (HITFEEL.medium.shake===4) instead, so it still proves "a landed hit queues
+// hit-feel fx" without asserting the one combination (light+shake) the ruling explicitly forbids.
+Test.add('a hit queues spark and popup fx; a medium also queues shake; a block queues dust',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);const kinds=f.fx.map(e=>e.kind);
+  ok(kinds.includes('spark')&&kinds.includes('popup'),kinds.join());
+  const m=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});closeIn(m);run(m,20);
+  ok(m.fx.some(e=>e.kind==='shake'),'a landed medium must queue shake: '+m.fx.map(e=>e.kind).join());
+  const g=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(g);run(g,15);ok(g.fx.some(e=>e.kind==='dust'))});
 Test.add('KO starts slow-mo and G steps the sim every 4th tick during it',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);f.p2.hp=1;run(f,5);ok(f.over&&f.slowmo>0);const before=f.slowmo;G.fight=f;G.state='FIGHT';G._tickN=0;for(let i=0;i<8;i++)G.tick();eq(f.slowmo,before-2);G.fight=null;G.state='TITLE'});
 Test.add('a parry works again after PARRY_LOCKOUT expires',()=>{
   const lightF=PARRY_LOCKOUT+10,blockF=lightF+2;
@@ -4017,11 +4026,78 @@ Test.add('an already-in-range medium keeps its old flat startup and speed (bit-i
 
 // --- Task 7.4: hit-feel pass (directional shake, camera punch-in, per-class impact fx, intercept
 // time dilation, per-node hit audio) -----------------------------------------------------------
-Test.add('a landed hit queues shake fx carrying the attacker\'s own facing as dir',()=>{
+// Task 7.4 fix round 1 (frozen ruling, exact HITFEEL table -- 40_movedata.js): per-class shake/punch
+// magnitudes, keyed off the landed move's own class (light/medium/heavy/s1/s2/s3), intercept
+// overriding whatever class the landing move actually was. p1 (carl) faces +1 in every mkFight/
+// closeIn fixture below; a second p2-attacks-p1 fixture (face -1) proves dir isn't hardcoded.
+Test.add('HITFEEL: a landed light pushes neither shake nor punch',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
-  const sh=f.fx.find(e=>e.kind==='shake');
-  ok(sh,'a landed hit must still queue a shake fx: '+f.fx.map(e=>e.kind).join());
-  eq(sh.dir,f.p1.face,"shake fx dir must equal the attacker's (p1's) own facing")});
+  const kinds=f.fx.map(e=>e.kind);
+  ok(!kinds.includes('shake'),'a plain light must push no shake fx: '+kinds.join());
+  ok(!kinds.includes('punch'),'a plain light must push no punch fx: '+kinds.join())});
+Test.add('HITFEEL: a landed medium pushes shake 4 (dir = attacker facing, both facings) and punch .02 hold 6',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});closeIn(f);run(f,20);
+  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
+  ok(sh,'a landed medium must push shake: '+f.fx.map(e=>e.kind).join());
+  eq(sh.amt,4,'medium shake amt must be 4');eq(sh.dir,f.p1.face,"shake dir must equal the attacker's own facing (+1 here)");
+  ok(pu,'a landed medium must push punch: '+f.fx.map(e=>e.kind).join());
+  eq(pu.pct,.02,'medium punch pct must be .02');eq(pu.hold,6,'medium punch hold must be 6');ok(!pu.creep,'medium punch must not creep');
+  // Flip who's attacking (p2 attacks p1, face -1) to prove dir tracks the actual attacker, not a
+  // hardcoded sign -- p2.face is always -1 (Fighter's own side-2 constructor convention).
+  const g=mkFight({ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});g.p1.x=500;g.p2.x=560;run(g,20);
+  const sh2=g.fx.find(e=>e.kind==='shake');
+  ok(sh2,'a landed medium (p2 attacking) must push shake: '+g.fx.map(e=>e.kind).join());
+  eq(sh2.dir,g.p2.face,"shake dir must equal p2's own facing (-1) when p2 is the attacker")});
+Test.add('HITFEEL: a landed heavy pushes shake 8 and punch .04 hold 10',()=>{
+  // A full continuous hold auto-fires once MOVES.heavy.charge frames elapse (same as the pre-
+  // existing "a full hold through the move's own charge frames must still auto-fire" test above).
+  const f=mkFight({ctrl1:Ctrl.hold({heavy:true})});closeIn(f);
+  for(let i=0;i<MOVES.heavy.charge+40&&!f.fx.some(e=>e.kind==='shake');i++)f.step();
+  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
+  ok(sh,'a landed heavy must push shake: '+f.fx.map(e=>e.kind).join());
+  eq(sh.amt,8,'heavy shake amt must be 8');eq(sh.dir,f.p1.face);
+  ok(pu,'a landed heavy must push punch: '+f.fx.map(e=>e.kind).join());
+  eq(pu.pct,.04,'heavy punch pct must be .04');eq(pu.hold,10,'heavy punch hold must be 10');ok(!pu.creep,'heavy punch must not creep')});
+Test.add('HITFEEL: a multi-hit S1 pushes shake/punch only on its final sub-hit, and the punch descriptor carries creep',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:1}}])});closeIn(f);f.p1.power=100;
+  const hitsSoFar=()=>f.log.filter(e=>e.type==='hit').length;
+  let sawShakeEarly=false,sawPunchEarly=false;
+  for(let i=0;i<40;i++){
+    f.fx.length=0; // isolate exactly what THIS tick's step pushed
+    const before=hitsSoFar();f.step();const after=hitsSoFar();
+    if(after>before&&after<MOVES.s1.hits){ // a sub-hit landed that is NOT the final one
+      if(f.fx.some(e=>e.kind==='shake'))sawShakeEarly=true;
+      if(f.fx.some(e=>e.kind==='punch'))sawPunchEarly=true}
+    if(after===MOVES.s1.hits)break}
+  ok(!sawShakeEarly,'an S1 sub-hit before the final one must never push shake');
+  ok(!sawPunchEarly,'an S1 sub-hit before the final one must never push punch');
+  eq(hitsSoFar(),MOVES.s1.hits,'sanity: all of S1\'s hits must have landed');
+  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
+  ok(sh,'the final S1 sub-hit must push shake: '+f.fx.map(e=>e.kind).join());
+  eq(sh.amt,6,'S1 shake amt must be 6');
+  ok(pu,'the final S1 sub-hit must push punch: '+f.fx.map(e=>e.kind).join());
+  eq(pu.pct,.03,'S1 punch pct must be .03');eq(pu.hold,6,'S1 punch hold must be 6');
+  ok(pu.creep,'S1\'s punch descriptor must carry creep:true')});
+Test.add('HITFEEL: intercept pushes shake 10 and punch .05 regardless of the intercepting move (overrides its own class)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});
+  closeIn(f);run(f,5);
+  ok(f.log.some(e=>e.type==='intercept'),'sanity: this must actually be an intercept');
+  const sh=f.fx.find(e=>e.kind==='shake'),pu=f.fx.find(e=>e.kind==='punch');
+  ok(sh,'an intercept must push shake: '+f.fx.map(e=>e.kind).join());
+  eq(sh.amt,10,'intercept shake amt must be the fixed 10, not the intercepting light\'s own (0) HITFEEL.light.shake');
+  ok(pu,'an intercept must push punch: '+f.fx.map(e=>e.kind).join());
+  eq(pu.pct,.05,'intercept punch pct must be .05');eq(pu.hold,6,'intercept punch hold must be 6')});
+Test.add('FX.push honors a per-descriptor hold (heavy\'s own 10 vs PUNCH_HOLD\'s fallback 6), and the camera cap still holds throughout',()=>{
+  FX.reset();
+  FX.push({kind:'punch',pct:.04,hold:10}); // heavy's own HITFEEL entry, verbatim
+  for(let i=0;i<10;i++){eq(FX.punch,.04,'punch must stay flat at its target through all 10 of its own held frames, frame '+i);FX.update()}
+  FX.update(); // one more: the 10 held frames have now fully elapsed, so THIS update starts the ease
+  ok(FX.punch<.04,'punch must start easing once its own 10-frame hold (not the 6-frame PUNCH_HOLD fallback) has fully elapsed');
+  FX.reset();
+  const cam={x:0,zoom:1},f={camTarget:{x:0,zoom:1.0}};
+  FX.push({kind:'punch',pct:.04,hold:10});
+  for(let i=0;i<40;i++){FX.update();Camera.update(cam,f,null,1.03);ok(cam.zoom<=1.03+1e-9,'cam.zoom must never exceed capNow at any step, got '+cam.zoom)}
+  FX.reset()});
 Test.add('FX.shake is a decaying {x,y} vector whose x sign follows dir, and reduceMotion aside, y is always populated',()=>{
   FX.reset();FX.push({kind:'shake',amt:8,dir:1});
   ok(FX.shake.x>0,'dir:1 must kick the shake vector to a positive x, got '+FX.shake.x);

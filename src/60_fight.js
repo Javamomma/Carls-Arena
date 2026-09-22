@@ -216,18 +216,32 @@ class Fight{
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
     // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
     this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
-    // Task 7.4: dir carries the attacker's own facing (att.face) so FX's own directional shake
-    // vector (72_fx.js) always kicks the camera the same way the exchange was actually facing.
-    this.fx.push({kind:'shake',amt:m.hitstop,dir:att.face});
-    // Task 7.3 (frozen interface, exact ruling): the intercept's own read/reward gets its own punch-
-    // in fx term (Task 7.4 composes fx.pct into the camera zoom) and its own INTERCEPT! callout, on
-    // top of (never instead of) the plain damage popup/spark just pushed above -- and its own event,
-    // carrying {who,dir} (dir is att's own facing, per the ruling) so Task 7.4's directional shake can
-    // tell which way to kick the camera. Presentation stays minimal here on purpose (Task 7.4 owns the
-    // full hit-feel pass); see emitTell's own comment for why this needs a dedicated event distinct
-    // from the plain 'hit' one just below.
+    // Task 7.4 fix round 1 (frozen ruling, exact table): HITFEEL[hfKey] (40_movedata.js) is the
+    // controller's own per-class shake/punch magnitudes -- intercept overrides the landed move's own
+    // class entirely (an intercepting hit always feels like an intercept, whatever move actually
+    // caught the foe); light carries shake:0/punch:0, so it pushes neither fx, matching the ruling
+    // "light: no shake/no punch". Gated by the exact same "single-hit move, or the LAST blow of a
+    // multi-hit special" condition (!m.hits||last) hitstop itself already uses just above -- a
+    // multi-hit special's own shake/punch fires once, off its final landed sub-hit, never per sub-hit
+    // (every sub-hit still gets its own popup/spark/impact fx just above, unaffected).
+    if(!m.hits||last){
+      const hfKey=intercept?'intercept':(HITFEEL[att.moveName]?att.moveName:null);
+      const hf=hfKey&&HITFEEL[hfKey];
+      if(hf){
+        // dir carries the attacker's own facing (att.face) so FX's own directional shake vector
+        // (72_fx.js) always kicks the camera the same way the exchange was actually facing.
+        if(hf.shake>0)this.fx.push({kind:'shake',amt:hf.shake,dir:att.face});
+        // hold/creep forward straight from the table -- the presentation side's own 'punch' push
+        // case (72_fx.js) reads both (hold overrides its own default per-push; creep eases the
+        // punch IN over that hold instead of snapping straight to it, the S1/S2 "final hit...
+        // creep" ruling).
+        if(hf.punch>0)this.fx.push({kind:'punch',pct:hf.punch,hold:hf.hold,creep:!!hf.creep})}}
+    // Task 7.3 (frozen interface, exact ruling): the intercept's own read/reward gets its own
+    // INTERCEPT! callout, on top of (never instead of) the plain damage popup/spark just pushed
+    // above -- and its own event, carrying {who,dir} (dir is att's own facing, per the ruling) so
+    // Task 7.4's directional shake can tell which way to kick the camera. Its own shake/punch fx are
+    // pushed by the HITFEEL block just above (keyed off 'intercept'), not here.
     if(intercept){
-      this.fx.push({kind:'punch',pct:.05});
       this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'INTERCEPT!',col:'#ff9d3b',big:true});
       this.emitTell('intercept',att,att.face)}
     this.emit('hit',att,def,dmg,att.moveName)}

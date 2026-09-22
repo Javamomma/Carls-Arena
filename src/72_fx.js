@@ -11,10 +11,18 @@ const FX={list:[],
   shake:{x:0,y:0},
   // Task 7.4: FX.punch is the camera's own additive zoom term -- Camera.update (65_stage.js)
   // composes cam.zoom = min(base*(1+FX.punch), capNow), the frozen interface. Envelope shape is
-  // "jump to target, hold PUNCH_HOLD frames, then ease (decay) back to 0" -- see push()'s 'punch'
-  // case and update() below. PUNCH_HOLD/PUNCH_EASE are exposed as named constants (not just inlined
-  // numbers) so a test can assert the envelope's own shape without hardcoding a magic frame count.
-  punch:0,punchTarget:0,punchHold:0,PUNCH_HOLD:6,PUNCH_EASE:.82,
+  // "jump to target, hold `hold` frames, then ease (decay) back to 0" -- see push()'s 'punch' case
+  // and update() below. PUNCH_HOLD/PUNCH_EASE are named constants (not just inlined numbers) so a
+  // test can assert the envelope's own shape without hardcoding a magic frame count; PUNCH_HOLD is
+  // now only the FALLBACK hold length (fix round 1) -- Fight.resolve's own HITFEEL table
+  // (40_movedata.js) passes an explicit `hold` per push (heavy's own 10-frame hold vs. medium's 6),
+  // read here via ev.hold, with PUNCH_HOLD covering any push that omits one.
+  // Fix round 1: punchCreep/punchStart/punchHoldTotal back the 'creep' envelope (S1/S2's own "final
+  // hit... creep" ruling) -- a creep push eases the punch term IN, from wherever it currently sits
+  // toward its target, over its own `hold` window, instead of snapping to target immediately the
+  // way every other push (plain shake-only hits, medium, heavy, intercept) still does.
+  punch:0,punchTarget:0,punchHold:0,punchCreep:false,punchStart:0,punchHoldTotal:0,
+  PUNCH_HOLD:6,PUNCH_EASE:.82,
   flash:0,card:null,shieldDown:null,
   // Task 7.1: label + color per timed effect id, read only here (presentation) -- Effects.apply
   // (48_effects.js, sim-side) pushes a bare {kind:'effectPopup',x,y,id,stacks} descriptor with no
@@ -32,6 +40,7 @@ const FX={list:[],
     // below), since Effects.apply has no notion of a facing-direction streak.
     dexterity:{text:'DEXTERITY',col:'#4fc3f7'}},
   reset(){this.list.length=0;this.shake={x:0,y:0};this.punch=0;this.punchTarget=0;this.punchHold=0;
+    this.punchCreep=false;this.punchStart=0;this.punchHoldTotal=0;
     this.flash=0;this.card=null;this.shieldDown=null},
   _seed(i){const fr=(G.fight&&G.fight.frame)||0;return((fr*97+i*131+1)>>>0)||1},
   push(ev){
@@ -136,14 +145,25 @@ const FX={list:[],
           if(mag>24){const s=24/mag;this.shake.x*=s;this.shake.y*=s}}
         break;
       // Task 7.4 (frozen interface): the camera's own additive zoom term -- pushed by Fight.resolve
-      // on every intercept (fx.pct, currently always .05) alongside its own INTERCEPT! popup.
-      // Envelope: jump straight to the pushed pct (never below it -- a re-push while one is already
-      // easing re-holds at the higher of the two, same "louder wins" rule popups/flash already
-      // follow elsewhere in this file), hold for PUNCH_HOLD frames, then ease() decays it back to 0.
+      // per HITFEEL[hfKey] (40_movedata.js) on any hit whose class carries a nonzero punch (medium/
+      // heavy/S1/S2's final hit/intercept; light and S3 never push one at all). ev.hold overrides
+      // PUNCH_HOLD (fix round 1: heavy's own 10-frame hold vs. medium's 6 vs. the fallback 6), and
+      // ev.creep (S1/S2 only) switches the envelope from "jump straight to pct" to "ease IN toward
+      // pct over the hold window" -- see update()'s own comment for the two envelope shapes.
+      // Non-creep envelope: jump straight to the pushed pct (never below it -- a re-push while one
+      // is already easing re-holds at the higher of the two, same "louder wins" rule popups/flash
+      // already follow elsewhere in this file), hold for `hold` frames, then ease() decays to 0.
+      // Creep envelope: capture the CURRENT punch value as punchStart, then ramp from punchStart to
+      // pct over `hold` frames (update() does the interpolation); once the hold window ends, the
+      // same ease()-back-to-0 takes over, same as the non-creep case.
       // Gated by reduceMotion, same as shake/flash -- it's a camera-motion fx too.
       case'punch':
         if(!Save.data.settings.reduceMotion){
-          this.punchTarget=Math.max(this.punch,ev.pct||0);this.punch=this.punchTarget;this.punchHold=this.PUNCH_HOLD}
+          const hold=ev.hold!==undefined?ev.hold:this.PUNCH_HOLD,pct=ev.pct||0;
+          if(ev.creep){
+            this.punchStart=this.punch;this.punchTarget=pct;this.punchHoldTotal=hold;this.punchHold=hold;this.punchCreep=true}
+          else{
+            this.punchTarget=Math.max(this.punch,pct);this.punch=this.punchTarget;this.punchHold=hold;this.punchCreep=false}}
         break;
       case'flash':
         if(!Save.data.settings.reduceMotion)this.flash=Math.max(this.flash,ev.frames||0);
@@ -165,11 +185,19 @@ const FX={list:[],
     // once its magnitude is negligible -- same "decay then snap to exact 0" shape the old scalar had.
     this.shake.x*=.85;this.shake.y*=.85;
     if(Math.hypot(this.shake.x,this.shake.y)<.05){this.shake.x=0;this.shake.y=0}
-    // Task 7.4: punch's own hold-then-ease envelope -- holds flat at its pushed target for
-    // punchHold frames (armed by push()'s 'punch' case), then eases (multiplicative decay, same
-    // shape as shake) back to exactly 0.
-    if(this.punchHold>0){this.punch=this.punchTarget;this.punchHold--}
-    else{this.punch*=this.PUNCH_EASE;if(this.punch<.001)this.punch=0}
+    // Task 7.4: punch's own hold-then-ease envelope -- for punchHold frames (armed by push()'s
+    // 'punch' case) it either holds flat at its pushed target (the plain case) or, for a creep push
+    // (fix round 1: S1/S2's own ruling), ramps LINEARLY from punchStart toward punchTarget across
+    // punchHoldTotal frames, reaching punchTarget exactly on the hold window's last frame -- either
+    // way, once the hold frames run out, the same ease() (multiplicative decay, same shape as shake)
+    // takes it back to exactly 0.
+    if(this.punchHold>0){
+      if(this.punchCreep){
+        const elapsed=this.punchHoldTotal-this.punchHold,t=Math.min(1,(elapsed+1)/this.punchHoldTotal);
+        this.punch=this.punchStart+(this.punchTarget-this.punchStart)*t}
+      else this.punch=this.punchTarget;
+      this.punchHold--}
+    else{this.punch*=this.PUNCH_EASE;if(this.punch<.001){this.punch=0;this.punchCreep=false}}
     if(this.flash>0)this.flash--;
     // Card runs on its own clock (advanced only here, from the wall-clock/screenshot render loop),
     // independent of fight.cinematic (G.tick decrements that once per sim tick); both count down
