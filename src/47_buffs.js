@@ -46,7 +46,20 @@ const BUFFS={
       const dmg=Math.round(ref.chip*0.2);if(dmg<=0)return;
       att.hp=Math.max(0,att.hp-dmg);
       fight.emit('thorns',holder,att,dmg);
-      fight.fx.push({kind:'popup',x:att.x,y:FLOOR-100,text:String(dmg),col:'#ff4444',big:false})}}};
+      fight.fx.push({kind:'popup',x:att.x,y:FLOOR-100,text:String(dmg),col:'#ff4444',big:false})}},
+  secondWind:{id:'secondWind',
+    // Sponsor perk 'Second Wind' (Task 5.2, Phase 5 ruling #2: "one regen tick at 20% hp per
+    // fight"): the first frame the holder's hp is at or under 20% of maxHp, heal +15% of maxHp
+    // (capped at maxHp), then never fire again for the rest of the fight. holder._secondWindSpent is
+    // per-Fighter one-shot state this buff needs and no other buff does -- Fighter's own constructor
+    // (50_fighter.js) declares the field (defaulting false) so every fighter starts unspent, not just
+    // ones actually holding this buff; Buffs.apply never re-resolves per frame, so there's nothing
+    // else to reset it mid-fight.
+    onFrame(fight,holder,foe){
+      if(holder._secondWindSpent||holder.hp<=0)return;
+      if(holder.hp<=holder.maxHp*0.2){
+        holder._secondWindSpent=true;
+        holder.hp=Math.min(holder.maxHp,holder.hp+Math.round(holder.maxHp*0.15))}}}};
 const Buffs={
   // Resolves ids[] to BUFFS objects and sets holder.buffs (replacing whatever was there). Called
   // once at fight/encounter setup, never per frame, so there's no per-frame allocation on the hot

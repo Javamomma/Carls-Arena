@@ -4,6 +4,12 @@ class Fighter{
     this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
     this.combo=0;this.stun=0;this.inv=0;this.blockAge=0;this.dx=0; // last tick's x delta; Rig.poseFor reads it to pick idle vs walk
     this.parryLock=0;this.blockPressedAt=0;this.pressTick=0;this._parried=false;this._mdCache=null;
+    // Task 5.2: parryBonus widens PARRY_WINDOW by this many frames (Sponsor perk "Parry Insurance",
+    // set by G.startFight from Sponsors.apply's parryWindow) -- 0 for every fighter that isn't the
+    // live player Fighter a fight actually started with an owned insurance perk. secondWindSpent:
+    // see BUFFS.secondWind's own comment (47_buffs.js) for why this one-shot flag lives on the
+    // Fighter itself rather than as buff-local state.
+    this.parryBonus=0;this._secondWindSpent=false;
     this.buffs=[]; // resolved BUFFS objects (Buffs.apply sets this once; Fight never re-resolves ids per frame)
     // wasKnockedDown (Task 3.6 refactor): set true the instant this fighter enters KNOCKDOWN
     // (setState below), stays true through the knockdown timer and the post-getup invulnerable
@@ -44,11 +50,16 @@ class Fighter{
   // Consume one frame of intent. Called before tick().
   act(intent){this.pressTick++; // monotonic frame counter (Fighter has no fight-frame ref of its own); stamps blockPressedAt
     const prevAge=this.blockAge;this.blockAge=intent.block?this.blockAge+1:0;
-    // Parry lockout bookkeeping: a block press that closes its PARRY_WINDOW (or ends) without a
-    // parry arms a PARRY_LOCKOUT-frame lock; a successful parry (flagged by Fight.resolve) clears it.
+    // Parry lockout bookkeeping: a block press that closes its (possibly widened, see parryBonus
+    // above) PARRY_WINDOW without a parry arms a PARRY_LOCKOUT-frame lock; a successful parry
+    // (flagged by Fight.resolve) clears it. Both bounds below add this.parryBonus so a fighter
+    // holding Parry Insurance gets the lockout armed exactly when THEIR widened window closes, not
+    // the base PARRY_WINDOW -- Fight.detect's own parry check (60_fight.js) widens by the same
+    // parryBonus, and these two must stay in lockstep or a widened-window parry attempt would find
+    // parryLock already armed from a lockout that fired too early against the un-widened window.
     if(prevAge===0&&this.blockAge===1){this.blockPressedAt=this.pressTick;this._parried=false}
-    if(intent.block&&this.blockAge===PARRY_WINDOW+1&&!this._parried)this.parryLock=PARRY_LOCKOUT;
-    if(!intent.block&&prevAge>0&&prevAge<=PARRY_WINDOW&&!this._parried)this.parryLock=PARRY_LOCKOUT;
+    if(intent.block&&this.blockAge===PARRY_WINDOW+this.parryBonus+1&&!this._parried)this.parryLock=PARRY_LOCKOUT;
+    if(!intent.block&&prevAge>0&&prevAge<=PARRY_WINDOW+this.parryBonus&&!this._parried)this.parryLock=PARRY_LOCKOUT;
     const S=this.state;
     if(S==='IDLE'||S==='BLOCK'){
       if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special);

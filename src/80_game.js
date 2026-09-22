@@ -103,7 +103,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.champ=champ;
     let p1def=DEFS[champ];
     const rosterEntry=Save.data.roster[champ];
-    if(rosterEntry){const d=Stats.derive(p1def,rosterEntry);p1def=Object.assign({},p1def,{hp:d.hp,atk:d.atk})}
+    // Task 5.2: Sponsors.apply(opts) is computed from a FRESH {playerBuffs:o.playerBuffs} object,
+    // never from o itself -- this.lastFightOpts (captured verbatim as `o` right at the top of this
+    // function, for FIGHT AGAIN's replay) must stay perk-free, or replaying it would fold every owned
+    // perk's playerBuffs/atkMul/parryWindow/viewersMul in a SECOND time on top of Sponsors.apply
+    // running again next call. perkOpts.statMul.atk/parryWindow/viewersMul are consumed below;
+    // perkOpts.playerBuffs is consumed alongside the encounter's own buffIds a few lines down.
+    const perkOpts=Sponsors.apply({playerBuffs:o.playerBuffs});
+    if(rosterEntry){const d=Stats.derive(p1def,rosterEntry);
+      p1def=Object.assign({},p1def,{hp:d.hp,atk:Math.round(d.atk*perkOpts.statMul.atk)})}
     this.fight=new Fight({seed,p1:p1def,p2:p2def,clock:o.clock,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
     // ids, not enc.buffs' resolved objects, so the sim's Buffs.apply does its own resolution instead
@@ -111,9 +119,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(this.encounter&&this.encounter.buffIds&&this.encounter.buffIds.length)Buffs.apply(this.fight,this.fight.p2,this.encounter.buffIds);
     // Fix-wave item 5: player-side buff path (o.playerBuffs — a plain id list, same shape as
     // enc.buffIds above) applied to p1 via the exact same Buffs.apply the encounter/enemy path
-    // already uses. No caller in this codebase sets it yet (Phase 4's crystals are the intended
-    // consumer); tests/harness.py's --player-buffs exercises it in the meantime.
-    if(o.playerBuffs&&o.playerBuffs.length)Buffs.apply(this.fight,this.fight.p1,o.playerBuffs);
+    // already uses. Task 5.2: perkOpts.playerBuffs is o.playerBuffs (if any) plus every owned perk's
+    // own buff id (e.g. secondWind), so an owned perk applies even when the caller passed no
+    // playerBuffs of its own.
+    if(perkOpts.playerBuffs.length)Buffs.apply(this.fight,this.fight.p1,perkOpts.playerBuffs);
+    // Task 5.2: 'Parry Insurance' widens the live player Fighter's own parry window -- see
+    // Fight.detect/Fighter.act's own parryBonus comments (60_fight.js/50_fighter.js) for how it's
+    // consumed. Set directly on the just-constructed Fighter (never threaded through Fighter's
+    // constructor options), same as every other post-construction fight setup below.
+    this.fight.p1.parryBonus=perkOpts.parryWindow;
     // Per-fight camera zoom cap: the worst-case topmost point (any pose, any prop — see Rig.extent)
     // either fighter can strike, scaled by their own def.scale, determines how far in the camera may
     // zoom before that point crosses HUD_LINE. Two ceilings share the same ratio: 1.12 is the normal
@@ -138,7 +152,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
      const tallestTop=Math.max(p1ext.top,p2ext.top);
      const ratio=(Camera.anchorY-HUD_LINE)/tallestTop;
      this.zoomCap=Math.min(1.12,ratio);this.cineZoomCap=Math.min(1.28,ratio)}
-    this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();Broadcast.reset();
+    // Task 5.2: perkOpts.viewersMul (the 'crowd' perk, 1 when unowned) is handed straight to
+    // Broadcast.reset -- see its own comment (13_broadcast.js) for why it's stashed there once per
+    // fight instead of read live.
+    this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();Broadcast.reset({viewersMul:perkOpts.viewersMul});
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
     // regardless of how recently the previous fight's last toast landed.

@@ -1474,6 +1474,133 @@ Test.add('Arena FIGHT AGAIN draws a fresh Arena.start() encounter for the post-w
   ok(G.fight.p2.def.id!==staleEnemyId,'must not be the same stale enemy the fight just beat');
   ok(G.fight.p2.maxHp!==staleHp||G.fight.p2.def.id!==staleEnemyId,'must not be the stale resolved encounter object');
   G.toTitle();G.sim=false});
+// --- Task 5.2: sponsor perks (Sponsors, secondWind, parry-window widening) ---------------------
+Test.add('Sponsors.buy deducts gold and flags the perk owned; refuses (no mutation) when short or already owned',()=>{
+  Save.data=Meta.defaults();Save.data.gold=800;
+  ok(Sponsors.buy('dashers'));
+  eq(Save.data.gold,0);
+  ok(Sponsors.owned().includes('dashers'));
+  eq(Sponsors.buy('dashers'),false,'already owned must refuse');
+  eq(Save.data.gold,0,'a refused duplicate buy must not double-charge');
+  Save.data.gold=100;
+  eq(Sponsors.buy('insurance'),false,'short on gold must refuse');
+  ok(!Sponsors.owned().includes('insurance'));
+  eq(Save.data.gold,100,'a refused buy must never touch gold');
+  ok(threw(()=>Sponsors.buy('nope')),'an unknown perk id must throw')});
+Test.add('Sponsors.owned lists every purchased perk id, empty on a fresh save',()=>{
+  Save.data=Meta.defaults();
+  eq(Sponsors.owned().length,0,'a fresh save owns no perks');
+  Save.data.gold=Sponsors.PERKS.dashers.cost+Sponsors.PERKS.insurance.cost;
+  Sponsors.buy('dashers');Sponsors.buy('insurance');
+  eq(Sponsors.owned().length,2);
+  ok(Sponsors.owned().includes('dashers')&&Sponsors.owned().includes('insurance'))});
+Test.add('Sponsors.apply folds every owned perk into opts: appends buffs, multiplies atkMul/viewersMul, sums parryWindow',()=>{
+  Save.data=Meta.defaults();
+  Save.data.gold=Sponsors.PERKS.dashers.cost+Sponsors.PERKS.insurance.cost+Sponsors.PERKS.secondWind.cost+Sponsors.PERKS.crowd.cost;
+  Sponsors.buy('dashers');Sponsors.buy('insurance');Sponsors.buy('secondWind');Sponsors.buy('crowd');
+  const o=Sponsors.apply({playerBuffs:['powerGain']});
+  ok(o.playerBuffs.includes('powerGain'),'must not drop an existing playerBuffs entry');
+  ok(o.playerBuffs.includes('secondWind'),'secondWind\'s own buff id must be appended');
+  eq(o.playerBuffs.length,2,'no duplicate/extra buffs beyond the one existing entry plus secondWind');
+  eq(o.statMul.atk,1.05,'dashers\' atkMul');
+  eq(o.parryWindow,2,'insurance\'s parryWindow');
+  eq(o.viewersMul,1.2,'crowd\'s viewersMul')});
+Test.add('Sponsors.apply with no owned perks and no opts is a pure no-op extension',()=>{
+  Save.data=Meta.defaults();
+  const o=Sponsors.apply();
+  eq(o.statMul.atk,1);eq(o.parryWindow,0);eq(o.viewersMul,1);eq(o.playerBuffs.length,0)});
+Test.add('G.startFight applies the dashers perk\'s atkMul to p1\'s Stats.derive-d atk',()=>{
+  Save.data=Meta.defaults();Save.data.gold=Sponsors.PERKS.dashers.cost;Sponsors.buy('dashers');
+  const derived=Stats.derive(CHAMPS.carl,Save.data.roster.carl).atk;
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(G.fight.p1.def.atk,Math.round(derived*1.05));
+  G.toTitle()});
+Test.add('G.startFight leaves p1 atk unmultiplied when no atk-affecting perk is owned',()=>{
+  Save.data=Meta.defaults();
+  const derived=Stats.derive(CHAMPS.carl,Save.data.roster.carl).atk;
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(G.fight.p1.def.atk,derived);
+  G.toTitle()});
+Test.add('G.startFight sets the live p1 Fighter\'s parryBonus from the insurance perk\'s parryWindow (0 when unowned)',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(G.fight.p1.parryBonus,0);
+  G.toTitle();
+  Save.data.gold=Sponsors.PERKS.insurance.cost;Sponsors.buy('insurance');
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(G.fight.p1.parryBonus,2);
+  G.toTitle()});
+Test.add('G.startFight threads the crowd perk\'s viewersMul into Broadcast.reset',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(Broadcast._viewersMul,1,'unowned crowd must leave the multiplier at 1');
+  G.toTitle();
+  Save.data.gold=Sponsors.PERKS.crowd.cost;Sponsors.buy('crowd');
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(Broadcast._viewersMul,1.2);
+  G.toTitle()});
+Test.add('G.startFight applies an owned perk\'s buff (secondWind) to p1 via the same Buffs.apply path as playerBuffs',()=>{
+  Save.data=Meta.defaults();Save.data.gold=Sponsors.PERKS.secondWind.cost;Sponsors.buy('secondWind');
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  ok(G.fight.p1.buffs.some(b=>b.id==='secondWind'),'p1 must hold the secondWind buff');
+  G.toTitle();
+  Save.data=Meta.defaults();
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy',playerBuffs:['powerGain']});
+  ok(G.fight.p1.buffs.some(b=>b.id==='powerGain'),'an explicit playerBuffs entry must still apply with no perks owned');
+  eq(G.fight.p1.buffs.length,1);
+  G.toTitle()});
+Test.add('Broadcast.reset({viewersMul}) scales a positive gain (the crowd perk) but a plain reset() never carries a stale multiplier over',()=>{
+  Broadcast.reset({viewersMul:1.2});Broadcast._firstBlood=true;
+  const f={p1:{combo:1,moveName:'light1',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,60,f); // base 60*2*1=120, crowd x1.2 = 144
+  eq(Broadcast.state.viewers,144);
+  Broadcast.reset();
+  eq(Broadcast._viewersMul,1,'a bare reset() must reset to no multiplier, not keep the last one')});
+Test.add('secondWind heals the holder 15% maxHp exactly once, the first frame hp is <=20% maxHp, never again',()=>{
+  const f=mkFight();Buffs.apply(f,f.p2,['secondWind']);
+  f.p2.hp=f.p2.maxHp*0.2;
+  run(f,1);
+  eq(f.p2.hp,Math.round(f.p2.maxHp*0.2)+Math.round(f.p2.maxHp*0.15),'must heal +15% maxHp on the triggering frame');
+  const healedHp=f.p2.hp;
+  run(f,120);
+  eq(f.p2.hp,healedHp,'must never heal again once spent, even while still under 20%');
+  f.p2.hp=f.p2.maxHp*0.05;run(f,1);
+  eq(f.p2.hp,f.p2.maxHp*0.05,'must not fire a second time even if hp drops low again later')});
+Test.add('secondWind never fires while the holder stays above 20% maxHp',()=>{
+  const f=mkFight();Buffs.apply(f,f.p2,['secondWind']);
+  f.p2.hp=f.p2.maxHp*0.5;
+  run(f,60);
+  eq(f.p2.hp,f.p2.maxHp*0.5,'no heal until hp actually drops to <=20%')});
+Test.add('a press at PARRY_WINDOW+1 frames parries with the insurance perk\'s +2 parryBonus, but just blocks without it',()=>{
+  // L(2) fires the light exactly on the attacker's 3rd step call; held block from step 1 gives the
+  // defender blockAge===7 (PARRY_WINDOW+1) on the exact step the attack's active frame lands — see
+  // this test's own derivation in the Task 5.2 report for the full frame-by-frame walkthrough.
+  const withBonus=mkFight({ctrl1:Ctrl.script([L(2)]),ctrl2:Ctrl.hold({block:true})});closeIn(withBonus);
+  withBonus.p2.parryBonus=2;
+  run(withBonus,7);
+  eq(withBonus.log[withBonus.log.length-1].type,'parry','blockAge 7 <= PARRY_WINDOW(6)+2 must parry');
+  const noBonus=mkFight({ctrl1:Ctrl.script([L(2)]),ctrl2:Ctrl.hold({block:true})});closeIn(noBonus);
+  run(noBonus,7);
+  eq(noBonus.log[noBonus.log.length-1].type,'block','blockAge 7 > PARRY_WINDOW(6) with no bonus must just block')});
+Test.add('the kiosk renders a PERKS row per Sponsors.PERKS entry, showing OWNED for an already-purchased perk and BUY otherwise',()=>{
+  Save.data=Meta.defaults();Save.data.gold=Sponsors.PERKS.dashers.cost;Sponsors.buy('dashers');
+  Screens.shop();
+  const rows=[...document.querySelectorAll('#shopPerks .perkrow')];
+  eq(rows.length,Object.keys(Sponsors.PERKS).length);
+  const dashersBtn=document.getElementById('buyPerkDashers');
+  ok(dashersBtn,'buyPerkDashers must exist');
+  eq(dashersBtn.textContent,'OWNED');ok(dashersBtn.disabled,'an owned perk\'s button must be disabled');
+  const insuranceBtn=document.getElementById('buyPerkInsurance');
+  eq(insuranceBtn.textContent,'BUY');
+  Screens.title()});
+Test.add('clicking a kiosk PERKS BUY button purchases it and re-renders as OWNED',()=>{
+  Save.data=Meta.defaults();Save.data.gold=Sponsors.PERKS.insurance.cost;
+  Screens.shop();
+  document.getElementById('buyPerkInsurance').click();
+  eq(Save.data.gold,0);
+  ok(Sponsors.owned().includes('insurance'));
+  eq(document.getElementById('buyPerkInsurance').textContent,'OWNED');
+  Screens.title()});
 // Task 4.5: Screens (title, map, roster, crystal, shop, arena, result) ---------------------------
 Test.add('every Phase 4 screen\'s DOM ids exist',()=>{
   const ids=['title','map','roster','crystal','shop','arena','result','pauseMenu',

@@ -252,6 +252,9 @@ const Screens={
     const item=Meta.SHOP_ITEMS[itemId];
     for(const c in item.cost)if((Save.data[c]||0)<item.cost[c])return false;
     return true},
+  // Task 5.2: same short-on-gold check Sponsors.buy itself does, exposed here so a card's BUY button
+  // can start out correctly disabled instead of only refusing after a click.
+  canAffordPerk(id){return(Save.data.gold||0)>=Sponsors.PERKS[id].cost},
   renderShop(){
     const cur=document.getElementById('shopCurrency');
     const catParts=Object.keys(Save.data.cats).map(c=>c.slice(0,4).toUpperCase()+' '+Save.data.cats[c]);
@@ -273,6 +276,25 @@ const Screens={
         :(()=>{Meta.buy(itemId);Screens.refresh()});
       card.appendChild(h);card.appendChild(cost);card.appendChild(btn);
       wrap.appendChild(card)}
+    // Task 5.2: a PERKS section beneath the consumable-item cards above -- a permanent, one-time
+    // buy per perk (never a `run`/`grant` item, so it doesn't belong in Meta.SHOP_ITEMS), rendered
+    // from Sponsors.PERKS the same "one table, one loop" way the cards above render from
+    // Meta.SHOP_ITEMS. Compact list rows (not another row of big .kcard tiles) so both sections fit
+    // 854x480 without scrolling in the common case; #shopBody (00_head.html) scrolls if they don't.
+    const pwrap=document.getElementById('shopPerks');pwrap.innerHTML='';
+    for(const id in Sponsors.PERKS){
+      const perk=Sponsors.PERKS[id],owned=Sponsors.owned().includes(id);
+      const row=document.createElement('div');row.className='perkrow';
+      const info=document.createElement('div');info.className='pinfo';
+      info.innerHTML='<div class="pname">'+(Sponsors.LABELS[id]||id.toUpperCase())+'</div>'+
+        '<div class="pcost">'+perk.cost+' GOLD</div>';
+      const btn=document.createElement('button');
+      btn.id='buyPerk'+id[0].toUpperCase()+id.slice(1);
+      if(owned){btn.className='owned';btn.textContent='OWNED';btn.disabled=true}
+      else{btn.textContent='BUY';btn.disabled=!Screens.canAffordPerk(id);
+        btn.onclick=()=>{Sponsors.buy(id);Screens.refresh()}}
+      row.appendChild(info);row.appendChild(btn);
+      pwrap.appendChild(row)}
     document.getElementById('shopBack').onclick=()=>Screens.title()},
   // ---- arena ---------------------------------------------------------------------------------
   renderArena(){

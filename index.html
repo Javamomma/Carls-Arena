@@ -118,6 +118,23 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .leaderboard h3{margin:0 0 4px;font-size:11px;color:#f4c542;letter-spacing:1px}
 .leaderboard .lbrow{display:flex;justify-content:space-between;gap:8px;padding:3px 6px;border-bottom:1px solid #222}
 .leaderboard .lbrow span:first-child{color:#f4c542;min-width:14px;text-align:left}
+/* Task 5.2: the kiosk's PERKS section -- compact list rows (not another row of big .kcard tiles) so
+   the consumable-item cards above and every perk both fit 854x480 without scrolling in the common
+   case; #shopBody wraps both and scrolls on its own if they don't. #shopCards keeps its .kcards
+   flex:1 in every OTHER context (the crystal screen also uses .kcards) but must not claim all of
+   shopBody's space here, or the perks below it would be pushed out of view -- #shopCards{flex:none}
+   below (ID beats class) scopes that override to the kiosk specifically. */
+.shopBody{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
+#shopCards{flex:none}
+.perksHeading{margin:6px 0 2px;font-size:11px;color:#f4c542;letter-spacing:1px;text-align:center}
+.perkrow{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;
+  padding:6px 12px;background:#181c2b;border:1px solid #444;border-radius:6px;text-align:left}
+.perkrow .pname{font-size:11px;color:#fff;font-weight:bold}
+.perkrow .pcost{font-size:10px;color:#999;margin-top:2px}
+.perkrow button{min-width:88px;min-height:36px;padding:6px 10px;font-size:11px;letter-spacing:.5px;
+  border-radius:6px;background:#f4c542;color:#111;border:0;font-family:inherit}
+.perkrow button:disabled{opacity:.35;background:#555;color:#999}
+.perkrow button.owned{background:transparent;color:#7fd18a;border:1px solid #7fd18a;opacity:1}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
 <button id="btnBlock" class="cbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
@@ -161,7 +178,11 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 <div class="overlay" id="shop"><div class="scr">
 <h2>SPONSOR PERK KIOSK</h2>
 <div class="curstrip" id="shopCurrency"></div>
+<div class="shopBody" id="shopBody">
 <div class="kcards" id="shopCards"></div>
+<h3 class="perksHeading">SPONSOR PERKS</h3>
+<div id="shopPerks"></div>
+</div>
 <button class="backbtn" id="shopBack">BACK</button>
 </div></div>
 <div class="overlay" id="arena"><div class="scr">
@@ -564,16 +585,27 @@ const Broadcast={
   // Fight.resolve does `att.hits.add(idx)` before it ever calls onEvent, so `a.hits.size===1` on a
   // 'hit' event where a.moveName is s1/s2/s3 means idx 0 (the move's first landed hit) just resolved.
   SPECIAL_BONUS:{s1:400,s2:800,s3:1500},
-  reset(){
+  // Task 5.2: `o.viewersMul` (from Sponsors.apply's 'crowd' perk, threaded in by G.startFight) is
+  // stashed once per fight, not read live off Save.data/Sponsors on every _gain call -- keeps
+  // Broadcast itself from reaching into Sponsors/Save.data mid-fight (same presentation-free
+  // boundary its own header claims), and matches the frozen interface's "stored on Broadcast at
+  // reset". Optional and defaults to 1 so every pre-5.2 caller (a bare `Broadcast.reset()`) is
+  // unaffected.
+  reset(o){
     this.state.viewers=0;this.state.peak=0;this.state.combo=0;this.state.mult=1;this.state.lastPop=null;
     this._multVal=1;this._multFrames=0;
     // "First blood" (ruling #1's +250) is the PLAYER's own first landed hit of the fight, not
     // literally whichever side strikes first — an enemy hit landing on the player first doesn't
     // consume or block it; it just waits for the player's first landed hit, whenever that comes.
-    this._firstBlood=false},
+    this._firstBlood=false;
+    this._viewersMul=(o&&o.viewersMul)||1},
   // Every viewer delta funnels through here: floors at 0 (decay or a taken hit can never push the
   // count negative) and keeps peak as the running max across both event gains and tick()'s decay.
+  // Task 5.2: only a POSITIVE gain is scaled by the crowd perk's viewersMul -- a taken-hit loss or
+  // tick()'s hitstun decay (both negative n) pass through unscaled, so "crowd" makes the good stuff
+  // bigger without also shrinking the bad stuff.
   _gain(n){
+    if(n>0)n*=this._viewersMul;
     this.state.viewers=Math.max(0,this.state.viewers+n);
     if(this.state.viewers>this.state.peak)this.state.peak=this.state.viewers},
   // Ratings multiplier windows are frame-countdown and never stack: a new trigger only takes over
@@ -617,6 +649,68 @@ const Broadcast={
       if(this._multFrames<=0){this._multVal=1;this.state.mult=1}}
   }
 };
+// Sponsors: Phase 5 ruling #2 ("sponsor perks are permanent buffs bought with gold"). Lives next to
+// Broadcast (not in 12_meta.js's Meta.SHOP_ITEMS) because it hands opts.viewersMul straight to
+// Broadcast.reset above and its other three effects (playerBuffs/statMul.atk/parryWindow) are all
+// consumed by G.startFight in the same one place SHOP_ITEMS' own consumers (Screens) never need to
+// touch. Unlike Meta.SHOP_ITEMS (consumable currency spends), a perk is bought once and owned
+// forever -- Sponsors.buy refuses a second purchase of the same id rather than double-charging or
+// double-applying it. Not folded into the sim-purity scan two tests above (unlike Broadcast.*): it
+// reads/writes Save.data directly (gold, Save.data.perks), which is a Meta-shaped concern, not a
+// sim one -- it still never touches document/canvas/Audio/FX/Render, same boundary, just not asserted
+// by name.
+const Sponsors={
+  PERKS:{
+    dashers:{cost:800,atkMul:1.05},
+    insurance:{cost:1200,parryWindow:2},
+    secondWind:{cost:1500,buff:'secondWind'},
+    crowd:{cost:1000,viewersMul:1.2}},
+  // Display labels for the kiosk's PERKS section (85_screens.js) -- kept separate from PERKS itself
+  // so PERKS stays exactly the frozen {cost,effect} shape with nothing extra riding along on it.
+  LABELS:{dashers:'SPONSOR: DOORWAY DASHERS',insurance:'PARRY INSURANCE',
+    secondWind:'SECOND WIND',crowd:'CROWD FAVORITE'},
+  // Save.data.perks isn't part of Meta.defaults()'s explicit shape (frozen before this task) --
+  // lazily created here the first time anything actually buys or queries a perk, same pattern as
+  // Save.data.pity being lazily created by Crystal.open (12_meta.js): a pre-5.2 v2 save picks it up
+  // for free through migrate()'s generic top-level "fill anything missing" loop the moment it's set.
+  owned(){
+    const p=Save.data.perks;
+    return p?Object.keys(Sponsors.PERKS).filter(id=>p[id]):[]},
+  // Refuses (returns false, no partial mutation) when the perk is unknown-would-throw... no: unknown
+  // ids throw (same as Buffs.apply/Crystal.open on an unknown id -- a programmer error, not a normal
+  // refusal); already-owned or short-on-gold both just return false, same as Meta.buy.
+  buy(id){
+    const perk=Sponsors.PERKS[id];
+    if(!perk)throw new Error('unknown perk: '+id);
+    if(!Save.data.perks)Save.data.perks={};
+    if(Save.data.perks[id])return false; // already owned -- no duplicate purchase, no double-charge
+    if((Save.data.gold||0)<perk.cost)return false;
+    Save.data.gold-=perk.cost;
+    Save.data.perks[id]=true;
+    Save.put();
+    return true},
+  // Extends `opts` (a G.startFight-shaped options object, or {} for a bare query) with every owned
+  // perk's effect, folded together: playerBuffs gets each perk's `buff` id appended (consumed by the
+  // exact same Buffs.apply path the encounter/enemy side already uses -- see G.startFight), atkMul
+  // multiplies together into statMul.atk (G.startFight applies it to Stats.derive's own atk output),
+  // parryWindow sums (G.startFight sets it as the live p1 Fighter's parryBonus), viewersMul
+  // multiplies together (G.startFight hands it straight to Broadcast.reset). Returns the same opts
+  // object it was given (mutated in place) so a caller that already has one can just keep using it.
+  apply(opts){
+    opts=opts||{};
+    const playerBuffs=(opts.playerBuffs||[]).slice();
+    let atkMul=1,parryWindow=0,viewersMul=1;
+    for(const id of Sponsors.owned()){
+      const perk=Sponsors.PERKS[id];
+      if(perk.buff)playerBuffs.push(perk.buff);
+      if(perk.atkMul)atkMul*=perk.atkMul;
+      if(perk.parryWindow)parryWindow+=perk.parryWindow;
+      if(perk.viewersMul)viewersMul*=perk.viewersMul}
+    opts.playerBuffs=playerBuffs;
+    opts.statMul={atk:atkMul};
+    opts.parryWindow=parryWindow;
+    opts.viewersMul=viewersMul;
+    return opts}};
 
 const Save={key:'carlsArena.v1',data:null,
   load(){let raw=null;try{raw=JSON.parse(localStorage.getItem(this.key))}catch(e){raw=null}
@@ -1060,7 +1154,20 @@ const BUFFS={
       const dmg=Math.round(ref.chip*0.2);if(dmg<=0)return;
       att.hp=Math.max(0,att.hp-dmg);
       fight.emit('thorns',holder,att,dmg);
-      fight.fx.push({kind:'popup',x:att.x,y:FLOOR-100,text:String(dmg),col:'#ff4444',big:false})}}};
+      fight.fx.push({kind:'popup',x:att.x,y:FLOOR-100,text:String(dmg),col:'#ff4444',big:false})}},
+  secondWind:{id:'secondWind',
+    // Sponsor perk 'Second Wind' (Task 5.2, Phase 5 ruling #2: "one regen tick at 20% hp per
+    // fight"): the first frame the holder's hp is at or under 20% of maxHp, heal +15% of maxHp
+    // (capped at maxHp), then never fire again for the rest of the fight. holder._secondWindSpent is
+    // per-Fighter one-shot state this buff needs and no other buff does -- Fighter's own constructor
+    // (50_fighter.js) declares the field (defaulting false) so every fighter starts unspent, not just
+    // ones actually holding this buff; Buffs.apply never re-resolves per frame, so there's nothing
+    // else to reset it mid-fight.
+    onFrame(fight,holder,foe){
+      if(holder._secondWindSpent||holder.hp<=0)return;
+      if(holder.hp<=holder.maxHp*0.2){
+        holder._secondWindSpent=true;
+        holder.hp=Math.min(holder.maxHp,holder.hp+Math.round(holder.maxHp*0.15))}}}};
 const Buffs={
   // Resolves ids[] to BUFFS objects and sets holder.buffs (replacing whatever was there). Called
   // once at fight/encounter setup, never per frame, so there's no per-frame allocation on the hot
@@ -1077,6 +1184,12 @@ class Fighter{
     this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
     this.combo=0;this.stun=0;this.inv=0;this.blockAge=0;this.dx=0; // last tick's x delta; Rig.poseFor reads it to pick idle vs walk
     this.parryLock=0;this.blockPressedAt=0;this.pressTick=0;this._parried=false;this._mdCache=null;
+    // Task 5.2: parryBonus widens PARRY_WINDOW by this many frames (Sponsor perk "Parry Insurance",
+    // set by G.startFight from Sponsors.apply's parryWindow) -- 0 for every fighter that isn't the
+    // live player Fighter a fight actually started with an owned insurance perk. secondWindSpent:
+    // see BUFFS.secondWind's own comment (47_buffs.js) for why this one-shot flag lives on the
+    // Fighter itself rather than as buff-local state.
+    this.parryBonus=0;this._secondWindSpent=false;
     this.buffs=[]; // resolved BUFFS objects (Buffs.apply sets this once; Fight never re-resolves ids per frame)
     // wasKnockedDown (Task 3.6 refactor): set true the instant this fighter enters KNOCKDOWN
     // (setState below), stays true through the knockdown timer and the post-getup invulnerable
@@ -1117,11 +1230,16 @@ class Fighter{
   // Consume one frame of intent. Called before tick().
   act(intent){this.pressTick++; // monotonic frame counter (Fighter has no fight-frame ref of its own); stamps blockPressedAt
     const prevAge=this.blockAge;this.blockAge=intent.block?this.blockAge+1:0;
-    // Parry lockout bookkeeping: a block press that closes its PARRY_WINDOW (or ends) without a
-    // parry arms a PARRY_LOCKOUT-frame lock; a successful parry (flagged by Fight.resolve) clears it.
+    // Parry lockout bookkeeping: a block press that closes its (possibly widened, see parryBonus
+    // above) PARRY_WINDOW without a parry arms a PARRY_LOCKOUT-frame lock; a successful parry
+    // (flagged by Fight.resolve) clears it. Both bounds below add this.parryBonus so a fighter
+    // holding Parry Insurance gets the lockout armed exactly when THEIR widened window closes, not
+    // the base PARRY_WINDOW -- Fight.detect's own parry check (60_fight.js) widens by the same
+    // parryBonus, and these two must stay in lockstep or a widened-window parry attempt would find
+    // parryLock already armed from a lockout that fired too early against the un-widened window.
     if(prevAge===0&&this.blockAge===1){this.blockPressedAt=this.pressTick;this._parried=false}
-    if(intent.block&&this.blockAge===PARRY_WINDOW+1&&!this._parried)this.parryLock=PARRY_LOCKOUT;
-    if(!intent.block&&prevAge>0&&prevAge<=PARRY_WINDOW&&!this._parried)this.parryLock=PARRY_LOCKOUT;
+    if(intent.block&&this.blockAge===PARRY_WINDOW+this.parryBonus+1&&!this._parried)this.parryLock=PARRY_LOCKOUT;
+    if(!intent.block&&prevAge>0&&prevAge<=PARRY_WINDOW+this.parryBonus&&!this._parried)this.parryLock=PARRY_LOCKOUT;
     const S=this.state;
     if(S==='IDLE'||S==='BLOCK'){
       if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special);
@@ -1420,7 +1538,10 @@ class Fight{
     // the attacker holds the buff, same treatment as MOVES.s3's own m.unblockable flag.
     const unblockable=m.unblockable||(m.cost&&att.buffs&&att.buffs.some(b=>b.id==='unblockableSpecials'));
     if(blocking&&!unblockable){
-      if(def.blockAge<=PARRY_WINDOW&&def.parryLock===0&&!m.cost)return{type:'parry',att,def,idx};
+      // Task 5.2: def.parryBonus (Sponsor perk "Parry Insurance", 0 for everyone else) widens the
+      // window by that many frames -- see Fighter.act's own parryLock-arming comment (50_fighter.js)
+      // for why its two bounds have to widen by the exact same amount, in lockstep with this one.
+      if(def.blockAge<=PARRY_WINDOW+def.parryBonus&&def.parryLock===0&&!m.cost)return{type:'parry',att,def,idx};
       return{type:'block',att,def,idx,m}}
     return{type:'hit',att,def,idx,m,last}}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
@@ -3252,7 +3373,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.champ=champ;
     let p1def=DEFS[champ];
     const rosterEntry=Save.data.roster[champ];
-    if(rosterEntry){const d=Stats.derive(p1def,rosterEntry);p1def=Object.assign({},p1def,{hp:d.hp,atk:d.atk})}
+    // Task 5.2: Sponsors.apply(opts) is computed from a FRESH {playerBuffs:o.playerBuffs} object,
+    // never from o itself -- this.lastFightOpts (captured verbatim as `o` right at the top of this
+    // function, for FIGHT AGAIN's replay) must stay perk-free, or replaying it would fold every owned
+    // perk's playerBuffs/atkMul/parryWindow/viewersMul in a SECOND time on top of Sponsors.apply
+    // running again next call. perkOpts.statMul.atk/parryWindow/viewersMul are consumed below;
+    // perkOpts.playerBuffs is consumed alongside the encounter's own buffIds a few lines down.
+    const perkOpts=Sponsors.apply({playerBuffs:o.playerBuffs});
+    if(rosterEntry){const d=Stats.derive(p1def,rosterEntry);
+      p1def=Object.assign({},p1def,{hp:d.hp,atk:Math.round(d.atk*perkOpts.statMul.atk)})}
     this.fight=new Fight({seed,p1:p1def,p2:p2def,clock:o.clock,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
     // ids, not enc.buffs' resolved objects, so the sim's Buffs.apply does its own resolution instead
@@ -3260,9 +3389,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(this.encounter&&this.encounter.buffIds&&this.encounter.buffIds.length)Buffs.apply(this.fight,this.fight.p2,this.encounter.buffIds);
     // Fix-wave item 5: player-side buff path (o.playerBuffs — a plain id list, same shape as
     // enc.buffIds above) applied to p1 via the exact same Buffs.apply the encounter/enemy path
-    // already uses. No caller in this codebase sets it yet (Phase 4's crystals are the intended
-    // consumer); tests/harness.py's --player-buffs exercises it in the meantime.
-    if(o.playerBuffs&&o.playerBuffs.length)Buffs.apply(this.fight,this.fight.p1,o.playerBuffs);
+    // already uses. Task 5.2: perkOpts.playerBuffs is o.playerBuffs (if any) plus every owned perk's
+    // own buff id (e.g. secondWind), so an owned perk applies even when the caller passed no
+    // playerBuffs of its own.
+    if(perkOpts.playerBuffs.length)Buffs.apply(this.fight,this.fight.p1,perkOpts.playerBuffs);
+    // Task 5.2: 'Parry Insurance' widens the live player Fighter's own parry window -- see
+    // Fight.detect/Fighter.act's own parryBonus comments (60_fight.js/50_fighter.js) for how it's
+    // consumed. Set directly on the just-constructed Fighter (never threaded through Fighter's
+    // constructor options), same as every other post-construction fight setup below.
+    this.fight.p1.parryBonus=perkOpts.parryWindow;
     // Per-fight camera zoom cap: the worst-case topmost point (any pose, any prop — see Rig.extent)
     // either fighter can strike, scaled by their own def.scale, determines how far in the camera may
     // zoom before that point crosses HUD_LINE. Two ceilings share the same ratio: 1.12 is the normal
@@ -3287,7 +3422,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
      const tallestTop=Math.max(p1ext.top,p2ext.top);
      const ratio=(Camera.anchorY-HUD_LINE)/tallestTop;
      this.zoomCap=Math.min(1.12,ratio);this.cineZoomCap=Math.min(1.28,ratio)}
-    this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();Broadcast.reset();
+    // Task 5.2: perkOpts.viewersMul (the 'crowd' perk, 1 when unowned) is handed straight to
+    // Broadcast.reset -- see its own comment (13_broadcast.js) for why it's stashed there once per
+    // fight instead of read live.
+    this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();Broadcast.reset({viewersMul:perkOpts.viewersMul});
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
     // regardless of how recently the previous fight's last toast landed.
@@ -3890,6 +4028,9 @@ const Screens={
     const item=Meta.SHOP_ITEMS[itemId];
     for(const c in item.cost)if((Save.data[c]||0)<item.cost[c])return false;
     return true},
+  // Task 5.2: same short-on-gold check Sponsors.buy itself does, exposed here so a card's BUY button
+  // can start out correctly disabled instead of only refusing after a click.
+  canAffordPerk(id){return(Save.data.gold||0)>=Sponsors.PERKS[id].cost},
   renderShop(){
     const cur=document.getElementById('shopCurrency');
     const catParts=Object.keys(Save.data.cats).map(c=>c.slice(0,4).toUpperCase()+' '+Save.data.cats[c]);
@@ -3911,6 +4052,25 @@ const Screens={
         :(()=>{Meta.buy(itemId);Screens.refresh()});
       card.appendChild(h);card.appendChild(cost);card.appendChild(btn);
       wrap.appendChild(card)}
+    // Task 5.2: a PERKS section beneath the consumable-item cards above -- a permanent, one-time
+    // buy per perk (never a `run`/`grant` item, so it doesn't belong in Meta.SHOP_ITEMS), rendered
+    // from Sponsors.PERKS the same "one table, one loop" way the cards above render from
+    // Meta.SHOP_ITEMS. Compact list rows (not another row of big .kcard tiles) so both sections fit
+    // 854x480 without scrolling in the common case; #shopBody (00_head.html) scrolls if they don't.
+    const pwrap=document.getElementById('shopPerks');pwrap.innerHTML='';
+    for(const id in Sponsors.PERKS){
+      const perk=Sponsors.PERKS[id],owned=Sponsors.owned().includes(id);
+      const row=document.createElement('div');row.className='perkrow';
+      const info=document.createElement('div');info.className='pinfo';
+      info.innerHTML='<div class="pname">'+(Sponsors.LABELS[id]||id.toUpperCase())+'</div>'+
+        '<div class="pcost">'+perk.cost+' GOLD</div>';
+      const btn=document.createElement('button');
+      btn.id='buyPerk'+id[0].toUpperCase()+id.slice(1);
+      if(owned){btn.className='owned';btn.textContent='OWNED';btn.disabled=true}
+      else{btn.textContent='BUY';btn.disabled=!Screens.canAffordPerk(id);
+        btn.onclick=()=>{Sponsors.buy(id);Screens.refresh()}}
+      row.appendChild(info);row.appendChild(btn);
+      pwrap.appendChild(row)}
     document.getElementById('shopBack').onclick=()=>Screens.title()},
   // ---- arena ---------------------------------------------------------------------------------
   renderArena(){
@@ -5441,6 +5601,133 @@ Test.add('Arena FIGHT AGAIN draws a fresh Arena.start() encounter for the post-w
   ok(G.fight.p2.def.id!==staleEnemyId,'must not be the same stale enemy the fight just beat');
   ok(G.fight.p2.maxHp!==staleHp||G.fight.p2.def.id!==staleEnemyId,'must not be the stale resolved encounter object');
   G.toTitle();G.sim=false});
+// --- Task 5.2: sponsor perks (Sponsors, secondWind, parry-window widening) ---------------------
+Test.add('Sponsors.buy deducts gold and flags the perk owned; refuses (no mutation) when short or already owned',()=>{
+  Save.data=Meta.defaults();Save.data.gold=800;
+  ok(Sponsors.buy('dashers'));
+  eq(Save.data.gold,0);
+  ok(Sponsors.owned().includes('dashers'));
+  eq(Sponsors.buy('dashers'),false,'already owned must refuse');
+  eq(Save.data.gold,0,'a refused duplicate buy must not double-charge');
+  Save.data.gold=100;
+  eq(Sponsors.buy('insurance'),false,'short on gold must refuse');
+  ok(!Sponsors.owned().includes('insurance'));
+  eq(Save.data.gold,100,'a refused buy must never touch gold');
+  ok(threw(()=>Sponsors.buy('nope')),'an unknown perk id must throw')});
+Test.add('Sponsors.owned lists every purchased perk id, empty on a fresh save',()=>{
+  Save.data=Meta.defaults();
+  eq(Sponsors.owned().length,0,'a fresh save owns no perks');
+  Save.data.gold=Sponsors.PERKS.dashers.cost+Sponsors.PERKS.insurance.cost;
+  Sponsors.buy('dashers');Sponsors.buy('insurance');
+  eq(Sponsors.owned().length,2);
+  ok(Sponsors.owned().includes('dashers')&&Sponsors.owned().includes('insurance'))});
+Test.add('Sponsors.apply folds every owned perk into opts: appends buffs, multiplies atkMul/viewersMul, sums parryWindow',()=>{
+  Save.data=Meta.defaults();
+  Save.data.gold=Sponsors.PERKS.dashers.cost+Sponsors.PERKS.insurance.cost+Sponsors.PERKS.secondWind.cost+Sponsors.PERKS.crowd.cost;
+  Sponsors.buy('dashers');Sponsors.buy('insurance');Sponsors.buy('secondWind');Sponsors.buy('crowd');
+  const o=Sponsors.apply({playerBuffs:['powerGain']});
+  ok(o.playerBuffs.includes('powerGain'),'must not drop an existing playerBuffs entry');
+  ok(o.playerBuffs.includes('secondWind'),'secondWind\'s own buff id must be appended');
+  eq(o.playerBuffs.length,2,'no duplicate/extra buffs beyond the one existing entry plus secondWind');
+  eq(o.statMul.atk,1.05,'dashers\' atkMul');
+  eq(o.parryWindow,2,'insurance\'s parryWindow');
+  eq(o.viewersMul,1.2,'crowd\'s viewersMul')});
+Test.add('Sponsors.apply with no owned perks and no opts is a pure no-op extension',()=>{
+  Save.data=Meta.defaults();
+  const o=Sponsors.apply();
+  eq(o.statMul.atk,1);eq(o.parryWindow,0);eq(o.viewersMul,1);eq(o.playerBuffs.length,0)});
+Test.add('G.startFight applies the dashers perk\'s atkMul to p1\'s Stats.derive-d atk',()=>{
+  Save.data=Meta.defaults();Save.data.gold=Sponsors.PERKS.dashers.cost;Sponsors.buy('dashers');
+  const derived=Stats.derive(CHAMPS.carl,Save.data.roster.carl).atk;
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(G.fight.p1.def.atk,Math.round(derived*1.05));
+  G.toTitle()});
+Test.add('G.startFight leaves p1 atk unmultiplied when no atk-affecting perk is owned',()=>{
+  Save.data=Meta.defaults();
+  const derived=Stats.derive(CHAMPS.carl,Save.data.roster.carl).atk;
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(G.fight.p1.def.atk,derived);
+  G.toTitle()});
+Test.add('G.startFight sets the live p1 Fighter\'s parryBonus from the insurance perk\'s parryWindow (0 when unowned)',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(G.fight.p1.parryBonus,0);
+  G.toTitle();
+  Save.data.gold=Sponsors.PERKS.insurance.cost;Sponsors.buy('insurance');
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(G.fight.p1.parryBonus,2);
+  G.toTitle()});
+Test.add('G.startFight threads the crowd perk\'s viewersMul into Broadcast.reset',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(Broadcast._viewersMul,1,'unowned crowd must leave the multiplier at 1');
+  G.toTitle();
+  Save.data.gold=Sponsors.PERKS.crowd.cost;Sponsors.buy('crowd');
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  eq(Broadcast._viewersMul,1.2);
+  G.toTitle()});
+Test.add('G.startFight applies an owned perk\'s buff (secondWind) to p1 via the same Buffs.apply path as playerBuffs',()=>{
+  Save.data=Meta.defaults();Save.data.gold=Sponsors.PERKS.secondWind.cost;Sponsors.buy('secondWind');
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy'});
+  ok(G.fight.p1.buffs.some(b=>b.id==='secondWind'),'p1 must hold the secondWind buff');
+  G.toTitle();
+  Save.data=Meta.defaults();
+  G.startFight({p1:'carl',p2:'donut',ai:'dummy',playerBuffs:['powerGain']});
+  ok(G.fight.p1.buffs.some(b=>b.id==='powerGain'),'an explicit playerBuffs entry must still apply with no perks owned');
+  eq(G.fight.p1.buffs.length,1);
+  G.toTitle()});
+Test.add('Broadcast.reset({viewersMul}) scales a positive gain (the crowd perk) but a plain reset() never carries a stale multiplier over',()=>{
+  Broadcast.reset({viewersMul:1.2});Broadcast._firstBlood=true;
+  const f={p1:{combo:1,moveName:'light1',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,60,f); // base 60*2*1=120, crowd x1.2 = 144
+  eq(Broadcast.state.viewers,144);
+  Broadcast.reset();
+  eq(Broadcast._viewersMul,1,'a bare reset() must reset to no multiplier, not keep the last one')});
+Test.add('secondWind heals the holder 15% maxHp exactly once, the first frame hp is <=20% maxHp, never again',()=>{
+  const f=mkFight();Buffs.apply(f,f.p2,['secondWind']);
+  f.p2.hp=f.p2.maxHp*0.2;
+  run(f,1);
+  eq(f.p2.hp,Math.round(f.p2.maxHp*0.2)+Math.round(f.p2.maxHp*0.15),'must heal +15% maxHp on the triggering frame');
+  const healedHp=f.p2.hp;
+  run(f,120);
+  eq(f.p2.hp,healedHp,'must never heal again once spent, even while still under 20%');
+  f.p2.hp=f.p2.maxHp*0.05;run(f,1);
+  eq(f.p2.hp,f.p2.maxHp*0.05,'must not fire a second time even if hp drops low again later')});
+Test.add('secondWind never fires while the holder stays above 20% maxHp',()=>{
+  const f=mkFight();Buffs.apply(f,f.p2,['secondWind']);
+  f.p2.hp=f.p2.maxHp*0.5;
+  run(f,60);
+  eq(f.p2.hp,f.p2.maxHp*0.5,'no heal until hp actually drops to <=20%')});
+Test.add('a press at PARRY_WINDOW+1 frames parries with the insurance perk\'s +2 parryBonus, but just blocks without it',()=>{
+  // L(2) fires the light exactly on the attacker's 3rd step call; held block from step 1 gives the
+  // defender blockAge===7 (PARRY_WINDOW+1) on the exact step the attack's active frame lands — see
+  // this test's own derivation in the Task 5.2 report for the full frame-by-frame walkthrough.
+  const withBonus=mkFight({ctrl1:Ctrl.script([L(2)]),ctrl2:Ctrl.hold({block:true})});closeIn(withBonus);
+  withBonus.p2.parryBonus=2;
+  run(withBonus,7);
+  eq(withBonus.log[withBonus.log.length-1].type,'parry','blockAge 7 <= PARRY_WINDOW(6)+2 must parry');
+  const noBonus=mkFight({ctrl1:Ctrl.script([L(2)]),ctrl2:Ctrl.hold({block:true})});closeIn(noBonus);
+  run(noBonus,7);
+  eq(noBonus.log[noBonus.log.length-1].type,'block','blockAge 7 > PARRY_WINDOW(6) with no bonus must just block')});
+Test.add('the kiosk renders a PERKS row per Sponsors.PERKS entry, showing OWNED for an already-purchased perk and BUY otherwise',()=>{
+  Save.data=Meta.defaults();Save.data.gold=Sponsors.PERKS.dashers.cost;Sponsors.buy('dashers');
+  Screens.shop();
+  const rows=[...document.querySelectorAll('#shopPerks .perkrow')];
+  eq(rows.length,Object.keys(Sponsors.PERKS).length);
+  const dashersBtn=document.getElementById('buyPerkDashers');
+  ok(dashersBtn,'buyPerkDashers must exist');
+  eq(dashersBtn.textContent,'OWNED');ok(dashersBtn.disabled,'an owned perk\'s button must be disabled');
+  const insuranceBtn=document.getElementById('buyPerkInsurance');
+  eq(insuranceBtn.textContent,'BUY');
+  Screens.title()});
+Test.add('clicking a kiosk PERKS BUY button purchases it and re-renders as OWNED',()=>{
+  Save.data=Meta.defaults();Save.data.gold=Sponsors.PERKS.insurance.cost;
+  Screens.shop();
+  document.getElementById('buyPerkInsurance').click();
+  eq(Save.data.gold,0);
+  ok(Sponsors.owned().includes('insurance'));
+  eq(document.getElementById('buyPerkInsurance').textContent,'OWNED');
+  Screens.title()});
 // Task 4.5: Screens (title, map, roster, crystal, shop, arena, result) ---------------------------
 Test.add('every Phase 4 screen\'s DOM ids exist',()=>{
   const ids=['title','map','roster','crystal','shop','arena','result','pauseMenu',

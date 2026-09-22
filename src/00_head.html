@@ -118,6 +118,23 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .leaderboard h3{margin:0 0 4px;font-size:11px;color:#f4c542;letter-spacing:1px}
 .leaderboard .lbrow{display:flex;justify-content:space-between;gap:8px;padding:3px 6px;border-bottom:1px solid #222}
 .leaderboard .lbrow span:first-child{color:#f4c542;min-width:14px;text-align:left}
+/* Task 5.2: the kiosk's PERKS section -- compact list rows (not another row of big .kcard tiles) so
+   the consumable-item cards above and every perk both fit 854x480 without scrolling in the common
+   case; #shopBody wraps both and scrolls on its own if they don't. #shopCards keeps its .kcards
+   flex:1 in every OTHER context (the crystal screen also uses .kcards) but must not claim all of
+   shopBody's space here, or the perks below it would be pushed out of view -- #shopCards{flex:none}
+   below (ID beats class) scopes that override to the kiosk specifically. */
+.shopBody{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
+#shopCards{flex:none}
+.perksHeading{margin:6px 0 2px;font-size:11px;color:#f4c542;letter-spacing:1px;text-align:center}
+.perkrow{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;
+  padding:6px 12px;background:#181c2b;border:1px solid #444;border-radius:6px;text-align:left}
+.perkrow .pname{font-size:11px;color:#fff;font-weight:bold}
+.perkrow .pcost{font-size:10px;color:#999;margin-top:2px}
+.perkrow button{min-width:88px;min-height:36px;padding:6px 10px;font-size:11px;letter-spacing:.5px;
+  border-radius:6px;background:#f4c542;color:#111;border:0;font-family:inherit}
+.perkrow button:disabled{opacity:.35;background:#555;color:#999}
+.perkrow button.owned{background:transparent;color:#7fd18a;border:1px solid #7fd18a;opacity:1}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
 <button id="btnBlock" class="cbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
@@ -161,7 +178,11 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 <div class="overlay" id="shop"><div class="scr">
 <h2>SPONSOR PERK KIOSK</h2>
 <div class="curstrip" id="shopCurrency"></div>
+<div class="shopBody" id="shopBody">
 <div class="kcards" id="shopCards"></div>
+<h3 class="perksHeading">SPONSOR PERKS</h3>
+<div id="shopPerks"></div>
+</div>
 <button class="backbtn" id="shopBack">BACK</button>
 </div></div>
 <div class="overlay" id="arena"><div class="scr">

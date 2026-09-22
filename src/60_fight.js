@@ -54,7 +54,10 @@ class Fight{
     // the attacker holds the buff, same treatment as MOVES.s3's own m.unblockable flag.
     const unblockable=m.unblockable||(m.cost&&att.buffs&&att.buffs.some(b=>b.id==='unblockableSpecials'));
     if(blocking&&!unblockable){
-      if(def.blockAge<=PARRY_WINDOW&&def.parryLock===0&&!m.cost)return{type:'parry',att,def,idx};
+      // Task 5.2: def.parryBonus (Sponsor perk "Parry Insurance", 0 for everyone else) widens the
+      // window by that many frames -- see Fighter.act's own parryLock-arming comment (50_fighter.js)
+      // for why its two bounds have to widen by the exact same amount, in lockstep with this one.
+      if(def.blockAge<=PARRY_WINDOW+def.parryBonus&&def.parryLock===0&&!m.cost)return{type:'parry',att,def,idx};
       return{type:'block',att,def,idx,m}}
     return{type:'hit',att,def,idx,m,last}}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
