@@ -1614,6 +1614,10 @@ Test.add('every Phase 4 screen\'s DOM ids exist',()=>{
 Test.add('G.bootScreens() binds the title screen\'s buttons on real page load (fix round 1, Critical: they were unbound until some other Screens.* function had run once -- Screens.renderTitle is the only place they get an onclick, and nothing called any Screens function at boot)',()=>{
   Screens._current=null;                       // simulate a fresh load: no Screens.* has rendered yet
   document.getElementById('btnCampaign').onclick=null;
+  // Task 5.3: CAMPAIGN on a fresh (!tutorialDone) save now starts the tutorial instead of the map --
+  // orthogonal to this test's own concern (button binding), so pin tutorialDone here to keep testing
+  // exactly what it always tested.
+  Save.data.tutorialDone=true;
   G.bootScreens();
   ok(typeof document.getElementById('btnCampaign').onclick==='function','CAMPAIGN must be bound after boot');
   document.getElementById('btnCampaign').click();
@@ -1631,7 +1635,9 @@ Test.add('Screens.show(\'map\') renders FLOORS[0].nodes.length non-boss .node el
   Screens._floor=1; // Screens.show bypasses Screens.map()'s own arg-stashing; set the floor directly
   Screens.show('map');
   const f=Quest.floor(1);
-  const nodeEls=[...document.querySelectorAll('#map .node:not(.boss)')];
+  // Task 5.3: scoped to #mapPath specifically -- the map's own permanently-open TUTORIAL entry lives
+  // in #mapTabs (not #mapPath), so a bare '#map .node' scope would also match it.
+  const nodeEls=[...document.querySelectorAll('#mapPath .node:not(.boss)')];
   eq(nodeEls.length,FLOORS[0].nodes.length);
   nodeEls.forEach((el,i)=>ok(el.classList.contains(f.nodes[i].state),'node '+i+' state class'));
   const bossEl=document.querySelector('#map .node.boss');
@@ -1671,7 +1677,7 @@ Test.add('the map path fits a full floor with no clipping/scroll at 854x480 (fix
 Test.add('a locked map node is disabled (cannot be clicked to start a fight); an open node with no energy shows the refusal in #mapMsg (fix-wave item 6)',()=>{
   Save.data=Meta.defaults();
   Screens.map(1);
-  const nodes=[...document.querySelectorAll('#map .node:not(.boss)')];
+  const nodes=[...document.querySelectorAll('#mapPath .node:not(.boss)')];
   eq(nodes[0].disabled,false,'node 0 starts open, must be clickable');
   eq(nodes[1].disabled,true,'node 1 starts locked, must be disabled');
   const origNow=Energy.now;
@@ -1680,7 +1686,7 @@ Test.add('a locked map node is disabled (cannot be clicked to start a fight); an
     Save.data.energy.n=0;Save.data.energy.ts=t; // no regen pending: exactly 6:00 to the next point
     Screens.map(1);
     eq(document.getElementById('mapMsg').textContent,'','no stale refusal text before any click');
-    document.querySelectorAll('#map .node:not(.boss)')[0].click();
+    document.querySelectorAll('#mapPath .node:not(.boss)')[0].click();
     eq(G.state,'TITLE','a refused start must not have begun a fight');
     eq(document.getElementById('mapMsg').textContent,'NOT ENOUGH ENERGY — next in 6:00')
   }finally{Energy.now=origNow}
@@ -1688,14 +1694,14 @@ Test.add('a locked map node is disabled (cannot be clicked to start a fight); an
 Test.add('a map node click starts the quest fight via G.startFight and records the map screen (with its floor) as the fight\'s origin',()=>{
   Save.data=Meta.defaults();
   Screens.map(1);
-  document.querySelectorAll('#map .node:not(.boss)')[0].click();
+  document.querySelectorAll('#mapPath .node:not(.boss)')[0].click();
   eq(G.mode,'quest');eq(G.state,'FIGHT');
   eq(Screens._origin.name,'map');eq(Screens._origin.args[0],1);
   G.toTitle();G.sim=false});
 Test.add('after a quest win, CONTINUE (resultTitleBtn) returns to the map screen at the floor the node was fought on',()=>{
   Save.data=Meta.defaults();
   Screens.map(1);
-  document.querySelectorAll('#map .node:not(.boss)')[0].click(); // floor 1, node 0: sets G.mode/origin
+  document.querySelectorAll('#mapPath .node:not(.boss)')[0].click(); // floor 1, node 0: sets G.mode/origin
   eq(Screens._origin.name,'map');eq(Screens._origin.args[0],1);
   G.toTitle(); // the click above used Ctrl.player() (no scripted attacks, so it'd never KO within a
   // bounded tick budget); re-fight the same node with a scripted p1 so it actually ends, keeping the
@@ -1811,6 +1817,9 @@ Test.add('the kiosk renders one card per Meta.SHOP_ITEMS entry, with its own cos
   Screens.title()});
 Test.add('the title screen\'s CAMPAIGN/ARENA/ROSTER/KIOSK buttons route to the matching screens',()=>{
   Save.data=Meta.defaults();
+  // Task 5.3: CAMPAIGN on a fresh save now starts the tutorial instead -- see the dedicated first-run
+  // routing test below; this one is about the plain screen-routing wiring, so pin tutorialDone true.
+  Save.data.tutorialDone=true;
   Screens.title();document.getElementById('btnRoster').click();eq(Screens._current,'roster');
   Screens.title();document.getElementById('btnKiosk').click();eq(Screens._current,'shop');
   Screens.title();document.getElementById('btnArenaMenu').click();eq(Screens._current,'arena');
@@ -1882,7 +1891,7 @@ Test.add('a locked boss node shows the lock icon, not the crown (fix-wave item 1
   Save.data=Meta.defaults(); // boss starts locked
   Screens.map(1);
   const bossEl=document.querySelector('#map .node.boss');
-  const lockedNodeEl=document.querySelectorAll('#map .node:not(.boss)')[1]; // node 1 starts locked too
+  const lockedNodeEl=document.querySelectorAll('#mapPath .node:not(.boss)')[1]; // node 1 starts locked too
   const bossContent=getComputedStyle(bossEl,'::before').content;
   const lockedContent=getComputedStyle(lockedNodeEl,'::before').content;
   eq(bossContent,lockedContent,'a locked boss must show the same icon as a plain locked node (the lock, not the crown)');
@@ -2098,3 +2107,163 @@ Test.add('a SHARE button exists on the result screen and calls G.share on click'
   const orig=G.share;let called=false;G.share=()=>{called=true};
   try{document.getElementById('shareBtn').click();eq(called,true,'clicking SHARE must call G.share')}
   finally{G.share=orig}});
+// --- Task 5.3: Tutorial (Floor 0) and first-run flow ---------------------------------------------
+Test.add('ENCOUNTERS.tutorial matches the frozen Phase 5 shape',()=>{
+  const e=ENCOUNTERS.tutorial;
+  ok(e,'ENCOUNTERS.tutorial must exist');
+  eq(e.floor,0);eq(e.name,'THE WAITING ROOM');eq(e.enemy,'goblin');eq(e.tier,'dummy');
+  eq(e.hpMul,.5);eq(e.atkMul,.3);ok(Array.isArray(e.buffs)&&e.buffs.length===0)});
+Test.add('BUFFS.noKo clamps holder.hp to at least 1, and leaves hp above 1 alone',()=>{
+  const b=BUFFS.noKo;ok(b,'BUFFS.noKo must exist');
+  const holder={hp:0,maxHp:100};b.onFrame(null,holder,null);eq(holder.hp,1,'0 hp must clamp up to 1');
+  holder.hp=-40;b.onFrame(null,holder,null);eq(holder.hp,1,'negative hp must clamp up to 1');
+  holder.hp=55;b.onFrame(null,holder,null);eq(holder.hp,55,'hp above 1 must be left alone')});
+Test.add('Meta.defaults().tutorialDone is false, and v2 migrate backfills it for an older save without discarding an already-true one',()=>{
+  eq(Meta.defaults().tutorialDone,false);
+  const d=Meta.migrate({v:2});
+  eq(d.tutorialDone,false,'a pre-5.3 v2 save must backfill tutorialDone via the generic top-level loop');
+  const kept=Meta.migrate({v:2,tutorialDone:true});
+  eq(kept.tutorialDone,true,'an already-true tutorialDone must survive migration')});
+Test.add('Tutorial.reset() starts at step 0 with the first prompt and every step undone',()=>{
+  Tutorial.reset();
+  eq(Tutorial.state.step,0);
+  eq(Tutorial.state.done.length,4);
+  ok(Tutorial.state.done.every(d=>d===false));
+  eq(Tutorial.prompt,Tutorial.steps[0].prompt)});
+Test.add('Tutorial.onEvent+tick advance step 0 (3 landed lights) to step 1',()=>{
+  Tutorial.reset();
+  const p1={moveName:'light1'};const f={p1};
+  for(let i=0;i<2;i++){Tutorial.onEvent('hit',p1,{},10,f);Tutorial.tick(f)}
+  eq(Tutorial.state.step,0,'2 landed lights must not be enough');
+  Tutorial.onEvent('hit',p1,{},10,f);Tutorial.tick(f);
+  eq(Tutorial.state.step,1,'the 3rd landed light must advance to step 1');
+  eq(Tutorial.state.done[0],true)});
+Test.add('Tutorial step 1 advances on a landed player medium; step 2 on a player parry',()=>{
+  Tutorial.reset();Tutorial.state.step=1;
+  const p1={};const f={p1};
+  Tutorial.onEvent('hit',p1,{},10,f); // no moveName yet -- must not count as a medium
+  p1.moveName='medium';Tutorial.onEvent('hit',p1,{},10,f);Tutorial.tick(f);
+  eq(Tutorial.state.step,2,'a landed medium must advance step 1 to step 2');
+  Tutorial.onEvent('parry',p1,{},0,f);Tutorial.tick(f);
+  eq(Tutorial.state.step,3,'a player parry must advance step 2 to step 3')});
+Test.add('Tutorial step 3 sets fight.p1.power to 100 exactly once, and advances the instant p1 fires a special',()=>{
+  Tutorial.reset();Tutorial.state.step=3;
+  const p1={power:0,state:'IDLE',moveName:null};const f={p1};
+  Tutorial.tick(f);
+  eq(p1.power,100,'entering step 3 must set the player\'s power to 100');
+  p1.power=5; // a later frame must not re-arm it back to 100
+  Tutorial.tick(f);
+  eq(p1.power,5,'power must only be set once, at step 3\'s start');
+  p1.state='ATTACK';p1.moveName='s1';
+  Tutorial.tick(f);
+  eq(Tutorial.state.step,4,'firing s1 must complete step 3');
+  eq(Tutorial.prompt,'FINISH HIM')});
+Test.add('G.startTutorial starts ENCOUNTERS.tutorial in mode tutorial with no energy spent and the goblin at half hp/30% atk',()=>{
+  Save.data=Meta.defaults();
+  const energyBefore=Save.data.energy.n;
+  const started=G.startTutorial();
+  ok(started!==false,'G.startTutorial must not be refused');
+  eq(G.mode,'tutorial');
+  eq(G.encounter.floor,0);eq(G.encounter.name,'THE WAITING ROOM');
+  eq(G.fight.p2.def.hp,Math.round(DEFS.goblin.hp*.5));
+  eq(G.fight.p2.def.atk,Math.round(DEFS.goblin.atk*.3));
+  eq(Save.data.energy.n,energyBefore,'the tutorial must never spend energy');
+  G.toTitle()});
+Test.add('G.startTutorial applies the noKo buff to p1, and a realistic (atkMul .3) tutorial fight never meaningfully threatens the player\'s hp',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle()});
+  ok(G.fight.p1.buffs.some(bf=>bf.id==='noKo'),'the noKo buff must be applied to the live player Fighter');
+  closeIn(G.fight);G.sim=true;
+  for(let i=0;i<1200;i++)G.tick();
+  ok(G.fight&&G.fight.p1.hp>G.fight.p1.maxHp*0.5,
+    'the tutorial\'s own atkMul must keep the goblin\'s damage far too small to meaningfully threaten the player');
+  G.toTitle();G.sim=false});
+Test.add('Ctrl.tutorialDummy is deterministic (two fresh instances match exactly) and eventually throws a medium',()=>{
+  const c1=Ctrl.tutorialDummy(),c2=Ctrl.tutorialDummy();
+  const me={busy:()=>false,state:'IDLE',moveName:null};
+  const seq1=[],seq2=[];
+  for(let i=0;i<200;i++){seq1.push(JSON.stringify(c1.next(null,me,me)));seq2.push(JSON.stringify(c2.next(null,me,me)))}
+  eq(JSON.stringify(seq1),JSON.stringify(seq2),'two fresh instances must be identical (deterministic, no rng)');
+  ok(seq1.some(s=>JSON.parse(s).medium),'the dummy must throw a medium at some point')});
+Test.add('BUFFS.tutorialGuard caps incoming damage so a defending holder can\'t drop below 1 hp while Tutorial has steps left, and stops capping once FINISH HIM fires',()=>{
+  Tutorial.reset();
+  const b=BUFFS.tutorialGuard,holder={hp:5};
+  let ref={dmg:20};b.onHit(null,{},holder,ref,holder);
+  eq(ref.dmg,4,'dmg must be capped to leave exactly 1 hp while a step remains');
+  Tutorial.state.step=Tutorial.steps.length; // all steps done -- FINISH HIM
+  ref={dmg:20};b.onHit(null,{},holder,ref,holder);
+  eq(ref.dmg,20,'dmg must pass through uncapped once every step is done');
+  Tutorial.reset()});
+Test.add('the tutorial dummy cannot be KO\'d by a light chain before every Tutorial step is done, but dies normally once they are',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  closeIn(G.fight);G.sim=true;
+  for(let i=0;i<300;i++)G.tick();
+  eq(G.state,'FIGHT','a light chain alone must never finish the dummy before PARRY/POWER are taught');
+  ok(G.fight.p2.hp>=1,'the dummy\'s hp must never have dropped below 1');
+  Tutorial.state.step=Tutorial.steps.length; // simulate every step having been completed
+  for(let i=0;i<500&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT','the SAME light chain must now finish the dummy once every step is done');
+  G.toTitle();G.sim=false});
+Test.add('completing the tutorial sets tutorialDone and grants 300 gold exactly once, on a natural KO',()=>{
+  Save.data=Meta.defaults();
+  const goldBefore=Save.data.gold||0;
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=Tutorial.steps.length; // every step already taught -- the dummy is now killable
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT','the tutorial fight must reach a natural KO result');
+  eq(Save.data.tutorialDone,true);
+  eq(Save.data.gold,goldBefore+300,'a first completion must grant exactly 300 gold');
+  const goldAfterFirst=Save.data.gold;
+  G.toTitle();
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=Tutorial.steps.length;
+  closeIn(G.fight);G.fight.p2.hp=1;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Save.data.gold,goldAfterFirst,'a second completion (replayed via the map\'s .node.tutorial row) must not grant gold again');
+  G.toTitle();G.sim=false});
+Test.add('Screens.renderMap always shows a .node.tutorial entry on floor 1 that starts G.startTutorial when clicked, and is never disabled',()=>{
+  Save.data=Meta.defaults();Save.data.tutorialDone=true; // even once done, it must stay replayable
+  Screens.map(1);
+  const el=document.querySelector('#map .node.tutorial');
+  ok(el,'.node.tutorial must exist on the floor 1 map');
+  ok(!el.disabled,'.node.tutorial must always be enabled/clickable');
+  el.click();
+  eq(G.mode,'tutorial');
+  G.toTitle()});
+Test.add('a fresh save\'s CAMPAIGN button starts the tutorial instead of opening the map; CAMPAIGN opens the map once tutorialDone',()=>{
+  Save.data=Meta.defaults();
+  eq(Save.data.tutorialDone,false);
+  Screens.title();
+  document.getElementById('btnCampaign').click();
+  eq(G.mode,'tutorial','CAMPAIGN on a fresh save must start the tutorial');
+  G.toTitle();
+  Save.data.tutorialDone=true;
+  Screens.title();
+  document.getElementById('btnCampaign').click();
+  eq(Screens._current,'map','CAMPAIGN must open the map once tutorialDone is true');
+  G.toTitle()});
+Test.add('the result screen shows a TUTORIAL COMPLETE line on a tutorial win',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=Tutorial.steps.length; // every step already taught -- the dummy is now killable
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  ok(document.getElementById('resultLine').textContent.includes('TUTORIAL COMPLETE'),
+    'result line: '+document.getElementById('resultLine').textContent);
+  G.toTitle();G.sim=false});
+Test.add('#tutorialPrompt shows the current step\'s prompt text during a tutorial fight, and hides once the tutorial ends',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  G.sim=true;G.tick();
+  const el=document.getElementById('tutorialPrompt');
+  ok(el,'#tutorialPrompt must exist');
+  eq(el.textContent,Tutorial.steps[0].prompt);
+  ok(el.classList.contains('show'));
+  G.toTitle();
+  ok(!document.getElementById('tutorialPrompt').classList.contains('show'),
+    '#tutorialPrompt must hide once the tutorial ends');
+  G.sim=false});

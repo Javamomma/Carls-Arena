@@ -113,4 +113,54 @@ const Ctrl={
     const dist=Math.abs(foe.x-me.x)-me.width,lightRange=me.moveDef('light1').range+20;
     if(dist<lightRange){it.light=true;return it}
     if(foe.state!=='ATTACK'&&closeCd===0){it.medium=true;closeCd=CLOSE_CD;return it}
-    return it}}}};
+    return it}}},
+  // Task 5.3: the tutorial's own dummy AI -- stands in for AI.make(enc.tier,...) as ctrl2
+  // (G.startTutorial passes this directly, bypassing AI.make/AI_TIERS entirely) so the goblin's one
+  // scripted attack (step 3's "parry it" prompt needs a real medium to react to) never depends on
+  // rng: a blind frame-countdown, not a probability roll, so two fresh instances are byte-identical
+  // forever (see the determinism test in 90_tests.js). Otherwise fully passive (never blocks, dashes,
+  // or specials) -- it only ever throws a medium, once every 90 frames of NOT being busy (holding
+  // the countdown rather than spending it while mid-move/stunned, so a hit that interrupts a pending
+  // swing just delays it instead of losing it). `seed` is accepted only for signature symmetry with
+  // every other seeded controller (Ctrl.random/Ctrl.competent/AI.make) -- never actually used.
+  tutorialDummy:seed=>{let cd=90;
+    return{next(fight,me,foe){
+      const it=Ctrl.EMPTY();
+      if(me.busy())return it;
+      if(cd>0){cd--;return it}
+      it.medium=true;cd=90;return it}}},
+  // Task 5.3: tests/harness.py's --tutorial flag scripts this as p1 -- a deterministic bot that plays
+  // the four tutorial steps in the order the prompts ask for (reading Tutorial.state.step, the same
+  // live global G's own tick() reads), then finishes the dummy off with lights once every step is
+  // done. Never rolls dice (Tutorial.state.step is the only thing branching its behavior), so it's
+  // safe for the harness's exit-1-on-any-assertion-failure contract.
+  tutorialBot:seed=>{let holding=false;
+    // Shared with step 0's punch prompt and the post-step-4 finisher: continue an already-open light
+    // chain through its own recovery+chain+landed window (mirrors Ctrl.competent's own priority
+    // order), otherwise start a fresh light the moment `me` isn't busy.
+    const chainLight=(it,me)=>{
+      if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){it.light=true;return}
+      if(me.busy())return;
+      it.light=true};
+    return{next(fight,me,foe){
+      const it=Ctrl.EMPTY();
+      const step=Tutorial.state.step;
+      if(step===0){chainLight(it,me);return it}
+      if(step===1){
+        // Don't let a light chain window (left open by step 0's own last hit) steal this step's
+        // medium -- SWIPE RIGHT / KICK asks for a medium specifically, not another light.
+        if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed)return it;
+        if(me.busy())return it;
+        it.medium=true;return it}
+      if(step===2){
+        // Start holding the instant the dummy's own scripted medium is 2 frames from its active
+        // window (Ctrl.tutorialDummy's only move), keep holding through the swing so the timed
+        // block lands inside PARRY_WINDOW, then release once the dummy is done attacking.
+        if(!holding&&foe.state==='ATTACK'&&foe.moveName==='medium'&&foe.f===foe.move.startup-2)holding=true;
+        if(holding){it.block=true;if(!(foe.state==='ATTACK'&&foe.moveName==='medium'))holding=false}
+        return it}
+      if(step===3){
+        if(me.busy())return it;
+        if(me.power>=100)it.special=1;
+        return it}
+      chainLight(it,me);return it}}}};

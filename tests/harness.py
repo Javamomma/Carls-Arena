@@ -17,6 +17,13 @@
   python3 tests/harness.py --screen settings --shot /tmp/settings.png  # Task 5.4: screenshot a Screens.<name>()
   python3 tests/harness.py --share --shot /tmp/share.png             # Task 5.4: G.shareCard() PNG data-URL
       # check (prefix + IHDR-decoded 854x480 dims); --shot writes the decoded PNG bytes to disk
+  python3 tests/harness.py --tutorial --seed 1                       # Task 5.3: resets the save, plays
+      # ENCOUNTERS.tutorial headless via a scripted Ctrl.tutorialBot (lights, a medium, a timed parry
+      # against the dummy's own scripted medium, a special, then lights to the KO); asserts the four
+      # Tutorial.steps advance in order, Save.data.tutorialDone is set, and exactly +300 gold is
+      # granted; prints a JSON summary and exits 1 on any assertion/page/console error
+  python3 tests/harness.py --tutorial --shot docs/shots/p5-tutorial-1.png  # same run, plus an early
+      # (step 1, before any light lands) screenshot of a live fight frame with #tutorialPrompt visible
 
 Exit 1 on any page error, console error, or if the game never left TITLE.
 """
@@ -197,6 +204,45 @@ try{
 }catch(e){push(String(e&&e.stack||e))}
 return summary})()""" % (seed, seed, seed, seed, loops, seed, seed)
 
+def build_tutorial_js(seed):
+    """Task 5.3: ENCOUNTERS.tutorial played headless by the deterministic Ctrl.tutorialBot(seed)
+    (30_input.js) -- G.startTutorial() (never Quest.start, so no energy check to satisfy), closeIn(f)
+    (a top-level function 90_tests.js already defines globally, same helper every in-page unit test
+    uses) so the bot doesn't have to spend real time closing the starting gap, then G.tick() until
+    RESULT or a generous 7200-frame (2 simulated minutes) budget. Tutorial.state.step is sampled every
+    tick and every actual change recorded, so the summary's own stepsInOrder is exactly the sequence
+    of steps the run passed through -- asserted to be [1,2,3,4] (0 is the starting step, never
+    recorded as a "change"), i.e. every one of the four prompts completed, in order, before the
+    dummy's natural KO ended the fight. Returns {seed, stepsInOrder, tutorialDone, goldGranted,
+    frame, errors:[...]}."""
+    return r"""(()=>{
+G.sim=true;
+const summary={seed:%d,stepsInOrder:[],tutorialDone:false,goldGranted:null,frame:0,errors:[]};
+const push=m=>summary.errors.push(m);
+try{
+  Save.data.seed=%d;Save.put();
+  const goldBefore=Save.data.gold||0;
+  const ok=G.startTutorial({seed:%d,ctrl1:Ctrl.tutorialBot(%d)});
+  if(ok===false)push('G.startTutorial refused');
+  closeIn(G.fight);
+  let lastStep=Tutorial.state.step;
+  let t=0;
+  while(G.state==='FIGHT'&&t<7200){
+    G.tick();t++;
+    if(Tutorial.state.step!==lastStep){summary.stepsInOrder.push(Tutorial.state.step);lastStep=Tutorial.state.step}
+  }
+  summary.frame=t;
+  if(G.state!=='RESULT')push('tutorial did not reach RESULT within the tick budget (state: '+G.state+')');
+  summary.tutorialDone=Save.data.tutorialDone;
+  summary.goldGranted=(Save.data.gold||0)-goldBefore;
+  const expected=[1,2,3,4];
+  if(JSON.stringify(summary.stepsInOrder.slice(0,4))!==JSON.stringify(expected))
+    push('tutorial steps did not advance in order 1,2,3,4: got '+JSON.stringify(summary.stepsInOrder));
+  if(!summary.tutorialDone)push('Save.data.tutorialDone was not set');
+  if(summary.goldGranted!==300)push('expected exactly +300 gold, got '+summary.goldGranted);
+}catch(e){push(String(e&&e.stack||e))}
+return summary})()""" % (seed, seed, seed, seed)
+
 def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
     """One soak cell: a fresh page, p1 on Ctrl.random(seed), p2 on AI.make(ain). The whole
     restart-on-KO loop runs as a single in-page evaluate() so a KO is caught the very next tick
@@ -335,6 +381,15 @@ def main():
                           "element); prints {state, prefix_ok, dims_ok, width, height} and exits 1 on "
                           "any page/console error or a failed check; combine with --shot to also write "
                           "the decoded PNG bytes to disk for a manual look")
+    ap.add_argument('--tutorial', action='store_true',
+                     help="Task 5.3: reset the save, seed Save.data.seed from --seed, play "
+                          "ENCOUNTERS.tutorial headless via the deterministic Ctrl.tutorialBot(seed) "
+                          "(30_input.js) until RESULT; asserts the four Tutorial.steps advance in "
+                          "order (1,2,3,4), Save.data.tutorialDone is set, and exactly +300 gold is "
+                          "granted; prints a JSON summary (see build_tutorial_js's docstring for the "
+                          "exact shape) and exits 1 on any assertion/page/console error; combine with "
+                          "--shot for an early (step 1, before any light lands) screenshot of a live "
+                          "fight frame with #tutorialPrompt visible")
     a = ap.parse_args()
     if a.floor is not None and a.node is None:
         ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2
@@ -433,6 +488,34 @@ def main():
                'prefix_ok': prefix_ok, 'dims_ok': dims_ok, 'width': width, 'height': height}
         print(json.dumps(out, indent=1))
         sys.exit(1 if share_errors or not prefix_ok or not dims_ok or r.get('state') != 'RESULT' else 0)
+    if a.tutorial:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page(viewport={'width': 854, 'height': 480})
+            tut_errors = []
+            pg.on('pageerror', lambda e: tut_errors.append(str(e)))
+            pg.on('console', lambda m: tut_errors.append(m.text) if m.type == 'error' else None)
+            pg.goto(INDEX)
+            pg.wait_for_function('typeof G!=="undefined"')
+            # Same reset as --e2e/--reset-save: re-migrate from empty localStorage onto Meta.defaults()
+            # so the run starts from a genuinely fresh (!tutorialDone) save.
+            pg.evaluate('localStorage.clear();Save.load()')
+            if a.shot:
+                # docs/shots/p5-tutorial-1.png: a quick start-and-freeze, well within step 1 (TAP
+                # PUNCH) since closeIn(f) is the only thing that ever moves the fighters here -- the
+                # full scripted run below (build_tutorial_js) then starts the tutorial fresh again and
+                # plays it to completion in the same page/session, unaffected by this earlier peek.
+                pg.evaluate(
+                    "(()=>{G.sim=true;Save.data.seed=%d;Save.put();"
+                    "G.startTutorial({seed:%d,ctrl1:Ctrl.tutorialBot(%d)});"
+                    "closeIn(G.fight);for(let i=0;i<10;i++)G.tick()})()" % (a.seed, a.seed, a.seed))
+                pg.screenshot(path=a.shot)
+            js = build_tutorial_js(a.seed)
+            r = pg.evaluate(js)
+            b.close()
+        out = {'page_errors': tut_errors, 'summary': r}
+        print(json.dumps(out, indent=1))
+        sys.exit(1 if tut_errors or r.get('errors') else 0)
     errors, console = [], []
     with sync_playwright() as p:
         b = p.chromium.launch()

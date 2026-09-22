@@ -74,6 +74,14 @@ body.left-handed #powerPicker{right:auto;left:14px}
    unaffected. */
 .node.boss::before{content:'\1F451';margin-right:2px}
 .node.locked::before{content:'\1F512';margin-right:2px}
+/* Task 5.3: the map's own permanently-open TUTORIAL entry -- never disabled, so it gets a distinct
+   teal (not .node.open's gold) so it doesn't read as just another campaign door. Lives in the .ftabs
+   row (Screens.renderMap), not #mapPath's own node list, so it costs zero extra vertical space there
+   -- .ftabs' row height is already pinned to its tallest child (.ftab is 44px); these overrides undo
+   .node's own width/min-height (sized for the path's stacked rows) so it sits inline at that same
+   44px instead of the path's 320px-wide/40px-tall shape. */
+.node.tutorial{border-color:#7fd18a;color:#7fd18a;background:#182018;
+  width:auto;max-width:none;min-height:44px;padding:6px 16px;margin-left:6px}
 .energy{display:flex;gap:4px;justify-content:center;margin:3px 0}
 .pip{width:14px;height:14px;border-radius:3px;background:#2a2a2a;border:1px solid #555}
 .pip.full{background:#f4c542;border-color:#f4c542}
@@ -159,6 +167,18 @@ body.left-handed #powerPicker{right:auto;left:14px}
    uses) controls both; neither is part of Screens' own show()/hideAll() screen list, since they layer
    on top of whichever screen (or fight) is already showing, not in place of it. */
 #tap .panel h1,#rotate .panel h1{font-size:22px}
+/* Task 5.3: the tutorial's own prompt overlay -- positioned in JS (G.positionTutorialPrompt, called
+   from G.fit on load/resize, the same off-canvas-rect technique #toast already uses) just under the
+   HUD line (canvas y=104) so it never covers the fighters. A gold pill matching the reveal ring's own
+   palette; .flash briefly recolors it the instant a step completes (G.syncTutorialPrompt, driven by
+   Tutorial._flash). Not part of Screens' show()/hideAll() list -- purely G's own concern, shown only
+   while G.mode==='tutorial' (G.tick's own gate) and hidden by G.toTitle/backToOrigin/startFight. */
+#tutorialPrompt{position:fixed;transform:translateX(-50%);font-size:12px;font-weight:bold;
+  letter-spacing:.5px;color:#111;background:#f4c542;border-radius:20px;padding:6px 14px;
+  text-align:center;white-space:nowrap;pointer-events:none;display:none;
+  box-shadow:0 2px 8px rgba(0,0,0,.4);z-index:1}
+#tutorialPrompt.show{display:block}
+#tutorialPrompt.flash{background:#8cf4c5}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
 <button id="btnBlock" class="cbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
@@ -241,4 +261,8 @@ body.left-handed #powerPicker{right:auto;left:14px}
      so it sits above every screen/menu/#tap when it's up, not just the title. -->
 <div class="overlay" id="rotate"><div class="panel"><h1>ROTATE YOUR<br>DEVICE</h1><p class="sub">This dungeon plays best in landscape.</p></div></div>
 <div id="toast"></div>
+<!-- Task 5.3: the tutorial's own prompt pill (G.positionTutorialPrompt/syncTutorialPrompt/
+     hideTutorialPrompt, 80_game.js) -- same "plain DOM element outside the overlay list" pattern as
+     #toast just above. -->
+<div id="tutorialPrompt"></div>
 </div><script>

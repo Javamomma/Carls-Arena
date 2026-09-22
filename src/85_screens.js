@@ -73,7 +73,12 @@ const Screens={
     // moved into the new #settings overlay as one more toggle row; renderSettings() below is what
     // syncs its label text now, since that's the screen it actually lives on.
     document.getElementById('btnSettings').onclick=()=>Screens.settings();
-    document.getElementById('btnCampaign').onclick=()=>{const n=Screens.lastFloor();
+    // Task 5.3: a fresh save (!Save.data.tutorialDone) routes CAMPAIGN to the tutorial instead of the
+    // map -- checked fresh on every click (not just latched at load), so CAMPAIGN opens the map as
+    // usual again the instant tutorialDone flips true, with no separate "first run" flag to track.
+    document.getElementById('btnCampaign').onclick=()=>{
+      if(!Save.data.tutorialDone){Screens._origin={name:'map',args:[1]};G.startTutorial();return}
+      const n=Screens.lastFloor();
       Screens._origin={name:'map',args:[n]};Screens.map(n)};
     document.getElementById('btnArenaMenu').onclick=()=>{Screens._origin={name:'arena'};Screens.arena()};
     document.getElementById('btnRoster').onclick=()=>{Screens._origin={name:'title'};Screens.roster()};
@@ -137,6 +142,19 @@ const Screens={
       b.disabled=!unlocked;
       b.onclick=()=>Screens.map(fd.floor);
       tabs.appendChild(b)}
+    // Task 5.3: a permanently-open TUTORIAL entry, appended into the floor-tabs row rather than the
+    // node path below -- .ftabs' own row height is already pinned to its tallest existing child
+    // (44px), so adding one more same-height button costs zero extra vertical space, unlike appending
+    // another .node row to #mapPath, which the "no clipping/scroll at 854x480" fix-wave item 3 test
+    // already fills to its worst case (every one of floor 1's nodes 'open' at once). Unlike every
+    // real node/boss button it never disables and never routes through Quest.start (G.startTutorial
+    // spends no energy, same as any bare o.encounter id).
+    if(n===1){
+      const t=document.createElement('button');
+      t.className='node tutorial';
+      t.textContent='TUTORIAL';
+      t.onclick=()=>{Screens._origin={name:'map',args:[n]};G.startTutorial()};
+      tabs.appendChild(t)}
     const path=document.getElementById('mapPath');path.innerHTML='';
     if(f){
       // Fix-wave item 6: a non-'open' node is disabled -- it used to be a live button that looked
@@ -369,6 +387,12 @@ const Screens={
     if(rewards){
       const rt=G.rewardsText(rewards);
       if(rt)line=line?line+'  '+rt:rt}
+    // Task 5.3: the tutorial's own special line -- shown on every tutorial win, even a replay through
+    // the map's .node.tutorial row (which never re-grants gold, see G.onFightEnd); the +300 GOLD
+    // suffix only appears on the run that actually granted it (G.tutorialJustGranted).
+    if(won&&G.mode==='tutorial'){
+      const t='TUTORIAL COMPLETE'+(G.tutorialJustGranted?' — +300 GOLD':'');
+      line=line?line+'  '+t:t}
     // Task 5.1: the ratings recap -- shown for every fight (win or loss), independent of rewards,
     // since viewers accrue off the fight itself, not off the quest/arena outcome.
     if(this._peakViewers!=null)line=(line?line+'  ':'')+'PEAK VIEWERS '+Render.fmtViewers(this._peakViewers);

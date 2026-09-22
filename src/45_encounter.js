@@ -23,6 +23,14 @@ const FLOORS=[
 // least once before the bosses, which already carry their own signature buff off their def
 // (armorUp/regen, Phase 3 ruling #4 — unaffected by this change).
 const ENCOUNTERS={
+  // Task 5.3: Floor 0, the frozen tutorial encounter (Phase 5 ruling #3) -- a goblin at half hp and
+  // 30% atk (`tier:'dummy'` is kept as the frozen descriptive shape even though G.startTutorial
+  // never actually routes it through AI.make('dummy',...): it hands the live fight a deterministic
+  // Ctrl.tutorialDummy() controller directly as ctrl2 instead, so the one scripted medium step 3's
+  // parry prompt needs never depends on rng). `buffs:[]` is explicit (not omitted) per the frozen
+  // interface line -- the dummy carries no encounter buffs, same empty-array meaning every other
+  // ENCOUNTERS entry gets from Encounter.resolve's own `o.buffs||[]` default.
+  tutorial:{floor:0,name:'THE WAITING ROOM',enemy:'goblin',tier:'dummy',hpMul:.5,atkMul:.3,buffs:[]},
   f1_goblin:{floor:1,name:'THE DEPTHS',enemy:'goblin',tier:'basic',hpMul:floorMul(1),atkMul:floorMul(1)},
   f1_hob:   {floor:1,name:'THE DEPTHS',enemy:'hobgoblin',tier:'brute',hpMul:floorMul(1),atkMul:floorMul(1),buffs:['armorUp']},
   f1_skel:    {floor:1,name:'THE DEPTHS',enemy:'skeleton', tier:'t2',hpMul:floorMul(1),atkMul:floorMul(1),buffs:['thorns']},

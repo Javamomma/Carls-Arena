@@ -1,3 +1,55 @@
+// Task 5.3: the Floor 0 tutorial's own presentation/meta state machine. Lives here (not a sim file)
+// since step 4 reaches directly into the live Fighter (fight.p1.power) the same way G.debugPose/
+// G.debugCinematic already reach into fight state from outside the sim boundary -- Fight/Fighter
+// themselves are never touched, and BUFFS.noKo (47_buffs.js) is what actually keeps the player alive,
+// not this object. Tutorial.steps is the frozen {prompt,done(fight)} shape (four entries);
+// Tutorial.state={step,done:[bool*4]} tracks progress; Tutorial.prompt is the live overlay text
+// (#tutorialPrompt, synced every tutorial-mode tick by G.syncTutorialPrompt below).
+//
+// Wiring (all in G, mirroring how Broadcast is wired): G.startTutorial calls Tutorial.reset();
+// G.onEvent forwards every Fight.emit'd event here via Tutorial.onEvent(type,a,b,val,fight), gated to
+// G.mode==='tutorial'; G.tick calls Tutorial.tick(fight) once per sim frame, same gate, right
+// alongside Broadcast.tick(f).
+const Tutorial={
+  state:{step:0,done:[false,false,false,false]},
+  prompt:'',
+  _lights:0,_medium:false,_parried:false,_powerSet:false,_flash:0,
+  steps:[
+    {prompt:'TAP PUNCH — land 3 light hits',done:()=>Tutorial._lights>=3},
+    {prompt:'SWIPE RIGHT / KICK — land a medium',done:()=>Tutorial._medium},
+    {prompt:'HOLD BLOCK, release just before the hit to PARRY — parry once',done:()=>Tutorial._parried},
+    {prompt:'POWER — fire a special',
+      done:fight=>!!(fight&&fight.p1&&(fight.p1.moveName==='s1'||fight.p1.moveName==='s2'||fight.p1.moveName==='s3'))}],
+  reset(){
+    this.state={step:0,done:[false,false,false,false]};
+    this._lights=0;this._medium=false;this._parried=false;this._powerSet=false;this._flash=0;
+    this.prompt=this.steps[0].prompt},
+  // Fed every Fight.emit'd event (mirrors Broadcast.onEvent's own wiring), gated to the CURRENT step
+  // only -- each branch sets just its own step's flag, so an event that would match a LATER step
+  // (e.g. a medium landed while chasing the finishing blow, well after step 1 is already done) can
+  // never retroactively complete a step out of order.
+  onEvent(type,a,b,val,fight){
+    if(!fight||!fight.p1)return;
+    const p1=fight.p1,step=this.state.step;
+    if(step===0&&type==='hit'&&a===p1&&a.moveName&&a.moveName.indexOf('light')===0)this._lights++;
+    else if(step===1&&type==='hit'&&a===p1&&a.moveName==='medium')this._medium=true;
+    else if(step===2&&type==='parry'&&a===p1)this._parried=true},
+  // Called once per sim frame (mirrors Broadcast.tick's own wiring): arms step 4's power-100 grant
+  // exactly once (the instant that step becomes current, never re-applied once the player starts
+  // spending it), then advances state.step the moment the current step's done(fight) goes true.
+  // Completion itself (Save.data.tutorialDone/the one-time gold grant) is NOT decided here -- see
+  // G.onFightEnd's tutorial branch: the fight ends on the dummy's own natural KO, independent of
+  // whether every step was actually followed, matching the ruling that rejected a forced
+  // G.endTutorial()-style finish in favor of the real player-vs-dummy combat path.
+  tick(fight){
+    if(!fight)return;
+    if(this._flash>0)this._flash--;
+    const step=this.state.step;
+    if(step>=this.steps.length)return;
+    if(step===3&&!this._powerSet&&fight.p1){fight.p1.power=100;this._powerSet=true}
+    if(this.steps[step].done(fight)){
+      this.state.done[step]=true;this._flash=30;this.state.step++;
+      this.prompt=this.state.step<this.steps.length?this.steps[this.state.step].prompt:'FINISH HIM'}}};
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
   cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
@@ -7,7 +59,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // already caps gameplay at 1.12; 1.28 is the S3 cinematic punch-in) so a Camera.update before any
   // startFight (shouldn't happen, but tests instantiate G without always calling it) behaves exactly
   // as it did before this existed.
-  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast();this.checkOrientation()},
+  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast();this.positionTutorialPrompt();this.checkOrientation()},
   // Positions #toast off the canvas's own box (canvas.getBoundingClientRect()), not #wrap, so it
   // tracks the actual displayed game area exactly even when #wrap letterboxes the canvas at an
   // aspect ratio other than W/H. Fix round 2: moved from just under the HUD's floor-line text to
@@ -48,6 +100,27 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     el.style.fontSize='13px';
     const lh=parseFloat(getComputedStyle(el).lineHeight)||1;
     if(Math.round(el.scrollHeight/lh)>2)el.style.fontSize='12px'},
+  // Task 5.3: #tutorialPrompt's position, same off-canvas-rect technique positionToast already uses
+  // (so it tracks the canvas box exactly through any letterboxing), pinned to canvas-local y=112 --
+  // just under HUD_LINE (104), clear of both the floor line/viewers counter above it and the
+  // fighters themselves below it.
+  positionTutorialPrompt(){
+    const r=canvas.getBoundingClientRect(),el=document.getElementById('tutorialPrompt');
+    if(!el)return;
+    const sy=r.height/H;
+    el.style.left=(r.left+r.width/2)+'px';
+    el.style.top=(r.top+112*sy)+'px'},
+  // Called once per tutorial-mode tick (see tick() below): mirrors Tutorial.prompt/._flash onto the
+  // DOM overlay every frame -- cheap (a textContent/classList write only, no layout work beyond what
+  // positionTutorialPrompt already did once at fit()) and simpler than trying to diff for changes,
+  // same tradeoff G.syncSpecials already makes for the power button's ready/disabled state.
+  syncTutorialPrompt(){
+    const el=document.getElementById('tutorialPrompt');
+    if(!el)return;
+    el.classList.add('show');
+    el.classList.toggle('flash',Tutorial._flash>0);
+    el.textContent=Tutorial.prompt},
+  hideTutorialPrompt(){const el=document.getElementById('tutorialPrompt');if(el)el.classList.remove('show')},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   // Task 5.4: settings whose effect is a standing DOM/layout state (not read live each time, unlike
   // reduceMotion/sfx/announcer/haptics, which are checked directly off Save.data.settings at their
@@ -208,7 +281,32 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // exhibition off the title screen) -- hide whichever one is still up so it doesn't linger over
     // the fight underneath.
     if(typeof Screens!=='undefined')Screens.hideAll();
+    // Task 5.3: any fight that ISN'T the tutorial must never show a stale prompt left over from a
+    // previous tutorial run; G.startTutorial (below) re-shows it on its own very next syncTutorialPrompt
+    // call, once G.tick actually starts stepping the sim it just started.
+    this.hideTutorialPrompt();
     this.show('btns',true);Audio.announce('start',this.fight.presRng)},
+  // Task 5.3: Floor 0. Routes through the exact same G.startFight a real quest node uses --
+  // ENCOUNTERS.tutorial resolves like any other encounter id, and since it's never given through the
+  // {floor,node} sugar, no Quest.start ever runs -- the tutorial spends no energy, same as any bare
+  // o.encounter id. mode:'tutorial' is what G.onEvent/G.tick gate Tutorial's own wiring on, and what
+  // G.onFightEnd reads to grant the one-time completion reward instead of Rewards.forNode/
+  // Arena.record. ctrl2 defaults to a deterministic Ctrl.tutorialDummy() (30_input.js) rather than
+  // AI.make(enc.tier,...) -- the dummy's one scripted medium (step 3's parry prompt needs a real
+  // attack to react to) must never depend on rng. playerBuffs folds in BUFFS.noKo (47_buffs.js)
+  // through the exact same path fix-wave item 5 already wired for a node's own player-side buffs, so
+  // the player can never actually be KO'd mid-lesson with no special case anywhere in Fight/Fighter.
+  startTutorial(o={}){
+    Tutorial.reset();
+    const started=this.startFight(Object.assign({},o,{encounter:'tutorial',mode:'tutorial',
+      ctrl2:o.ctrl2||Ctrl.tutorialDummy(o.seed||this.seed),
+      playerBuffs:(o.playerBuffs||[]).concat('noKo')}));
+    // Task 5.3: BUFFS.tutorialGuard (47_buffs.js) layered onto the live p2 Fighter directly, outside
+    // ENCOUNTERS.tutorial's own frozen `buffs:[]` -- it keeps the dummy from dying to an early light
+    // chain before every step is taught, and stops applying itself the instant Tutorial.state.step
+    // reaches all-steps-done, so "FINISH HIM" is a real natural KO.
+    if(started!==false&&this.fight)this.fight.p2.buffs=(this.fight.p2.buffs||[]).concat(BUFFS.tutorialGuard);
+    return started},
   // Fix-wave item 4: a fighter's current pose's own top (Rig.topAt), scaled by its def.scale — the
   // per-frame counterpart to the per-fight Rig.extent worst-case calc above, read by tick() every
   // frame to build capNow.
@@ -246,6 +344,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   playRecipe(fn){if(Save.data.settings.sfx&&fn)fn()},
   onEvent(t,a,b,val){
     if(this.fight)Broadcast.onEvent(t,a,b,val,this.fight);
+    // Task 5.3: Tutorial gets the exact same every-event feed Broadcast does, gated to tutorial mode
+    // only (a stray event from some OTHER fight must never touch Tutorial's counters).
+    if(this.fight&&this.mode==='tutorial')Tutorial.onEvent(t,a,b,val,this.fight);
     if(Broadcast.state.lastPop){
       const pop=Broadcast.state.lastPop;Broadcast.state.lastPop=null;
       if(this.fight)this.fight.fx.push({kind:'popup',
@@ -380,6 +481,20 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       Quest.complete(floor,node,won);
       if(won)rewards=Rewards.forNode(floor,node)
     }else if(this.mode==='arena')Arena.record(won);
+    else if(this.mode==='tutorial'&&won){
+      // Task 5.3: completion = a natural win in tutorial mode -- the fight ends on the dummy's real
+      // KO (ruling: rejected a forced G.endTutorial()-style finish in favor of the actual player-vs-
+      // dummy combat path), independent of whether every Tutorial.steps prompt was actually followed.
+      // tutorialDone + the one-time 300 gold only ever grant ONCE: Save.data.tutorialDone starts
+      // false (Meta.defaults) and this branch is itself guarded on it, so replaying the map's own
+      // permanently-open .node.tutorial row can't re-farm the grant. G.tutorialJustGranted (read by
+      // Screens.renderResult) records whether THIS particular win is the one that granted it, so a
+      // replay still shows the completion line without falsely claiming another +300 gold.
+      this.tutorialJustGranted=!Save.data.tutorialDone;
+      if(!Save.data.tutorialDone){
+        Save.data.tutorialDone=true;
+        Save.data.gold=(Save.data.gold||0)+300;
+        Save.put()}}
     let leveledUp=false;
     if(rewards){
       // Fix round 1: reads this.champ (the champion who actually fought), not Save.data.active --
@@ -452,9 +567,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // that); backToOrigin (below) is the "go back to wherever this fight was launched from" version,
   // used by the pause menu's QUIT and the result overlay's CONTINUE button.
   toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+    this.hideTutorialPrompt();
     if(typeof Screens!=='undefined')Screens.show('title');
     else{this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)}},
   backToOrigin(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+    this.hideTutorialPrompt();
     if(typeof Screens!=='undefined')Screens.toOrigin();else this.toTitle()},
   // Fix round 1 (controller review, Critical): the title screen's own buttons only ever get their
   // onclick bound inside Screens.renderTitle(), which only runs when some Screens.* function
@@ -491,12 +608,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // not G.tick() calls -- called only from inside the branch that actually ran f.step(), so the
       // once-every-4th-call KO slow-mo throttle above doesn't also run Broadcast's windows 4x too
       // fast relative to the fight frames they're meant to track.
-      if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--;Broadcast.tick(f)}}
-      else{f.step();Broadcast.tick(f)}
+      if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--;Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}}
+      else{f.step();Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}
       this.frameNow=f.frame;
       this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
       this.checkCinematicFx(f);
-      this.syncSpecials()}
+      this.syncSpecials();
+      // Task 5.3: syncs #tutorialPrompt from Tutorial.prompt/._flash every tutorial-mode tick, same
+      // per-sim-frame cadence Broadcast.tick/Tutorial.tick above already run at.
+      if(this.mode==='tutorial')this.syncTutorialPrompt()}
     FX.pushAll(f.fx);f.fx.length=0;
     const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.28}:null; // fix round 2: 1.6->1.28
     // Fix-wave item 4: per-frame zoom cap sized off the pose(s) actually on screen this tick

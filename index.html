@@ -74,6 +74,14 @@ body.left-handed #powerPicker{right:auto;left:14px}
    unaffected. */
 .node.boss::before{content:'\1F451';margin-right:2px}
 .node.locked::before{content:'\1F512';margin-right:2px}
+/* Task 5.3: the map's own permanently-open TUTORIAL entry -- never disabled, so it gets a distinct
+   teal (not .node.open's gold) so it doesn't read as just another campaign door. Lives in the .ftabs
+   row (Screens.renderMap), not #mapPath's own node list, so it costs zero extra vertical space there
+   -- .ftabs' row height is already pinned to its tallest child (.ftab is 44px); these overrides undo
+   .node's own width/min-height (sized for the path's stacked rows) so it sits inline at that same
+   44px instead of the path's 320px-wide/40px-tall shape. */
+.node.tutorial{border-color:#7fd18a;color:#7fd18a;background:#182018;
+  width:auto;max-width:none;min-height:44px;padding:6px 16px;margin-left:6px}
 .energy{display:flex;gap:4px;justify-content:center;margin:3px 0}
 .pip{width:14px;height:14px;border-radius:3px;background:#2a2a2a;border:1px solid #555}
 .pip.full{background:#f4c542;border-color:#f4c542}
@@ -159,6 +167,18 @@ body.left-handed #powerPicker{right:auto;left:14px}
    uses) controls both; neither is part of Screens' own show()/hideAll() screen list, since they layer
    on top of whichever screen (or fight) is already showing, not in place of it. */
 #tap .panel h1,#rotate .panel h1{font-size:22px}
+/* Task 5.3: the tutorial's own prompt overlay -- positioned in JS (G.positionTutorialPrompt, called
+   from G.fit on load/resize, the same off-canvas-rect technique #toast already uses) just under the
+   HUD line (canvas y=104) so it never covers the fighters. A gold pill matching the reveal ring's own
+   palette; .flash briefly recolors it the instant a step completes (G.syncTutorialPrompt, driven by
+   Tutorial._flash). Not part of Screens' show()/hideAll() list -- purely G's own concern, shown only
+   while G.mode==='tutorial' (G.tick's own gate) and hidden by G.toTitle/backToOrigin/startFight. */
+#tutorialPrompt{position:fixed;transform:translateX(-50%);font-size:12px;font-weight:bold;
+  letter-spacing:.5px;color:#111;background:#f4c542;border-radius:20px;padding:6px 14px;
+  text-align:center;white-space:nowrap;pointer-events:none;display:none;
+  box-shadow:0 2px 8px rgba(0,0,0,.4);z-index:1}
+#tutorialPrompt.show{display:block}
+#tutorialPrompt.flash{background:#8cf4c5}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
 <button id="btnBlock" class="cbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
@@ -241,6 +261,10 @@ body.left-handed #powerPicker{right:auto;left:14px}
      so it sits above every screen/menu/#tap when it's up, not just the title. -->
 <div class="overlay" id="rotate"><div class="panel"><h1>ROTATE YOUR<br>DEVICE</h1><p class="sub">This dungeon plays best in landscape.</p></div></div>
 <div id="toast"></div>
+<!-- Task 5.3: the tutorial's own prompt pill (G.positionTutorialPrompt/syncTutorialPrompt/
+     hideTutorialPrompt, 80_game.js) -- same "plain DOM element outside the overlay list" pattern as
+     #toast just above. -->
+<div id="tutorialPrompt"></div>
 </div><script>
 
 'use strict';
@@ -287,6 +311,12 @@ const Meta={
       // this one DOES need (unlike leaderboard/pity, `settings` already existed as `{}` before this
       // task, so the generic "fill anything TOP-LEVEL missing" loop below would never touch it).
       settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true},
+      // Task 5.3: a plain top-level boolean, same free-ride-through-migrate() story as leaderboard/
+      // pity above -- a pre-5.3 v2 save picks it up for free via migrate()'s generic "fill anything
+      // top-level missing" loop below, no dedicated migrate branch needed. false until G.onFightEnd
+      // grants a tutorial win (once); read by Screens.renderTitle's CAMPAIGN handler (first-run
+      // routing) and the result screen's tutorial line.
+      tutorialDone:false,
       mute:false,stats:{fights:0,wins:0}}},
   // v1 -> v2: keep gold/units/mute/settings, everything else starts fresh (including roster, which
   // v1 saves never meaningfully populated). v2 -> v2: fill in any keys/sub-keys a save from an
@@ -1003,7 +1033,57 @@ const Ctrl={
     const dist=Math.abs(foe.x-me.x)-me.width,lightRange=me.moveDef('light1').range+20;
     if(dist<lightRange){it.light=true;return it}
     if(foe.state!=='ATTACK'&&closeCd===0){it.medium=true;closeCd=CLOSE_CD;return it}
-    return it}}}};
+    return it}}},
+  // Task 5.3: the tutorial's own dummy AI -- stands in for AI.make(enc.tier,...) as ctrl2
+  // (G.startTutorial passes this directly, bypassing AI.make/AI_TIERS entirely) so the goblin's one
+  // scripted attack (step 3's "parry it" prompt needs a real medium to react to) never depends on
+  // rng: a blind frame-countdown, not a probability roll, so two fresh instances are byte-identical
+  // forever (see the determinism test in 90_tests.js). Otherwise fully passive (never blocks, dashes,
+  // or specials) -- it only ever throws a medium, once every 90 frames of NOT being busy (holding
+  // the countdown rather than spending it while mid-move/stunned, so a hit that interrupts a pending
+  // swing just delays it instead of losing it). `seed` is accepted only for signature symmetry with
+  // every other seeded controller (Ctrl.random/Ctrl.competent/AI.make) -- never actually used.
+  tutorialDummy:seed=>{let cd=90;
+    return{next(fight,me,foe){
+      const it=Ctrl.EMPTY();
+      if(me.busy())return it;
+      if(cd>0){cd--;return it}
+      it.medium=true;cd=90;return it}}},
+  // Task 5.3: tests/harness.py's --tutorial flag scripts this as p1 -- a deterministic bot that plays
+  // the four tutorial steps in the order the prompts ask for (reading Tutorial.state.step, the same
+  // live global G's own tick() reads), then finishes the dummy off with lights once every step is
+  // done. Never rolls dice (Tutorial.state.step is the only thing branching its behavior), so it's
+  // safe for the harness's exit-1-on-any-assertion-failure contract.
+  tutorialBot:seed=>{let holding=false;
+    // Shared with step 0's punch prompt and the post-step-4 finisher: continue an already-open light
+    // chain through its own recovery+chain+landed window (mirrors Ctrl.competent's own priority
+    // order), otherwise start a fresh light the moment `me` isn't busy.
+    const chainLight=(it,me)=>{
+      if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){it.light=true;return}
+      if(me.busy())return;
+      it.light=true};
+    return{next(fight,me,foe){
+      const it=Ctrl.EMPTY();
+      const step=Tutorial.state.step;
+      if(step===0){chainLight(it,me);return it}
+      if(step===1){
+        // Don't let a light chain window (left open by step 0's own last hit) steal this step's
+        // medium -- SWIPE RIGHT / KICK asks for a medium specifically, not another light.
+        if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed)return it;
+        if(me.busy())return it;
+        it.medium=true;return it}
+      if(step===2){
+        // Start holding the instant the dummy's own scripted medium is 2 frames from its active
+        // window (Ctrl.tutorialDummy's only move), keep holding through the swing so the timed
+        // block lands inside PARRY_WINDOW, then release once the dummy is done attacking.
+        if(!holding&&foe.state==='ATTACK'&&foe.moveName==='medium'&&foe.f===foe.move.startup-2)holding=true;
+        if(holding){it.block=true;if(!(foe.state==='ATTACK'&&foe.moveName==='medium'))holding=false}
+        return it}
+      if(step===3){
+        if(me.busy())return it;
+        if(me.power>=100)it.special=1;
+        return it}
+      chainLight(it,me);return it}}}};
 
 // All frame counts at 60 Hz. dash = px the attacker advances during startup. push = px the defender is shoved on hit.
 const MOVES={
@@ -1129,6 +1209,14 @@ const FLOORS=[
 // least once before the bosses, which already carry their own signature buff off their def
 // (armorUp/regen, Phase 3 ruling #4 — unaffected by this change).
 const ENCOUNTERS={
+  // Task 5.3: Floor 0, the frozen tutorial encounter (Phase 5 ruling #3) -- a goblin at half hp and
+  // 30% atk (`tier:'dummy'` is kept as the frozen descriptive shape even though G.startTutorial
+  // never actually routes it through AI.make('dummy',...): it hands the live fight a deterministic
+  // Ctrl.tutorialDummy() controller directly as ctrl2 instead, so the one scripted medium step 3's
+  // parry prompt needs never depends on rng). `buffs:[]` is explicit (not omitted) per the frozen
+  // interface line -- the dummy carries no encounter buffs, same empty-array meaning every other
+  // ENCOUNTERS entry gets from Encounter.resolve's own `o.buffs||[]` default.
+  tutorial:{floor:0,name:'THE WAITING ROOM',enemy:'goblin',tier:'dummy',hpMul:.5,atkMul:.3,buffs:[]},
   f1_goblin:{floor:1,name:'THE DEPTHS',enemy:'goblin',tier:'basic',hpMul:floorMul(1),atkMul:floorMul(1)},
   f1_hob:   {floor:1,name:'THE DEPTHS',enemy:'hobgoblin',tier:'brute',hpMul:floorMul(1),atkMul:floorMul(1),buffs:['armorUp']},
   f1_skel:    {floor:1,name:'THE DEPTHS',enemy:'skeleton', tier:'t2',hpMul:floorMul(1),atkMul:floorMul(1),buffs:['thorns']},
@@ -1221,7 +1309,40 @@ const BUFFS={
       if(holder._secondWindSpent||holder.hp<=0)return;
       if(holder.hp<=holder.maxHp*0.2){
         holder._secondWindSpent=true;
-        holder.hp=Math.min(holder.maxHp,holder.hp+Math.round(holder.maxHp*0.15))}}}};
+        holder.hp=Math.min(holder.maxHp,holder.hp+Math.round(holder.maxHp*0.15))}}},
+  noKo:{id:'noKo',
+    // Task 5.3 (Tutorial, Floor 0): "the goblin cannot KO the player during the tutorial" -- kept as
+    // a plain buff (the sim's own framework), not a special case in Fight/Fighter and not a
+    // presentation-side write of fight.p1.hp from Tutorial.tick, so the sim boundary stays exactly
+    // as pure as every other buff leaves it. Applied to p1 via G.startTutorial's playerBuffs (the
+    // same path fix-wave item 5 already wired for a node's own player-side buffs).
+    // Frame-ordering note (see the Task 5.3 report): Fight.step() runs buffFrame BEFORE detect/
+    // resolve, so this clamp only ever restores hp *after* it's already read <1 by a PRIOR frame's
+    // resolve -- it cannot rescue a single frame that drops hp from >0 straight past 0 (finish()
+    // fires that same frame, before the next buffFrame call would run). In practice this never
+    // matters here: ENCOUNTERS.tutorial's atkMul:.3 keeps every one of the dummy's hits tiny (well
+    // under 20 dmg) against any champion's multi-hundred hp pool, so hp never approaches 0 to begin
+    // with over the tutorial's short run -- this buff is the belt-and-suspenders backstop the frozen
+    // interface asked for, not the only thing standing between the player and a real KO.
+    onFrame(fight,holder,foe){if(holder.hp<1)holder.hp=1}},
+  tutorialGuard:{id:'tutorialGuard',
+    // Task 5.3: keeps the tutorial's dummy goblin alive through every step so the player can't
+    // accidentally one/two-shot a 150hp (hpMul:.5) dummy with a single light chain before ever
+    // reaching KICK/PARRY/POWER -- "the fight ends on the natural KO" (the ruling behind noKo's own
+    // design) only actually reads as intended once Tutorial's own "FINISH HIM" prompt (step 4 done)
+    // has fired. Unlike noKo (an onFrame clamp, timed to run before the NEXT frame's damage -- fine
+    // there since atkMul:.3 keeps every hit tiny relative to a champion's hp pool), this has to be an
+    // onHit cap: it runs INSIDE resolve(), before dmg is subtracted from hp, the same point armorUp
+    // already adjusts ref.dmg from -- an onFrame clamp here would be one frame too late (Fight.finish
+    // already runs, over=true, within the SAME step() call that applied a lethal hit, before any next
+    // frame's onFrame could ever run). Deliberately NOT part of ENCOUNTERS.tutorial's own frozen
+    // `buffs:[]` (kept empty exactly as specified) -- G.startTutorial layers this onto the live p2
+    // Fighter directly after construction, the same "G sets extra live-Fighter state outside the
+    // buffIds pipeline" pattern G.startFight already uses for a sponsor perk's parryBonus.
+    onHit(fight,att,def,ref,holder){
+      if(holder!==def)return; // only ever meaningful for the dummy defending, never attacking
+      if(typeof Tutorial==='undefined'||Tutorial.state.step>=Tutorial.steps.length)return; // FINISH HIM: no cap
+      if(ref.dmg>=holder.hp)ref.dmg=Math.max(0,holder.hp-1)}}};
 const Buffs={
   // Resolves ids[] to BUFFS objects and sets holder.buffs (replacing whatever was there). Called
   // once at fight/encounter setup, never per frame, so there's no per-frame allocation on the hot
@@ -3327,6 +3448,58 @@ const FX={list:[],shake:0,flash:0,card:null,
     c.restore();
     c.restore()}};
 
+// Task 5.3: the Floor 0 tutorial's own presentation/meta state machine. Lives here (not a sim file)
+// since step 4 reaches directly into the live Fighter (fight.p1.power) the same way G.debugPose/
+// G.debugCinematic already reach into fight state from outside the sim boundary -- Fight/Fighter
+// themselves are never touched, and BUFFS.noKo (47_buffs.js) is what actually keeps the player alive,
+// not this object. Tutorial.steps is the frozen {prompt,done(fight)} shape (four entries);
+// Tutorial.state={step,done:[bool*4]} tracks progress; Tutorial.prompt is the live overlay text
+// (#tutorialPrompt, synced every tutorial-mode tick by G.syncTutorialPrompt below).
+//
+// Wiring (all in G, mirroring how Broadcast is wired): G.startTutorial calls Tutorial.reset();
+// G.onEvent forwards every Fight.emit'd event here via Tutorial.onEvent(type,a,b,val,fight), gated to
+// G.mode==='tutorial'; G.tick calls Tutorial.tick(fight) once per sim frame, same gate, right
+// alongside Broadcast.tick(f).
+const Tutorial={
+  state:{step:0,done:[false,false,false,false]},
+  prompt:'',
+  _lights:0,_medium:false,_parried:false,_powerSet:false,_flash:0,
+  steps:[
+    {prompt:'TAP PUNCH — land 3 light hits',done:()=>Tutorial._lights>=3},
+    {prompt:'SWIPE RIGHT / KICK — land a medium',done:()=>Tutorial._medium},
+    {prompt:'HOLD BLOCK, release just before the hit to PARRY — parry once',done:()=>Tutorial._parried},
+    {prompt:'POWER — fire a special',
+      done:fight=>!!(fight&&fight.p1&&(fight.p1.moveName==='s1'||fight.p1.moveName==='s2'||fight.p1.moveName==='s3'))}],
+  reset(){
+    this.state={step:0,done:[false,false,false,false]};
+    this._lights=0;this._medium=false;this._parried=false;this._powerSet=false;this._flash=0;
+    this.prompt=this.steps[0].prompt},
+  // Fed every Fight.emit'd event (mirrors Broadcast.onEvent's own wiring), gated to the CURRENT step
+  // only -- each branch sets just its own step's flag, so an event that would match a LATER step
+  // (e.g. a medium landed while chasing the finishing blow, well after step 1 is already done) can
+  // never retroactively complete a step out of order.
+  onEvent(type,a,b,val,fight){
+    if(!fight||!fight.p1)return;
+    const p1=fight.p1,step=this.state.step;
+    if(step===0&&type==='hit'&&a===p1&&a.moveName&&a.moveName.indexOf('light')===0)this._lights++;
+    else if(step===1&&type==='hit'&&a===p1&&a.moveName==='medium')this._medium=true;
+    else if(step===2&&type==='parry'&&a===p1)this._parried=true},
+  // Called once per sim frame (mirrors Broadcast.tick's own wiring): arms step 4's power-100 grant
+  // exactly once (the instant that step becomes current, never re-applied once the player starts
+  // spending it), then advances state.step the moment the current step's done(fight) goes true.
+  // Completion itself (Save.data.tutorialDone/the one-time gold grant) is NOT decided here -- see
+  // G.onFightEnd's tutorial branch: the fight ends on the dummy's own natural KO, independent of
+  // whether every step was actually followed, matching the ruling that rejected a forced
+  // G.endTutorial()-style finish in favor of the real player-vs-dummy combat path.
+  tick(fight){
+    if(!fight)return;
+    if(this._flash>0)this._flash--;
+    const step=this.state.step;
+    if(step>=this.steps.length)return;
+    if(step===3&&!this._powerSet&&fight.p1){fight.p1.power=100;this._powerSet=true}
+    if(this.steps[step].done(fight)){
+      this.state.done[step]=true;this._flash=30;this.state.step++;
+      this.prompt=this.state.step<this.steps.length?this.steps[this.state.step].prompt:'FINISH HIM'}}};
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
   cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
@@ -3336,7 +3509,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // already caps gameplay at 1.12; 1.28 is the S3 cinematic punch-in) so a Camera.update before any
   // startFight (shouldn't happen, but tests instantiate G without always calling it) behaves exactly
   // as it did before this existed.
-  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast();this.checkOrientation()},
+  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast();this.positionTutorialPrompt();this.checkOrientation()},
   // Positions #toast off the canvas's own box (canvas.getBoundingClientRect()), not #wrap, so it
   // tracks the actual displayed game area exactly even when #wrap letterboxes the canvas at an
   // aspect ratio other than W/H. Fix round 2: moved from just under the HUD's floor-line text to
@@ -3377,6 +3550,27 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     el.style.fontSize='13px';
     const lh=parseFloat(getComputedStyle(el).lineHeight)||1;
     if(Math.round(el.scrollHeight/lh)>2)el.style.fontSize='12px'},
+  // Task 5.3: #tutorialPrompt's position, same off-canvas-rect technique positionToast already uses
+  // (so it tracks the canvas box exactly through any letterboxing), pinned to canvas-local y=112 --
+  // just under HUD_LINE (104), clear of both the floor line/viewers counter above it and the
+  // fighters themselves below it.
+  positionTutorialPrompt(){
+    const r=canvas.getBoundingClientRect(),el=document.getElementById('tutorialPrompt');
+    if(!el)return;
+    const sy=r.height/H;
+    el.style.left=(r.left+r.width/2)+'px';
+    el.style.top=(r.top+112*sy)+'px'},
+  // Called once per tutorial-mode tick (see tick() below): mirrors Tutorial.prompt/._flash onto the
+  // DOM overlay every frame -- cheap (a textContent/classList write only, no layout work beyond what
+  // positionTutorialPrompt already did once at fit()) and simpler than trying to diff for changes,
+  // same tradeoff G.syncSpecials already makes for the power button's ready/disabled state.
+  syncTutorialPrompt(){
+    const el=document.getElementById('tutorialPrompt');
+    if(!el)return;
+    el.classList.add('show');
+    el.classList.toggle('flash',Tutorial._flash>0);
+    el.textContent=Tutorial.prompt},
+  hideTutorialPrompt(){const el=document.getElementById('tutorialPrompt');if(el)el.classList.remove('show')},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   // Task 5.4: settings whose effect is a standing DOM/layout state (not read live each time, unlike
   // reduceMotion/sfx/announcer/haptics, which are checked directly off Save.data.settings at their
@@ -3537,7 +3731,32 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // exhibition off the title screen) -- hide whichever one is still up so it doesn't linger over
     // the fight underneath.
     if(typeof Screens!=='undefined')Screens.hideAll();
+    // Task 5.3: any fight that ISN'T the tutorial must never show a stale prompt left over from a
+    // previous tutorial run; G.startTutorial (below) re-shows it on its own very next syncTutorialPrompt
+    // call, once G.tick actually starts stepping the sim it just started.
+    this.hideTutorialPrompt();
     this.show('btns',true);Audio.announce('start',this.fight.presRng)},
+  // Task 5.3: Floor 0. Routes through the exact same G.startFight a real quest node uses --
+  // ENCOUNTERS.tutorial resolves like any other encounter id, and since it's never given through the
+  // {floor,node} sugar, no Quest.start ever runs -- the tutorial spends no energy, same as any bare
+  // o.encounter id. mode:'tutorial' is what G.onEvent/G.tick gate Tutorial's own wiring on, and what
+  // G.onFightEnd reads to grant the one-time completion reward instead of Rewards.forNode/
+  // Arena.record. ctrl2 defaults to a deterministic Ctrl.tutorialDummy() (30_input.js) rather than
+  // AI.make(enc.tier,...) -- the dummy's one scripted medium (step 3's parry prompt needs a real
+  // attack to react to) must never depend on rng. playerBuffs folds in BUFFS.noKo (47_buffs.js)
+  // through the exact same path fix-wave item 5 already wired for a node's own player-side buffs, so
+  // the player can never actually be KO'd mid-lesson with no special case anywhere in Fight/Fighter.
+  startTutorial(o={}){
+    Tutorial.reset();
+    const started=this.startFight(Object.assign({},o,{encounter:'tutorial',mode:'tutorial',
+      ctrl2:o.ctrl2||Ctrl.tutorialDummy(o.seed||this.seed),
+      playerBuffs:(o.playerBuffs||[]).concat('noKo')}));
+    // Task 5.3: BUFFS.tutorialGuard (47_buffs.js) layered onto the live p2 Fighter directly, outside
+    // ENCOUNTERS.tutorial's own frozen `buffs:[]` -- it keeps the dummy from dying to an early light
+    // chain before every step is taught, and stops applying itself the instant Tutorial.state.step
+    // reaches all-steps-done, so "FINISH HIM" is a real natural KO.
+    if(started!==false&&this.fight)this.fight.p2.buffs=(this.fight.p2.buffs||[]).concat(BUFFS.tutorialGuard);
+    return started},
   // Fix-wave item 4: a fighter's current pose's own top (Rig.topAt), scaled by its def.scale — the
   // per-frame counterpart to the per-fight Rig.extent worst-case calc above, read by tick() every
   // frame to build capNow.
@@ -3575,6 +3794,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   playRecipe(fn){if(Save.data.settings.sfx&&fn)fn()},
   onEvent(t,a,b,val){
     if(this.fight)Broadcast.onEvent(t,a,b,val,this.fight);
+    // Task 5.3: Tutorial gets the exact same every-event feed Broadcast does, gated to tutorial mode
+    // only (a stray event from some OTHER fight must never touch Tutorial's counters).
+    if(this.fight&&this.mode==='tutorial')Tutorial.onEvent(t,a,b,val,this.fight);
     if(Broadcast.state.lastPop){
       const pop=Broadcast.state.lastPop;Broadcast.state.lastPop=null;
       if(this.fight)this.fight.fx.push({kind:'popup',
@@ -3709,6 +3931,20 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       Quest.complete(floor,node,won);
       if(won)rewards=Rewards.forNode(floor,node)
     }else if(this.mode==='arena')Arena.record(won);
+    else if(this.mode==='tutorial'&&won){
+      // Task 5.3: completion = a natural win in tutorial mode -- the fight ends on the dummy's real
+      // KO (ruling: rejected a forced G.endTutorial()-style finish in favor of the actual player-vs-
+      // dummy combat path), independent of whether every Tutorial.steps prompt was actually followed.
+      // tutorialDone + the one-time 300 gold only ever grant ONCE: Save.data.tutorialDone starts
+      // false (Meta.defaults) and this branch is itself guarded on it, so replaying the map's own
+      // permanently-open .node.tutorial row can't re-farm the grant. G.tutorialJustGranted (read by
+      // Screens.renderResult) records whether THIS particular win is the one that granted it, so a
+      // replay still shows the completion line without falsely claiming another +300 gold.
+      this.tutorialJustGranted=!Save.data.tutorialDone;
+      if(!Save.data.tutorialDone){
+        Save.data.tutorialDone=true;
+        Save.data.gold=(Save.data.gold||0)+300;
+        Save.put()}}
     let leveledUp=false;
     if(rewards){
       // Fix round 1: reads this.champ (the champion who actually fought), not Save.data.active --
@@ -3781,9 +4017,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // that); backToOrigin (below) is the "go back to wherever this fight was launched from" version,
   // used by the pause menu's QUIT and the result overlay's CONTINUE button.
   toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+    this.hideTutorialPrompt();
     if(typeof Screens!=='undefined')Screens.show('title');
     else{this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)}},
   backToOrigin(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+    this.hideTutorialPrompt();
     if(typeof Screens!=='undefined')Screens.toOrigin();else this.toTitle()},
   // Fix round 1 (controller review, Critical): the title screen's own buttons only ever get their
   // onclick bound inside Screens.renderTitle(), which only runs when some Screens.* function
@@ -3820,12 +4058,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // not G.tick() calls -- called only from inside the branch that actually ran f.step(), so the
       // once-every-4th-call KO slow-mo throttle above doesn't also run Broadcast's windows 4x too
       // fast relative to the fight frames they're meant to track.
-      if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--;Broadcast.tick(f)}}
-      else{f.step();Broadcast.tick(f)}
+      if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--;Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}}
+      else{f.step();Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}
       this.frameNow=f.frame;
       this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
       this.checkCinematicFx(f);
-      this.syncSpecials()}
+      this.syncSpecials();
+      // Task 5.3: syncs #tutorialPrompt from Tutorial.prompt/._flash every tutorial-mode tick, same
+      // per-sim-frame cadence Broadcast.tick/Tutorial.tick above already run at.
+      if(this.mode==='tutorial')this.syncTutorialPrompt()}
     FX.pushAll(f.fx);f.fx.length=0;
     const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.28}:null; // fix round 2: 1.6->1.28
     // Fix-wave item 4: per-frame zoom cap sized off the pose(s) actually on screen this tick
@@ -4023,7 +4264,12 @@ const Screens={
     // moved into the new #settings overlay as one more toggle row; renderSettings() below is what
     // syncs its label text now, since that's the screen it actually lives on.
     document.getElementById('btnSettings').onclick=()=>Screens.settings();
-    document.getElementById('btnCampaign').onclick=()=>{const n=Screens.lastFloor();
+    // Task 5.3: a fresh save (!Save.data.tutorialDone) routes CAMPAIGN to the tutorial instead of the
+    // map -- checked fresh on every click (not just latched at load), so CAMPAIGN opens the map as
+    // usual again the instant tutorialDone flips true, with no separate "first run" flag to track.
+    document.getElementById('btnCampaign').onclick=()=>{
+      if(!Save.data.tutorialDone){Screens._origin={name:'map',args:[1]};G.startTutorial();return}
+      const n=Screens.lastFloor();
       Screens._origin={name:'map',args:[n]};Screens.map(n)};
     document.getElementById('btnArenaMenu').onclick=()=>{Screens._origin={name:'arena'};Screens.arena()};
     document.getElementById('btnRoster').onclick=()=>{Screens._origin={name:'title'};Screens.roster()};
@@ -4087,6 +4333,19 @@ const Screens={
       b.disabled=!unlocked;
       b.onclick=()=>Screens.map(fd.floor);
       tabs.appendChild(b)}
+    // Task 5.3: a permanently-open TUTORIAL entry, appended into the floor-tabs row rather than the
+    // node path below -- .ftabs' own row height is already pinned to its tallest existing child
+    // (44px), so adding one more same-height button costs zero extra vertical space, unlike appending
+    // another .node row to #mapPath, which the "no clipping/scroll at 854x480" fix-wave item 3 test
+    // already fills to its worst case (every one of floor 1's nodes 'open' at once). Unlike every
+    // real node/boss button it never disables and never routes through Quest.start (G.startTutorial
+    // spends no energy, same as any bare o.encounter id).
+    if(n===1){
+      const t=document.createElement('button');
+      t.className='node tutorial';
+      t.textContent='TUTORIAL';
+      t.onclick=()=>{Screens._origin={name:'map',args:[n]};G.startTutorial()};
+      tabs.appendChild(t)}
     const path=document.getElementById('mapPath');path.innerHTML='';
     if(f){
       // Fix-wave item 6: a non-'open' node is disabled -- it used to be a live button that looked
@@ -4319,6 +4578,12 @@ const Screens={
     if(rewards){
       const rt=G.rewardsText(rewards);
       if(rt)line=line?line+'  '+rt:rt}
+    // Task 5.3: the tutorial's own special line -- shown on every tutorial win, even a replay through
+    // the map's .node.tutorial row (which never re-grants gold, see G.onFightEnd); the +300 GOLD
+    // suffix only appears on the run that actually granted it (G.tutorialJustGranted).
+    if(won&&G.mode==='tutorial'){
+      const t='TUTORIAL COMPLETE'+(G.tutorialJustGranted?' — +300 GOLD':'');
+      line=line?line+'  '+t:t}
     // Task 5.1: the ratings recap -- shown for every fight (win or loss), independent of rewards,
     // since viewers accrue off the fight itself, not off the quest/arena outcome.
     if(this._peakViewers!=null)line=(line?line+'  ':'')+'PEAK VIEWERS '+Render.fmtViewers(this._peakViewers);
@@ -5948,6 +6213,10 @@ Test.add('every Phase 4 screen\'s DOM ids exist',()=>{
 Test.add('G.bootScreens() binds the title screen\'s buttons on real page load (fix round 1, Critical: they were unbound until some other Screens.* function had run once -- Screens.renderTitle is the only place they get an onclick, and nothing called any Screens function at boot)',()=>{
   Screens._current=null;                       // simulate a fresh load: no Screens.* has rendered yet
   document.getElementById('btnCampaign').onclick=null;
+  // Task 5.3: CAMPAIGN on a fresh (!tutorialDone) save now starts the tutorial instead of the map --
+  // orthogonal to this test's own concern (button binding), so pin tutorialDone here to keep testing
+  // exactly what it always tested.
+  Save.data.tutorialDone=true;
   G.bootScreens();
   ok(typeof document.getElementById('btnCampaign').onclick==='function','CAMPAIGN must be bound after boot');
   document.getElementById('btnCampaign').click();
@@ -5965,7 +6234,9 @@ Test.add('Screens.show(\'map\') renders FLOORS[0].nodes.length non-boss .node el
   Screens._floor=1; // Screens.show bypasses Screens.map()'s own arg-stashing; set the floor directly
   Screens.show('map');
   const f=Quest.floor(1);
-  const nodeEls=[...document.querySelectorAll('#map .node:not(.boss)')];
+  // Task 5.3: scoped to #mapPath specifically -- the map's own permanently-open TUTORIAL entry lives
+  // in #mapTabs (not #mapPath), so a bare '#map .node' scope would also match it.
+  const nodeEls=[...document.querySelectorAll('#mapPath .node:not(.boss)')];
   eq(nodeEls.length,FLOORS[0].nodes.length);
   nodeEls.forEach((el,i)=>ok(el.classList.contains(f.nodes[i].state),'node '+i+' state class'));
   const bossEl=document.querySelector('#map .node.boss');
@@ -6005,7 +6276,7 @@ Test.add('the map path fits a full floor with no clipping/scroll at 854x480 (fix
 Test.add('a locked map node is disabled (cannot be clicked to start a fight); an open node with no energy shows the refusal in #mapMsg (fix-wave item 6)',()=>{
   Save.data=Meta.defaults();
   Screens.map(1);
-  const nodes=[...document.querySelectorAll('#map .node:not(.boss)')];
+  const nodes=[...document.querySelectorAll('#mapPath .node:not(.boss)')];
   eq(nodes[0].disabled,false,'node 0 starts open, must be clickable');
   eq(nodes[1].disabled,true,'node 1 starts locked, must be disabled');
   const origNow=Energy.now;
@@ -6014,7 +6285,7 @@ Test.add('a locked map node is disabled (cannot be clicked to start a fight); an
     Save.data.energy.n=0;Save.data.energy.ts=t; // no regen pending: exactly 6:00 to the next point
     Screens.map(1);
     eq(document.getElementById('mapMsg').textContent,'','no stale refusal text before any click');
-    document.querySelectorAll('#map .node:not(.boss)')[0].click();
+    document.querySelectorAll('#mapPath .node:not(.boss)')[0].click();
     eq(G.state,'TITLE','a refused start must not have begun a fight');
     eq(document.getElementById('mapMsg').textContent,'NOT ENOUGH ENERGY — next in 6:00')
   }finally{Energy.now=origNow}
@@ -6022,14 +6293,14 @@ Test.add('a locked map node is disabled (cannot be clicked to start a fight); an
 Test.add('a map node click starts the quest fight via G.startFight and records the map screen (with its floor) as the fight\'s origin',()=>{
   Save.data=Meta.defaults();
   Screens.map(1);
-  document.querySelectorAll('#map .node:not(.boss)')[0].click();
+  document.querySelectorAll('#mapPath .node:not(.boss)')[0].click();
   eq(G.mode,'quest');eq(G.state,'FIGHT');
   eq(Screens._origin.name,'map');eq(Screens._origin.args[0],1);
   G.toTitle();G.sim=false});
 Test.add('after a quest win, CONTINUE (resultTitleBtn) returns to the map screen at the floor the node was fought on',()=>{
   Save.data=Meta.defaults();
   Screens.map(1);
-  document.querySelectorAll('#map .node:not(.boss)')[0].click(); // floor 1, node 0: sets G.mode/origin
+  document.querySelectorAll('#mapPath .node:not(.boss)')[0].click(); // floor 1, node 0: sets G.mode/origin
   eq(Screens._origin.name,'map');eq(Screens._origin.args[0],1);
   G.toTitle(); // the click above used Ctrl.player() (no scripted attacks, so it'd never KO within a
   // bounded tick budget); re-fight the same node with a scripted p1 so it actually ends, keeping the
@@ -6145,6 +6416,9 @@ Test.add('the kiosk renders one card per Meta.SHOP_ITEMS entry, with its own cos
   Screens.title()});
 Test.add('the title screen\'s CAMPAIGN/ARENA/ROSTER/KIOSK buttons route to the matching screens',()=>{
   Save.data=Meta.defaults();
+  // Task 5.3: CAMPAIGN on a fresh save now starts the tutorial instead -- see the dedicated first-run
+  // routing test below; this one is about the plain screen-routing wiring, so pin tutorialDone true.
+  Save.data.tutorialDone=true;
   Screens.title();document.getElementById('btnRoster').click();eq(Screens._current,'roster');
   Screens.title();document.getElementById('btnKiosk').click();eq(Screens._current,'shop');
   Screens.title();document.getElementById('btnArenaMenu').click();eq(Screens._current,'arena');
@@ -6216,7 +6490,7 @@ Test.add('a locked boss node shows the lock icon, not the crown (fix-wave item 1
   Save.data=Meta.defaults(); // boss starts locked
   Screens.map(1);
   const bossEl=document.querySelector('#map .node.boss');
-  const lockedNodeEl=document.querySelectorAll('#map .node:not(.boss)')[1]; // node 1 starts locked too
+  const lockedNodeEl=document.querySelectorAll('#mapPath .node:not(.boss)')[1]; // node 1 starts locked too
   const bossContent=getComputedStyle(bossEl,'::before').content;
   const lockedContent=getComputedStyle(lockedNodeEl,'::before').content;
   eq(bossContent,lockedContent,'a locked boss must show the same icon as a plain locked node (the lock, not the crown)');
@@ -6432,5 +6706,165 @@ Test.add('a SHARE button exists on the result screen and calls G.share on click'
   const orig=G.share;let called=false;G.share=()=>{called=true};
   try{document.getElementById('shareBtn').click();eq(called,true,'clicking SHARE must call G.share')}
   finally{G.share=orig}});
+// --- Task 5.3: Tutorial (Floor 0) and first-run flow ---------------------------------------------
+Test.add('ENCOUNTERS.tutorial matches the frozen Phase 5 shape',()=>{
+  const e=ENCOUNTERS.tutorial;
+  ok(e,'ENCOUNTERS.tutorial must exist');
+  eq(e.floor,0);eq(e.name,'THE WAITING ROOM');eq(e.enemy,'goblin');eq(e.tier,'dummy');
+  eq(e.hpMul,.5);eq(e.atkMul,.3);ok(Array.isArray(e.buffs)&&e.buffs.length===0)});
+Test.add('BUFFS.noKo clamps holder.hp to at least 1, and leaves hp above 1 alone',()=>{
+  const b=BUFFS.noKo;ok(b,'BUFFS.noKo must exist');
+  const holder={hp:0,maxHp:100};b.onFrame(null,holder,null);eq(holder.hp,1,'0 hp must clamp up to 1');
+  holder.hp=-40;b.onFrame(null,holder,null);eq(holder.hp,1,'negative hp must clamp up to 1');
+  holder.hp=55;b.onFrame(null,holder,null);eq(holder.hp,55,'hp above 1 must be left alone')});
+Test.add('Meta.defaults().tutorialDone is false, and v2 migrate backfills it for an older save without discarding an already-true one',()=>{
+  eq(Meta.defaults().tutorialDone,false);
+  const d=Meta.migrate({v:2});
+  eq(d.tutorialDone,false,'a pre-5.3 v2 save must backfill tutorialDone via the generic top-level loop');
+  const kept=Meta.migrate({v:2,tutorialDone:true});
+  eq(kept.tutorialDone,true,'an already-true tutorialDone must survive migration')});
+Test.add('Tutorial.reset() starts at step 0 with the first prompt and every step undone',()=>{
+  Tutorial.reset();
+  eq(Tutorial.state.step,0);
+  eq(Tutorial.state.done.length,4);
+  ok(Tutorial.state.done.every(d=>d===false));
+  eq(Tutorial.prompt,Tutorial.steps[0].prompt)});
+Test.add('Tutorial.onEvent+tick advance step 0 (3 landed lights) to step 1',()=>{
+  Tutorial.reset();
+  const p1={moveName:'light1'};const f={p1};
+  for(let i=0;i<2;i++){Tutorial.onEvent('hit',p1,{},10,f);Tutorial.tick(f)}
+  eq(Tutorial.state.step,0,'2 landed lights must not be enough');
+  Tutorial.onEvent('hit',p1,{},10,f);Tutorial.tick(f);
+  eq(Tutorial.state.step,1,'the 3rd landed light must advance to step 1');
+  eq(Tutorial.state.done[0],true)});
+Test.add('Tutorial step 1 advances on a landed player medium; step 2 on a player parry',()=>{
+  Tutorial.reset();Tutorial.state.step=1;
+  const p1={};const f={p1};
+  Tutorial.onEvent('hit',p1,{},10,f); // no moveName yet -- must not count as a medium
+  p1.moveName='medium';Tutorial.onEvent('hit',p1,{},10,f);Tutorial.tick(f);
+  eq(Tutorial.state.step,2,'a landed medium must advance step 1 to step 2');
+  Tutorial.onEvent('parry',p1,{},0,f);Tutorial.tick(f);
+  eq(Tutorial.state.step,3,'a player parry must advance step 2 to step 3')});
+Test.add('Tutorial step 3 sets fight.p1.power to 100 exactly once, and advances the instant p1 fires a special',()=>{
+  Tutorial.reset();Tutorial.state.step=3;
+  const p1={power:0,state:'IDLE',moveName:null};const f={p1};
+  Tutorial.tick(f);
+  eq(p1.power,100,'entering step 3 must set the player\'s power to 100');
+  p1.power=5; // a later frame must not re-arm it back to 100
+  Tutorial.tick(f);
+  eq(p1.power,5,'power must only be set once, at step 3\'s start');
+  p1.state='ATTACK';p1.moveName='s1';
+  Tutorial.tick(f);
+  eq(Tutorial.state.step,4,'firing s1 must complete step 3');
+  eq(Tutorial.prompt,'FINISH HIM')});
+Test.add('G.startTutorial starts ENCOUNTERS.tutorial in mode tutorial with no energy spent and the goblin at half hp/30% atk',()=>{
+  Save.data=Meta.defaults();
+  const energyBefore=Save.data.energy.n;
+  const started=G.startTutorial();
+  ok(started!==false,'G.startTutorial must not be refused');
+  eq(G.mode,'tutorial');
+  eq(G.encounter.floor,0);eq(G.encounter.name,'THE WAITING ROOM');
+  eq(G.fight.p2.def.hp,Math.round(DEFS.goblin.hp*.5));
+  eq(G.fight.p2.def.atk,Math.round(DEFS.goblin.atk*.3));
+  eq(Save.data.energy.n,energyBefore,'the tutorial must never spend energy');
+  G.toTitle()});
+Test.add('G.startTutorial applies the noKo buff to p1, and a realistic (atkMul .3) tutorial fight never meaningfully threatens the player\'s hp',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle()});
+  ok(G.fight.p1.buffs.some(bf=>bf.id==='noKo'),'the noKo buff must be applied to the live player Fighter');
+  closeIn(G.fight);G.sim=true;
+  for(let i=0;i<1200;i++)G.tick();
+  ok(G.fight&&G.fight.p1.hp>G.fight.p1.maxHp*0.5,
+    'the tutorial\'s own atkMul must keep the goblin\'s damage far too small to meaningfully threaten the player');
+  G.toTitle();G.sim=false});
+Test.add('Ctrl.tutorialDummy is deterministic (two fresh instances match exactly) and eventually throws a medium',()=>{
+  const c1=Ctrl.tutorialDummy(),c2=Ctrl.tutorialDummy();
+  const me={busy:()=>false,state:'IDLE',moveName:null};
+  const seq1=[],seq2=[];
+  for(let i=0;i<200;i++){seq1.push(JSON.stringify(c1.next(null,me,me)));seq2.push(JSON.stringify(c2.next(null,me,me)))}
+  eq(JSON.stringify(seq1),JSON.stringify(seq2),'two fresh instances must be identical (deterministic, no rng)');
+  ok(seq1.some(s=>JSON.parse(s).medium),'the dummy must throw a medium at some point')});
+Test.add('BUFFS.tutorialGuard caps incoming damage so a defending holder can\'t drop below 1 hp while Tutorial has steps left, and stops capping once FINISH HIM fires',()=>{
+  Tutorial.reset();
+  const b=BUFFS.tutorialGuard,holder={hp:5};
+  let ref={dmg:20};b.onHit(null,{},holder,ref,holder);
+  eq(ref.dmg,4,'dmg must be capped to leave exactly 1 hp while a step remains');
+  Tutorial.state.step=Tutorial.steps.length; // all steps done -- FINISH HIM
+  ref={dmg:20};b.onHit(null,{},holder,ref,holder);
+  eq(ref.dmg,20,'dmg must pass through uncapped once every step is done');
+  Tutorial.reset()});
+Test.add('the tutorial dummy cannot be KO\'d by a light chain before every Tutorial step is done, but dies normally once they are',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  closeIn(G.fight);G.sim=true;
+  for(let i=0;i<300;i++)G.tick();
+  eq(G.state,'FIGHT','a light chain alone must never finish the dummy before PARRY/POWER are taught');
+  ok(G.fight.p2.hp>=1,'the dummy\'s hp must never have dropped below 1');
+  Tutorial.state.step=Tutorial.steps.length; // simulate every step having been completed
+  for(let i=0;i<500&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT','the SAME light chain must now finish the dummy once every step is done');
+  G.toTitle();G.sim=false});
+Test.add('completing the tutorial sets tutorialDone and grants 300 gold exactly once, on a natural KO',()=>{
+  Save.data=Meta.defaults();
+  const goldBefore=Save.data.gold||0;
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=Tutorial.steps.length; // every step already taught -- the dummy is now killable
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT','the tutorial fight must reach a natural KO result');
+  eq(Save.data.tutorialDone,true);
+  eq(Save.data.gold,goldBefore+300,'a first completion must grant exactly 300 gold');
+  const goldAfterFirst=Save.data.gold;
+  G.toTitle();
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=Tutorial.steps.length;
+  closeIn(G.fight);G.fight.p2.hp=1;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Save.data.gold,goldAfterFirst,'a second completion (replayed via the map\'s .node.tutorial row) must not grant gold again');
+  G.toTitle();G.sim=false});
+Test.add('Screens.renderMap always shows a .node.tutorial entry on floor 1 that starts G.startTutorial when clicked, and is never disabled',()=>{
+  Save.data=Meta.defaults();Save.data.tutorialDone=true; // even once done, it must stay replayable
+  Screens.map(1);
+  const el=document.querySelector('#map .node.tutorial');
+  ok(el,'.node.tutorial must exist on the floor 1 map');
+  ok(!el.disabled,'.node.tutorial must always be enabled/clickable');
+  el.click();
+  eq(G.mode,'tutorial');
+  G.toTitle()});
+Test.add('a fresh save\'s CAMPAIGN button starts the tutorial instead of opening the map; CAMPAIGN opens the map once tutorialDone',()=>{
+  Save.data=Meta.defaults();
+  eq(Save.data.tutorialDone,false);
+  Screens.title();
+  document.getElementById('btnCampaign').click();
+  eq(G.mode,'tutorial','CAMPAIGN on a fresh save must start the tutorial');
+  G.toTitle();
+  Save.data.tutorialDone=true;
+  Screens.title();
+  document.getElementById('btnCampaign').click();
+  eq(Screens._current,'map','CAMPAIGN must open the map once tutorialDone is true');
+  G.toTitle()});
+Test.add('the result screen shows a TUTORIAL COMPLETE line on a tutorial win',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=Tutorial.steps.length; // every step already taught -- the dummy is now killable
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  ok(document.getElementById('resultLine').textContent.includes('TUTORIAL COMPLETE'),
+    'result line: '+document.getElementById('resultLine').textContent);
+  G.toTitle();G.sim=false});
+Test.add('#tutorialPrompt shows the current step\'s prompt text during a tutorial fight, and hides once the tutorial ends',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  G.sim=true;G.tick();
+  const el=document.getElementById('tutorialPrompt');
+  ok(el,'#tutorialPrompt must exist');
+  eq(el.textContent,Tutorial.steps[0].prompt);
+  ok(el.classList.contains('show'));
+  G.toTitle();
+  ok(!document.getElementById('tutorialPrompt').classList.contains('show'),
+    '#tutorialPrompt must hide once the tutorial ends');
+  G.sim=false});
 
 </script></body></html>

@@ -28,6 +28,12 @@ const Meta={
       // this one DOES need (unlike leaderboard/pity, `settings` already existed as `{}` before this
       // task, so the generic "fill anything TOP-LEVEL missing" loop below would never touch it).
       settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true},
+      // Task 5.3: a plain top-level boolean, same free-ride-through-migrate() story as leaderboard/
+      // pity above -- a pre-5.3 v2 save picks it up for free via migrate()'s generic "fill anything
+      // top-level missing" loop below, no dedicated migrate branch needed. false until G.onFightEnd
+      // grants a tutorial win (once); read by Screens.renderTitle's CAMPAIGN handler (first-run
+      // routing) and the result screen's tutorial line.
+      tutorialDone:false,
       mute:false,stats:{fights:0,wins:0}}},
   // v1 -> v2: keep gold/units/mute/settings, everything else starts fresh (including roster, which
   // v1 saves never meaningfully populated). v2 -> v2: fill in any keys/sub-keys a save from an
