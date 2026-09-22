@@ -62,4 +62,10 @@ $H --sim --seconds 1 --pose medium --p2 goblin --shot "$S/p6-kick-carl.png"
 $H --p1 mongo --pose medium --shot "$S/p6-kick-mongo.png"
 $H --p1 donut --p2 goblin --pose medium --shot "$S/p6-kick-donut.png"
 
+# ---- Phase 6: tutorial spar mode (Task 6.4) -- deterministic freeze frames via --tutorial-shot,
+# same tool the task's own report used; the '1'/'3'/'shield' choices are frozen by harness.py itself.
+$H --tutorial-shot 1 --shot "$S/p6-tutorial-1.png"
+$H --tutorial-shot 3 --shot "$S/p6-tutorial-3.png"
+$H --tutorial-shot shield --shot "$S/p6-tutorial-shield.png"
+
 echo "shots.sh: regenerated $(ls "$S"/*.png | wc -l | tr -d ' ') PNGs in $S"

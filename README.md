@@ -8,10 +8,10 @@ One-on-one tap-and-swipe fighter in the Dungeon Crawler Carl universe. Single HT
 
 | | |
 |---|---|
-| ![A fight in progress, Carl vs Goblin Scavenger](docs/shots/p2-goblin.png) | ![Carl vs Grull, the Floor 1 boss](docs/shots/p3-floor1-boss.png) |
-| Floor 1's opening fight | Floor 1's boss door |
-| ![The campaign map: a column of doors up to the boss](docs/shots/p4-map.png) | ![The roster screen: owned champions, stars, level](docs/shots/p4-roster.png) |
-| The campaign map | Your roster |
+| ![A fight in progress, Carl vs Goblin Scavenger, gestures-only HUD](docs/shots/p2-close.png) | ![The tutorial's visible spar mode: SPAR plate, LESSON banner](docs/shots/p5-tutorial-1.png) |
+| A fight in progress — one thumb, gestures-only HUD | The tutorial's own visible sparring session |
+| ![The campaign map: doors show a REC. LVL hint](docs/shots/p4-map.png) | ![Carl vs Mother Rat, Floor 2's boss](docs/shots/p3-floor2-boss.png) |
+| The campaign map, with a REC. LVL hint under every door | Floor 2's boss fight |
 
 ## How to play
 
@@ -25,9 +25,12 @@ until it's been completed once.
 After the tutorial, the title screen offers CAMPAIGN, ARENA, ROSTER, KIOSK, EXHIBITION, and SETTINGS.
 
 - **CAMPAIGN** opens the floor map: a vertical column of doors (five per floor) ending in a **boss
-  door**. Doors unlock left-to-right as you clear the one before them; each costs 1 energy (10 max,
-  regenerating over time) and pays out gold, ISO, and XP for your active champion on a win, plus
-  units and a class catalyst for a boss win. Clearing a floor's boss opens the next floor.
+  door**. Every door and the boss show a **REC. LVL** hint (the recommended level for that fight,
+  turning red once your active champion is below it) — you can still walk in under-leveled, it's
+  just a fair warning, not a hard gate. Doors unlock left-to-right as you clear the one before them;
+  each costs 1 energy (10 max, regenerating over time) and pays out gold, ISO, and XP for your
+  active champion on a win, plus units and a class catalyst for a boss win. Clearing a floor's boss
+  opens the next floor.
 - **ROSTER** shows every champion you own, star rating, rank, and level. LEVEL UP spends ISO,
   RANK UP spends that champion's class catalyst, and SELECT makes a champion the one who actually
   fights doors/arena runs.
@@ -68,13 +71,17 @@ toggle brings them back), and shown automatically during the tutorial's early le
 CONTROLS only mirrors where those buttons sit; gestures read the same regardless of that setting.
 
 **Keyboard** (desktop browsers, for testing or just preference): `J` light, `K` medium (`Shift`+`K`
-dashes in and charges straight into a heavy), `L` (hold) heavy, `A`/`D` dash back, `S` (hold) block,
-`1`/`2`/`3` fire that special, `Space` starts a fight from the title screen, `P` pauses.
+dashes in with a medium and arms the follow-up heavy *instantly* — the keyboard has no hold timing
+to emulate, so unlike the touch swipe-and-hold this skips straight to the heavy with no delay),
+`L` (hold) heavy, `A`/`D` dash back, `S` (hold) block, `1`/`2`/`3` fire that special, `Space` starts
+a fight from the title screen, `P` pauses.
 
 ## Development
 
 - Edit files in `src/`, then `python3 tools/build.py` writes `index.html`. Never hand-edit
   `index.html` — it's a generated, concatenated build of every `src/*.js`/`*.html` file.
+  `python3 tools/build.py --check` builds without writing, exiting non-zero if the build would
+  differ from the committed `index.html`.
 - `python3 tests/harness.py --unit` runs the in-page unit tests headless (Python Playwright driving
   a real headless Chromium against `index.html`, no npm/node toolchain).
 - `python3 tests/harness.py --sim --seconds 60 --bot random --ai basic` soaks the fight loop for a
@@ -92,7 +99,9 @@ dashes in and charges straight into a heavy), `L` (hold) heavy, `A`/`D` dash bac
   horizontally at an 844×390 CSS-px landscape-phone viewport.
 - `python3 tests/harness.py --screen <name> --shot out.png` screenshots any menu screen
   (`title|map|roster|crystal|shop|arena|settings`) without starting a fight; `--pose <key> --shot
-  out.png` freezes a fighter in a named rig pose for a clean reference shot.
+  out.png` freezes a fighter in a named rig pose for a clean reference shot; `--tutorial-shot
+  {1,3,shield} --shot out.png` freezes one of three deterministic tutorial frames (lesson 1's SPAR
+  plate, lesson 3's red wind-up flash, the SHIELD DOWN moment) for a clean reference shot.
 - `python3 tests/batch.py --n 30 --ai t1,t2,t3,t4,t5` runs the seeded win-rate table against
   `Ctrl.competent` across the AI difficulty tiers (and, by default, every floor node/boss), gating on
   a monotone non-increasing curve.
