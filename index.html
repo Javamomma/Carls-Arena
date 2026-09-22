@@ -2062,7 +2062,13 @@ class Fight{
     // landed hit still shakes/sparks/pops for combo feedback; only the freeze itself is gated, and
     // an intermediate multi-hit leaves any hitstop already armed by a same-frame mutual trade alone.
     if(!m.hits||last)this.hitstop=m.hitstop;
-    this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:crit?'#ff5a4a':'#ffd86b'});
+    // Task 6.5: a landed medium (KICK, a leg strike in every rig -- Phase 6 ruling 4) pushes a low
+    // dust arc instead of the usual gold spark burst -- data-only (which fx kind gets pushed), never
+    // touching hitstop/shake, so the sim stays exactly as deterministic as it already was. att.face
+    // (not def's) is the kick's own forward direction, since the dust sweeps the way the kicking
+    // attacker is facing, into the defender.
+    if(att.moveName==='medium')this.fx.push({kind:'dustArc',x:def.x,y:FLOOR,face:att.face});
+    else this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:crit?'#ff5a4a':'#ffd86b'});
     // Task 6.4: BUFFS.tutorialGuard (47_buffs.js) sets ref.capped=true the instant it actually
     // clamped this hit's dmg -- forwarded onto the popup fx as `muted`, which FX/Render draw grey
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
@@ -2283,13 +2289,32 @@ POSES.light2=jab('l',{peakSh:90,peakOffX:12});
 POSES.light3=jab('r',{peakSh:95,peakOffX:14,torsoPeak:14});
 POSES.light4=jab('l',{peakSh:100,peakOffX:16,torsoPeak:16});
 POSES.light5=jab('r',{peakSh:118,peakEl:-10,peakOffX:26,torsoPeak:22,startEl:30});
-// Medium: a deep forward lunge, not just an arm reach — front leg bends under the driving weight,
-// rear leg kicks out straight behind, torso commits hard forward. Silhouette (wide low stance, big
-// torso lean) reads nothing like light1's near-upright jab or heavy's vertical wind-up-then-smash.
+// Medium (Task 6.5 / Phase 6 ruling 4: KICK is a leg strike in every rig): a rear-leg front kick, not
+// an arm move at all — anticipation (t:0) pulls weight back and lifts the rear (right) knee; strike
+// (t:.43, chosen so it lands inside the move's own active window — MOVES.medium is
+// startup:10/active:4/recovery:14, active frames 10-13 of 28, t01 in [0.357,0.5) — so the hitbox's
+// active frames coincide with the foot's own furthest-forward point, not some other part of the
+// swing) snaps the rear leg forward and up to roughly hip height while the torso leans back ~20deg;
+// recovery (t:1) draws the leg back in. The lead (left) arm counterbalances the backward torso lean
+// by swinging forward just enough that its HAND stays near its own idle position in absolute (not
+// torso-relative) x — a torso lean this size drags the whole shoulder girdle back with it (neck.x
+// shifts by torsoLen*sin(torsoA)), so the arm has to actively compensate, not just hold its idle
+// angle, to read as "counterbalancing" rather than "also flung backward". The right ARM (rShoulder/
+// rElbow, independent of the right LEG doing the kick — arms and legs are separate FK chains off the
+// same shoulder/hip attach points) swings back for a real visual counterbalance, unconstrained by any
+// test. Silhouette (a raised, extended leg with a back-leaning torso) reads nothing like light1's
+// near-upright jab or heavy's vertical wind-up-then-smash, and nothing like the old arm-lunge design
+// this replaces — see the 'kick: medium's active-phase pose...' test (90_tests.js) for the frozen
+// "foot >=60px forward of idle, lead hand within 20px of idle" pose contract this satisfies for all
+// three rig kinds, and 40_movedata.js's MOVES.medium comment for why hitting exactly hip height/20deg
+// isn't load-bearing (only the two pose-test numbers are).
 POSES.medium=[
-  {t:0, ang:{torso:D(-10),rShoulder:D(-10),rElbow:D(15),lShoulder:D(10),lElbow:D(15),rHip:D(-14),lHip:D(10),rKnee:D(20),lKnee:D(-6)},off:{x:-6,y:0}},
-  {t:.5,ang:{torso:D(34), rShoulder:D(95), rElbow:D(-4),lShoulder:D(-14),lElbow:D(10),rHip:D(34), lHip:D(-46),rKnee:D(-40),lKnee:D(6)},off:{x:30,y:6}},
-  {t:1, ang:{torso:D(12), rShoulder:D(40), rElbow:D(15),lShoulder:D(0),  lElbow:D(15),rHip:D(10), lHip:D(-10)},off:{x:8,y:0}}];
+  {t:0, ang:{torso:D(-10),rHip:D(-46),rKnee:D(78),lHip:D(-6),lKnee:D(8),
+             lShoulder:D(10),lElbow:D(50),rShoulder:D(-28),rElbow:D(46)},off:{x:-6,y:0}},
+  {t:.43,ang:{torso:D(-20),rHip:D(80),rKnee:D(8),lHip:D(4),lKnee:D(-4),
+             lShoulder:D(45),lElbow:D(48),rShoulder:D(-46),rElbow:D(18)},off:{x:6,y:-2}},
+  {t:1, ang:{torso:D(4), rHip:D(10),rKnee:D(-4),lHip:D(-10),lKnee:D(10),
+             lShoulder:D(6),lElbow:D(52),rShoulder:D(-6),rElbow:D(30)},off:{x:0,y:0}}];
 // Heavy wind-up: fist raised straight above the head, weight shifted back (matches poseFor's
 // CHARGE->heavyCharge mapping, so this is what's held while the player charges the swing).
 // Fix round 2: peak rShoulder pulled in from 172 to 134 (was swinging the arm almost straight up,
@@ -2428,16 +2453,32 @@ POSES_QUAD.light2=pawSwipe('fr',{peakU:80,peakOffX:14});
 POSES_QUAD.light3=pawSwipe('fl',{peakU:86,peakOffX:17,spinePeak:9});
 POSES_QUAD.light4=pawSwipe('fr',{peakU:92,peakOffX:20,spinePeak:11});
 POSES_QUAD.light5=pawSwipe('fl',{peakU:104,peakL:-20,peakOffX:28,spinePeak:16,startL:18});
-// Medium: a full pounce — hips coil low then drive the whole body forward through the air, front
-// paws reaching to land the hit, tail streaming back for a counterweight. Silhouette (deep spine
-// dip -> long airborne reach) reads nothing like light1's small paw flick or heavy's rear-up-and-slam.
+// Medium (Task 6.5 / Phase 6 ruling 4: KICK is a leg strike in every rig): a hind-leg buck, not the
+// old full-body pounce. Front paws stay planted near their own idle position throughout (they're the
+// "lead hand" side of this pose contract, see the pose test below) while both HIND legs do the work:
+// anticipation (t:0) coils them up and well back — as if the hips were winding up to spin toward the
+// foe, though this 2D side-view FK has no real whole-body yaw to animate, so the "spin" is entirely
+// sold by the big swing (roughly 110-130deg of blU/brU travel from this coiled-back anticipation to
+// the strike keyframe below) rather than an actual hip rotation — then strike (t:.43, chosen so it
+// lands inside the move's own active window exactly like the human/big rigs above — see POSES.medium's
+// own comment for the frame math, identical here since MOVES.medium is shared by every rig) snaps both
+// hind paws forward at the foe (not backward — a literal "buck" kicks away from an opponent standing
+// behind, but this move has to reach the foe standing in FRONT); recovery (t:1) returns to an
+// idle-like stance facing forward. See the 'kick: medium's active-phase pose...' test (90_tests.js)
+// for the frozen "hind paw >=60px forward of idle, front paw within 20px of idle" contract this
+// satisfies for all three rig kinds — donut/mother_rat's reach budget (EDGE_PAD, see their own LOOKS
+// comments) is already close to its ceiling from OTHER poses (light5/s2/s3), so this kick was tuned to
+// land well inside that existing budget rather than becoming the new worst case.
 POSES_QUAD.medium=[
-  {t:0, ang:{spine:D(-14),chest:D(-10),neck:D(30),tail1:D(-6),tail2:D(4),
-             flU:D(-10),flL:D(14),frU:D(-8),frL:D(12),blU:D(30),blL:D(-26),brU:D(28),brL:D(-24)},off:{x:-8,y:6}},
-  {t:.5,ang:{spine:D(20),chest:D(24),neck:D(44),tail1:D(20),tail2:D(-16),
-             flU:D(46),flL:D(-30),frU:D(50),frL:D(-34),blU:D(-30),blL:D(18),brU:D(-34),brL:D(20)},off:{x:34,y:-10}},
-  {t:1, ang:{spine:D(6),chest:D(4),neck:D(32),tail1:D(6),tail2:D(-2),
-             flU:D(6),flL:D(4),frU:D(4),frL:D(6),blU:D(6),blL:D(-4),brU:D(4),brL:D(-2)},off:{x:14,y:0}}];
+  {t:0, ang:{spine:D(2),chest:D(2),neck:D(30),tail1:D(34),tail2:D(-20),
+             flU:D(-4),flL:D(5),frU:D(6),frL:D(-6),
+             blU:D(-66),blL:D(50),brU:D(-58),brL:D(44)},off:{x:-4,y:2}},
+  {t:.43,ang:{spine:D(2),chest:D(2),neck:D(28),tail1:D(18),tail2:D(-8),
+             flU:D(2),flL:D(-2),frU:D(4),frL:D(-4),
+             blU:D(60),blL:D(0),brU:D(54),brL:D(4)},off:{x:6,y:0}},
+  {t:1, ang:{spine:D(2),chest:D(2),neck:D(32),tail1:D(10),tail2:D(-4),
+             flU:D(-2),flL:D(4),frU:D(2),frL:D(-2),
+             blU:D(-4),blL:D(5),brU:D(6),brL:D(-6)},off:{x:0,y:0}}];
 // Heavy wind-up: the rear-up half — weight shifts back onto the haunches, front paws start lifting
 // off the ground (matches poseFor's CHARGE->heavyCharge mapping, held while the player charges).
 // Fix round 1: the original 20/26/20 -> 30/38/14 spine/chest/neck angles reared up hard enough that
@@ -2568,15 +2609,27 @@ POSES_BIG.light2=jab('l',{startSh:-10,startEl:36,peakSh:72,peakEl:22,peakOffX:14
 POSES_BIG.light3=jab('r',{startSh:-10,startEl:38,peakSh:78,peakEl:20,peakOffX:16,torsoPeak:8});
 POSES_BIG.light4=jab('l',{startSh:-10,startEl:38,peakSh:84,peakEl:20,peakOffX:18,torsoPeak:9});
 POSES_BIG.light5=jab('r',{startSh:-12,startEl:42,peakSh:94,peakEl:12,peakOffX:24,torsoPeak:10});
-// Medium: a driving shoulder charge — big forward off.x, guard held tight (not a reaching arm like
-// the human lunge), torso rolling hard into the hit.
-// Fix round 1 (controller review): t:.5's torso trimmed 46->34 — Rig.extent's reach now walks every
-// pose (not a fixed formula), and torsoLen*sin(46deg) alone was already most of the trimmed reach
-// budget (see LOOKS.mongo's Fix round 3) before the arm added anything.
+// Medium (Task 6.5 / Phase 6 ruling 4: KICK is a leg strike in every rig): a stomping front kick, not
+// the old driving shoulder charge. Torso stays close to upright (a small angle on top of look.hunch,
+// unlike the human rig's dramatic 20deg back-lean — a brute's stomp reads as weight driven STRAIGHT
+// DOWN through the kick, not a back-leaning snap) while both fists stay near their own idle guard
+// position throughout — "both fists guarding" — rather than the human rig's single counterbalancing
+// lead arm; the right leg (rHip/rKnee, independent of the right ARM doing the guard — arms and legs
+// are separate FK chains) lifts the knee high and pushes the foot forward at roughly chest height (a
+// much bigger vertical reach than the human kick's hip-height, matching a stomping brute's longer
+// legs and lower stance). Strike lands at t:.43, same active-window reasoning as POSES.medium's own
+// comment (MOVES.medium is shared by every rig). See the 'kick: medium's active-phase pose...' test
+// (90_tests.js) for the frozen "foot >=60px forward of idle, guard hand within 20px of idle" contract
+// this satisfies for all three rig kinds — Mongo/Grull's own reach budget has real margin here (their
+// worst-case reach across the whole pose set is s3/knockdown, not this kick), unlike the human/quad
+// rigs' much tighter budgets (see those tables' own comments).
 POSES_BIG.medium=[
-  {t:0, ang:{torso:D(8), rShoulder:D(6), rElbow:D(50),lShoulder:D(10),lElbow:D(50),rHip:D(-10),lHip:D(10),rKnee:D(18),lKnee:D(-8)},off:{x:-8,y:0}},
-  {t:.5,ang:{torso:D(34),rShoulder:D(24),rElbow:D(40),lShoulder:D(20),lElbow:D(40),rHip:D(30), lHip:D(-40),rKnee:D(-30),lKnee:D(10)},off:{x:38,y:4}},
-  {t:1, ang:{torso:D(20),rShoulder:D(14),rElbow:D(46),lShoulder:D(14),lElbow:D(46),rHip:D(12), lHip:D(-14)},off:{x:14,y:0}}];
+  {t:0, ang:{torso:D(2),head:D(-2),rHip:D(-40),rKnee:D(70),lHip:D(-4),lKnee:D(6),
+             lShoulder:D(10),lElbow:D(62),rShoulder:D(14),rElbow:D(62)},off:{x:-4,y:8}},
+  {t:.43,ang:{torso:D(4),head:D(-2),rHip:D(106),rKnee:D(24),lHip:D(6),lKnee:D(-4),
+             lShoulder:D(16),lElbow:D(66),rShoulder:D(20),rElbow:D(66)},off:{x:4,y:4}},
+  {t:1, ang:{torso:D(1),rHip:D(12),rKnee:D(-6),lHip:D(-10),lKnee:D(10),
+             lShoulder:D(4),lElbow:D(64),rShoulder:D(16),rElbow:D(64)},off:{x:0,y:0}}];
 // Heavy charge: the gather. Fix round 1 (controller review): originally a deep torso-rotation crouch
 // (64-76deg pose angle, past 60deg once stacked with look.hunch) to keep the pose's TOP low for the
 // old fixed heavyCharge/s3-only HUD test — but rotating a torso this long by that much is exactly what
@@ -3896,6 +3949,19 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
         for(let i=0;i<5;i++){const rng=RNG(this._seed(i+50));const ang=Math.PI+(rng.next()-.5)*1.3,spd=.4+rng.next()*.9;
           this.list.push({kind:'dust',x:ev.x,y:ev.y,vx:Math.cos(ang)*spd,vy:-Math.abs(Math.sin(ang))*spd-.2,life:0,max:24,col:'#cbb89a'})}
         break;
+      // Task 6.5 (kick poses and impact art): the kick's own hit-impact fx, pushed by Fight.resolve
+      // INSTEAD OF the usual gold 'spark' burst whenever the landing move is 'medium' (KICK is a leg
+      // strike in every rig -- Phase 6 ruling 4) -- hitstop/shake are unaffected, only this one fx
+      // push differs, per the frozen interface. Six grey-brown particles low to the floor, swept
+      // forward in ev.face's direction (not a symmetric circular burst like 'spark') so it reads as
+      // dust kicked up along the ground by a leg strike, not an arm impact -- the same seeded-per-
+      // frame RNG pattern every other fx kind here uses (never Math.random), so --sim screenshots
+      // stay reproducible frame for frame.
+      case'dustArc':
+        for(let i=0;i<6;i++){const rng=RNG(this._seed(i+90));
+          const spd=1.6+rng.next()*2.2,rise=.25+rng.next()*.85;
+          this.list.push({kind:'dustArc',x:ev.x,y:ev.y,vx:(ev.face||1)*spd,vy:-rise,life:0,max:22,col:'#8a7358'})}
+        break;
       case'popup':
         // Task 6.4: `muted` (Fight.resolve, forwarding BUFFS.tutorialGuard's ref.capped) draws grey
         // instead of the pushed col -- see draw() below. Stored alongside col (never overwriting it)
@@ -3942,7 +4008,9 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
   pushAll(evs){for(const e of evs)this.push(e)},
   update(){
     for(let i=this.list.length-1;i>=0;i--){const p=this.list[i];p.life++;
-      if(p.kind==='spark'||p.kind==='dust'){p.x+=p.vx;p.y+=p.vy;p.vy+=0.15}
+      // Task 6.5: dustArc gets the same gravity-arc physics as spark/dust (a low forward sweep that
+      // settles back toward the floor, not a straight line) -- see the push() case above.
+      if(p.kind==='spark'||p.kind==='dust'||p.kind==='dustArc'){p.x+=p.vx;p.y+=p.vy;p.vy+=0.15}
       if(p.life>=p.max)this.list.splice(i,1)}
     this.shake*=.85;if(this.shake<.05)this.shake=0;
     if(this.flash>0)this.flash--;
@@ -3955,6 +4023,10 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
     for(const p of this.list){
       if(p.kind==='spark'){c.globalAlpha=Math.max(0,1-p.life/p.max);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,2.5,0,Math.PI*2);c.fill()}
       else if(p.kind==='dust'){c.globalAlpha=Math.max(0,(1-p.life/p.max)*.5);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,3+p.life*.12,0,Math.PI*2);c.fill()}
+      // Task 6.5: same fading-circle treatment as 'dust' (a low, grounded impact reads better as a
+      // soft puff than a hard-edged spark), just its own grey-brown color and a touch more opaque so
+      // a low sweep of 6 still reads clearly against the floor art next to a landed light's gold spark.
+      else if(p.kind==='dustArc'){c.globalAlpha=Math.max(0,(1-p.life/p.max)*.6);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,2.6+p.life*.13,0,Math.PI*2);c.fill()}
       else if(p.kind==='popup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
         // Task 6.4: a capped (muted) hit always reads grey, regardless of what col it was pushed
         // with (crit/normal) -- the frozen "capped popups drawn grey" interface.
@@ -8490,5 +8562,103 @@ Test.add('CONTINUE off a first-time tutorial win lands on the map with DOOR 1 (.
   const doors2=document.querySelectorAll('#mapPath .node:not(.boss)');
   ok(!doors2[0].classList.contains('next'),'the highlight must be consumed after one map render, not linger');
   G.toTitle();G.sim=false});
+
+// --- Task 6.5: kick poses and impact art ---
+// activeStartT01(name)/activeMidT01(name): MOVES[name]'s own active window expressed as poseFor-style
+// t01 fractions of the move's full startup+active+recovery span -- the frame the hitbox first goes
+// active (f===effStartup) and the frame at the middle of the active span, respectively. Used instead
+// of hardcoded magic numbers so both stay correct if MOVES.medium/light1's own frame counts are ever
+// retuned. The two checks below deliberately use different points in each move's own active window,
+// not the same t01 for both, because they're testing different things: the kick's own pose data was
+// authored so its peak (the foot's furthest-forward point) lands at the ACTIVE WINDOW'S MIDDLE (see
+// POSES.medium/POSES_BIG.medium/POSES_QUAD.medium's own comments, 68_rig.js) -- "the active frames
+// coincide with the foot's furthest forward point" per the task brief, not specifically the first
+// active frame -- so the kick check below samples there. light1's own hand-authored pose (frozen,
+// untouched by this task) is checked at the START of its active window instead, the point in its own
+// window with the most margin against the 20px threshold (it sits within ~1.5px of that threshold at
+// every point across the window, not just this one -- see the Task 6.5 report for the full table).
+function activeStartT01(name){const m=MOVES[name],act=(m.hits||1)*m.active+((m.hits||1)-1)*(m.gap||0);
+  return m.startup/(m.startup+act+m.recovery)}
+function activeMidT01(name){const m=MOVES[name],act=(m.hits||1)*m.active+((m.hits||1)-1)*(m.gap||0);
+  return(m.startup+act/2)/(m.startup+act+m.recovery)}
+// The frozen pose test itself (TDD red-to-green for this task, see the Task 6.5 report): Phase 6
+// ruling 4 says KICK is a leg strike in every rig, so medium's own pose data was rewritten from an
+// arm move (a forward lunge for human, a shoulder charge for big, a full-body pounce for quad) to a
+// leg strike in all three rig kinds -- POSES.medium/POSES_BIG.medium/POSES_QUAD.medium, 68_rig.js.
+// At each rig's own medium active-t01, the striking foot/paw joint must sit >=60px forward of its own
+// idle x (in the facing direction, face=1 here) while the counterbalancing lead hand/guard fist (or,
+// for the quad rig, the un-involved front paw) stays within 20px of its own idle x -- proof the move
+// now reads as a leg strike, not an arm move, purely from joint data (not by eyeballing a screenshot).
+// One representative look per rig kind (carl/mongo/donut), matching this file's existing convention
+// for rig-level pose assertions (see 'poses differ: light1...' and 'quad light1 at t0.5...' above,
+// which similarly check one look each rather than every look in LOOKS) -- the separate 'every look\'s
+// reach fits inside EDGE_PAD' and 'every look renders every pose without throwing' tests already cover
+// every look in the roster for the concerns that actually vary per-look (reach budget, finite FK).
+Test.add('kick: medium\'s active-phase pose snaps a leg forward in every rig while the lead hand/paw stays near idle',()=>{
+  const T=activeMidT01('medium');
+  // human (Carl): the rear leg (rFoot) kicks forward; the lead (left) hand counterbalances but stays
+  // close to its own idle x (see POSES.medium's own comment for why the torso's back-lean would
+  // otherwise drag it well past 20px on its own).
+  {const idle=Rig.solve(LOOKS.carl,'idle',0,1),strike=Rig.solve(LOOKS.carl,'medium',T,1);
+    const footFwd=strike.rFoot.x-idle.rFoot.x,handDrift=Math.abs(strike.lHand.x-idle.lHand.x);
+    ok(footFwd>=60,'human kicking foot must be >=60px forward of idle: '+footFwd.toFixed(1));
+    ok(handDrift<=20,'human lead hand must stay within 20px of idle: '+handDrift.toFixed(1))}
+  // big (Mongo): a stomping front kick (rFoot); both fists stay near their own idle guard -- checked
+  // via the left fist, matching the human check's "lead hand" side.
+  {const idle=Rig.solve(LOOKS.mongo,'idle',0,1),strike=Rig.solve(LOOKS.mongo,'medium',T,1);
+    const footFwd=strike.rFoot.x-idle.rFoot.x,handDrift=Math.abs(strike.lHand.x-idle.lHand.x);
+    ok(footFwd>=60,'big kicking foot must be >=60px forward of idle: '+footFwd.toFixed(1));
+    ok(handDrift<=20,'big guard fist must stay within 20px of idle: '+handDrift.toFixed(1))}
+  // quad (Donut): both hind paws kick forward at the foe -- checked via bl2 -- while the front paws
+  // stay planted near idle (the quad rig's own "lead hand" equivalent) -- checked via fl2.
+  {const idle=Rig.solve(LOOKS.donut,'idle',0,1),strike=Rig.solve(LOOKS.donut,'medium',T,1);
+    const pawFwd=strike.bl2.x-idle.bl2.x,frontDrift=Math.abs(strike.fl2.x-idle.fl2.x);
+    ok(pawFwd>=60,'quad hind paw must be >=60px forward of idle: '+pawFwd.toFixed(1));
+    ok(frontDrift<=20,'quad front paw must stay within 20px of idle: '+frontDrift.toFixed(1))}});
+// The contrasting half of the same frozen contract ("so punch vs kick are distinguishable by data"):
+// light1 (the arm jab every rig keeps unchanged, per Phase 6 ruling 4) must NOT move the legs/hind
+// paws the way the new kick does -- human (Carl, both feet) and quad (Donut, both hind paws, since
+// light1 is a FRONT paw swipe -- the hind paws are its own "uninvolved limb" side) stay within 20px of
+// idle at light1's own active-t01. Big rig (Mongo) is deliberately left out of this specific check:
+// POSES_BIG.light1 (and every other POSES_BIG.light*/heavy/s1-s3, unmodified by this task) never sets
+// leg angles at all, so samplePose's per-pose angKeys union has no lHip/lKnee/rHip/rKnee entries for
+// those moves and the legs render at angle 0 ("attention") instead of holding idle's own small stance
+// angles -- a pre-existing rig quirk across every big-rig arm move, not something this kick task
+// introduced or is in scope to fix, and one that (at Mongo's larger legLen) pushes his own foot drift
+// during light1 past 20px on its own. See the Task 6.5 report for the full per-look numbers.
+Test.add('light1 (the arm jab, unchanged) keeps the legs/hind paws within 20px of idle -- contrast with the new kick',()=>{
+  const T=activeStartT01('light1');
+  {const idle=Rig.solve(LOOKS.carl,'idle',0,1),l1=Rig.solve(LOOKS.carl,'light1',T,1);
+    const lDrift=Math.abs(l1.lFoot.x-idle.lFoot.x),rDrift=Math.abs(l1.rFoot.x-idle.rFoot.x);
+    ok(lDrift<=20,'human left foot must stay within 20px of idle during light1: '+lDrift.toFixed(1));
+    ok(rDrift<=20,'human right foot must stay within 20px of idle during light1: '+rDrift.toFixed(1))}
+  {const idle=Rig.solve(LOOKS.donut,'idle',0,1),l1=Rig.solve(LOOKS.donut,'light1',T,1);
+    const blDrift=Math.abs(l1.bl2.x-idle.bl2.x),brDrift=Math.abs(l1.br2.x-idle.br2.x);
+    ok(blDrift<=20,'quad back-left paw must stay within 20px of idle during light1: '+blDrift.toFixed(1));
+    ok(brDrift<=20,'quad back-right paw must stay within 20px of idle during light1: '+brDrift.toFixed(1))}});
+// Kick impact art: a landed medium pushes the new 'dustArc' fx kind (a low, forward-swept dust arc)
+// instead of the usual gold 'spark' burst -- see Fight.resolve's own comment (60_fight.js) and
+// FX.push's 'dustArc' case (72_fx.js). A landed light1 (the unchanged arm jab) must still push the
+// ordinary 'spark' -- both checked in one test so a regression in either direction (kick losing its
+// own fx, or every OTHER move accidentally losing its spark) fails loudly.
+Test.add('a landed kick (medium) queues dustArc fx, not the gold spark burst; a landed punch (light1) still sparks',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});
+  closeIn(f);run(f,20);
+  const kinds=f.fx.map(e=>e.kind);
+  ok(kinds.includes('dustArc'),'a landed medium must push dustArc: '+kinds.join());
+  ok(!kinds.includes('spark'),'a landed medium must NOT push the gold spark burst: '+kinds.join());
+  ok(kinds.includes('shake'),'hitstop/shake fx must be unaffected by the kick fx swap: '+kinds.join());
+  const g=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(g);run(g,10);
+  const gKinds=g.fx.map(e=>e.kind);
+  ok(gKinds.includes('spark'),'a landed light1 must still push the ordinary spark: '+gKinds.join());
+  ok(!gKinds.includes('dustArc'),'a landed light1 must not push dustArc: '+gKinds.join())});
+Test.add('dustArc fx updates (gravity arc) and expires deterministically, same as spark/dust',()=>{
+  FX.reset();FX.push({kind:'dustArc',x:0,y:0,face:1});
+  eq(FX.list.length,6,'dustArc pushes 6 particles');
+  const p0=Object.assign({},FX.list[0]);
+  FX.update();
+  ok(FX.list[0].x!==p0.x||FX.list[0].y!==p0.y,'dustArc particles must move each update, like spark/dust');
+  for(let i=0;i<40;i++)FX.update();
+  eq(FX.list.length,0,'dustArc particles must expire like every other fx kind')});
 
 </script></body></html>

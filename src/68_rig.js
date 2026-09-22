@@ -63,13 +63,32 @@ POSES.light2=jab('l',{peakSh:90,peakOffX:12});
 POSES.light3=jab('r',{peakSh:95,peakOffX:14,torsoPeak:14});
 POSES.light4=jab('l',{peakSh:100,peakOffX:16,torsoPeak:16});
 POSES.light5=jab('r',{peakSh:118,peakEl:-10,peakOffX:26,torsoPeak:22,startEl:30});
-// Medium: a deep forward lunge, not just an arm reach — front leg bends under the driving weight,
-// rear leg kicks out straight behind, torso commits hard forward. Silhouette (wide low stance, big
-// torso lean) reads nothing like light1's near-upright jab or heavy's vertical wind-up-then-smash.
+// Medium (Task 6.5 / Phase 6 ruling 4: KICK is a leg strike in every rig): a rear-leg front kick, not
+// an arm move at all — anticipation (t:0) pulls weight back and lifts the rear (right) knee; strike
+// (t:.43, chosen so it lands inside the move's own active window — MOVES.medium is
+// startup:10/active:4/recovery:14, active frames 10-13 of 28, t01 in [0.357,0.5) — so the hitbox's
+// active frames coincide with the foot's own furthest-forward point, not some other part of the
+// swing) snaps the rear leg forward and up to roughly hip height while the torso leans back ~20deg;
+// recovery (t:1) draws the leg back in. The lead (left) arm counterbalances the backward torso lean
+// by swinging forward just enough that its HAND stays near its own idle position in absolute (not
+// torso-relative) x — a torso lean this size drags the whole shoulder girdle back with it (neck.x
+// shifts by torsoLen*sin(torsoA)), so the arm has to actively compensate, not just hold its idle
+// angle, to read as "counterbalancing" rather than "also flung backward". The right ARM (rShoulder/
+// rElbow, independent of the right LEG doing the kick — arms and legs are separate FK chains off the
+// same shoulder/hip attach points) swings back for a real visual counterbalance, unconstrained by any
+// test. Silhouette (a raised, extended leg with a back-leaning torso) reads nothing like light1's
+// near-upright jab or heavy's vertical wind-up-then-smash, and nothing like the old arm-lunge design
+// this replaces — see the 'kick: medium's active-phase pose...' test (90_tests.js) for the frozen
+// "foot >=60px forward of idle, lead hand within 20px of idle" pose contract this satisfies for all
+// three rig kinds, and 40_movedata.js's MOVES.medium comment for why hitting exactly hip height/20deg
+// isn't load-bearing (only the two pose-test numbers are).
 POSES.medium=[
-  {t:0, ang:{torso:D(-10),rShoulder:D(-10),rElbow:D(15),lShoulder:D(10),lElbow:D(15),rHip:D(-14),lHip:D(10),rKnee:D(20),lKnee:D(-6)},off:{x:-6,y:0}},
-  {t:.5,ang:{torso:D(34), rShoulder:D(95), rElbow:D(-4),lShoulder:D(-14),lElbow:D(10),rHip:D(34), lHip:D(-46),rKnee:D(-40),lKnee:D(6)},off:{x:30,y:6}},
-  {t:1, ang:{torso:D(12), rShoulder:D(40), rElbow:D(15),lShoulder:D(0),  lElbow:D(15),rHip:D(10), lHip:D(-10)},off:{x:8,y:0}}];
+  {t:0, ang:{torso:D(-10),rHip:D(-46),rKnee:D(78),lHip:D(-6),lKnee:D(8),
+             lShoulder:D(10),lElbow:D(50),rShoulder:D(-28),rElbow:D(46)},off:{x:-6,y:0}},
+  {t:.43,ang:{torso:D(-20),rHip:D(80),rKnee:D(8),lHip:D(4),lKnee:D(-4),
+             lShoulder:D(45),lElbow:D(48),rShoulder:D(-46),rElbow:D(18)},off:{x:6,y:-2}},
+  {t:1, ang:{torso:D(4), rHip:D(10),rKnee:D(-4),lHip:D(-10),lKnee:D(10),
+             lShoulder:D(6),lElbow:D(52),rShoulder:D(-6),rElbow:D(30)},off:{x:0,y:0}}];
 // Heavy wind-up: fist raised straight above the head, weight shifted back (matches poseFor's
 // CHARGE->heavyCharge mapping, so this is what's held while the player charges the swing).
 // Fix round 2: peak rShoulder pulled in from 172 to 134 (was swinging the arm almost straight up,
@@ -208,16 +227,32 @@ POSES_QUAD.light2=pawSwipe('fr',{peakU:80,peakOffX:14});
 POSES_QUAD.light3=pawSwipe('fl',{peakU:86,peakOffX:17,spinePeak:9});
 POSES_QUAD.light4=pawSwipe('fr',{peakU:92,peakOffX:20,spinePeak:11});
 POSES_QUAD.light5=pawSwipe('fl',{peakU:104,peakL:-20,peakOffX:28,spinePeak:16,startL:18});
-// Medium: a full pounce — hips coil low then drive the whole body forward through the air, front
-// paws reaching to land the hit, tail streaming back for a counterweight. Silhouette (deep spine
-// dip -> long airborne reach) reads nothing like light1's small paw flick or heavy's rear-up-and-slam.
+// Medium (Task 6.5 / Phase 6 ruling 4: KICK is a leg strike in every rig): a hind-leg buck, not the
+// old full-body pounce. Front paws stay planted near their own idle position throughout (they're the
+// "lead hand" side of this pose contract, see the pose test below) while both HIND legs do the work:
+// anticipation (t:0) coils them up and well back — as if the hips were winding up to spin toward the
+// foe, though this 2D side-view FK has no real whole-body yaw to animate, so the "spin" is entirely
+// sold by the big swing (roughly 110-130deg of blU/brU travel from this coiled-back anticipation to
+// the strike keyframe below) rather than an actual hip rotation — then strike (t:.43, chosen so it
+// lands inside the move's own active window exactly like the human/big rigs above — see POSES.medium's
+// own comment for the frame math, identical here since MOVES.medium is shared by every rig) snaps both
+// hind paws forward at the foe (not backward — a literal "buck" kicks away from an opponent standing
+// behind, but this move has to reach the foe standing in FRONT); recovery (t:1) returns to an
+// idle-like stance facing forward. See the 'kick: medium's active-phase pose...' test (90_tests.js)
+// for the frozen "hind paw >=60px forward of idle, front paw within 20px of idle" contract this
+// satisfies for all three rig kinds — donut/mother_rat's reach budget (EDGE_PAD, see their own LOOKS
+// comments) is already close to its ceiling from OTHER poses (light5/s2/s3), so this kick was tuned to
+// land well inside that existing budget rather than becoming the new worst case.
 POSES_QUAD.medium=[
-  {t:0, ang:{spine:D(-14),chest:D(-10),neck:D(30),tail1:D(-6),tail2:D(4),
-             flU:D(-10),flL:D(14),frU:D(-8),frL:D(12),blU:D(30),blL:D(-26),brU:D(28),brL:D(-24)},off:{x:-8,y:6}},
-  {t:.5,ang:{spine:D(20),chest:D(24),neck:D(44),tail1:D(20),tail2:D(-16),
-             flU:D(46),flL:D(-30),frU:D(50),frL:D(-34),blU:D(-30),blL:D(18),brU:D(-34),brL:D(20)},off:{x:34,y:-10}},
-  {t:1, ang:{spine:D(6),chest:D(4),neck:D(32),tail1:D(6),tail2:D(-2),
-             flU:D(6),flL:D(4),frU:D(4),frL:D(6),blU:D(6),blL:D(-4),brU:D(4),brL:D(-2)},off:{x:14,y:0}}];
+  {t:0, ang:{spine:D(2),chest:D(2),neck:D(30),tail1:D(34),tail2:D(-20),
+             flU:D(-4),flL:D(5),frU:D(6),frL:D(-6),
+             blU:D(-66),blL:D(50),brU:D(-58),brL:D(44)},off:{x:-4,y:2}},
+  {t:.43,ang:{spine:D(2),chest:D(2),neck:D(28),tail1:D(18),tail2:D(-8),
+             flU:D(2),flL:D(-2),frU:D(4),frL:D(-4),
+             blU:D(60),blL:D(0),brU:D(54),brL:D(4)},off:{x:6,y:0}},
+  {t:1, ang:{spine:D(2),chest:D(2),neck:D(32),tail1:D(10),tail2:D(-4),
+             flU:D(-2),flL:D(4),frU:D(2),frL:D(-2),
+             blU:D(-4),blL:D(5),brU:D(6),brL:D(-6)},off:{x:0,y:0}}];
 // Heavy wind-up: the rear-up half — weight shifts back onto the haunches, front paws start lifting
 // off the ground (matches poseFor's CHARGE->heavyCharge mapping, held while the player charges).
 // Fix round 1: the original 20/26/20 -> 30/38/14 spine/chest/neck angles reared up hard enough that
@@ -348,15 +383,27 @@ POSES_BIG.light2=jab('l',{startSh:-10,startEl:36,peakSh:72,peakEl:22,peakOffX:14
 POSES_BIG.light3=jab('r',{startSh:-10,startEl:38,peakSh:78,peakEl:20,peakOffX:16,torsoPeak:8});
 POSES_BIG.light4=jab('l',{startSh:-10,startEl:38,peakSh:84,peakEl:20,peakOffX:18,torsoPeak:9});
 POSES_BIG.light5=jab('r',{startSh:-12,startEl:42,peakSh:94,peakEl:12,peakOffX:24,torsoPeak:10});
-// Medium: a driving shoulder charge — big forward off.x, guard held tight (not a reaching arm like
-// the human lunge), torso rolling hard into the hit.
-// Fix round 1 (controller review): t:.5's torso trimmed 46->34 — Rig.extent's reach now walks every
-// pose (not a fixed formula), and torsoLen*sin(46deg) alone was already most of the trimmed reach
-// budget (see LOOKS.mongo's Fix round 3) before the arm added anything.
+// Medium (Task 6.5 / Phase 6 ruling 4: KICK is a leg strike in every rig): a stomping front kick, not
+// the old driving shoulder charge. Torso stays close to upright (a small angle on top of look.hunch,
+// unlike the human rig's dramatic 20deg back-lean — a brute's stomp reads as weight driven STRAIGHT
+// DOWN through the kick, not a back-leaning snap) while both fists stay near their own idle guard
+// position throughout — "both fists guarding" — rather than the human rig's single counterbalancing
+// lead arm; the right leg (rHip/rKnee, independent of the right ARM doing the guard — arms and legs
+// are separate FK chains) lifts the knee high and pushes the foot forward at roughly chest height (a
+// much bigger vertical reach than the human kick's hip-height, matching a stomping brute's longer
+// legs and lower stance). Strike lands at t:.43, same active-window reasoning as POSES.medium's own
+// comment (MOVES.medium is shared by every rig). See the 'kick: medium's active-phase pose...' test
+// (90_tests.js) for the frozen "foot >=60px forward of idle, guard hand within 20px of idle" contract
+// this satisfies for all three rig kinds — Mongo/Grull's own reach budget has real margin here (their
+// worst-case reach across the whole pose set is s3/knockdown, not this kick), unlike the human/quad
+// rigs' much tighter budgets (see those tables' own comments).
 POSES_BIG.medium=[
-  {t:0, ang:{torso:D(8), rShoulder:D(6), rElbow:D(50),lShoulder:D(10),lElbow:D(50),rHip:D(-10),lHip:D(10),rKnee:D(18),lKnee:D(-8)},off:{x:-8,y:0}},
-  {t:.5,ang:{torso:D(34),rShoulder:D(24),rElbow:D(40),lShoulder:D(20),lElbow:D(40),rHip:D(30), lHip:D(-40),rKnee:D(-30),lKnee:D(10)},off:{x:38,y:4}},
-  {t:1, ang:{torso:D(20),rShoulder:D(14),rElbow:D(46),lShoulder:D(14),lElbow:D(46),rHip:D(12), lHip:D(-14)},off:{x:14,y:0}}];
+  {t:0, ang:{torso:D(2),head:D(-2),rHip:D(-40),rKnee:D(70),lHip:D(-4),lKnee:D(6),
+             lShoulder:D(10),lElbow:D(62),rShoulder:D(14),rElbow:D(62)},off:{x:-4,y:8}},
+  {t:.43,ang:{torso:D(4),head:D(-2),rHip:D(106),rKnee:D(24),lHip:D(6),lKnee:D(-4),
+             lShoulder:D(16),lElbow:D(66),rShoulder:D(20),rElbow:D(66)},off:{x:4,y:4}},
+  {t:1, ang:{torso:D(1),rHip:D(12),rKnee:D(-6),lHip:D(-10),lKnee:D(10),
+             lShoulder:D(4),lElbow:D(64),rShoulder:D(16),rElbow:D(64)},off:{x:0,y:0}}];
 // Heavy charge: the gather. Fix round 1 (controller review): originally a deep torso-rotation crouch
 // (64-76deg pose angle, past 60deg once stacked with look.hunch) to keep the pose's TOP low for the
 // old fixed heavyCharge/s3-only HUD test — but rotating a torso this long by that much is exactly what

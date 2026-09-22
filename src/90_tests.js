@@ -3114,3 +3114,101 @@ Test.add('CONTINUE off a first-time tutorial win lands on the map with DOOR 1 (.
   const doors2=document.querySelectorAll('#mapPath .node:not(.boss)');
   ok(!doors2[0].classList.contains('next'),'the highlight must be consumed after one map render, not linger');
   G.toTitle();G.sim=false});
+
+// --- Task 6.5: kick poses and impact art ---
+// activeStartT01(name)/activeMidT01(name): MOVES[name]'s own active window expressed as poseFor-style
+// t01 fractions of the move's full startup+active+recovery span -- the frame the hitbox first goes
+// active (f===effStartup) and the frame at the middle of the active span, respectively. Used instead
+// of hardcoded magic numbers so both stay correct if MOVES.medium/light1's own frame counts are ever
+// retuned. The two checks below deliberately use different points in each move's own active window,
+// not the same t01 for both, because they're testing different things: the kick's own pose data was
+// authored so its peak (the foot's furthest-forward point) lands at the ACTIVE WINDOW'S MIDDLE (see
+// POSES.medium/POSES_BIG.medium/POSES_QUAD.medium's own comments, 68_rig.js) -- "the active frames
+// coincide with the foot's furthest forward point" per the task brief, not specifically the first
+// active frame -- so the kick check below samples there. light1's own hand-authored pose (frozen,
+// untouched by this task) is checked at the START of its active window instead, the point in its own
+// window with the most margin against the 20px threshold (it sits within ~1.5px of that threshold at
+// every point across the window, not just this one -- see the Task 6.5 report for the full table).
+function activeStartT01(name){const m=MOVES[name],act=(m.hits||1)*m.active+((m.hits||1)-1)*(m.gap||0);
+  return m.startup/(m.startup+act+m.recovery)}
+function activeMidT01(name){const m=MOVES[name],act=(m.hits||1)*m.active+((m.hits||1)-1)*(m.gap||0);
+  return(m.startup+act/2)/(m.startup+act+m.recovery)}
+// The frozen pose test itself (TDD red-to-green for this task, see the Task 6.5 report): Phase 6
+// ruling 4 says KICK is a leg strike in every rig, so medium's own pose data was rewritten from an
+// arm move (a forward lunge for human, a shoulder charge for big, a full-body pounce for quad) to a
+// leg strike in all three rig kinds -- POSES.medium/POSES_BIG.medium/POSES_QUAD.medium, 68_rig.js.
+// At each rig's own medium active-t01, the striking foot/paw joint must sit >=60px forward of its own
+// idle x (in the facing direction, face=1 here) while the counterbalancing lead hand/guard fist (or,
+// for the quad rig, the un-involved front paw) stays within 20px of its own idle x -- proof the move
+// now reads as a leg strike, not an arm move, purely from joint data (not by eyeballing a screenshot).
+// One representative look per rig kind (carl/mongo/donut), matching this file's existing convention
+// for rig-level pose assertions (see 'poses differ: light1...' and 'quad light1 at t0.5...' above,
+// which similarly check one look each rather than every look in LOOKS) -- the separate 'every look\'s
+// reach fits inside EDGE_PAD' and 'every look renders every pose without throwing' tests already cover
+// every look in the roster for the concerns that actually vary per-look (reach budget, finite FK).
+Test.add('kick: medium\'s active-phase pose snaps a leg forward in every rig while the lead hand/paw stays near idle',()=>{
+  const T=activeMidT01('medium');
+  // human (Carl): the rear leg (rFoot) kicks forward; the lead (left) hand counterbalances but stays
+  // close to its own idle x (see POSES.medium's own comment for why the torso's back-lean would
+  // otherwise drag it well past 20px on its own).
+  {const idle=Rig.solve(LOOKS.carl,'idle',0,1),strike=Rig.solve(LOOKS.carl,'medium',T,1);
+    const footFwd=strike.rFoot.x-idle.rFoot.x,handDrift=Math.abs(strike.lHand.x-idle.lHand.x);
+    ok(footFwd>=60,'human kicking foot must be >=60px forward of idle: '+footFwd.toFixed(1));
+    ok(handDrift<=20,'human lead hand must stay within 20px of idle: '+handDrift.toFixed(1))}
+  // big (Mongo): a stomping front kick (rFoot); both fists stay near their own idle guard -- checked
+  // via the left fist, matching the human check's "lead hand" side.
+  {const idle=Rig.solve(LOOKS.mongo,'idle',0,1),strike=Rig.solve(LOOKS.mongo,'medium',T,1);
+    const footFwd=strike.rFoot.x-idle.rFoot.x,handDrift=Math.abs(strike.lHand.x-idle.lHand.x);
+    ok(footFwd>=60,'big kicking foot must be >=60px forward of idle: '+footFwd.toFixed(1));
+    ok(handDrift<=20,'big guard fist must stay within 20px of idle: '+handDrift.toFixed(1))}
+  // quad (Donut): both hind paws kick forward at the foe -- checked via bl2 -- while the front paws
+  // stay planted near idle (the quad rig's own "lead hand" equivalent) -- checked via fl2.
+  {const idle=Rig.solve(LOOKS.donut,'idle',0,1),strike=Rig.solve(LOOKS.donut,'medium',T,1);
+    const pawFwd=strike.bl2.x-idle.bl2.x,frontDrift=Math.abs(strike.fl2.x-idle.fl2.x);
+    ok(pawFwd>=60,'quad hind paw must be >=60px forward of idle: '+pawFwd.toFixed(1));
+    ok(frontDrift<=20,'quad front paw must stay within 20px of idle: '+frontDrift.toFixed(1))}});
+// The contrasting half of the same frozen contract ("so punch vs kick are distinguishable by data"):
+// light1 (the arm jab every rig keeps unchanged, per Phase 6 ruling 4) must NOT move the legs/hind
+// paws the way the new kick does -- human (Carl, both feet) and quad (Donut, both hind paws, since
+// light1 is a FRONT paw swipe -- the hind paws are its own "uninvolved limb" side) stay within 20px of
+// idle at light1's own active-t01. Big rig (Mongo) is deliberately left out of this specific check:
+// POSES_BIG.light1 (and every other POSES_BIG.light*/heavy/s1-s3, unmodified by this task) never sets
+// leg angles at all, so samplePose's per-pose angKeys union has no lHip/lKnee/rHip/rKnee entries for
+// those moves and the legs render at angle 0 ("attention") instead of holding idle's own small stance
+// angles -- a pre-existing rig quirk across every big-rig arm move, not something this kick task
+// introduced or is in scope to fix, and one that (at Mongo's larger legLen) pushes his own foot drift
+// during light1 past 20px on its own. See the Task 6.5 report for the full per-look numbers.
+Test.add('light1 (the arm jab, unchanged) keeps the legs/hind paws within 20px of idle -- contrast with the new kick',()=>{
+  const T=activeStartT01('light1');
+  {const idle=Rig.solve(LOOKS.carl,'idle',0,1),l1=Rig.solve(LOOKS.carl,'light1',T,1);
+    const lDrift=Math.abs(l1.lFoot.x-idle.lFoot.x),rDrift=Math.abs(l1.rFoot.x-idle.rFoot.x);
+    ok(lDrift<=20,'human left foot must stay within 20px of idle during light1: '+lDrift.toFixed(1));
+    ok(rDrift<=20,'human right foot must stay within 20px of idle during light1: '+rDrift.toFixed(1))}
+  {const idle=Rig.solve(LOOKS.donut,'idle',0,1),l1=Rig.solve(LOOKS.donut,'light1',T,1);
+    const blDrift=Math.abs(l1.bl2.x-idle.bl2.x),brDrift=Math.abs(l1.br2.x-idle.br2.x);
+    ok(blDrift<=20,'quad back-left paw must stay within 20px of idle during light1: '+blDrift.toFixed(1));
+    ok(brDrift<=20,'quad back-right paw must stay within 20px of idle during light1: '+brDrift.toFixed(1))}});
+// Kick impact art: a landed medium pushes the new 'dustArc' fx kind (a low, forward-swept dust arc)
+// instead of the usual gold 'spark' burst -- see Fight.resolve's own comment (60_fight.js) and
+// FX.push's 'dustArc' case (72_fx.js). A landed light1 (the unchanged arm jab) must still push the
+// ordinary 'spark' -- both checked in one test so a regression in either direction (kick losing its
+// own fx, or every OTHER move accidentally losing its spark) fails loudly.
+Test.add('a landed kick (medium) queues dustArc fx, not the gold spark burst; a landed punch (light1) still sparks',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});
+  closeIn(f);run(f,20);
+  const kinds=f.fx.map(e=>e.kind);
+  ok(kinds.includes('dustArc'),'a landed medium must push dustArc: '+kinds.join());
+  ok(!kinds.includes('spark'),'a landed medium must NOT push the gold spark burst: '+kinds.join());
+  ok(kinds.includes('shake'),'hitstop/shake fx must be unaffected by the kick fx swap: '+kinds.join());
+  const g=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(g);run(g,10);
+  const gKinds=g.fx.map(e=>e.kind);
+  ok(gKinds.includes('spark'),'a landed light1 must still push the ordinary spark: '+gKinds.join());
+  ok(!gKinds.includes('dustArc'),'a landed light1 must not push dustArc: '+gKinds.join())});
+Test.add('dustArc fx updates (gravity arc) and expires deterministically, same as spark/dust',()=>{
+  FX.reset();FX.push({kind:'dustArc',x:0,y:0,face:1});
+  eq(FX.list.length,6,'dustArc pushes 6 particles');
+  const p0=Object.assign({},FX.list[0]);
+  FX.update();
+  ok(FX.list[0].x!==p0.x||FX.list[0].y!==p0.y,'dustArc particles must move each update, like spark/dust');
+  for(let i=0;i<40;i++)FX.update();
+  eq(FX.list.length,0,'dustArc particles must expire like every other fx kind')});

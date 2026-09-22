@@ -57,4 +57,9 @@ $H --share --shot "$S/p5-share.png"
 $H --tutorial --seed 1 --shot "$S/p5-tutorial-1.png"
 $H --reset-save --screen map --shot "$S/p5-tutorial-map.png"
 
+# ---- Phase 6: kick poses (Task 6.5) -- KICK reads as a leg strike in every rig -----------------
+$H --sim --seconds 1 --pose medium --p2 goblin --shot "$S/p6-kick-carl.png"
+$H --p1 mongo --pose medium --shot "$S/p6-kick-mongo.png"
+$H --p1 donut --pose medium --shot "$S/p6-kick-donut.png"
+
 echo "shots.sh: regenerated $(ls "$S"/*.png | wc -l | tr -d ' ') PNGs in $S"

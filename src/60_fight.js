@@ -108,7 +108,13 @@ class Fight{
     // landed hit still shakes/sparks/pops for combo feedback; only the freeze itself is gated, and
     // an intermediate multi-hit leaves any hitstop already armed by a same-frame mutual trade alone.
     if(!m.hits||last)this.hitstop=m.hitstop;
-    this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:crit?'#ff5a4a':'#ffd86b'});
+    // Task 6.5: a landed medium (KICK, a leg strike in every rig -- Phase 6 ruling 4) pushes a low
+    // dust arc instead of the usual gold spark burst -- data-only (which fx kind gets pushed), never
+    // touching hitstop/shake, so the sim stays exactly as deterministic as it already was. att.face
+    // (not def's) is the kick's own forward direction, since the dust sweeps the way the kicking
+    // attacker is facing, into the defender.
+    if(att.moveName==='medium')this.fx.push({kind:'dustArc',x:def.x,y:FLOOR,face:att.face});
+    else this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:crit?'#ff5a4a':'#ffd86b'});
     // Task 6.4: BUFFS.tutorialGuard (47_buffs.js) sets ref.capped=true the instant it actually
     // clamped this hit's dmg -- forwarded onto the popup fx as `muted`, which FX/Render draw grey
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.

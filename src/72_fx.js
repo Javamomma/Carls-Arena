@@ -16,6 +16,19 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
         for(let i=0;i<5;i++){const rng=RNG(this._seed(i+50));const ang=Math.PI+(rng.next()-.5)*1.3,spd=.4+rng.next()*.9;
           this.list.push({kind:'dust',x:ev.x,y:ev.y,vx:Math.cos(ang)*spd,vy:-Math.abs(Math.sin(ang))*spd-.2,life:0,max:24,col:'#cbb89a'})}
         break;
+      // Task 6.5 (kick poses and impact art): the kick's own hit-impact fx, pushed by Fight.resolve
+      // INSTEAD OF the usual gold 'spark' burst whenever the landing move is 'medium' (KICK is a leg
+      // strike in every rig -- Phase 6 ruling 4) -- hitstop/shake are unaffected, only this one fx
+      // push differs, per the frozen interface. Six grey-brown particles low to the floor, swept
+      // forward in ev.face's direction (not a symmetric circular burst like 'spark') so it reads as
+      // dust kicked up along the ground by a leg strike, not an arm impact -- the same seeded-per-
+      // frame RNG pattern every other fx kind here uses (never Math.random), so --sim screenshots
+      // stay reproducible frame for frame.
+      case'dustArc':
+        for(let i=0;i<6;i++){const rng=RNG(this._seed(i+90));
+          const spd=1.6+rng.next()*2.2,rise=.25+rng.next()*.85;
+          this.list.push({kind:'dustArc',x:ev.x,y:ev.y,vx:(ev.face||1)*spd,vy:-rise,life:0,max:22,col:'#8a7358'})}
+        break;
       case'popup':
         // Task 6.4: `muted` (Fight.resolve, forwarding BUFFS.tutorialGuard's ref.capped) draws grey
         // instead of the pushed col -- see draw() below. Stored alongside col (never overwriting it)
@@ -62,7 +75,9 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
   pushAll(evs){for(const e of evs)this.push(e)},
   update(){
     for(let i=this.list.length-1;i>=0;i--){const p=this.list[i];p.life++;
-      if(p.kind==='spark'||p.kind==='dust'){p.x+=p.vx;p.y+=p.vy;p.vy+=0.15}
+      // Task 6.5: dustArc gets the same gravity-arc physics as spark/dust (a low forward sweep that
+      // settles back toward the floor, not a straight line) -- see the push() case above.
+      if(p.kind==='spark'||p.kind==='dust'||p.kind==='dustArc'){p.x+=p.vx;p.y+=p.vy;p.vy+=0.15}
       if(p.life>=p.max)this.list.splice(i,1)}
     this.shake*=.85;if(this.shake<.05)this.shake=0;
     if(this.flash>0)this.flash--;
@@ -75,6 +90,10 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
     for(const p of this.list){
       if(p.kind==='spark'){c.globalAlpha=Math.max(0,1-p.life/p.max);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,2.5,0,Math.PI*2);c.fill()}
       else if(p.kind==='dust'){c.globalAlpha=Math.max(0,(1-p.life/p.max)*.5);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,3+p.life*.12,0,Math.PI*2);c.fill()}
+      // Task 6.5: same fading-circle treatment as 'dust' (a low, grounded impact reads better as a
+      // soft puff than a hard-edged spark), just its own grey-brown color and a touch more opaque so
+      // a low sweep of 6 still reads clearly against the floor art next to a landed light's gold spark.
+      else if(p.kind==='dustArc'){c.globalAlpha=Math.max(0,(1-p.life/p.max)*.6);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,2.6+p.life*.13,0,Math.PI*2);c.fill()}
       else if(p.kind==='popup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
         // Task 6.4: a capped (muted) hit always reads grey, regardless of what col it was pushed
         // with (crit/normal) -- the frozen "capped popups drawn grey" interface.
