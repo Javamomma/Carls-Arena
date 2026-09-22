@@ -392,3 +392,43 @@ Test.add('buff badges: one 12px gold square with a 1-letter code per encounter b
   eq(Render.BUFF_CODES.regen,'R');eq(Render.BUFF_CODES.armorUp,'A');eq(Render.BUFF_CODES.powerGain,'P');
   eq(Render.BUFF_CODES.unblockableSpecials,'U');eq(Render.BUFF_CODES.degen,'D');eq(Render.BUFF_CODES.thorns,'T');
   ok(!threw(()=>Render.buffBadges(Render.ctx,0,0,300,[BUFFS.regen,BUFFS.thorns])),'buffBadges must not throw')});
+
+// --- Task 3.3: floors, encounters, bosses (data) ---
+Test.add('every FLOORS node and boss resolves',()=>{
+  for(const fl of FLOORS){
+    for(const nodeId of fl.nodes)ok(!threw(()=>Encounter.resolve(nodeId)),'floor '+fl.floor+' node '+nodeId+' must resolve');
+    ok(!threw(()=>Encounter.resolve(fl.boss)),'floor '+fl.floor+' boss '+fl.boss+' must resolve')}});
+Test.add('every FLOORS-referenced encounter enemy exists in DEFS',()=>{
+  for(const fl of FLOORS){
+    for(const nodeId of fl.nodes){const e=Encounter.resolve(nodeId);ok(DEFS[e.enemy.id]===e.enemy,nodeId+' enemy must be a DEFS entry')}
+    const b=Encounter.resolve(fl.boss);ok(DEFS[b.enemy.id]===b.enemy,fl.boss+' enemy must be a DEFS entry')}});
+Test.add('boss defs have boss:true, an s3 override, and at least one buff',()=>{
+  for(const id in BOSSES){const b=BOSSES[id];
+    eq(b.boss,true,id+' must be boss:true');
+    ok(b.moves&&b.moves.s3,id+' must have an s3 override');
+    ok(Array.isArray(b.buffs)&&b.buffs.length>=1,id+' must have at least one buff')}});
+Test.add('boss encounter buffIds include the def\'s signature buff',()=>{
+  const grull=Encounter.resolve('f1_grull');
+  ok(grull.buffIds.includes('armorUp'),'grull encounter must carry armorUp from its def');
+  eq(grull.buffs.length,grull.buffIds.length);
+  const mother=Encounter.resolve('f2_mother');
+  ok(mother.buffIds.includes('regen'),'mother_rat encounter must carry regen from its def')});
+Test.add('G.startFight({floor,node:"boss"}) resolves the boss encounter and sets G.encounter.boss',()=>{
+  G.startFight({floor:2,node:'boss'});
+  ok(G.encounter&&G.encounter.boss,'G.encounter.boss must be true');
+  eq(G.fight.p2.def.id,'mother_rat');
+  ok(!threw(()=>Render.frame(G.fight)),'Render.frame must not throw for a boss fight (boss plate)');
+  G.toTitle()});
+Test.add('G.startFight({floor,node}) resolves a numeric node index to that floor\'s node encounter',()=>{
+  G.startFight({floor:1,node:0});
+  eq(G.fight.p2.def.id,'goblin');ok(G.encounter&&!G.encounter.boss);
+  G.toTitle()});
+Test.add('hp/atk multipliers scale with floor via floorMul',()=>{
+  eq(floorMul(1),1);eq(floorMul(2),1.15);
+  const e1=Encounter.resolve('f1_skel'),e2=Encounter.resolve('f2_skel2');
+  eq(e1.hpMul,1);eq(e1.atkMul,1);
+  eq(e2.hpMul,1.15);eq(e2.atkMul,1.15)});
+Test.add('shaman s1 override merges to a 6-hit flurry over the base MOVES.s1',()=>{
+  const F=new Fighter(DEFS.shaman,-1,Ctrl.idle());
+  eq(F.moveDef('s1').hits,6);
+  eq(F.moveDef('s1').startup,MOVES.s1.startup,'fields the override omits still fall back to base MOVES.s1')});

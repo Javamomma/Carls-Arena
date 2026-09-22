@@ -155,10 +155,48 @@ const LOOKS={
   hobgoblin:{skin:'#5c6b52',hair:null,primary:'#3d3428',secondary:'#6b5c46',
     limb:23,legLen:106,armLen:99,torsoLen:86,headR:25,shoulderW:65,hipW:40,earLen:18,
     props:['rags','club']},
-  // Placeholder human-rig look for the Phase 1 caster opponent; her bespoke non-humanoid rig is Phase 3.
+  // PLACEHOLDER (Task 3.5 gives Donut her own RigQuad cat rig): human-rig look for the Phase 1
+  // caster opponent, now with rig:'human' set explicitly to mark it as the stand-in it is — her
+  // def (DEFS.donut) already carries rig:'quad', but Rig.solve dispatches on look.rig, not def.rig,
+  // so this is what actually renders her today.
   donut:{skin:'#f2cfe0',hair:'#ffe7f5',primary:'#e8a0d8',secondary:'#b565a0',
-    limb:14,legLen:107,armLen:88,torsoLen:74,headR:23,shoulderW:39,hipW:29,earLen:0,
-    props:['gear']}};
+    limb:14,legLen:107,armLen:88,torsoLen:74,headR:23,shoulderW:39,hipW:29,earLen:0,rig:'human',
+    props:['gear']},
+  // PLACEHOLDER (Task 3.4 gives Mongo his own RigBig brute rig): a scaled-down copy of the
+  // hobgoblin's proportions (def.scale is already 1.25 — full hobgoblin proportions on top of that
+  // push the tallest pose's topmost joint above the HUD at max zoom, see the "tallest pose stays
+  // under the HUD" test) with Mongo's own palette and rig:'human' set explicitly.
+  mongo:{skin:'#7a6a52',hair:null,primary:'#3a2f1f',secondary:'#8a6d3b',
+    limb:20,legLen:90,armLen:84,torsoLen:73,headR:21,shoulderW:55,hipW:34,earLen:0,rig:'human',
+    props:['club']},
+  // PLACEHOLDER (Task 3.4/3.5): a copy of Katia's lean proportions with a bone-white palette and
+  // rig:'human' set explicitly.
+  skeleton:{skin:'#d8d0c0',hair:null,primary:'#2a2a2a',secondary:'#555555',
+    limb:12,legLen:117,armLen:91,torsoLen:78,headR:20,shoulderW:38,hipW:28,earLen:0,rig:'human',
+    props:['rags','dagger']},
+  // PLACEHOLDER (Task 3.4/3.5): a copy of Donut's proportions with a mystic-purple palette and
+  // rig:'human' set explicitly.
+  shaman:{skin:'#8a6aa8',hair:'#2a1a3a',primary:'#4a2f6a',secondary:'#8a4fae',
+    limb:14,legLen:107,armLen:88,torsoLen:74,headR:23,shoulderW:39,hipW:29,earLen:0,rig:'human',
+    props:['gear']},
+  // PLACEHOLDER (Task 3.5 gives Grub his own RigQuad rig): a copy of the goblin's small proportions
+  // with a grub-green palette and rig:'human' set explicitly.
+  grub:{skin:'#8a9a4f',hair:null,primary:'#5a6a30',secondary:'#3a4a20',
+    limb:13,legLen:82,armLen:72,torsoLen:58,headR:18,shoulderW:33,hipW:21,earLen:0,rig:'human',
+    props:[]},
+  // PLACEHOLDER (Task 3.4 gives Grull his own RigBig rig): a scaled-down copy of the hobgoblin's
+  // proportions (def.scale is 1.3, the biggest in the roster — see the mongo comment above for why
+  // this can't just reuse the hobgoblin's own numbers) with a boss-red palette and rig:'human' set
+  // explicitly.
+  grull:{skin:'#5c2f2f',hair:null,primary:'#2f1a1a',secondary:'#8a3a3a',
+    limb:18,legLen:85,armLen:79,torsoLen:69,headR:20,shoulderW:52,hipW:32,earLen:0,rig:'human',
+    props:['club']},
+  // PLACEHOLDER (Task 3.5 gives Mother Rat her own RigQuad rig): the same scaled-down proportions
+  // as Grull (also def.scale:1.3) with a rat-fur palette (and rat ears) and rig:'human' set
+  // explicitly.
+  mother_rat:{skin:'#4a3040',hair:'#2a1a24',primary:'#3a2030',secondary:'#6a4058',
+    limb:18,legLen:85,armLen:79,torsoLen:69,headR:20,shoulderW:52,hipW:32,earLen:22,rig:'human',
+    props:[]}};
 
 // Resolves a def's look, falling back to LOOKS.carl (once, with a console.warn) for a Phase-3-added
 // def that ships without one, instead of every reader (Rig.draw, Render.overlayY/shadow) crashing on

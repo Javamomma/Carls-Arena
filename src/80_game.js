@@ -42,8 +42,18 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.lastFightOpts=o; // FIGHT AGAIN replays these (minus seed) so a custom p2/ai isn't lost
     let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
     this.encounter=null;
-    if(o.encounter){
-      const enc=Encounter.resolve(o.encounter);this.encounter=enc;
+    // {floor,node} sugar: node is an index into FLOORS[floor-1].nodes, or the string 'boss' for
+    // that floor's boss encounter. Resolved to an encounter id up front so the block below (which
+    // already knows how to turn an encounter id into p2def+ai+G.encounter) handles it exactly like
+    // a plain o.encounter id, with no separate code path.
+    let encSrc=o.encounter;
+    if(o.floor!==undefined){
+      const fl=FLOORS[o.floor-1];
+      if(!fl)throw new Error('unknown floor: '+o.floor);
+      encSrc=o.node==='boss'?fl.boss:fl.nodes[o.node];
+      if(!encSrc)throw new Error('unknown floor node: floor '+o.floor+' node '+o.node)}
+    if(encSrc){
+      const enc=Encounter.resolve(encSrc);this.encounter=enc;
       p2def=Object.assign({},enc.enemy,{hp:Math.round(enc.enemy.hp*enc.hpMul),atk:Math.round(enc.enemy.atk*enc.atkMul)});
       ai=enc.tier}
     this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:p2def,clock:o.clock,

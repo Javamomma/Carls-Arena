@@ -257,15 +257,38 @@ const MOVES={
   s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,chain:null,knockdown:true,unblockable:true,hitstop:14}};
 const CHAMPS={
   carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human'},
-  donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'human'},
+  // rig:'quad' — Donut is a real cat (Task 3.5's RigQuad, a four-legged bone set). Until that lands,
+  // her .look (LOOKS.donut in 68_rig.js) stays a human-rig placeholder so she still renders; Rig.solve
+  // dispatches on look.rig, not def.rig, which is what makes that placeholder work today.
+  donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad'},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
-    moves:{s1:{hits:5,gap:4,dmg:1.2}}}};
+    moves:{s1:{hits:5,gap:4,dmg:1.2}}},
+  // rig:'big' — Mongo is Task 3.4's brute bone set (RigBig). Until then LOOKS.mongo (68_rig.js) is a
+  // human-rig placeholder, same deal as Donut above.
+  mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big'}};
 const MOBS={
   goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:300,atk:38,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',
     moves:{heavy:{charge:14,dmg:2.0}}},
   hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:700,atk:55,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human', // fix round 2: 1.2->1.1, see LOOKS.hobgoblin
-    moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}}};
-const DEFS=Object.assign({},CHAMPS,MOBS);
+    moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}},
+  skeleton: {id:'skeleton',name:'SKELETON',cls:'rogue', hp:260,atk:34,color:'#d8d0c0',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.95,rig:'human'},
+  // s1 override: a longer 6-hit flurry (base s1 is 3 hits) — the shaman's signature multi-hit special.
+  shaman:   {id:'shaman',  name:'SHAMAN',  cls:'caster',hp:240,atk:44,color:'#6a4c93',armor:0,  crit:.1, critMul:1.6,blockProf:0,  scale:.95,rig:'human',
+    moves:{s1:{hits:6,gap:4,dmg:1.1}}},
+  // rig:'quad' — Task 3.5's four-legged bone set. Until then LOOKS.grub (68_rig.js) is a human-rig
+  // placeholder, same deal as Donut/Mongo above.
+  grub:     {id:'grub',    name:'GRUB',    cls:'beast', hp:380,atk:40,color:'#8a9a4f',armor:.05,crit:.05,critMul:1.6,blockProf:0,  scale:.8, rig:'quad'}};
+const BOSSES={
+  // rig:'big' — Task 3.4's brute bone set. Until then LOOKS.grull (68_rig.js) is a human-rig
+  // placeholder. s3 override + buffs are his boss-signature mechanics per Phase 3 ruling #4 (a mob
+  // def with boss:true, a bigger rig, a unique S3, and one signature buff — no boss-only engine).
+  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1600,atk:70,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:1.3,rig:'big',
+    boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
+  // rig:'quad' — Task 3.5's four-legged bone set. Until then LOOKS.mother_rat (68_rig.js) is a
+  // human-rig placeholder.
+  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1400,atk:62,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.3,rig:'quad',
+    boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
+const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
 const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,POWER_MAX=300,PARRY_LOCKOUT=20,CRIT_MUL_DEFAULT=1.6;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
@@ -281,25 +304,47 @@ const STAGE_W=1400;
 const EDGE_PAD=220;
 
 // Dungeon encounters: a floor + name + enemy id/tier the HUD reads for the "FLOOR n • NAME" line
-// and G.startFight uses to build p2. Pure data lookup; scaling (hpMul/atkMul) is applied by G, not
-// here, so Encounter.resolve never mutates a DEFS entry.
+// and G.startFight uses to build p2. Pure data lookup; scaling (hpMul/atkMul) is applied by
+// floorMul below, so Encounter.resolve never mutates a DEFS entry.
+// hpMul/atkMul scale +15% per floor past the first (floor 1 -> 1.0, floor 2 -> 1.15, ...), computed
+// from the floor number here rather than hard-coded per encounter so a future floor 3+ just plugs in.
+function floorMul(floor){return 1+0.15*(floor-1)}
+// FLOORS[i] = {floor, name, nodes:[encounterId,...], boss:encounterId}. G.startFight({floor,node})
+// resolves node (an index into .nodes, or the string 'boss') to one of these ids.
+const FLOORS=[
+  {floor:1,name:'THE DEPTHS',nodes:['f1_goblin','f1_skel','f1_hob','f1_shaman','f1_goblin2'],boss:'f1_grull'},
+  {floor:2,name:'THE SEWERS',nodes:['f2_grub','f2_skel2','f2_shaman2','f2_hob2','f2_grub2'],boss:'f2_mother'}];
 const ENCOUNTERS={
   f1_goblin:{floor:1,name:'THE DEPTHS',enemy:'goblin',tier:'basic',hpMul:1,atkMul:1},
-  f1_hob:   {floor:1,name:'THE DEPTHS',enemy:'hobgoblin',tier:'brute',hpMul:1,atkMul:1}};
+  f1_hob:   {floor:1,name:'THE DEPTHS',enemy:'hobgoblin',tier:'brute',hpMul:1,atkMul:1},
+  f1_skel:    {floor:1,name:'THE DEPTHS',enemy:'skeleton', tier:'t2',hpMul:floorMul(1),atkMul:floorMul(1)},
+  f1_shaman:  {floor:1,name:'THE DEPTHS',enemy:'shaman',   tier:'t3',hpMul:floorMul(1),atkMul:floorMul(1)},
+  f1_goblin2: {floor:1,name:'THE DEPTHS',enemy:'goblin',   tier:'t3',hpMul:floorMul(1),atkMul:floorMul(1)},
+  f1_grull:   {floor:1,name:'THE DEPTHS',enemy:'grull',    tier:'t4',hpMul:floorMul(1),atkMul:floorMul(1),boss:true},
+  f2_grub:    {floor:2,name:'THE SEWERS',enemy:'grub',     tier:'t3',hpMul:floorMul(2),atkMul:floorMul(2)},
+  f2_skel2:   {floor:2,name:'THE SEWERS',enemy:'skeleton', tier:'t3',hpMul:floorMul(2),atkMul:floorMul(2)},
+  f2_shaman2: {floor:2,name:'THE SEWERS',enemy:'shaman',   tier:'t4',hpMul:floorMul(2),atkMul:floorMul(2)},
+  f2_hob2:    {floor:2,name:'THE SEWERS',enemy:'hobgoblin',tier:'t4',hpMul:floorMul(2),atkMul:floorMul(2)},
+  f2_grub2:   {floor:2,name:'THE SEWERS',enemy:'grub',     tier:'t4',hpMul:floorMul(2),atkMul:floorMul(2)},
+  f2_mother:  {floor:2,name:'THE SEWERS',enemy:'mother_rat',tier:'t5',hpMul:floorMul(2),atkMul:floorMul(2),boss:true}};
 const Encounter={
   resolve(x){
     const o=typeof x==='string'?ENCOUNTERS[x]:x;
     if(!o)throw new Error('unknown encounter: '+x);
     const enemy=typeof o.enemy==='string'?DEFS[o.enemy]:o.enemy;
     if(!enemy)throw new Error('unknown encounter enemy: '+o.enemy);
-    const buffIds=o.buffs||[];
+    const boss=!!o.boss;
     // enc.buffs is resolved BUFFS objects, for the HUD to read (badge codes come off b.id); enc.buffIds
     // is the raw id list, kept alongside so G.startFight can hand ids (not encounter/presentation-side
-    // objects) to Buffs.apply, which does its own independent resolution.
+    // objects) to Buffs.apply, which does its own independent resolution. A boss encounter's buffIds
+    // are its def's signature buff(s) (Phase 3 ruling #4) plus whatever the node itself adds via
+    // o.buffs (no boss node uses this today, but it's kept general rather than assuming empty).
+    const nodeBuffIds=o.buffs||[];
+    const buffIds=boss?(enemy.buffs||[]).concat(nodeBuffIds):nodeBuffIds;
     const buffs=buffIds.map(id=>{if(!BUFFS[id])throw new Error('unknown buff: '+id);return BUFFS[id]});
     return{floor:o.floor,name:o.name,enemy,tier:o.tier,
       hpMul:o.hpMul===undefined?1:o.hpMul,atkMul:o.atkMul===undefined?1:o.atkMul,
-      buffIds,buffs}}};
+      buffIds,buffs,boss}}};
 
 // Node buffs: pure hooks on Fight/Fighter, never presentation. See Phase 3 plan Ruling #3 and the
 // frozen interfaces list. BUFFS[id] = {id, onFrame?(fight,holder,foe), onHit?(fight,att,def,ref,holder),
@@ -903,10 +948,48 @@ const LOOKS={
   hobgoblin:{skin:'#5c6b52',hair:null,primary:'#3d3428',secondary:'#6b5c46',
     limb:23,legLen:106,armLen:99,torsoLen:86,headR:25,shoulderW:65,hipW:40,earLen:18,
     props:['rags','club']},
-  // Placeholder human-rig look for the Phase 1 caster opponent; her bespoke non-humanoid rig is Phase 3.
+  // PLACEHOLDER (Task 3.5 gives Donut her own RigQuad cat rig): human-rig look for the Phase 1
+  // caster opponent, now with rig:'human' set explicitly to mark it as the stand-in it is — her
+  // def (DEFS.donut) already carries rig:'quad', but Rig.solve dispatches on look.rig, not def.rig,
+  // so this is what actually renders her today.
   donut:{skin:'#f2cfe0',hair:'#ffe7f5',primary:'#e8a0d8',secondary:'#b565a0',
-    limb:14,legLen:107,armLen:88,torsoLen:74,headR:23,shoulderW:39,hipW:29,earLen:0,
-    props:['gear']}};
+    limb:14,legLen:107,armLen:88,torsoLen:74,headR:23,shoulderW:39,hipW:29,earLen:0,rig:'human',
+    props:['gear']},
+  // PLACEHOLDER (Task 3.4 gives Mongo his own RigBig brute rig): a scaled-down copy of the
+  // hobgoblin's proportions (def.scale is already 1.25 — full hobgoblin proportions on top of that
+  // push the tallest pose's topmost joint above the HUD at max zoom, see the "tallest pose stays
+  // under the HUD" test) with Mongo's own palette and rig:'human' set explicitly.
+  mongo:{skin:'#7a6a52',hair:null,primary:'#3a2f1f',secondary:'#8a6d3b',
+    limb:20,legLen:90,armLen:84,torsoLen:73,headR:21,shoulderW:55,hipW:34,earLen:0,rig:'human',
+    props:['club']},
+  // PLACEHOLDER (Task 3.4/3.5): a copy of Katia's lean proportions with a bone-white palette and
+  // rig:'human' set explicitly.
+  skeleton:{skin:'#d8d0c0',hair:null,primary:'#2a2a2a',secondary:'#555555',
+    limb:12,legLen:117,armLen:91,torsoLen:78,headR:20,shoulderW:38,hipW:28,earLen:0,rig:'human',
+    props:['rags','dagger']},
+  // PLACEHOLDER (Task 3.4/3.5): a copy of Donut's proportions with a mystic-purple palette and
+  // rig:'human' set explicitly.
+  shaman:{skin:'#8a6aa8',hair:'#2a1a3a',primary:'#4a2f6a',secondary:'#8a4fae',
+    limb:14,legLen:107,armLen:88,torsoLen:74,headR:23,shoulderW:39,hipW:29,earLen:0,rig:'human',
+    props:['gear']},
+  // PLACEHOLDER (Task 3.5 gives Grub his own RigQuad rig): a copy of the goblin's small proportions
+  // with a grub-green palette and rig:'human' set explicitly.
+  grub:{skin:'#8a9a4f',hair:null,primary:'#5a6a30',secondary:'#3a4a20',
+    limb:13,legLen:82,armLen:72,torsoLen:58,headR:18,shoulderW:33,hipW:21,earLen:0,rig:'human',
+    props:[]},
+  // PLACEHOLDER (Task 3.4 gives Grull his own RigBig rig): a scaled-down copy of the hobgoblin's
+  // proportions (def.scale is 1.3, the biggest in the roster — see the mongo comment above for why
+  // this can't just reuse the hobgoblin's own numbers) with a boss-red palette and rig:'human' set
+  // explicitly.
+  grull:{skin:'#5c2f2f',hair:null,primary:'#2f1a1a',secondary:'#8a3a3a',
+    limb:18,legLen:85,armLen:79,torsoLen:69,headR:20,shoulderW:52,hipW:32,earLen:0,rig:'human',
+    props:['club']},
+  // PLACEHOLDER (Task 3.5 gives Mother Rat her own RigQuad rig): the same scaled-down proportions
+  // as Grull (also def.scale:1.3) with a rat-fur palette (and rat ears) and rig:'human' set
+  // explicitly.
+  mother_rat:{skin:'#4a3040',hair:'#2a1a24',primary:'#3a2030',secondary:'#6a4058',
+    limb:18,legLen:85,armLen:79,torsoLen:69,headR:20,shoulderW:52,hipW:32,earLen:22,rig:'human',
+    props:[]}};
 
 // Resolves a def's look, falling back to LOOKS.carl (once, with a console.warn) for a Phase-3-added
 // def that ships without one, instead of every reader (Rig.draw, Render.overlayY/shadow) crashing on
@@ -1169,6 +1252,18 @@ const Render={ctx:canvas.getContext('2d'),
       c.fillStyle='#f4c542';c.fillRect(bx,y,size,size);
       c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(bx+.5,y+.5,size-1,size-1);
       c.fillStyle='#000';c.fillText(this.BUFF_CODES[b.id]||'?',bx+size/2,y+size/2+1)})},
+  // Boss name plate: a wider red-bordered field around p2's name, plus a small gold crown glyph
+  // over the portrait's near corner. Only drawn when G.encounter.boss (see hud()). Presentation-only
+  // (reads G.encounter, never mutates it) — the sim has no notion of "boss", per Phase 3 ruling #4.
+  bossPlate(c,p2x,p2barX,barW){
+    const plateX=p2barX-6,plateY=11,plateW=barW+16,plateH=18;
+    c.strokeStyle='#c62828';c.lineWidth=2.5;c.strokeRect(plateX+.5,plateY+.5,plateW-1,plateH-1);
+    const cx=p2x+28,cy=6,w=9,h=8;
+    c.fillStyle='#f4c542';c.strokeStyle='#000';c.lineWidth=1;
+    c.beginPath();
+    c.moveTo(cx-w,cy+h);c.lineTo(cx-w,cy+h*.2);c.lineTo(cx-w*.5,cy+h*.6);
+    c.lineTo(cx,cy);c.lineTo(cx+w*.5,cy+h*.6);c.lineTo(cx+w,cy+h*.2);c.lineTo(cx+w,cy+h);
+    c.closePath();c.fill();c.stroke()},
   pauseGlyph(c){const r=this.pauseRect,rr=6;
     c.fillStyle='rgba(0,0,0,.4)';c.strokeStyle='#f4c542';c.lineWidth=1.5;
     c.beginPath();c.moveTo(r.x+rr,r.y);c.lineTo(r.x+r.w-rr,r.y);c.arcTo(r.x+r.w,r.y,r.x+r.w,r.y+rr,rr);
@@ -1197,6 +1292,7 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p1barX,39);
     c.font='bold 14px ui-monospace,monospace';c.textAlign='right';c.fillStyle='#fff';c.fillText(b.def.name,p2barX+barW,25);
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39);
+    if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW);
     this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22');
     this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp);
     if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);
@@ -1360,8 +1456,18 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.lastFightOpts=o; // FIGHT AGAIN replays these (minus seed) so a custom p2/ai isn't lost
     let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
     this.encounter=null;
-    if(o.encounter){
-      const enc=Encounter.resolve(o.encounter);this.encounter=enc;
+    // {floor,node} sugar: node is an index into FLOORS[floor-1].nodes, or the string 'boss' for
+    // that floor's boss encounter. Resolved to an encounter id up front so the block below (which
+    // already knows how to turn an encounter id into p2def+ai+G.encounter) handles it exactly like
+    // a plain o.encounter id, with no separate code path.
+    let encSrc=o.encounter;
+    if(o.floor!==undefined){
+      const fl=FLOORS[o.floor-1];
+      if(!fl)throw new Error('unknown floor: '+o.floor);
+      encSrc=o.node==='boss'?fl.boss:fl.nodes[o.node];
+      if(!encSrc)throw new Error('unknown floor node: floor '+o.floor+' node '+o.node)}
+    if(encSrc){
+      const enc=Encounter.resolve(encSrc);this.encounter=enc;
       p2def=Object.assign({},enc.enemy,{hp:Math.round(enc.enemy.hp*enc.hpMul),atk:Math.round(enc.enemy.atk*enc.atkMul)});
       ai=enc.tier}
     this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:p2def,clock:o.clock,
@@ -1933,5 +2039,45 @@ Test.add('buff badges: one 12px gold square with a 1-letter code per encounter b
   eq(Render.BUFF_CODES.regen,'R');eq(Render.BUFF_CODES.armorUp,'A');eq(Render.BUFF_CODES.powerGain,'P');
   eq(Render.BUFF_CODES.unblockableSpecials,'U');eq(Render.BUFF_CODES.degen,'D');eq(Render.BUFF_CODES.thorns,'T');
   ok(!threw(()=>Render.buffBadges(Render.ctx,0,0,300,[BUFFS.regen,BUFFS.thorns])),'buffBadges must not throw')});
+
+// --- Task 3.3: floors, encounters, bosses (data) ---
+Test.add('every FLOORS node and boss resolves',()=>{
+  for(const fl of FLOORS){
+    for(const nodeId of fl.nodes)ok(!threw(()=>Encounter.resolve(nodeId)),'floor '+fl.floor+' node '+nodeId+' must resolve');
+    ok(!threw(()=>Encounter.resolve(fl.boss)),'floor '+fl.floor+' boss '+fl.boss+' must resolve')}});
+Test.add('every FLOORS-referenced encounter enemy exists in DEFS',()=>{
+  for(const fl of FLOORS){
+    for(const nodeId of fl.nodes){const e=Encounter.resolve(nodeId);ok(DEFS[e.enemy.id]===e.enemy,nodeId+' enemy must be a DEFS entry')}
+    const b=Encounter.resolve(fl.boss);ok(DEFS[b.enemy.id]===b.enemy,fl.boss+' enemy must be a DEFS entry')}});
+Test.add('boss defs have boss:true, an s3 override, and at least one buff',()=>{
+  for(const id in BOSSES){const b=BOSSES[id];
+    eq(b.boss,true,id+' must be boss:true');
+    ok(b.moves&&b.moves.s3,id+' must have an s3 override');
+    ok(Array.isArray(b.buffs)&&b.buffs.length>=1,id+' must have at least one buff')}});
+Test.add('boss encounter buffIds include the def\'s signature buff',()=>{
+  const grull=Encounter.resolve('f1_grull');
+  ok(grull.buffIds.includes('armorUp'),'grull encounter must carry armorUp from its def');
+  eq(grull.buffs.length,grull.buffIds.length);
+  const mother=Encounter.resolve('f2_mother');
+  ok(mother.buffIds.includes('regen'),'mother_rat encounter must carry regen from its def')});
+Test.add('G.startFight({floor,node:"boss"}) resolves the boss encounter and sets G.encounter.boss',()=>{
+  G.startFight({floor:2,node:'boss'});
+  ok(G.encounter&&G.encounter.boss,'G.encounter.boss must be true');
+  eq(G.fight.p2.def.id,'mother_rat');
+  ok(!threw(()=>Render.frame(G.fight)),'Render.frame must not throw for a boss fight (boss plate)');
+  G.toTitle()});
+Test.add('G.startFight({floor,node}) resolves a numeric node index to that floor\'s node encounter',()=>{
+  G.startFight({floor:1,node:0});
+  eq(G.fight.p2.def.id,'goblin');ok(G.encounter&&!G.encounter.boss);
+  G.toTitle()});
+Test.add('hp/atk multipliers scale with floor via floorMul',()=>{
+  eq(floorMul(1),1);eq(floorMul(2),1.15);
+  const e1=Encounter.resolve('f1_skel'),e2=Encounter.resolve('f2_skel2');
+  eq(e1.hpMul,1);eq(e1.atkMul,1);
+  eq(e2.hpMul,1.15);eq(e2.atkMul,1.15)});
+Test.add('shaman s1 override merges to a 6-hit flurry over the base MOVES.s1',()=>{
+  const F=new Fighter(DEFS.shaman,-1,Ctrl.idle());
+  eq(F.moveDef('s1').hits,6);
+  eq(F.moveDef('s1').startup,MOVES.s1.startup,'fields the override omits still fall back to base MOVES.s1')});
 
 </script></body></html>

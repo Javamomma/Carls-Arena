@@ -84,6 +84,18 @@ const Render={ctx:canvas.getContext('2d'),
       c.fillStyle='#f4c542';c.fillRect(bx,y,size,size);
       c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(bx+.5,y+.5,size-1,size-1);
       c.fillStyle='#000';c.fillText(this.BUFF_CODES[b.id]||'?',bx+size/2,y+size/2+1)})},
+  // Boss name plate: a wider red-bordered field around p2's name, plus a small gold crown glyph
+  // over the portrait's near corner. Only drawn when G.encounter.boss (see hud()). Presentation-only
+  // (reads G.encounter, never mutates it) — the sim has no notion of "boss", per Phase 3 ruling #4.
+  bossPlate(c,p2x,p2barX,barW){
+    const plateX=p2barX-6,plateY=11,plateW=barW+16,plateH=18;
+    c.strokeStyle='#c62828';c.lineWidth=2.5;c.strokeRect(plateX+.5,plateY+.5,plateW-1,plateH-1);
+    const cx=p2x+28,cy=6,w=9,h=8;
+    c.fillStyle='#f4c542';c.strokeStyle='#000';c.lineWidth=1;
+    c.beginPath();
+    c.moveTo(cx-w,cy+h);c.lineTo(cx-w,cy+h*.2);c.lineTo(cx-w*.5,cy+h*.6);
+    c.lineTo(cx,cy);c.lineTo(cx+w*.5,cy+h*.6);c.lineTo(cx+w,cy+h*.2);c.lineTo(cx+w,cy+h);
+    c.closePath();c.fill();c.stroke()},
   pauseGlyph(c){const r=this.pauseRect,rr=6;
     c.fillStyle='rgba(0,0,0,.4)';c.strokeStyle='#f4c542';c.lineWidth=1.5;
     c.beginPath();c.moveTo(r.x+rr,r.y);c.lineTo(r.x+r.w-rr,r.y);c.arcTo(r.x+r.w,r.y,r.x+r.w,r.y+rr,rr);
@@ -112,6 +124,7 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p1barX,39);
     c.font='bold 14px ui-monospace,monospace';c.textAlign='right';c.fillStyle='#fff';c.fillText(b.def.name,p2barX+barW,25);
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39);
+    if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW);
     this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22');
     this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp);
     if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);

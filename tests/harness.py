@@ -117,6 +117,10 @@ def main():
     ap.add_argument('--pre', default=None, help='JS run after load, before start')
     ap.add_argument('--pose', default=None, help='freeze p1 in a named Rig pose (via G.debugPose) and screenshot')
     ap.add_argument('--encounter', default=None, help="start via G.startFight({encounter:ID}) instead of --p2/--ai")
+    ap.add_argument('--floor', type=int, default=None,
+                     help="start via G.startFight({floor,node}) instead of --p2/--ai/--encounter; "
+                          "requires --node")
+    ap.add_argument('--node', default=None, help="node index (int) or 'boss', used with --floor")
     ap.add_argument('--cinematic', action='store_true',
                      help="run G.debugCinematic() (starts its own fight, arms an s3, sim-steps past "
                           "the card trigger, advances FX) and screenshot; skips the normal --p2/--ai "
@@ -191,7 +195,13 @@ def main():
             print(json.dumps(out, indent=1))
             sys.exit(1 if errors or console else 0)
         ctrl = 'Ctrl.random(%d)' % a.seed if a.bot == 'random' else 'Ctrl.idle()'
-        enc = ",encounter:'%s'" % a.encounter if a.encounter else ''
+        # --floor/--node take priority over --encounter (both are sugar for the same G.startFight
+        # option object; build_soak_js and the plain evaluate() below both just splice `enc` in raw).
+        if a.floor is not None:
+            node_val = "'boss'" if a.node == 'boss' else str(int(a.node))
+            enc = ",floor:%d,node:%s" % (a.floor, node_val)
+        else:
+            enc = ",encounter:'%s'" % a.encounter if a.encounter else ''
         pg.evaluate("G.sim=%s;G.startFight({seed:%d,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s%s})"
                     % ('true' if a.sim else 'false', a.seed, a.p1, a.p2, a.ai, ctrl, enc))
         if a.pose:
