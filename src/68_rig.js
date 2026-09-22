@@ -144,7 +144,10 @@ const Rig={
   bones:['hip','torso','neck','head','lShoulder','lElbow','lHand','rShoulder','rElbow','rHand','lHip','lKnee','lFoot','rHip','rKnee','rFoot'],
   poseFor(f){
     const st=f.state;
-    if(st==='IDLE')return{key:'idle',t01:(f.f%60)/60};
+    // A fighter has no dedicated locomotion state; the only x movement while IDLE comes from
+    // Fight.separate()'s overlap push, read here off Fighter.dx (last tick's raw x delta) so it
+    // still reads as a walk cycle instead of the idle sway while it's happening.
+    if(st==='IDLE')return Math.abs(f.dx)>0.3?{key:'walk',t01:(f.f%24)/24}:{key:'idle',t01:(f.f%60)/60};
     if(st==='DASH')return{key:'dash',t01:clamp(f.f/DASH_BACK.frames,0,1)};
     if(st==='BLOCK')return{key:'block',t01:clamp(f.f/10,0,1)};
     if(st==='BLOCKSTUN')return{key:'blockstun',t01:clamp(f.f/(f.stun||1),0,1)};

@@ -2,7 +2,7 @@ class Fighter{
   constructor(def,side,ctrl){this.def=def;this.side=side;this.face=side;this.ctrl=ctrl;
     this.x=side===1?STAGE_W/2-160:STAGE_W/2+160;this.width=48;this.hp=def.hp;this.maxHp=def.hp;this.power=0;
     this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
-    this.combo=0;this.stun=0;this.inv=0;this.blockAge=0;
+    this.combo=0;this.stun=0;this.inv=0;this.blockAge=0;this.dx=0; // last tick's x delta; Rig.poseFor reads it to pick idle vs walk
     this.parryLock=0;this.blockPressedAt=0;this.pressTick=0;this._parried=false;this._mdCache=null}
   get front(){return this.x+this.face*this.width/2}
   busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
@@ -40,7 +40,7 @@ class Fighter{
       if(intent.medium&&this.moveName!=='medium')return this.startMove('medium')}
     else if(S==='CHARGE'&&!intent.heavy){this.move=null;this.moveName=null;this.setState('IDLE')}}
   // Advance one frame of the state machine.
-  tick(){this.f++;if(this.inv>0)this.inv--;if(this.parryLock>0)this.parryLock--;
+  tick(){const prevX=this.x;this.f++;if(this.inv>0)this.inv--;if(this.parryLock>0)this.parryLock--;
     switch(this.state){
       case'CHARGE':if(this.f>=this.move.charge)this.setState('ATTACK');break;
       case'ATTACK':{const m=this.move;if(m.dash&&this.f<=m.startup)this.x+=this.face*m.dash/m.startup;
@@ -48,4 +48,5 @@ class Fighter{
       case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
       case'HITSTUN':case'BLOCKSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
       case'KNOCKDOWN':if(this.f>=KNOCKDOWN.frames){this.inv=KNOCKDOWN.inv;this.setState('IDLE')}break}
-    this.x=clamp(this.x,EDGE_PAD,STAGE_W-EDGE_PAD)}}
+    this.x=clamp(this.x,EDGE_PAD,STAGE_W-EDGE_PAD);
+    this.dx=this.x-prevX}}
