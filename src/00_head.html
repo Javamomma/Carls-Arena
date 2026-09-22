@@ -23,6 +23,59 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 #toast{position:fixed;transform:translateX(-50%);font-size:13px;line-height:1.2;color:#f4c542;pointer-events:none;text-align:center;white-space:normal;background:rgba(10,11,18,.6);border-radius:10px;padding:4px 12px}
 #toast:empty{padding:0}
 #toast.hidden{visibility:hidden}
+/* Task 4.5: meta screens (title/map/roster/crystal/shop/arena). .panel (above) stays the narrow
+   three-button style for title/pauseMenu/result; .scr is the wide format every new browsing screen
+   uses so it can hold cards/paths/tabs at 854x480 without scrolling. */
+#titleLogo{font-size:26px;letter-spacing:1px;transform:scaleX(.88);transform-origin:center;font-weight:900;line-height:1.15}
+.sub{font-size:11px;color:#999;margin:0 0 10px}
+.scr{box-sizing:border-box;text-align:center;padding:10px 14px;width:820px;max-width:96vw;max-height:456px;overflow:hidden;display:flex;flex-direction:column}
+.scr h2{margin:0 0 8px;font-size:17px;letter-spacing:3px;color:#f4c542;text-transform:uppercase;transform:scaleX(.92)}
+.backbtn{margin-top:8px;width:180px;min-height:44px;align-self:center;padding:10px;font-size:13px;letter-spacing:1px;background:#1a1f33;color:#f4c542;border:2px solid #f4c542;border-radius:6px}
+.curstrip{display:flex;gap:14px;justify-content:center;font-size:12px;color:#f4c542;margin:0 0 10px;flex-wrap:wrap}
+.ftabs{display:flex;gap:6px;justify-content:center;margin-bottom:8px}
+.ftab{min-height:32px;padding:6px 16px;font-size:12px;letter-spacing:1px;background:#1a1f33;color:#999;border:1px solid #444;border-radius:4px}
+.ftab.active{color:#f4c542;border-color:#f4c542}
+.path{display:flex;flex-direction:column-reverse;align-items:center;gap:6px;overflow:hidden;flex:1;justify-content:center}
+.node{width:320px;max-width:84%;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;
+  font-size:12px;letter-spacing:2px;border-radius:6px;border:2px solid #3a3a3a;background:#181c2b;color:#666}
+.node.open{border-color:#f4c542;color:#f4c542;background:#20263d}
+.node.done{border-color:#5c8a4a;color:#8fd18a;background:#182018}
+.node.boss{font-weight:bold}
+.node.locked::before{content:'\1F512';margin-right:2px}
+.node.boss::before{content:'\1F451';margin-right:2px}
+.energy{display:flex;gap:4px;justify-content:center;margin:6px 0}
+.pip{width:14px;height:14px;border-radius:3px;background:#2a2a2a;border:1px solid #555}
+.pip.full{background:#f4c542;border-color:#f4c542}
+.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;overflow:hidden;flex:1}
+.card{box-sizing:border-box;background:#181c2b;border:2px solid #333;border-radius:8px;padding:8px;display:flex;gap:8px;align-items:flex-start;text-align:left}
+.card.active{border-color:#f4c542}
+.card canvas{width:52px;height:52px;flex:none;background:#101422;border-radius:4px}
+.card .info{flex:1;min-width:0}
+.card .name{font-size:12px;color:#fff;font-weight:bold;letter-spacing:1px}
+.card .stars{color:#f4c542;font-size:11px;margin-top:2px}
+.card .pips{display:flex;gap:2px;margin:3px 0}
+.card .rp{display:inline-block;width:8px;height:8px;border-radius:50%;background:#333;border:1px solid #555}
+.card .rp.on{background:#7fb0a8;border-color:#7fb0a8}
+.card .lvl{font-size:10px;color:#bbb}
+.card .xpbar{height:5px;background:#333;border-radius:3px;overflow:hidden;margin:3px 0}
+.card .xpbar i{display:block;height:100%;background:#f4c542}
+.card button{display:block;font-size:9px;letter-spacing:.5px;padding:8px 4px;min-height:26px;margin:2px 0;width:100%;border-radius:4px;background:#1a1f33;color:#f4c542;border:1px solid #f4c542;font-family:inherit}
+.card button:disabled{opacity:.3}
+.card button.select{background:#f4c542;color:#111}
+.kcards{display:flex;gap:10px;justify-content:center;flex:1;align-items:flex-start;flex-wrap:wrap;overflow:hidden}
+.kcard{box-sizing:border-box;width:220px;background:#181c2b;border:2px solid #444;border-radius:8px;padding:10px}
+.kcard h3{margin:0 0 4px;font-size:12px;color:#f4c542;letter-spacing:1px}
+.kcard .cost{font-size:11px;color:#ccc;margin-bottom:6px}
+.kcard canvas{background:#101422;border-radius:6px;margin:4px 0;display:block}
+.kcard .rtext{font-size:10px;color:#f4c542;min-height:24px}
+.kcard button{width:100%;min-height:44px;padding:10px;font-size:12px;letter-spacing:1px;border-radius:6px;background:#f4c542;color:#111;border:0;font-family:inherit}
+.kcard button:disabled{opacity:.35;background:#555;color:#999}
+.arenabox{text-align:center;margin:auto 0}
+.arenabox .streak{font-size:26px;color:#f4c542;font-weight:bold}
+.arenabox .best{font-size:12px;color:#999;margin-bottom:10px}
+.enemyprev{display:flex;align-items:center;justify-content:center;gap:10px;margin:10px 0}
+.enemyprev canvas{background:#101422;border-radius:6px}
+#arenaFight{min-height:48px;width:220px;padding:12px;font-size:15px;letter-spacing:2px;background:#f4c542;color:#111;border:0;border-radius:6px;font-family:inherit}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
 <button id="btnBlock" class="cbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
@@ -32,7 +85,49 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 <div id="powerPicker"><button id="pk1">S1</button><button id="pk2">S2</button><button id="pk3">S3</button></div>
 </div>
 <div id="toast"></div>
-<div class="overlay show" id="title"><div class="panel"><h1>CARL'S DOORWAY BRAWL</h1><p>ONE THUMB. ONE DOORWAY. ONE CRAWLER LEAVES.<br>LEFT SIDE: HOLD = BLOCK, SWIPE LEFT = DODGE. RIGHT SIDE: TAP = LIGHT, SWIPE RIGHT = MEDIUM, HOLD = HEAVY.</p><button id="fightBtn">FIGHT</button><button id="titleMute">SOUND: ON</button></div></div>
+<div class="overlay show" id="title"><div class="panel">
+<h1 id="titleLogo">CARL'S DOORWAY<br>BRAWL</h1>
+<p class="sub">ONE THUMB. ONE DOORWAY. ONE CRAWLER LEAVES.</p>
+<button id="btnCampaign">CAMPAIGN</button>
+<button id="btnArenaMenu">ARENA</button>
+<button id="btnRoster">ROSTER</button>
+<button id="btnKiosk">KIOSK</button>
+<button id="btnExhibition">EXHIBITION</button>
+<button id="titleMute">SOUND: ON</button>
+</div></div>
 <div class="overlay" id="pauseMenu"><div class="panel"><h1>PAUSED</h1><button id="resume">RESUME</button><button id="quit">QUIT</button></div></div>
-<div class="overlay" id="result"><div class="panel"><h1 id="resultTitle">VICTORY</h1><p id="resultLine"></p><button id="again">FIGHT AGAIN</button><button id="resultTitleBtn">TITLE</button></div></div>
+<div class="overlay" id="result"><div class="panel"><h1 id="resultTitle">VICTORY</h1><p id="resultLine"></p><button id="again">FIGHT AGAIN</button><button id="resultTitleBtn">CONTINUE</button></div></div>
+<div class="overlay" id="map"><div class="scr">
+<h2>CAMPAIGN</h2>
+<div class="ftabs" id="mapTabs"></div>
+<div class="energy" id="mapEnergy"></div>
+<div class="path" id="mapPath"></div>
+<button class="backbtn" id="mapBack">BACK</button>
+</div></div>
+<div class="overlay" id="roster"><div class="scr">
+<h2>ROSTER</h2>
+<div class="cards" id="rosterCards"></div>
+<button class="backbtn" id="rosterBack">BACK</button>
+</div></div>
+<div class="overlay" id="crystal"><div class="scr">
+<h2>CRYSTALS</h2>
+<div class="kcards" id="crystalCards"></div>
+<button class="backbtn" id="crystalBack">BACK</button>
+</div></div>
+<div class="overlay" id="shop"><div class="scr">
+<h2>SPONSOR PERK KIOSK</h2>
+<div class="curstrip" id="shopCurrency"></div>
+<div class="kcards" id="shopCards"></div>
+<button class="backbtn" id="shopBack">BACK</button>
+</div></div>
+<div class="overlay" id="arena"><div class="scr">
+<h2>ARENA</h2>
+<div class="arenabox">
+<div class="streak" id="arenaStreak">STREAK 0</div>
+<div class="best" id="arenaBest">BEST 0</div>
+<div class="enemyprev" id="arenaEnemy"></div>
+<button id="arenaFight">FIGHT</button>
+</div>
+<button class="backbtn" id="arenaBack">BACK</button>
+</div></div>
 </div><script>

@@ -1171,3 +1171,178 @@ Test.add('a scripted arena win records the streak/gold via Arena.record and neve
   eq(G.lastRewards,null,'arena wins go through Arena.record, not Rewards.forNode');
   eq(Quest.floor(1).nodes[0].state,'open','arena must never touch quest floor state');
   G.toTitle();G.sim=false});
+// Task 4.5: Screens (title, map, roster, crystal, shop, arena, result) ---------------------------
+Test.add('every Phase 4 screen\'s DOM ids exist',()=>{
+  const ids=['title','map','roster','crystal','shop','arena','result','pauseMenu',
+    'btnCampaign','btnArenaMenu','btnRoster','btnKiosk','btnExhibition','titleMute',
+    'mapTabs','mapEnergy','mapPath','mapBack',
+    'rosterCards','rosterBack','crystalCards','crystalBack',
+    'shopCurrency','shopCards','shopBack',
+    'arenaStreak','arenaBest','arenaEnemy','arenaFight','arenaBack',
+    'resultTitle','resultLine','again','resultTitleBtn'];
+  for(const id of ids)ok(document.getElementById(id),'#'+id+' must exist')});
+Test.add('G.toTitle() shows the title screen only (every other Phase 4 overlay and pauseMenu hidden)',()=>{
+  Save.data=Meta.defaults();
+  Screens.show('roster'); // start from some other screen so this isn't a no-op
+  G.toTitle();
+  for(const id of['map','roster','crystal','shop','arena','result','pauseMenu'])
+    ok(!document.getElementById(id).classList.contains('show'),id+' must be hidden');
+  ok(document.getElementById('title').classList.contains('show'))});
+Test.add('Screens.show(\'map\') renders FLOORS[0].nodes.length non-boss .node elements with state classes matching Quest.floor(1), plus one .node.boss',()=>{
+  Save.data=Meta.defaults();
+  Screens._floor=1; // Screens.show bypasses Screens.map()'s own arg-stashing; set the floor directly
+  Screens.show('map');
+  const f=Quest.floor(1);
+  const nodeEls=[...document.querySelectorAll('#map .node:not(.boss)')];
+  eq(nodeEls.length,FLOORS[0].nodes.length);
+  nodeEls.forEach((el,i)=>ok(el.classList.contains(f.nodes[i].state),'node '+i+' state class'));
+  const bossEl=document.querySelector('#map .node.boss');
+  ok(bossEl&&bossEl.classList.contains(f.boss.state),'boss node state class');
+  Screens.title()});
+Test.add('the map screen\'s energy pip row has energy.max pips, energy.n of them .full',()=>{
+  Save.data=Meta.defaults();
+  Save.data.energy.ts=Energy.now(); // renderMap calls Energy.tick(); pin ts to "now" so a fresh
+  Save.data.energy.n=3;             // ts:0 default doesn't regen this straight back to max
+  Screens.map(1);
+  const pips=[...document.querySelectorAll('#mapEnergy .pip')];
+  eq(pips.length,Save.data.energy.max);
+  eq(pips.filter(p=>p.classList.contains('full')).length,3);
+  Screens.title()});
+Test.add('a map node click starts the quest fight via G.startFight and records the map screen (with its floor) as the fight\'s origin',()=>{
+  Save.data=Meta.defaults();
+  Screens.map(1);
+  document.querySelectorAll('#map .node:not(.boss)')[0].click();
+  eq(G.mode,'quest');eq(G.state,'FIGHT');
+  eq(Screens._origin.name,'map');eq(Screens._origin.args[0],1);
+  G.toTitle();G.sim=false});
+Test.add('after a quest win, CONTINUE (resultTitleBtn) returns to the map screen at the floor the node was fought on',()=>{
+  Save.data=Meta.defaults();
+  Screens.map(1);
+  document.querySelectorAll('#map .node:not(.boss)')[0].click(); // floor 1, node 0: sets G.mode/origin
+  eq(Screens._origin.name,'map');eq(Screens._origin.args[0],1);
+  G.toTitle(); // the click above used Ctrl.player() (no scripted attacks, so it'd never KO within a
+  // bounded tick budget); re-fight the same node with a scripted p1 so it actually ends, keeping the
+  // origin the click already recorded (toTitle doesn't touch Screens._origin).
+  G.startFight({floor:1,node:0,champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'map');eq(Screens._floor,1);
+  ok(document.getElementById('map').classList.contains('show'));
+  G.toTitle();G.sim=false});
+Test.add('Screens.show(\'roster\') renders one .card per roster entry, with exactly the active one marked .active',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster.katia={stars:3,rank:1,level:1,xp:0,shards:0};
+  Screens.show('roster');
+  const cards=[...document.querySelectorAll('#roster .card')];
+  eq(cards.length,Object.keys(Save.data.roster).length);
+  eq(cards.filter(c=>c.classList.contains('active')).length,1);
+  Screens.title()});
+Test.add('roster card buttons mutate only through Roster.levelUp/rankUp/setActive',()=>{
+  Save.data=Meta.defaults();Save.data.iso=10;
+  Save.data.roster.katia={stars:3,rank:1,level:1,xp:0,shards:0};
+  Screens.roster();
+  const carlCard=document.querySelectorAll('#roster .card')[0]; // insertion order: carl, katia
+  carlCard.querySelectorAll('button')[0].click(); // LEVEL UP
+  eq(Save.data.roster.carl.level,2,'Roster.levelUp must have run');eq(Save.data.iso,0);
+  Screens.title()});
+Test.add('crystal OPEN is disabled when unaffordable and enabled once gold reaches the basic cost (500)',()=>{
+  Save.data=Meta.defaults();Save.data.gold=0;
+  Screens.show('crystal');
+  ok(document.getElementById('openBtn_basic').disabled,'disabled at gold 0');
+  Save.data.gold=500;
+  Screens.refresh();
+  ok(!document.getElementById('openBtn_basic').disabled,'enabled at gold 500');
+  Screens.title()});
+Test.add('a crystal reveal completes after exactly 40 G.tick() frames (frame-counted, not wall-clock) and then holds',()=>{
+  Save.data=Meta.defaults();Save.data.gold=500;Save.data.seed=1;
+  Screens.crystal();
+  document.getElementById('openBtn_basic').click();
+  ok(Screens._reveal&&Screens._reveal.frame===0);
+  G.sim=true;G.simFrames(39);
+  eq(document.getElementById('revealText_basic').textContent,'','not revealed yet at frame 39');
+  G.simFrames(1);
+  eq(Screens._reveal.frame,40);
+  ok(document.getElementById('revealText_basic').textContent.length>0,'revealed at frame 40');
+  G.simFrames(20); // ticks past 40 must not keep advancing the counter
+  eq(Screens._reveal.frame,40);
+  Screens.title();G.sim=false});
+Test.add('shop BASIC CRYSTAL opens a crystal immediately on buy (ruling: buy == Crystal.open + reveal): deducts 500 gold and mutates the roster',()=>{
+  Save.data=Meta.defaults();Save.data.gold=500;Save.data.seed=1;
+  Screens.shop();
+  const before=JSON.stringify(Save.data.roster);
+  document.getElementById('buyBasic').click();
+  eq(Save.data.gold,0,'500 gold deducted');
+  ok(JSON.stringify(Save.data.roster)!==before,'roster must change (new champ or shards) via Crystal.open');
+  eq(Screens._current,'crystal','buying navigates to the crystal screen to show the reveal');
+  Screens.title()});
+Test.add('shop ISO PACK converts 200 gold into 60 iso via Rewards.grant (a screen may only mutate Save.data through a Meta function)',()=>{
+  Save.data=Meta.defaults();Save.data.gold=500;
+  Screens.shop();
+  document.getElementById('buyIso').click();
+  eq(Save.data.gold,300);eq(Save.data.iso,60);
+  Screens.title()});
+Test.add('the title screen\'s CAMPAIGN/ARENA/ROSTER/KIOSK buttons route to the matching screens',()=>{
+  Save.data=Meta.defaults();
+  Screens.title();document.getElementById('btnRoster').click();eq(Screens._current,'roster');
+  Screens.title();document.getElementById('btnKiosk').click();eq(Screens._current,'shop');
+  Screens.title();document.getElementById('btnArenaMenu').click();eq(Screens._current,'arena');
+  Screens.title();document.getElementById('btnCampaign').click();eq(Screens._current,'map');eq(Screens._floor,1);
+  G.toTitle()});
+Test.add('title EXHIBITION starts the old quick fight (carl vs donut, mode exhibition) exactly like the old fightBtn',()=>{
+  Save.data=Meta.defaults();
+  Screens.title();
+  document.getElementById('btnExhibition').click();
+  eq(G.mode,'exhibition');eq(G.fight.p2.def.id,'donut');eq(G.champ,'carl');
+  G.toTitle()});
+Test.add('the arena screen\'s FIGHT button starts G.startArena with arena as the fight\'s origin, and QUIT/CONTINUE return to it',()=>{
+  Save.data=Meta.defaults();
+  Screens.arena();
+  document.getElementById('arenaFight').click(); // Ctrl.player() p1: proves mode+origin wiring only
+  eq(G.mode,'arena');eq(Screens._origin.name,'arena');
+  G.toTitle(); // re-fight with a scripted p1 so this one actually reaches RESULT within the tick
+  // budget below; Screens._origin is left exactly as the click above set it (toTitle doesn't touch it).
+  G.startArena({ctrl1:Ctrl.script([L(0)]),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  G.backToOrigin();
+  eq(Screens._current,'arena');
+  G.toTitle();G.sim=false});
+Test.add('FIGHT AGAIN is hidden after a quest win (the node is now done; replaying it would just refuse) and shown after other outcomes',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0,ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(document.getElementById('again').style.display,'none','hidden after a quest win');
+  G.toTitle();G.sim=false;
+  Save.data=Meta.defaults();
+  G.startArena({ctrl1:Ctrl.script([L(0)]),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  ok(document.getElementById('again').style.display!=='none','shown after an arena win');
+  G.toTitle();G.sim=false});
+Test.add('Screens.result({gold,iso,xp},true) fills VICTORY and the reward line',()=>{
+  Screens.result({gold:120,iso:20,xp:30},true);
+  eq(document.getElementById('resultTitle').textContent,'VICTORY');
+  const line=document.getElementById('resultLine').textContent;
+  ok(line.includes('+120 G'),'gold in reward line: '+line);
+  ok(line.includes('+20 ISO'),'iso in reward line: '+line);
+  ok(line.includes('+30 XP'),'xp in reward line: '+line);
+  Screens.title()});
+Test.add('Screens.result(null,false) fills DEFEATED with no reward line',()=>{
+  Screens.result(null,false);
+  eq(document.getElementById('resultTitle').textContent,'DEFEATED');
+  Screens.title()});
+Test.add('starting a fight from any browsing screen hides that screen (it must not linger over the fight)',()=>{
+  Save.data=Meta.defaults();
+  for(const show of[()=>Screens.map(1),()=>Screens.roster(),()=>Screens.crystal(),()=>Screens.shop(),()=>Screens.arena()]){
+    show();
+    const shown=Screens._current;
+    ok(document.getElementById(shown).classList.contains('show'),shown+' must be visible before the fight starts');
+    G.startFight({p2:'donut'});
+    ok(!document.getElementById(shown).classList.contains('show'),shown+' must be hidden once G.startFight begins');
+    G.toTitle()}});

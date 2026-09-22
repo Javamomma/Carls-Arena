@@ -142,6 +142,10 @@ def main():
                      help="clear localStorage and re-run Save.load() before starting, so the run "
                           "begins from Meta.defaults() (full energy, floor 1 node 0 open, only carl "
                           "owned) instead of whatever a previous run left in this browser profile")
+    ap.add_argument('--screen', default=None,
+                     help="render Screens.<name>() (title|map|roster|crystal|shop|arena) and "
+                          "screenshot instead of starting a fight; map defaults to floor 1; "
+                          "combine with --pre to seed currencies/roster first")
     ap.add_argument('--cinematic', action='store_true',
                      help="run G.debugCinematic() (starts its own fight, arms an s3, sim-steps past "
                           "the card trigger, advances FX) and screenshot; skips the normal --p2/--ai "
@@ -216,6 +220,20 @@ def main():
             out['state'] = pg.evaluate('G.state')
             out['fight'] = pg.evaluate(
                 'G.fight&&{frame:G.fight.frame,cinematic:G.fight.cinematic,p1power:G.fight.p1.power}')
+            if a.shot:
+                pg.screenshot(path=a.shot)
+            b.close()
+            print(json.dumps(out, indent=1))
+            sys.exit(1 if errors or console else 0)
+        if a.screen:
+            # G.state stays 'TITLE' while browsing every Phase 4 screen (Screens owns which overlay
+            # is actually visible), so the shared exit check below (`out['state']=='TITLE'` means
+            # "never left the title screen", i.e. a real failure for a normal fight run) doesn't
+            # apply here -- this branch exits on its own, same as --pose/--cinematic above.
+            js = "Screens.map(1)" if a.screen == 'map' else "Screens.%s()" % a.screen
+            pg.evaluate(js)
+            out['state'] = pg.evaluate('G.state')
+            out['screen'] = pg.evaluate('Screens._current')
             if a.shot:
                 pg.screenshot(path=a.shot)
             b.close()

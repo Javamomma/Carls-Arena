@@ -141,7 +141,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
     // regardless of how recently the previous fight's last toast landed.
     this.frameNow=0;this._sayAt=-999;
-    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.announce('start',this.fight.presRng)},
+    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);
+    // Task 4.5: a fight can be launched from any browsing screen (a map node, arena's FIGHT,
+    // exhibition off the title screen) -- hide whichever one is still up so it doesn't linger over
+    // the fight underneath.
+    if(typeof Screens!=='undefined')Screens.hideAll();
+    this.show('btns',true);Audio.announce('start',this.fight.presRng)},
   // Fix-wave item 4: a fighter's current pose's own top (Rig.topAt), scaled by its def.scale — the
   // per-frame counterpart to the per-fight Rig.extent worst-case calc above, read by tick() every
   // frame to build capNow.
@@ -271,7 +276,17 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(m.stun!==undefined)p.stun=m.stun;
     this.sim=true},
   togglePause(){if(this.state==='FIGHT'){this.state='PAUSED';this.show('pauseMenu',true)}else if(this.state==='PAUSED'){this.state='FIGHT';this.show('pauseMenu',false);this.acc=0}},
-  toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)},
+  // Task 4.5: browsing (title/map/roster/crystal/shop/arena) all share G.state='TITLE' -- the same
+  // generic "not fighting" value togglePause/Input already gate on -- so no new state value is
+  // needed; which overlay is actually on screen is Screens' own concern (Screens._current). toTitle
+  // always lands on the title screen specifically (tests call this directly and expect exactly
+  // that); backToOrigin (below) is the "go back to wherever this fight was launched from" version,
+  // used by the pause menu's QUIT and the result overlay's CONTINUE button.
+  toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+    if(typeof Screens!=='undefined')Screens.show('title');
+    else{this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)}},
+  backToOrigin(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+    if(typeof Screens!=='undefined')Screens.toOrigin();else this.toTitle()},
   // Steps the sim one tick, handling KO slow-mo (step every 4th tick while fight.slowmo>0) and
   // draining fight.fx into FX after any step. No rAF/wall-clock dependency, so tests can call it
   // directly. G.loop drives this once per accumulated STEP; simFrames/stepFrame delegate to it too.
@@ -279,7 +294,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // on a >60Hz display the old rAF-driven update ran FX/camera at double speed and could desync
   // the S3 card's own clock from fight.cinematic. This also means both freeze whenever tick() isn't
   // being called, i.e. while PAUSED (desired) or between --sim harness round trips.
-  tick(){if(this.state!=='FIGHT')return;const f=this.fight;
+  // Task 4.5: the crystal reveal's 40-frame counter (Screens._reveal) is advanced here,
+  // unconditionally, ahead of the FIGHT-only guard below -- this is the one place already called
+  // once per real animation frame (via loop()) AND once per harness --sim/simFrames step, with no
+  // wall-clock read of its own (G.loop's rAF timestamp only decides how many times to call tick(),
+  // never what tick() itself draws), so it's the natural home for a "frame-counted, no Date.now()"
+  // animation that has to run whether or not a fight is in progress (crystal-opening never happens
+  // mid-fight, but G.state stays 'TITLE' while browsing every Phase 4 screen, same as an idle title).
+  tick(){if(typeof Screens!=='undefined'&&Screens.tickReveal)Screens.tickReveal();
+    if(this.state!=='FIGHT')return;const f=this.fight;
     if(f.cinematic>0){
       // Sim frozen (Fight.step() itself no-ops while cinematic>0); G is the one counting the 72
       // frames down, one per tick, so FX/Render keep animating around a frozen sim. Input is
@@ -359,17 +382,27 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // so loop() is purely the wall-clock -> tick() driver plus the render call.
   loop(t){if(!this.sim){const dt=Math.min(.1,(t-this.last)/1000||0);this.last=t;this.acc+=dt;while(this.acc>=STEP){this.tick();this.acc-=STEP}}
     Render.frame(this.fight);requestAnimationFrame(t=>this.loop(t))},
+  // Task 4.5: the title screen's own buttons (CAMPAIGN/ARENA/ROSTER/KIOSK/EXHIBITION/SOUND) are
+  // bound by Screens.title() (85_screens.js, concatenated after this file) every time that screen
+  // renders, not here -- 'fightBtn'/the old single-button title no longer exist. 'again'/'resume'
+  // stay G's own concern (replaying a fight / unpausing); 'resultTitleBtn' (now labeled CONTINUE)
+  // and 'quit' both route back to whichever screen launched the fight via backToOrigin(), which
+  // only Screens (loaded after this file) knows how to resolve -- safe to reference here because
+  // these callbacks only run on a later click, well after the whole script (including
+  // 85_screens.js) has parsed.
   init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
-    document.getElementById('fightBtn').onclick=()=>{Audio.init();this.startFight()};
     // Reuses the previous fight's full options (p1/p2/ai/ctrl1/ctrl2/encounter/clock), overriding only
     // the seed — previously this passed just {seed,encounter}, silently dropping a custom p2/ai back
     // to the startFight defaults (donut/basic) on every rematch.
     document.getElementById('again').onclick=()=>this.startFight(Object.assign({},this.lastFightOpts,
       {seed:this.fight?this.fight.rng.int(1e9)+1:this.seed}));
-    document.getElementById('resultTitleBtn').onclick=()=>this.toTitle();
+    document.getElementById('resultTitleBtn').onclick=()=>this.backToOrigin();
     document.getElementById('resume').onclick=()=>this.togglePause();
-    document.getElementById('quit').onclick=()=>this.toTitle();
-    document.getElementById('titleMute').onclick=e=>{Audio.muted=!Audio.muted;Save.data.mute=Audio.muted;Save.put();e.target.textContent='SOUND: '+(Audio.muted?'OFF':'ON')};
+    document.getElementById('quit').onclick=()=>this.backToOrigin();
+    // Unchanged from before Task 4.5 (still the only place that mutates Audio.muted/Save.data.mute);
+    // Screens.renderTitle() only syncs this button's label text from that state, never its handler.
+    document.getElementById('titleMute').onclick=e=>{Audio.muted=!Audio.muted;Save.data.mute=Audio.muted;Save.put();
+      e.target.textContent='SOUND: '+(Audio.muted?'OFF':'ON')};
     document.addEventListener('visibilitychange',()=>{if(document.hidden&&this.state==='FIGHT')this.togglePause()});
     requestAnimationFrame(t=>{this.last=t;this.loop(t)})}};
 G.init();
