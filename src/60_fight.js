@@ -11,8 +11,12 @@ class Fight{
     this.fx=[];this.slowmo=0;this.cinematic=0; // fx: plain events drained by G into FX each tick; slowmo/cinematic: frame counters G steps around
     this.noCrit=!!o.noCrit; // mkFight defaults this true for deterministic Phase 1/2 tests; G.startFight leaves crits live
     this.updateCam()}
+  // Fix round 2: gameplay zoom capped at 1.12 (was 1.35) — same 1.0..cap ramp over the same
+  // 120-500 distance range, just a smaller max, since the rescaled rig at 1.35 put a raised-arm
+  // pose's hand above the HUD (see 68_rig.js's 'tallest pose stays under the HUD at max zoom' test;
+  // the still-higher 1.28 cinematic-only cap is G's, not the sim's — Fight never reaches it itself).
   updateCam(){const dist=Math.abs(this.p2.x-this.p1.x);
-    this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.35-(dist-120)/380*0.35,1,1.35)}}
+    this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.12-(dist-120)/380*0.12,1,1.12)}}
   step(){if(this.over)return;if(this.cinematic>0)return;if(this.hitstop>0){this.hitstop--;return}
     this.frame++;this.clock-=STEP;
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);

@@ -4,16 +4,26 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast()},
   // Positions #toast off the canvas's own box (canvas.getBoundingClientRect()), not #wrap, so it
   // tracks the actual displayed game area exactly even when #wrap letterboxes the canvas at an
-  // aspect ratio other than W/H. TOAST_Y is a canvas-local (854x480) y — just under the HUD's
-  // 'FLOOR n • NAME' text (Render.floorLine, drawn at canvas y=80..~96) and well above the stage
-  // arch (its top is around canvas y=175 at zoom 1), so the toast can never cross the arch. Width is
-  // capped at 70% of the displayed canvas width so a long line wraps and pills, rather than running
-  // edge to edge.
-  TOAST_Y:98,
+  // aspect ratio other than W/H. Fix round 2: moved from just under the HUD's floor-line text to
+  // the bottom band — with the rescaled rig (see 65_stage.js's Camera anchor comment) the toast up
+  // top was landing squarely across the now-much-taller fighters' heads in nearly every shot.
+  // TOAST_BOTTOM_GAP is canvas-local (854x480) px from the bottom of the canvas up to the toast's
+  // bottom edge: the chevron power bar sits at canvas y=H-24, so H-(H-24)+8 = 32 clears it by 8px.
+  // Width is capped at 62% of the displayed canvas width (narrower than round 1's 70%, since there's
+  // less horizontal room to work with down here between the on-screen buttons).
+  TOAST_BOTTOM_GAP:32,
   positionToast(){const r=canvas.getBoundingClientRect(),el=document.getElementById('toast');
     el.style.left=(r.left+r.width/2)+'px';
-    el.style.top=(r.top+this.TOAST_Y/H*r.height)+'px';
-    el.style.maxWidth=Math.round(r.width*.7)+'px'},
+    el.style.bottom=(innerHeight-r.bottom+this.TOAST_BOTTOM_GAP/H*r.height)+'px';
+    el.style.maxWidth=Math.round(r.width*.62)+'px'},
+  // Caps the toast at 2 lines by dropping from 13px to 12px if the current text would wrap to 3+ at
+  // 13px (measuring via the laid-out scrollHeight against the computed line-height, so it accounts
+  // for the actual maxWidth positionToast() set, not an estimate). Called after every text change
+  // (Audio.say), not just on resize, since it depends on the string, not just the layout.
+  fitToastText(){const el=document.getElementById('toast');
+    el.style.fontSize='13px';
+    const lh=parseFloat(getComputedStyle(el).lineHeight)||1;
+    if(Math.round(el.scrollHeight/lh)>2)el.style.fontSize='12px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   // Canvas hit-test for the HUD's pause glyph (drawn by Render.hud at Render.pauseRect), consulted
   // by Input's pointerdown handler before it does any zone/gesture handling.
@@ -131,7 +141,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       this.checkCinematicFx(f);
       this.syncSpecials()}
     FX.pushAll(f.fx);f.fx.length=0;
-    const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.6}:null;
+    const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.28}:null; // fix round 2: 1.6->1.28
     Camera.update(this.cam,f,punchIn);
     FX.update();
     // f.over flips true inside f.step() the instant a KO/timeout resolves, well before slow-mo has

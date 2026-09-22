@@ -1,7 +1,7 @@
 const Audio={ac:null,muted:Save.data.mute,_t:0,
   init(){if(!this.ac){try{this.ac=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(this.ac&&this.ac.state==='suspended')this.ac.resume()},
   tone(f,d=.08,type='square',v=.035,when=0){if(this.muted||!this.ac)return;const t=this.ac.currentTime+when,o=this.ac.createOscillator(),g=this.ac.createGain();o.type=type;o.frequency.setValueAtTime(f,t);g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.0001,t+d);o.connect(g).connect(this.ac.destination);o.start(t);o.stop(t+d+.02)},
-  say(line){const el=document.getElementById('toast');el.textContent=line;clearTimeout(this._t);this._t=setTimeout(()=>{el.textContent=''},2200)},
+  say(line){const el=document.getElementById('toast');el.textContent=line;G.fitToastText();clearTimeout(this._t);this._t=setTimeout(()=>{el.textContent=''},2200)},
   // Per-move sound recipes: short sequences of Audio.tone calls. Every entry is a plain function
   // that only calls this.tone (which itself no-ops when muted or before an AudioContext exists via
   // user gesture), so every recipe is safe to call from the headless test harness with no gesture.

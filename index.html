@@ -20,7 +20,7 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 /* Positioned in JS (G.positionToast, called from G.fit on load/resize) off canvas.getBoundingClientRect()
    so it tracks the canvas box exactly (not #wrap, which can letterbox at other aspect ratios); left/top/
    max-width are set inline per call. */
-#toast{position:fixed;transform:translateX(-50%);font-size:14px;line-height:1.2;color:#f4c542;pointer-events:none;text-align:center;white-space:normal;background:rgba(10,11,18,.6);border-radius:10px;padding:4px 12px}
+#toast{position:fixed;transform:translateX(-50%);font-size:13px;line-height:1.2;color:#f4c542;pointer-events:none;text-align:center;white-space:normal;background:rgba(10,11,18,.6);border-radius:10px;padding:4px 12px}
 #toast:empty{padding:0}
 #toast.hidden{visibility:hidden}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
@@ -56,7 +56,7 @@ Save.load();
 const Audio={ac:null,muted:Save.data.mute,_t:0,
   init(){if(!this.ac){try{this.ac=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(this.ac&&this.ac.state==='suspended')this.ac.resume()},
   tone(f,d=.08,type='square',v=.035,when=0){if(this.muted||!this.ac)return;const t=this.ac.currentTime+when,o=this.ac.createOscillator(),g=this.ac.createGain();o.type=type;o.frequency.setValueAtTime(f,t);g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.0001,t+d);o.connect(g).connect(this.ac.destination);o.start(t);o.stop(t+d+.02)},
-  say(line){const el=document.getElementById('toast');el.textContent=line;clearTimeout(this._t);this._t=setTimeout(()=>{el.textContent=''},2200)},
+  say(line){const el=document.getElementById('toast');el.textContent=line;G.fitToastText();clearTimeout(this._t);this._t=setTimeout(()=>{el.textContent=''},2200)},
   // Per-move sound recipes: short sequences of Audio.tone calls. Every entry is a plain function
   // that only calls this.tone (which itself no-ops when muted or before an AudioContext exists via
   // user gesture), so every recipe is safe to call from the headless test harness with no gesture.
@@ -263,20 +263,22 @@ const CHAMPS={
 const MOBS={
   goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:300,atk:38,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',
     moves:{heavy:{charge:14,dmg:2.0}}},
-  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:700,atk:55,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.2,rig:'human',
+  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:700,atk:55,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human', // fix round 2: 1.2->1.1, see LOOKS.hobgoblin
     moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
 const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,POWER_MAX=300,PARRY_LOCKOUT=20,CRIT_MUL_DEFAULT=1.6;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
 const STAGE_W=1400;
-// Wall clamp half-width for Fighter.tick's x clamp. Wider than the old width/2+8 inset (32px) so a
-// fighter pinned at the wall stays fully on screen: the rig can reach shoulderW/2+armLen+limb past
-// the fighter's x, which is ~86px for Carl and ~108px for a scaled-up hobgoblin. A camera margin
-// can't fix this alone because the parallax-1.0 floor layer is drawn exactly STAGE_W wide, so
-// letting the camera past its own limit would expose blank canvas past the stage edge; this has to
-// be a sim-side constant (Fighter stays independent of Rig) instead.
-const EDGE_PAD=110;
+// Wall clamp half-width for Fighter.tick's x clamp. Wide enough that a fighter pinned at the wall
+// stays fully on screen: the rig can reach (shoulderW/2 + armLen + limb) * def.scale past the
+// fighter's x. Fix round 1 set this to 110 against the Phase-2-era rig; fix round 2's rescaled
+// LOOKS push that reach to ~162px for Carl and ~212px for the hobgoblin (its def.scale=1.1 on top
+// of already-larger proportions), so 110 was no longer enough — see the "every look's reach fits
+// inside EDGE_PAD" test. A camera margin can't fix this alone because the parallax-1.0 floor layer
+// is drawn exactly STAGE_W wide, so letting the camera past its own limit would expose blank canvas
+// past the stage edge; this has to be a sim-side constant (Fighter stays independent of Rig) instead.
+const EDGE_PAD=220;
 
 // Dungeon encounters: a floor + name + enemy id/tier the HUD reads for the "FLOOR n • NAME" line
 // and G.startFight uses to build p2. Pure data lookup; scaling (hpMul/atkMul) is applied by G, not
@@ -405,8 +407,12 @@ class Fight{
     this.fx=[];this.slowmo=0;this.cinematic=0; // fx: plain events drained by G into FX each tick; slowmo/cinematic: frame counters G steps around
     this.noCrit=!!o.noCrit; // mkFight defaults this true for deterministic Phase 1/2 tests; G.startFight leaves crits live
     this.updateCam()}
+  // Fix round 2: gameplay zoom capped at 1.12 (was 1.35) — same 1.0..cap ramp over the same
+  // 120-500 distance range, just a smaller max, since the rescaled rig at 1.35 put a raised-arm
+  // pose's hand above the HUD (see 68_rig.js's 'tallest pose stays under the HUD at max zoom' test;
+  // the still-higher 1.28 cinematic-only cap is G's, not the sim's — Fight never reaches it itself).
   updateCam(){const dist=Math.abs(this.p2.x-this.p1.x);
-    this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.35-(dist-120)/380*0.35,1,1.35)}}
+    this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.12-(dist-120)/380*0.12,1,1.12)}}
   step(){if(this.over)return;if(this.cinematic>0)return;if(this.hitstop>0){this.hitstop--;return}
     this.frame++;this.clock-=STEP;
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);
@@ -479,7 +485,8 @@ const Stage={cache:{},
     if(this.cache[themeId])return this.cache[themeId];
     const r=RNG(0xd00d),H0=FLOOR+80,cx=STAGE_W/2;
     const mk=()=>{const cv=document.createElement('canvas');cv.width=STAGE_W;cv.height=H0;return cv};
-    // torches kept close to center so they stay on screen across the camera's zoom range (1.0-1.35)
+    // torches kept close to center so they stay on screen across the camera's zoom range (1.0-1.28,
+    // fix round 2: gameplay caps at 1.12, the S3 cinematic punch-in at 1.28)
     const torches=[{x:cx-150,y:225},{x:cx+150,y:225},{x:cx-255,y:235},{x:cx+255,y:235}];
 
     // ---- layer 0: far fog + lit archway + distant stairs (parallax .2); shows through the wall's arch cutout ----
@@ -521,7 +528,7 @@ const Stage={cache:{},
       wc.fillStyle=g;wc.beginPath();wc.moveTo(nx-55,FLOOR+10);wc.lineTo(nx-55,FLOOR-130);wc.quadraticCurveTo(nx,FLOOR-180,nx+55,FLOOR-130);
       wc.lineTo(nx+55,FLOOR+10);wc.closePath();wc.fill();
       wc.strokeStyle='#0c0e16';wc.lineWidth=5;wc.stroke()}
-    // hanging chains: start below the camera's visible-top edge at every zoom (worst case ~180 at zoom 1.35)
+    // hanging chains: start below the camera's visible-top edge at every zoom (worst case ~180 at zoom 1.28)
     // so the links are always on screen, with a wall bracket marking the mount point.
     const chainXs=[cx-330,cx-190,cx+190,cx+330,cx-70,cx+70],chainY0=200;
     for(let ci=0;ci<chainXs.length;ci++){const cxs=chainXs[ci],len=90+r.int(60);
@@ -582,15 +589,22 @@ const Stage={cache:{},
       c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
       c.fillStyle=`rgba(255,${210+Math.floor(20*flick)},150,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
 const Camera={
-  // override, when given, replaces fight.camTarget for the lerp (G passes {x:attacker.x,zoom:1.6}
-  // while fight.cinematic>0 for the S3 punch-in; Fight itself never knows about this, it only ever
-  // exposes camTarget).
+  // override, when given, replaces fight.camTarget for the lerp (G passes {x:attacker.x,zoom:1.28}
+  // while fight.cinematic>0 for the S3 punch-in — CINEMATIC_ZOOM, fix round 2 down from 1.6; Fight
+  // itself never knows about this, it only ever exposes camTarget).
   update(cam,f,override){const t=override||f.camTarget;cam.x+=(t.x-cam.x)*.12;cam.zoom+=(t.zoom-cam.zoom)*.12;
     const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
-  // Anchor moved from .62 to .74: fighters now get most of the frame height and the floor reads as
-  // a thin strip (the rendition target), instead of ~38% of the screen being empty floor.
-  apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.74);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
-  toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.74+(y-FLOOR)*cam.zoom}}};
+  // Anchor moved .62 -> .74 (round 1) -> .90 (fix round 2): at zoom 1.0 a character's SCREEN size
+  // is anchor-independent (world px == screen px at zoom 1), so this doesn't cost any of round 1's
+  // frame-height win — fighters still fill >55% of frame height at zoom 1.0 (measured; see
+  // docs/ARENA.md). What the anchor buys is headroom for the CINEMATIC_ZOOM (1.28) punch-in during
+  // an S3, where a raised-arm/leaning pose's topmost joint can otherwise land above the HUD bars —
+  // see the 'tallest pose stays under the HUD at max zoom' test (90_tests.js), which needed .90
+  // (not .74 or .80) to pass once combined with the round-2 heavyCharge pose trim and hobgoblin rescale.
+  // The floor strip this leaves is thin (~48px at zoom 1) but still reads as a real floor, not a
+  // sliver — verified in docs/shots/p2-idle.png.
+  apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.90);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
+  toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.90+(y-FLOOR)*cam.zoom}}};
 
 // Stylized vector-rig renderer. Pure presentation: reads Fight/Fighter state, never writes it.
 // Forward-kinematics bone rig driven by keyframed joint-angle poses; per-character "looks" supply
@@ -662,9 +676,13 @@ POSES.medium=[
   {t:1, ang:{torso:D(12), rShoulder:D(40), rElbow:D(15),lShoulder:D(0),  lElbow:D(15),rHip:D(10), lHip:D(-10)},off:{x:8,y:0}}];
 // Heavy wind-up: fist raised straight above the head, weight shifted back (matches poseFor's
 // CHARGE->heavyCharge mapping, so this is what's held while the player charges the swing).
+// Fix round 2: peak rShoulder pulled in from 172 to 134 (was swinging the arm almost straight up,
+// which at the rescaled rig height plus the S3 cinematic punch-in zoom put the raised hand above the
+// visible canvas — see the 'tallest pose stays under the HUD at max zoom' test). Still a clear
+// overhead wind-up, just short of vertical.
 POSES.heavyCharge=[
-  {t:0,ang:{torso:D(-14),rShoulder:D(150),rElbow:D(-8),lShoulder:D(10),lElbow:D(20),rHip:D(-6),lHip:D(6)},off:{x:-4,y:2}},
-  {t:1,ang:{torso:D(-20),rShoulder:D(172),rElbow:D(-4),lShoulder:D(6), lElbow:D(16),rHip:D(-10),lHip:D(10)},off:{x:-8,y:4}}];
+  {t:0,ang:{torso:D(-14),rShoulder:D(94),rElbow:D(-8),lShoulder:D(10),lElbow:D(20),rHip:D(-6),lHip:D(6)},off:{x:-4,y:2}},
+  {t:1,ang:{torso:D(-20),rShoulder:D(108),rElbow:D(-4),lShoulder:D(6), lElbow:D(16),rHip:D(-10),lHip:D(10)},off:{x:-8,y:4}}];
 // Heavy release: from overhead down through a forward-and-down smash, driving into a crouch on
 // impact (front knee bends, hip drops) — a vertical arc, unlike medium's horizontal lunge.
 POSES.heavy=[
@@ -739,8 +757,11 @@ const LOOKS={
   goblin:{skin:'#5f8a3f',hair:null,primary:'#4a3b28',secondary:'#7a6248',
     limb:13,legLen:82,armLen:72,torsoLen:58,headR:18,shoulderW:33,hipW:21,earLen:29,
     props:['rags','dagger']},
+  // Fix round 2: trimmed back from the round-1 numbers, which combined with def.scale=1.2 (a
+  // second, canvas-level multiplier on top of these) made the hobgoblin's overhead reach the worst
+  // case in the whole roster by a wide margin at max zoom — see EDGE_PAD and the HUD-safety test.
   hobgoblin:{skin:'#5c6b52',hair:null,primary:'#3d3428',secondary:'#6b5c46',
-    limb:26,legLen:122,armLen:114,torsoLen:98,headR:29,shoulderW:74,hipW:45,earLen:21,
+    limb:23,legLen:106,armLen:99,torsoLen:86,headR:25,shoulderW:65,hipW:40,earLen:18,
     props:['rags','club']},
   // Placeholder human-rig look for the Phase 1 caster opponent; her bespoke non-humanoid rig is Phase 3.
   donut:{skin:'#f2cfe0',hair:'#ffe7f5',primary:'#e8a0d8',secondary:'#b565a0',
@@ -1147,16 +1168,26 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast()},
   // Positions #toast off the canvas's own box (canvas.getBoundingClientRect()), not #wrap, so it
   // tracks the actual displayed game area exactly even when #wrap letterboxes the canvas at an
-  // aspect ratio other than W/H. TOAST_Y is a canvas-local (854x480) y — just under the HUD's
-  // 'FLOOR n • NAME' text (Render.floorLine, drawn at canvas y=80..~96) and well above the stage
-  // arch (its top is around canvas y=175 at zoom 1), so the toast can never cross the arch. Width is
-  // capped at 70% of the displayed canvas width so a long line wraps and pills, rather than running
-  // edge to edge.
-  TOAST_Y:98,
+  // aspect ratio other than W/H. Fix round 2: moved from just under the HUD's floor-line text to
+  // the bottom band — with the rescaled rig (see 65_stage.js's Camera anchor comment) the toast up
+  // top was landing squarely across the now-much-taller fighters' heads in nearly every shot.
+  // TOAST_BOTTOM_GAP is canvas-local (854x480) px from the bottom of the canvas up to the toast's
+  // bottom edge: the chevron power bar sits at canvas y=H-24, so H-(H-24)+8 = 32 clears it by 8px.
+  // Width is capped at 62% of the displayed canvas width (narrower than round 1's 70%, since there's
+  // less horizontal room to work with down here between the on-screen buttons).
+  TOAST_BOTTOM_GAP:32,
   positionToast(){const r=canvas.getBoundingClientRect(),el=document.getElementById('toast');
     el.style.left=(r.left+r.width/2)+'px';
-    el.style.top=(r.top+this.TOAST_Y/H*r.height)+'px';
-    el.style.maxWidth=Math.round(r.width*.7)+'px'},
+    el.style.bottom=(innerHeight-r.bottom+this.TOAST_BOTTOM_GAP/H*r.height)+'px';
+    el.style.maxWidth=Math.round(r.width*.62)+'px'},
+  // Caps the toast at 2 lines by dropping from 13px to 12px if the current text would wrap to 3+ at
+  // 13px (measuring via the laid-out scrollHeight against the computed line-height, so it accounts
+  // for the actual maxWidth positionToast() set, not an estimate). Called after every text change
+  // (Audio.say), not just on resize, since it depends on the string, not just the layout.
+  fitToastText(){const el=document.getElementById('toast');
+    el.style.fontSize='13px';
+    const lh=parseFloat(getComputedStyle(el).lineHeight)||1;
+    if(Math.round(el.scrollHeight/lh)>2)el.style.fontSize='12px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   // Canvas hit-test for the HUD's pause glyph (drawn by Render.hud at Render.pauseRect), consulted
   // by Input's pointerdown handler before it does any zone/gesture handling.
@@ -1274,7 +1305,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       this.checkCinematicFx(f);
       this.syncSpecials()}
     FX.pushAll(f.fx);f.fx.length=0;
-    const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.6}:null;
+    const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.28}:null; // fix round 2: 1.6->1.28
     Camera.update(this.cam,f,punchIn);
     FX.update();
     // f.over flips true inside f.step() the instant a KO/timeout resolves, well before slow-mo has
@@ -1491,6 +1522,22 @@ Test.add('a parry works again after PARRY_LOCKOUT expires',()=>{
   eq(f.p2.parryLock,0,'lockout must have fully expired');
   run(f,15); // the scripted light now lands with p2's block already pressed inside PARRY_WINDOW
   eq(f.log[f.log.length-1].type,'parry','block pressed inside the window after lockout expiry must parry again')});
+Test.add('tallest pose stays under the HUD at max zoom',()=>{
+  // 1.28 mirrors G's S3 cinematic punch-in zoom (80_game.js) — the highest zoom the camera ever
+  // reaches, and therefore the worst case for a raised-arm/leaning pose's topmost joint clearing the
+  // HUD bars (portraits/hp bars end around canvas y=70, the floor-line text around y=96).
+  const CINEMATIC_ZOOM=1.28,cam={x:0,zoom:CINEMATIC_ZOOM};
+  for(const id in LOOKS){const look=LOOKS[id],sc=(DEFS[id]&&DEFS[id].scale)||1;
+    for(const key of['heavyCharge','s3'])
+      for(const t of[0,0.5,1]){
+        const j=Rig.solve(look,key,t,1);
+        const minY=Math.min(j.head.y,j.lHand.y,j.rHand.y)*sc;
+        const screen=Camera.toScreen(cam,0,FLOOR+minY);
+        ok(screen.sy>=104,id+'/'+key+'/t'+t+' topmost joint at screen y='+screen.sy.toFixed(1)+', must clear the HUD (>=104)')}}});
+Test.add('every look\'s reach fits inside EDGE_PAD',()=>{
+  for(const id in LOOKS){const look=LOOKS[id],sc=(DEFS[id]&&DEFS[id].scale)||1;
+    const reach=(look.shoulderW/2+look.armLen+look.limb)*sc;
+    ok(reach<=EDGE_PAD,id+' reach '+reach.toFixed(1)+' must fit inside EDGE_PAD ('+EDGE_PAD+')')}});
 Test.add('every look renders every pose without throwing',()=>{
   for(const id in LOOKS){const look=LOOKS[id];
     for(const key in POSES){const j=Rig.solve(look,key,0.5,1);

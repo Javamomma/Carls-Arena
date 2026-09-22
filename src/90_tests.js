@@ -145,6 +145,22 @@ Test.add('a parry works again after PARRY_LOCKOUT expires',()=>{
   eq(f.p2.parryLock,0,'lockout must have fully expired');
   run(f,15); // the scripted light now lands with p2's block already pressed inside PARRY_WINDOW
   eq(f.log[f.log.length-1].type,'parry','block pressed inside the window after lockout expiry must parry again')});
+Test.add('tallest pose stays under the HUD at max zoom',()=>{
+  // 1.28 mirrors G's S3 cinematic punch-in zoom (80_game.js) — the highest zoom the camera ever
+  // reaches, and therefore the worst case for a raised-arm/leaning pose's topmost joint clearing the
+  // HUD bars (portraits/hp bars end around canvas y=70, the floor-line text around y=96).
+  const CINEMATIC_ZOOM=1.28,cam={x:0,zoom:CINEMATIC_ZOOM};
+  for(const id in LOOKS){const look=LOOKS[id],sc=(DEFS[id]&&DEFS[id].scale)||1;
+    for(const key of['heavyCharge','s3'])
+      for(const t of[0,0.5,1]){
+        const j=Rig.solve(look,key,t,1);
+        const minY=Math.min(j.head.y,j.lHand.y,j.rHand.y)*sc;
+        const screen=Camera.toScreen(cam,0,FLOOR+minY);
+        ok(screen.sy>=104,id+'/'+key+'/t'+t+' topmost joint at screen y='+screen.sy.toFixed(1)+', must clear the HUD (>=104)')}}});
+Test.add('every look\'s reach fits inside EDGE_PAD',()=>{
+  for(const id in LOOKS){const look=LOOKS[id],sc=(DEFS[id]&&DEFS[id].scale)||1;
+    const reach=(look.shoulderW/2+look.armLen+look.limb)*sc;
+    ok(reach<=EDGE_PAD,id+' reach '+reach.toFixed(1)+' must fit inside EDGE_PAD ('+EDGE_PAD+')')}});
 Test.add('every look renders every pose without throwing',()=>{
   for(const id in LOOKS){const look=LOOKS[id];
     for(const key in POSES){const j=Rig.solve(look,key,0.5,1);

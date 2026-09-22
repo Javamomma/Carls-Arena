@@ -68,9 +68,13 @@ POSES.medium=[
   {t:1, ang:{torso:D(12), rShoulder:D(40), rElbow:D(15),lShoulder:D(0),  lElbow:D(15),rHip:D(10), lHip:D(-10)},off:{x:8,y:0}}];
 // Heavy wind-up: fist raised straight above the head, weight shifted back (matches poseFor's
 // CHARGE->heavyCharge mapping, so this is what's held while the player charges the swing).
+// Fix round 2: peak rShoulder pulled in from 172 to 134 (was swinging the arm almost straight up,
+// which at the rescaled rig height plus the S3 cinematic punch-in zoom put the raised hand above the
+// visible canvas — see the 'tallest pose stays under the HUD at max zoom' test). Still a clear
+// overhead wind-up, just short of vertical.
 POSES.heavyCharge=[
-  {t:0,ang:{torso:D(-14),rShoulder:D(150),rElbow:D(-8),lShoulder:D(10),lElbow:D(20),rHip:D(-6),lHip:D(6)},off:{x:-4,y:2}},
-  {t:1,ang:{torso:D(-20),rShoulder:D(172),rElbow:D(-4),lShoulder:D(6), lElbow:D(16),rHip:D(-10),lHip:D(10)},off:{x:-8,y:4}}];
+  {t:0,ang:{torso:D(-14),rShoulder:D(94),rElbow:D(-8),lShoulder:D(10),lElbow:D(20),rHip:D(-6),lHip:D(6)},off:{x:-4,y:2}},
+  {t:1,ang:{torso:D(-20),rShoulder:D(108),rElbow:D(-4),lShoulder:D(6), lElbow:D(16),rHip:D(-10),lHip:D(10)},off:{x:-8,y:4}}];
 // Heavy release: from overhead down through a forward-and-down smash, driving into a crouch on
 // impact (front knee bends, hip drops) — a vertical arc, unlike medium's horizontal lunge.
 POSES.heavy=[
@@ -145,8 +149,11 @@ const LOOKS={
   goblin:{skin:'#5f8a3f',hair:null,primary:'#4a3b28',secondary:'#7a6248',
     limb:13,legLen:82,armLen:72,torsoLen:58,headR:18,shoulderW:33,hipW:21,earLen:29,
     props:['rags','dagger']},
+  // Fix round 2: trimmed back from the round-1 numbers, which combined with def.scale=1.2 (a
+  // second, canvas-level multiplier on top of these) made the hobgoblin's overhead reach the worst
+  // case in the whole roster by a wide margin at max zoom — see EDGE_PAD and the HUD-safety test.
   hobgoblin:{skin:'#5c6b52',hair:null,primary:'#3d3428',secondary:'#6b5c46',
-    limb:26,legLen:122,armLen:114,torsoLen:98,headR:29,shoulderW:74,hipW:45,earLen:21,
+    limb:23,legLen:106,armLen:99,torsoLen:86,headR:25,shoulderW:65,hipW:40,earLen:18,
     props:['rags','club']},
   // Placeholder human-rig look for the Phase 1 caster opponent; her bespoke non-humanoid rig is Phase 3.
   donut:{skin:'#f2cfe0',hair:'#ffe7f5',primary:'#e8a0d8',secondary:'#b565a0',

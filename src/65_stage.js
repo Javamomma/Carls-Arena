@@ -4,7 +4,8 @@ const Stage={cache:{},
     if(this.cache[themeId])return this.cache[themeId];
     const r=RNG(0xd00d),H0=FLOOR+80,cx=STAGE_W/2;
     const mk=()=>{const cv=document.createElement('canvas');cv.width=STAGE_W;cv.height=H0;return cv};
-    // torches kept close to center so they stay on screen across the camera's zoom range (1.0-1.35)
+    // torches kept close to center so they stay on screen across the camera's zoom range (1.0-1.28,
+    // fix round 2: gameplay caps at 1.12, the S3 cinematic punch-in at 1.28)
     const torches=[{x:cx-150,y:225},{x:cx+150,y:225},{x:cx-255,y:235},{x:cx+255,y:235}];
 
     // ---- layer 0: far fog + lit archway + distant stairs (parallax .2); shows through the wall's arch cutout ----
@@ -46,7 +47,7 @@ const Stage={cache:{},
       wc.fillStyle=g;wc.beginPath();wc.moveTo(nx-55,FLOOR+10);wc.lineTo(nx-55,FLOOR-130);wc.quadraticCurveTo(nx,FLOOR-180,nx+55,FLOOR-130);
       wc.lineTo(nx+55,FLOOR+10);wc.closePath();wc.fill();
       wc.strokeStyle='#0c0e16';wc.lineWidth=5;wc.stroke()}
-    // hanging chains: start below the camera's visible-top edge at every zoom (worst case ~180 at zoom 1.35)
+    // hanging chains: start below the camera's visible-top edge at every zoom (worst case ~180 at zoom 1.28)
     // so the links are always on screen, with a wall bracket marking the mount point.
     const chainXs=[cx-330,cx-190,cx+190,cx+330,cx-70,cx+70],chainY0=200;
     for(let ci=0;ci<chainXs.length;ci++){const cxs=chainXs[ci],len=90+r.int(60);
@@ -107,12 +108,19 @@ const Stage={cache:{},
       c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
       c.fillStyle=`rgba(255,${210+Math.floor(20*flick)},150,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
 const Camera={
-  // override, when given, replaces fight.camTarget for the lerp (G passes {x:attacker.x,zoom:1.6}
-  // while fight.cinematic>0 for the S3 punch-in; Fight itself never knows about this, it only ever
-  // exposes camTarget).
+  // override, when given, replaces fight.camTarget for the lerp (G passes {x:attacker.x,zoom:1.28}
+  // while fight.cinematic>0 for the S3 punch-in — CINEMATIC_ZOOM, fix round 2 down from 1.6; Fight
+  // itself never knows about this, it only ever exposes camTarget).
   update(cam,f,override){const t=override||f.camTarget;cam.x+=(t.x-cam.x)*.12;cam.zoom+=(t.zoom-cam.zoom)*.12;
     const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
-  // Anchor moved from .62 to .74: fighters now get most of the frame height and the floor reads as
-  // a thin strip (the rendition target), instead of ~38% of the screen being empty floor.
-  apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.74);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
-  toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.74+(y-FLOOR)*cam.zoom}}};
+  // Anchor moved .62 -> .74 (round 1) -> .90 (fix round 2): at zoom 1.0 a character's SCREEN size
+  // is anchor-independent (world px == screen px at zoom 1), so this doesn't cost any of round 1's
+  // frame-height win — fighters still fill >55% of frame height at zoom 1.0 (measured; see
+  // docs/ARENA.md). What the anchor buys is headroom for the CINEMATIC_ZOOM (1.28) punch-in during
+  // an S3, where a raised-arm/leaning pose's topmost joint can otherwise land above the HUD bars —
+  // see the 'tallest pose stays under the HUD at max zoom' test (90_tests.js), which needed .90
+  // (not .74 or .80) to pass once combined with the round-2 heavyCharge pose trim and hobgoblin rescale.
+  // The floor strip this leaves is thin (~48px at zoom 1) but still reads as a real floor, not a
+  // sliver — verified in docs/shots/p2-idle.png.
+  apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.90);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
+  toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.90+(y-FLOOR)*cam.zoom}}};

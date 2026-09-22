@@ -18,17 +18,19 @@ const CHAMPS={
 const MOBS={
   goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:300,atk:38,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',
     moves:{heavy:{charge:14,dmg:2.0}}},
-  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:700,atk:55,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.2,rig:'human',
+  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:700,atk:55,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human', // fix round 2: 1.2->1.1, see LOOKS.hobgoblin
     moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
 const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,POWER_MAX=300,PARRY_LOCKOUT=20,CRIT_MUL_DEFAULT=1.6;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
 const STAGE_W=1400;
-// Wall clamp half-width for Fighter.tick's x clamp. Wider than the old width/2+8 inset (32px) so a
-// fighter pinned at the wall stays fully on screen: the rig can reach shoulderW/2+armLen+limb past
-// the fighter's x, which is ~86px for Carl and ~108px for a scaled-up hobgoblin. A camera margin
-// can't fix this alone because the parallax-1.0 floor layer is drawn exactly STAGE_W wide, so
-// letting the camera past its own limit would expose blank canvas past the stage edge; this has to
-// be a sim-side constant (Fighter stays independent of Rig) instead.
-const EDGE_PAD=110;
+// Wall clamp half-width for Fighter.tick's x clamp. Wide enough that a fighter pinned at the wall
+// stays fully on screen: the rig can reach (shoulderW/2 + armLen + limb) * def.scale past the
+// fighter's x. Fix round 1 set this to 110 against the Phase-2-era rig; fix round 2's rescaled
+// LOOKS push that reach to ~162px for Carl and ~212px for the hobgoblin (its def.scale=1.1 on top
+// of already-larger proportions), so 110 was no longer enough — see the "every look's reach fits
+// inside EDGE_PAD" test. A camera margin can't fix this alone because the parallax-1.0 floor layer
+// is drawn exactly STAGE_W wide, so letting the camera past its own limit would expose blank canvas
+// past the stage edge; this has to be a sim-side constant (Fighter stays independent of Rig) instead.
+const EDGE_PAD=220;
