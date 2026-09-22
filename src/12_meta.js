@@ -5,7 +5,14 @@
 // clock only ever enters through Energy.now, which is injectable for deterministic tests.
 const Meta={
   defaults(){
-    return{v:2,seed:1,gold:0,units:0,iso:0,
+    return{v:2,seed:1,
+      // Fix-wave item 4 (final review, Important): the persisted, ever-incrementing seed a REAL (non-
+      // harness) fight starts at -- see G.startFight's own comment (80_game.js) for why this exists
+      // separately from `seed` above (Meta's own crystal-pull stream, untouched by this). A plain
+      // top-level default key, so a pre-fix-wave v2 save picks it up for free through migrate()'s
+      // generic "fill anything missing" loop below -- no dedicated migrate branch needed, same story
+      // as leaderboard/pity/tutorialDone.
+      fightSeed:1,gold:0,units:0,iso:0,
       cats:{brawler:0,rogue:0,caster:0,tank:0,beast:0,trickster:0},
       roster:{carl:{stars:1,rank:1,level:1,xp:0,shards:0}},
       active:'carl',
@@ -171,14 +178,15 @@ const Crystal={
   // is almost exactly double that, and so on for thousands of seeds, which skews any single draw
   // taken immediately off a freshly-seeded RNG toward the low end (verified: raw first-draw tier
   // frequencies over seeds 1..10000 came out 100/0/0 against basic's 70/25/5 odds instead of
-  // matching them). One throwaway warm-up call fixes it (same seeds then measure 70.06/24.88/5.06)
-  // — this is the standard fix for a freshly-seeded PRNG's under-mixed first output, not a
-  // workaround for a test; every real RNG(Save.data.seed++) instance in open() needs it too.
-  rng(seed){const r=RNG(seed);r.next();return r},
-  // One RNG instance per open (both the tier roll and the champion pick draw from it, after the
-  // warm-up draw above), seeded from Save.data.seed++ so every open — including a pity-forced one
-  // — advances the save's random stream exactly once. Refusing for cost never touches the seed or
-  // pity counter: nothing about the save changes on a refusal.
+  // matching them). Fix-wave item 4 (final review, Important): this used to be fixed locally here
+  // with a one-draw Crystal.rng(seed) wrapper around the plain RNG(seed) constructor; RNG itself
+  // (10_util.js) now discards 8 throwaway draws at construction — the same fix, generalized to every
+  // RNG(seed) instance in the codebase (Fight, AI.make, Ctrl.random too, not just crystals) — so the
+  // wrapper is gone and every call below just uses RNG(seed) directly.
+  // One RNG instance per open (both the tier roll and the champion pick draw from it), seeded from
+  // Save.data.seed++ so every open — including a pity-forced one — advances the save's random stream
+  // exactly once. Refusing for cost never touches the seed or pity counter: nothing about the save
+  // changes on a refusal.
   // Task 6.4: opts.free (default falsy) skips the cost check/deduction entirely -- used by the
   // tutorial's own free completion crystal (G.onFightEnd, 80_game.js: Crystal.open('basic',{free:true}))
   // so a fresh save with 0 gold still gets it. Every other line (the RNG draw, pity, roster/dup
@@ -191,7 +199,7 @@ const Crystal={
     if(!free){
       for(const c in k.cost)if((Save.data[c]||0)<k.cost[c])return null;
       for(const c in k.cost)Save.data[c]-=k.cost[c]}
-    const rng=Crystal.rng(Save.data.seed++);
+    const rng=RNG(Save.data.seed++);
     let stars=Crystal.rollTier(k.odds,rng);
     if(!Save.data.pity)Save.data.pity={};
     // Fix-wave item 4 (plan defect, ruled): the frozen interface line said "the kind's top-1 tier"

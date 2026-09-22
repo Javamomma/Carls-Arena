@@ -123,7 +123,7 @@ const Tutorial={
       if(this.state.step>=this.steps.length&&fight.p2){
         fight.p2.guardActive=false;
         fight.fx.push({kind:'shieldDown',x:fight.p2.x,y:FLOOR-160})}}}};
-const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
+const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   // Fix-wave item 5 (final review, Minor): the page's own ?atlas=1 URL override, computed once here
   // (location.search doesn't change without a navigation) -- the exact same regex Atlas.load's own
   // `enabled` check already uses (68_rig.js) to decide whether to fetch at all. Rig.draw's atlas
@@ -301,7 +301,18 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // screenshot recipes already do, dozens of times per run). A bare encounter id is 'exhibition' now
   // (no Quest.complete, no rewards, no energy) but still populates G.encounter so the HUD floor line
   // keeps working -- 'arena' remains the explicit o.mode G.startArena() sugar passes.
-  startFight(o={}){const seed=o.seed||this.seed;
+  // Fix-wave item 4 (final review, Important): a REAL fight (no o.seed given -- every player-facing
+  // call site: renderTitle's EXHIBITION, renderMap's door/boss clicks, renderArena's FIGHT, the map's
+  // TUTORIAL row) now draws its seed from Save.data.fightSeed++ (persisted via Save.put right here),
+  // not the constant G.seed(===1) this used to fall back to -- every real fight used to run at seed 1,
+  // which RNG's own under-mixed-first-draw bug (see 10_util.js's own comment) turned into a guaranteed
+  // crit on the first landed hit of EVERY fight, repeating fight to fight. tests/harness.py and
+  // tests/batch.py always pass an explicit o.seed (every --sim/--e2e/--tutorial/batch-cell build_*_js
+  // call), so this branch never fires for them -- they stay exactly as deterministic as before.
+  startFight(o={}){
+    let seed;
+    if(o.seed!==undefined)seed=o.seed;
+    else{seed=Save.data.fightSeed=(Save.data.fightSeed||1);Save.data.fightSeed++;Save.put()}
     this.lastFightOpts=o; // FIGHT AGAIN replays these (minus seed) so a custom p2/ai isn't lost
     let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
     // {floor,node} sugar: node is an index into that floor's .nodes, or the string 'boss' for that
@@ -939,7 +950,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // neither does an exhibition/arena LOSS. This handler itself stays mode-generic (not gated on
     // won/mode) since it's only ever reachable through a click when the button is actually visible.
     document.getElementById('again').onclick=()=>{
-      const opts=Object.assign({},this.lastFightOpts,{seed:this.fight?this.fight.rng.int(1e9)+1:this.seed});
+      const opts=Object.assign({},this.lastFightOpts,{seed:this.fight?this.fight.rng.int(1e9)+1:1});
       if(this.mode==='arena')this.startArena(opts);else this.startFight(opts)};
     document.getElementById('resultTitleBtn').onclick=()=>this.backToOrigin();
     // Task 6.1 (owner playtest note: "No way to exit it seems after a defeat"): TITLE is a second,

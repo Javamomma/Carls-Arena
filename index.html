@@ -329,10 +329,20 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 // (65_stage.js/80_game.js) and its own regression test (90_tests.js) so all three read one number.
 const HUD_LINE=104;
 // xorshift32; deterministic per seed. Never use Math.random inside the sim.
-function RNG(seed){let s=(seed>>>0)||0x9e3779b9;return{
-  next(){s^=s<<13;s>>>=0;s^=s>>>17;s^=s<<5;s>>>=0;return s/4294967296},
-  int(n){return Math.floor(this.next()*n)},
-  pick(a){return a[this.int(a.length)]}}}
+// Fix-wave item 4 (final review, Important): xorshift32's first output from a small, low-entropy seed
+// (1, 2, 3, ... -- exactly what a fight seed or Save.data.fightSeed++ produces) is badly under-mixed
+// (RNG(1).next()===0.0000629..., RNG(2).next() almost exactly double that, and so on for thousands of
+// seeds) -- every real fight ran at seed 1 (see G.startFight's own comment below) so the FIRST landed
+// hit of every fight was a guaranteed crit, and the whole crit stream repeated fight to fight. 12_meta.
+// js's Crystal.rng already discarded one throwaway draw to fix exactly this for crystal pulls; that fix
+// is generalized here (8 discarded draws, comfortably past the under-mixed region) so it covers every
+// RNG(seed) instance in the codebase at the source -- Fight's own this.rng/this.presRng, AI.make,
+// Ctrl.random, and Crystal itself, which no longer needs its own separate warm-up (see its own comment,
+// 12_meta.js). `next`/`int`/`pick` are unchanged; only construction now runs 8 throwaway steps first.
+function RNG(seed){let s=(seed>>>0)||0x9e3779b9;
+  const step=()=>{s^=s<<13;s>>>=0;s^=s>>>17;s^=s<<5;s>>>=0;return s/4294967296};
+  for(let i=0;i<8;i++)step();
+  return{next:step,int(n){return Math.floor(this.next()*n)},pick(a){return a[this.int(a.length)]}}}
 
 'use strict';
 // Meta: the pure data layer for Phase 4 (roster, crystals, quests, rewards, arena, energy). No
@@ -341,7 +351,14 @@ function RNG(seed){let s=(seed>>>0)||0x9e3779b9;return{
 // clock only ever enters through Energy.now, which is injectable for deterministic tests.
 const Meta={
   defaults(){
-    return{v:2,seed:1,gold:0,units:0,iso:0,
+    return{v:2,seed:1,
+      // Fix-wave item 4 (final review, Important): the persisted, ever-incrementing seed a REAL (non-
+      // harness) fight starts at -- see G.startFight's own comment (80_game.js) for why this exists
+      // separately from `seed` above (Meta's own crystal-pull stream, untouched by this). A plain
+      // top-level default key, so a pre-fix-wave v2 save picks it up for free through migrate()'s
+      // generic "fill anything missing" loop below -- no dedicated migrate branch needed, same story
+      // as leaderboard/pity/tutorialDone.
+      fightSeed:1,gold:0,units:0,iso:0,
       cats:{brawler:0,rogue:0,caster:0,tank:0,beast:0,trickster:0},
       roster:{carl:{stars:1,rank:1,level:1,xp:0,shards:0}},
       active:'carl',
@@ -507,14 +524,15 @@ const Crystal={
   // is almost exactly double that, and so on for thousands of seeds, which skews any single draw
   // taken immediately off a freshly-seeded RNG toward the low end (verified: raw first-draw tier
   // frequencies over seeds 1..10000 came out 100/0/0 against basic's 70/25/5 odds instead of
-  // matching them). One throwaway warm-up call fixes it (same seeds then measure 70.06/24.88/5.06)
-  // — this is the standard fix for a freshly-seeded PRNG's under-mixed first output, not a
-  // workaround for a test; every real RNG(Save.data.seed++) instance in open() needs it too.
-  rng(seed){const r=RNG(seed);r.next();return r},
-  // One RNG instance per open (both the tier roll and the champion pick draw from it, after the
-  // warm-up draw above), seeded from Save.data.seed++ so every open — including a pity-forced one
-  // — advances the save's random stream exactly once. Refusing for cost never touches the seed or
-  // pity counter: nothing about the save changes on a refusal.
+  // matching them). Fix-wave item 4 (final review, Important): this used to be fixed locally here
+  // with a one-draw Crystal.rng(seed) wrapper around the plain RNG(seed) constructor; RNG itself
+  // (10_util.js) now discards 8 throwaway draws at construction — the same fix, generalized to every
+  // RNG(seed) instance in the codebase (Fight, AI.make, Ctrl.random too, not just crystals) — so the
+  // wrapper is gone and every call below just uses RNG(seed) directly.
+  // One RNG instance per open (both the tier roll and the champion pick draw from it), seeded from
+  // Save.data.seed++ so every open — including a pity-forced one — advances the save's random stream
+  // exactly once. Refusing for cost never touches the seed or pity counter: nothing about the save
+  // changes on a refusal.
   // Task 6.4: opts.free (default falsy) skips the cost check/deduction entirely -- used by the
   // tutorial's own free completion crystal (G.onFightEnd, 80_game.js: Crystal.open('basic',{free:true}))
   // so a fresh save with 0 gold still gets it. Every other line (the RNG draw, pity, roster/dup
@@ -527,7 +545,7 @@ const Crystal={
     if(!free){
       for(const c in k.cost)if((Save.data[c]||0)<k.cost[c])return null;
       for(const c in k.cost)Save.data[c]-=k.cost[c]}
-    const rng=Crystal.rng(Save.data.seed++);
+    const rng=RNG(Save.data.seed++);
     let stars=Crystal.rollTier(k.odds,rng);
     if(!Save.data.pity)Save.data.pity={};
     // Fix-wave item 4 (plan defect, ruled): the frozen interface line said "the kind's top-1 tier"
@@ -4275,7 +4293,7 @@ const Tutorial={
       if(this.state.step>=this.steps.length&&fight.p2){
         fight.p2.guardActive=false;
         fight.fx.push({kind:'shieldDown',x:fight.p2.x,y:FLOOR-160})}}}};
-const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
+const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   // Fix-wave item 5 (final review, Minor): the page's own ?atlas=1 URL override, computed once here
   // (location.search doesn't change without a navigation) -- the exact same regex Atlas.load's own
   // `enabled` check already uses (68_rig.js) to decide whether to fetch at all. Rig.draw's atlas
@@ -4453,7 +4471,18 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // screenshot recipes already do, dozens of times per run). A bare encounter id is 'exhibition' now
   // (no Quest.complete, no rewards, no energy) but still populates G.encounter so the HUD floor line
   // keeps working -- 'arena' remains the explicit o.mode G.startArena() sugar passes.
-  startFight(o={}){const seed=o.seed||this.seed;
+  // Fix-wave item 4 (final review, Important): a REAL fight (no o.seed given -- every player-facing
+  // call site: renderTitle's EXHIBITION, renderMap's door/boss clicks, renderArena's FIGHT, the map's
+  // TUTORIAL row) now draws its seed from Save.data.fightSeed++ (persisted via Save.put right here),
+  // not the constant G.seed(===1) this used to fall back to -- every real fight used to run at seed 1,
+  // which RNG's own under-mixed-first-draw bug (see 10_util.js's own comment) turned into a guaranteed
+  // crit on the first landed hit of EVERY fight, repeating fight to fight. tests/harness.py and
+  // tests/batch.py always pass an explicit o.seed (every --sim/--e2e/--tutorial/batch-cell build_*_js
+  // call), so this branch never fires for them -- they stay exactly as deterministic as before.
+  startFight(o={}){
+    let seed;
+    if(o.seed!==undefined)seed=o.seed;
+    else{seed=Save.data.fightSeed=(Save.data.fightSeed||1);Save.data.fightSeed++;Save.put()}
     this.lastFightOpts=o; // FIGHT AGAIN replays these (minus seed) so a custom p2/ai isn't lost
     let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
     // {floor,node} sugar: node is an index into that floor's .nodes, or the string 'boss' for that
@@ -5091,7 +5120,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // neither does an exhibition/arena LOSS. This handler itself stays mode-generic (not gated on
     // won/mode) since it's only ever reachable through a click when the button is actually visible.
     document.getElementById('again').onclick=()=>{
-      const opts=Object.assign({},this.lastFightOpts,{seed:this.fight?this.fight.rng.int(1e9)+1:this.seed});
+      const opts=Object.assign({},this.lastFightOpts,{seed:this.fight?this.fight.rng.int(1e9)+1:1});
       if(this.mode==='arena')this.startArena(opts);else this.startFight(opts)};
     document.getElementById('resultTitleBtn').onclick=()=>this.backToOrigin();
     // Task 6.1 (owner playtest note: "No way to exit it seems after a defeat"): TITLE is a second,
@@ -5599,6 +5628,42 @@ const eq=(a,b,m)=>{if(a!==b)throw new Error((m||'')+' expected '+JSON.stringify(
 const ok=(v,m)=>{if(!v)throw new Error(m||'expected truthy')};
 const threw=fn=>{try{fn()}catch(e){return true}return false};
 Test.add('rng is deterministic per seed',()=>{const a=RNG(42),b=RNG(42);for(let i=0;i<5;i++)eq(a.next(),b.next());ok(RNG(1).next()!==RNG(2).next())});
+// Fix-wave item 4 (final review, Important): xorshift32's first output from a small seed (1, 2, 3...)
+// is badly under-mixed (RNG(1).next() was ~0.0000629 before this fix, RNG(2).next() almost exactly
+// double that) -- since every real fight used to run at seed 1, the first landed hit of every fight
+// was a guaranteed crit. RNG(seed) now discards 8 throwaway draws at construction; the first real draw
+// off any of seeds 1..8 must no longer be near-zero.
+Test.add('RNG(seed).next()\'s first real draw is not near-zero for seeds 1..8 (the under-mixed-first-output fix)',()=>{
+  for(let s=1;s<=8;s++){
+    const v=RNG(s).next();
+    ok(v>0.01,'RNG('+s+').next() must be well above the under-mixed-first-output region, got '+v)}});
+Test.add('a fresh fight\'s first crit roll off seed 1 is not the old guaranteed-crit value',()=>{
+  // Directly mirrors Crystal.rollTier's own historical measurement (12_meta.js's comment): the raw,
+  // un-warmed first draw off seed 1 was 0.0000629... -- comfortably under any real crit chance in
+  // CHAMPS/DEFS, so it always rolled a crit. The warmed-up first draw must not be.
+  const f=mkFight({seed:1,noCrit:false});
+  ok(f.rng.next()>0.01,'the warmed-up first rng draw off a seed-1 fight must not be near-zero')});
+// Fix-wave item 4: G.startFight for a REAL fight (no o.seed given) now draws from the persisted,
+// ever-incrementing Save.data.fightSeed instead of the constant it used to fall back to -- every real
+// fight ran at the exact same seed before this fix. Two consecutive real fights must land on different
+// seeds; the RNG each fight's p1/p2 controllers and this.rng/presRng are built from is never directly
+// observable here, so this checks the thing G.startFight itself actually varies: Save.data.fightSeed.
+Test.add('two consecutive real (no-seed) fights advance Save.data.fightSeed to different values',()=>{
+  Save.data=Meta.defaults();
+  const before=Save.data.fightSeed;
+  G.startFight({p1:'carl',p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  const afterFirst=Save.data.fightSeed;
+  ok(afterFirst!==before,'the first real fight must advance Save.data.fightSeed');
+  G.startFight({p1:'carl',p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  const afterSecond=Save.data.fightSeed;
+  ok(afterSecond!==afterFirst,'a second real fight must advance Save.data.fightSeed again, to a new value');
+  G.toTitle()});
+Test.add('an explicit o.seed (every harness/test/batch call site) is used verbatim, never Save.data.fightSeed',()=>{
+  Save.data=Meta.defaults();
+  const before=Save.data.fightSeed;
+  G.startFight({seed:1,p1:'carl',p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  eq(Save.data.fightSeed,before,'an explicit seed must never touch Save.data.fightSeed');
+  G.toTitle()});
 Test.add('move table is complete and sane',()=>{
   for(const k of ['light1','light2','light3','light4','light5','medium','heavy','s1','s2','s3']){const m=MOVES[k];ok(m,k+' missing');
     for(const f of ['startup','active','recovery','dmg','range','hitstun','blockstun','push','powHit','powTaken'])ok(typeof m[f]==='number',k+'.'+f)}
@@ -6386,7 +6451,10 @@ Test.add('G.tick decrements cinematic without stepping the sim',()=>{const f=mkF
 Test.add('brute profile exists and prefers heavies',()=>{ok(AI.profiles.brute);ok(AI.profiles.brute.heavy>=.5)});
 Test.add('brute AI lands a heavy on an idle target within 600 frames',()=>{
   let landed=false;
-  const f=mkFight({ctrl2:AI.make('brute',13),onEvent:(type,a)=>{if(type==='hit'&&a&&a.side===-1&&a.moveName==='heavy')landed=true}});
+  // Fix-wave item 4: seed bumped 13->1 -- RNG(seed) now discards 8 warm-up draws at construction
+  // (10_util.js), which shifts seed 13's own downstream roll sequence past this test's 600-frame
+  // window; re-picked against the new RNG (seed 1 lands well inside it, same as most other seeds).
+  const f=mkFight({ctrl2:AI.make('brute',1),onEvent:(type,a)=>{if(type==='hit'&&a&&a.side===-1&&a.moveName==='heavy')landed=true}});
   // Positioned inside heavy range (not closeIn's light range): Task 3.6's combo follow-through
   // (see 55_ai.js's comboFollow) now lets a landed light chase into a 3-4 hit chain, which starting
   // from light range can KO an idle target before repeated light pushback ever widens the gap out to
@@ -6833,13 +6901,13 @@ Test.add('Save.put/load round-trips a v2 save',()=>{
 // which would blow well past a 2% tolerance if this test ran through Crystal.open unbroken).
 Test.add('Crystal.rollTier matches basic odds within 2% over 10000 draws',()=>{
   const tally={1:0,2:0,3:0};
-  for(let s=1;s<=10000;s++){const t=Crystal.rollTier(Crystal.KINDS.basic.odds,Crystal.rng(s));tally[t]++}
+  for(let s=1;s<=10000;s++){const t=Crystal.rollTier(Crystal.KINDS.basic.odds,RNG(s));tally[t]++}
   ok(Math.abs(tally[1]/10000-.70)<=.02,'1-star freq '+tally[1]/10000);
   ok(Math.abs(tally[2]/10000-.25)<=.02,'2-star freq '+tally[2]/10000);
   ok(Math.abs(tally[3]/10000-.05)<=.02,'3-star freq '+tally[3]/10000)});
 Test.add('Crystal.rollTier matches premium odds within 2% over 10000 draws',()=>{
   const tally={2:0,3:0,4:0};
-  for(let s=1;s<=10000;s++){const t=Crystal.rollTier(Crystal.KINDS.premium.odds,Crystal.rng(s));tally[t]++}
+  for(let s=1;s<=10000;s++){const t=Crystal.rollTier(Crystal.KINDS.premium.odds,RNG(s));tally[t]++}
   ok(Math.abs(tally[2]/10000-.60)<=.02,'2-star freq '+tally[2]/10000);
   ok(Math.abs(tally[3]/10000-.32)<=.02,'3-star freq '+tally[3]/10000);
   ok(Math.abs(tally[4]/10000-.08)<=.02,'4-star freq '+tally[4]/10000)});
