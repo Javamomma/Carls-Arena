@@ -230,6 +230,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       p1def=Object.assign({},p1def,{hp:d.hp,atk:Math.round(d.atk*perkOpts.statMul.atk)})}
     this.fight=new Fight({seed,p1:p1def,p2:p2def,clock:o.clock,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
+    // Task 5.5: fire-and-forget atlas preload for both looks. Atlas.load itself is the gate -- a
+    // no-op Promise.resolve(null) with no fetch at all unless settings.useAtlas/?atlas=1 -- so this
+    // call is safe to make unconditionally on every fight, never awaited (never blocks this call or
+    // the fight's first render), and its result is never read here: Rig.draw's own short-circuit
+    // reads ATLAS[lookId] fresh every frame, once/if the promise settles.
+    Atlas.load(this.fight.p1.def.id);Atlas.load(this.fight.p2.def.id);
     // ids, not enc.buffs' resolved objects, so the sim's Buffs.apply does its own resolution instead
     // of trusting a reference that passed through the encounter/presentation layer.
     if(this.encounter&&this.encounter.buffIds&&this.encounter.buffIds.length)Buffs.apply(this.fight,this.fight.p2,this.encounter.buffIds);

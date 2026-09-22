@@ -612,6 +612,51 @@ function lookFor(def){
     console.warn('Rig: def "'+(def.id||'?')+'" has no .look; falling back to LOOKS.carl')}
   return LOOKS.carl}
 
+// ---- Task 5.5: optional sprite atlas hook -----------------------------------------------------
+// ATLAS[lookId] is the single source of truth Rig.draw's short-circuit (below) reads every frame:
+// undefined = never loaded/attempted (draw the FK rig, as always); a Promise = a real fetch is in
+// flight (still draw the FK rig -- this is what "never blocks first render" means in practice: the
+// rig path keeps drawing every frame until the promise resolves); a plain {img,meta} object or null
+// = settled (an atlas to draw from, or a permanent "this look has none" -- also draw the FK rig).
+// Kept as a bare global object (not a property on Atlas) specifically so a test can assign a
+// synthetic {img,meta} straight onto ATLAS.<lookId> without going through Atlas.load at all, per the
+// frozen interface ("Rig.draw uses ATLAS[lookId] when present").
+const ATLAS={};
+const Atlas={
+  // Promise<{img,meta}|null>, cached in ATLAS[lookId] itself (see the comment above): while a real
+  // fetch is in flight the SAME promise this call returns sits in ATLAS[lookId], so a second
+  // concurrent Atlas.load(lookId) call finds it there and returns that exact cached promise instead
+  // of starting a second fetch; once it settles, ATLAS[lookId] is overwritten with the resolved
+  // value ({img,meta} or null) itself, which is what Rig.draw actually reads. Never fetches unless
+  // Save.data.settings.useAtlas is true or the page URL has ?atlas=1 (Ruling #4) -- the disabled
+  // path resolves null WITHOUT writing to ATLAS at all, so flipping the setting on later and
+  // starting a fresh fight can still trigger a real, uncached attempt.
+  load(lookId){
+    if(lookId in ATLAS){
+      const cached=ATLAS[lookId];
+      return cached&&typeof cached.then==='function'?cached:Promise.resolve(cached)}
+    const enabled=!!(Save.data&&Save.data.settings&&Save.data.settings.useAtlas)||/(?:^|[?&])atlas=1(?:&|$)/.test(location.search);
+    if(!enabled)return Promise.resolve(null);
+    // Missing files, bad JSON, and a rejected/thrown fetch (file:// rejects rather than 404ing) all
+    // funnel through this one try/catch into a clean null -- Atlas.load itself must never throw or
+    // leave a rejected promise for a caller (G.startFight below) that never attaches a .catch.
+    const p=(async()=>{
+      try{
+        const res=await fetch('assets/'+lookId+'/sheet.json');
+        if(!res||!res.ok)return null;
+        const meta=await res.json();
+        if(!meta||typeof meta!=='object'||!meta.frame||!meta.poses)return null;
+        const img=await new Promise(resolve=>{
+          const im=new Image();
+          im.onload=()=>resolve(im);
+          im.onerror=()=>resolve(null);
+          im.src='assets/'+lookId+'/sheet.png'});
+        return img?{img,meta}:null
+      }catch(e){return null}
+    })().then(result=>{ATLAS[lookId]=result;return result});
+    ATLAS[lookId]=p;
+    return p}};
+
 // ---- forward kinematics ----
 const Rig={
   bones:['hip','torso','neck','head','lShoulder','lElbow','lHand','rShoulder','rElbow','rHand','lHip','lKnee','lFoot','rHip','rKnee','rFoot'],
@@ -643,6 +688,13 @@ const Rig={
       return[{x:tx+face*7,y:j.head.y+look.headR*.25}]}
     return[]}, // 'vest','boxers','bandages','gear','rags','trousers','scars','segments': stay within
                // joint bounds (torso/hip/limb strokes), no separate extent contribution.
+  // Task 5.5: deliberately UNCHANGED by the atlas hook. extent() always walks the FK rig's own
+  // geometry (never a sprite sheet's pixels), on the assumption that a hand-drawn atlas frame is
+  // authored to fit within its character's own rig silhouette -- the camera's per-fight zoom cap
+  // (G.startFight, 80_game.js) and the wall-clamp reach check (90_tests.js) both size themselves off
+  // this number regardless of whether that character ends up drawn as the rig or an atlas frame. An
+  // atlas artist who draws a limb reaching visibly further than the rig's own FK would silently
+  // exceed those margins; nothing here catches that case.
   // Worst-case {top, reach} (both positive) a look can strike across EVERY pose it can reach, sampled
   // at every keyframe and its neighbors' midpoint (not just t=0/.5/1 globally — a multi-keyframe
   // flurry like s3 has real peaks at interior keyframes a coarse global sample could straddle and
@@ -841,7 +893,41 @@ const Rig={
     return{hip,spine,chest,neck,head,tail1,tail2,
       flHip,fl1:fl.knee,fl2:fl.paw,frHip,fr1:fr.knee,fr2:fr.paw,
       blHip,bl1:bl.knee,bl2:bl.paw,brHip,br1:br.knee,br2:br.paw}},
+  // Task 5.5: draws one atlas frame in place of the whole FK rig -- broken out of draw() as its own
+  // method purely so a test can spy on it (wrap-and-restore) to confirm draw() took this path without
+  // needing to decode pixels back off the canvas. sheet coordinates come from meta.poses[key][idx]
+  // (idx = floor(t01*(frames-1)), the frozen sampling rule -- no easing, no interpolation between
+  // frames, same "just pick the nearest keyframe" spirit as a low-frame-count sprite sheet always
+  // has); meta.frame gives the shared {w,h,anchorX,anchorY} every frame in the sheet shares. The
+  // anchor is where the fighter's feet sit within the frame, so translating to (F.x,FLOOR) and
+  // drawing the subimage offset by -anchorX,-anchorY plants that point exactly on the floor line,
+  // the same origin every FK pose already draws from (see draw()'s own c.translate(F.x,FLOOR) just
+  // below). Mirrored by face and scaled by def.scale via the canvas transform itself (a flat image
+  // has no per-joint face math to redo, unlike the FK solve() paths) -- negative x-scale flips the
+  // drawImage call along with everything else drawn in this transform.
+  _drawAtlasFrame(c,F,cam,frame,atlas,key,t01){
+    const meta=atlas.meta,fr=meta.frame,frames=meta.poses[key];
+    const idx=Math.max(0,Math.min(frames.length-1,Math.floor(clamp(t01,0,1)*(frames.length-1))));
+    const[sx,sy]=frames[idx];
+    const scale=F.def.scale||1,face=F.face||1;
+    c.save();
+    c.translate(F.x,FLOOR);
+    c.scale(scale*face,scale);
+    c.drawImage(atlas.img,sx,sy,fr.w,fr.h,-fr.anchorX,-fr.anchorY,fr.w,fr.h);
+    c.restore()},
   draw(c,F,cam,frame){
+    // Task 5.5: the atlas short-circuit. F.def.id doubles as the atlas lookId (it's the same key
+    // LOOKS/DEFS are both keyed on -- see the DEFS[id].look=LOOKS[id] wiring loop at the bottom of
+    // this file). ATLAS[lookId] only ever holds a real {img,meta} once Atlas.load's promise has
+    // settled successfully (see its own comment above) -- a pending promise or a settled `null` both
+    // fail the `atlas&&atlas.meta` check below and fall straight through to the ordinary FK rig path,
+    // exactly the "missing files fall back to the rig silently" contract (Ruling #4). Only short-
+    // circuits when this fighter's CURRENT pose key has frames in the manifest -- a partial atlas
+    // (some poses covered, not others) still lets the rig path fill in whatever's missing.
+    const lookId=F.def&&F.def.id,atlas=lookId&&ATLAS[lookId];
+    if(atlas&&atlas.meta&&atlas.meta.poses){
+      const{key,t01}=this.poseFor(F);
+      if(atlas.meta.poses[key]){this._drawAtlasFrame(c,F,cam,frame,atlas,key,t01);return}}
     const look0=lookFor(F.def);
     if(look0.rig==='quad')return this.drawQuad(c,F,cam,frame,look0);
     if(look0.rig==='big')return this.drawBig(c,F,cam,frame,look0);

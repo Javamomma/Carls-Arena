@@ -2522,6 +2522,51 @@ function lookFor(def){
     console.warn('Rig: def "'+(def.id||'?')+'" has no .look; falling back to LOOKS.carl')}
   return LOOKS.carl}
 
+// ---- Task 5.5: optional sprite atlas hook -----------------------------------------------------
+// ATLAS[lookId] is the single source of truth Rig.draw's short-circuit (below) reads every frame:
+// undefined = never loaded/attempted (draw the FK rig, as always); a Promise = a real fetch is in
+// flight (still draw the FK rig -- this is what "never blocks first render" means in practice: the
+// rig path keeps drawing every frame until the promise resolves); a plain {img,meta} object or null
+// = settled (an atlas to draw from, or a permanent "this look has none" -- also draw the FK rig).
+// Kept as a bare global object (not a property on Atlas) specifically so a test can assign a
+// synthetic {img,meta} straight onto ATLAS.<lookId> without going through Atlas.load at all, per the
+// frozen interface ("Rig.draw uses ATLAS[lookId] when present").
+const ATLAS={};
+const Atlas={
+  // Promise<{img,meta}|null>, cached in ATLAS[lookId] itself (see the comment above): while a real
+  // fetch is in flight the SAME promise this call returns sits in ATLAS[lookId], so a second
+  // concurrent Atlas.load(lookId) call finds it there and returns that exact cached promise instead
+  // of starting a second fetch; once it settles, ATLAS[lookId] is overwritten with the resolved
+  // value ({img,meta} or null) itself, which is what Rig.draw actually reads. Never fetches unless
+  // Save.data.settings.useAtlas is true or the page URL has ?atlas=1 (Ruling #4) -- the disabled
+  // path resolves null WITHOUT writing to ATLAS at all, so flipping the setting on later and
+  // starting a fresh fight can still trigger a real, uncached attempt.
+  load(lookId){
+    if(lookId in ATLAS){
+      const cached=ATLAS[lookId];
+      return cached&&typeof cached.then==='function'?cached:Promise.resolve(cached)}
+    const enabled=!!(Save.data&&Save.data.settings&&Save.data.settings.useAtlas)||/(?:^|[?&])atlas=1(?:&|$)/.test(location.search);
+    if(!enabled)return Promise.resolve(null);
+    // Missing files, bad JSON, and a rejected/thrown fetch (file:// rejects rather than 404ing) all
+    // funnel through this one try/catch into a clean null -- Atlas.load itself must never throw or
+    // leave a rejected promise for a caller (G.startFight below) that never attaches a .catch.
+    const p=(async()=>{
+      try{
+        const res=await fetch('assets/'+lookId+'/sheet.json');
+        if(!res||!res.ok)return null;
+        const meta=await res.json();
+        if(!meta||typeof meta!=='object'||!meta.frame||!meta.poses)return null;
+        const img=await new Promise(resolve=>{
+          const im=new Image();
+          im.onload=()=>resolve(im);
+          im.onerror=()=>resolve(null);
+          im.src='assets/'+lookId+'/sheet.png'});
+        return img?{img,meta}:null
+      }catch(e){return null}
+    })().then(result=>{ATLAS[lookId]=result;return result});
+    ATLAS[lookId]=p;
+    return p}};
+
 // ---- forward kinematics ----
 const Rig={
   bones:['hip','torso','neck','head','lShoulder','lElbow','lHand','rShoulder','rElbow','rHand','lHip','lKnee','lFoot','rHip','rKnee','rFoot'],
@@ -2553,6 +2598,13 @@ const Rig={
       return[{x:tx+face*7,y:j.head.y+look.headR*.25}]}
     return[]}, // 'vest','boxers','bandages','gear','rags','trousers','scars','segments': stay within
                // joint bounds (torso/hip/limb strokes), no separate extent contribution.
+  // Task 5.5: deliberately UNCHANGED by the atlas hook. extent() always walks the FK rig's own
+  // geometry (never a sprite sheet's pixels), on the assumption that a hand-drawn atlas frame is
+  // authored to fit within its character's own rig silhouette -- the camera's per-fight zoom cap
+  // (G.startFight, 80_game.js) and the wall-clamp reach check (90_tests.js) both size themselves off
+  // this number regardless of whether that character ends up drawn as the rig or an atlas frame. An
+  // atlas artist who draws a limb reaching visibly further than the rig's own FK would silently
+  // exceed those margins; nothing here catches that case.
   // Worst-case {top, reach} (both positive) a look can strike across EVERY pose it can reach, sampled
   // at every keyframe and its neighbors' midpoint (not just t=0/.5/1 globally — a multi-keyframe
   // flurry like s3 has real peaks at interior keyframes a coarse global sample could straddle and
@@ -2751,7 +2803,41 @@ const Rig={
     return{hip,spine,chest,neck,head,tail1,tail2,
       flHip,fl1:fl.knee,fl2:fl.paw,frHip,fr1:fr.knee,fr2:fr.paw,
       blHip,bl1:bl.knee,bl2:bl.paw,brHip,br1:br.knee,br2:br.paw}},
+  // Task 5.5: draws one atlas frame in place of the whole FK rig -- broken out of draw() as its own
+  // method purely so a test can spy on it (wrap-and-restore) to confirm draw() took this path without
+  // needing to decode pixels back off the canvas. sheet coordinates come from meta.poses[key][idx]
+  // (idx = floor(t01*(frames-1)), the frozen sampling rule -- no easing, no interpolation between
+  // frames, same "just pick the nearest keyframe" spirit as a low-frame-count sprite sheet always
+  // has); meta.frame gives the shared {w,h,anchorX,anchorY} every frame in the sheet shares. The
+  // anchor is where the fighter's feet sit within the frame, so translating to (F.x,FLOOR) and
+  // drawing the subimage offset by -anchorX,-anchorY plants that point exactly on the floor line,
+  // the same origin every FK pose already draws from (see draw()'s own c.translate(F.x,FLOOR) just
+  // below). Mirrored by face and scaled by def.scale via the canvas transform itself (a flat image
+  // has no per-joint face math to redo, unlike the FK solve() paths) -- negative x-scale flips the
+  // drawImage call along with everything else drawn in this transform.
+  _drawAtlasFrame(c,F,cam,frame,atlas,key,t01){
+    const meta=atlas.meta,fr=meta.frame,frames=meta.poses[key];
+    const idx=Math.max(0,Math.min(frames.length-1,Math.floor(clamp(t01,0,1)*(frames.length-1))));
+    const[sx,sy]=frames[idx];
+    const scale=F.def.scale||1,face=F.face||1;
+    c.save();
+    c.translate(F.x,FLOOR);
+    c.scale(scale*face,scale);
+    c.drawImage(atlas.img,sx,sy,fr.w,fr.h,-fr.anchorX,-fr.anchorY,fr.w,fr.h);
+    c.restore()},
   draw(c,F,cam,frame){
+    // Task 5.5: the atlas short-circuit. F.def.id doubles as the atlas lookId (it's the same key
+    // LOOKS/DEFS are both keyed on -- see the DEFS[id].look=LOOKS[id] wiring loop at the bottom of
+    // this file). ATLAS[lookId] only ever holds a real {img,meta} once Atlas.load's promise has
+    // settled successfully (see its own comment above) -- a pending promise or a settled `null` both
+    // fail the `atlas&&atlas.meta` check below and fall straight through to the ordinary FK rig path,
+    // exactly the "missing files fall back to the rig silently" contract (Ruling #4). Only short-
+    // circuits when this fighter's CURRENT pose key has frames in the manifest -- a partial atlas
+    // (some poses covered, not others) still lets the rig path fill in whatever's missing.
+    const lookId=F.def&&F.def.id,atlas=lookId&&ATLAS[lookId];
+    if(atlas&&atlas.meta&&atlas.meta.poses){
+      const{key,t01}=this.poseFor(F);
+      if(atlas.meta.poses[key]){this._drawAtlasFrame(c,F,cam,frame,atlas,key,t01);return}}
     const look0=lookFor(F.def);
     if(look0.rig==='quad')return this.drawQuad(c,F,cam,frame,look0);
     if(look0.rig==='big')return this.drawBig(c,F,cam,frame,look0);
@@ -3680,6 +3766,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       p1def=Object.assign({},p1def,{hp:d.hp,atk:Math.round(d.atk*perkOpts.statMul.atk)})}
     this.fight=new Fight({seed,p1:p1def,p2:p2def,clock:o.clock,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
+    // Task 5.5: fire-and-forget atlas preload for both looks. Atlas.load itself is the gate -- a
+    // no-op Promise.resolve(null) with no fetch at all unless settings.useAtlas/?atlas=1 -- so this
+    // call is safe to make unconditionally on every fight, never awaited (never blocks this call or
+    // the fight's first render), and its result is never read here: Rig.draw's own short-circuit
+    // reads ATLAS[lookId] fresh every frame, once/if the promise settles.
+    Atlas.load(this.fight.p1.def.id);Atlas.load(this.fight.p2.def.id);
     // ids, not enc.buffs' resolved objects, so the sim's Buffs.apply does its own resolution instead
     // of trusting a reference that passed through the encounter/presentation layer.
     if(this.encounter&&this.encounter.buffIds&&this.encounter.buffIds.length)Buffs.apply(this.fight,this.fight.p2,this.encounter.buffIds);
@@ -4597,8 +4689,15 @@ const Screens={
     cont.textContent='CONTINUE';
     cont.onclick=()=>G.backToOrigin()}};
 
+// Task 5.5: run() is now async so a case's fn may return a Promise (an async test, e.g. one that
+// awaits Atlas.load) -- `await`ing a plain non-Promise return value (every existing sync test) is a
+// same-tick no-op, so every sync case's pass/fail behavior is unchanged. Test.add itself needs no
+// change at all: async and sync fns are added identically, and a sync fn that throws synchronously
+// is still caught by the same try/catch (the throw happens before the `await` line is even reached).
+// tests/harness.py's `pg.evaluate('Test.run()')` already awaits whatever it evaluates to when that's
+// a Promise (Playwright's own behavior), so no harness change was needed for this either.
 const Test={cases:[],add(n,fn){this.cases.push({n,fn})},
-  run(){const out=[];for(const c of this.cases){try{c.fn();out.push({name:c.n,ok:true})}catch(e){out.push({name:c.n,ok:false,err:String(e&&e.message||e)})}}
+  async run(){const out=[];for(const c of this.cases){try{await c.fn();out.push({name:c.n,ok:true})}catch(e){out.push({name:c.n,ok:false,err:String(e&&e.message||e)})}}
     return{pass:out.filter(o=>o.ok).length,fail:out.filter(o=>!o.ok).length,results:out}}};
 const eq=(a,b,m)=>{if(a!==b)throw new Error((m||'')+' expected '+JSON.stringify(b)+' got '+JSON.stringify(a))};
 const ok=(v,m)=>{if(!v)throw new Error(m||'expected truthy')};
@@ -4774,6 +4873,97 @@ Test.add('fighters clamp to STAGE_W not W',()=>{const F=mkFighter();F.x=STAGE_W+
 Test.add('every look has every pose the state machine can reach',()=>{const need=['idle','walk','dash','light1','light2','light3','light4','light5','medium','heavyCharge','heavy','block','blockstun','hit','knockdown','getup','stunned','s1','s2','s3','win','ko'];for(const k of need)ok(POSES[k]&&POSES[k].length>=2,'pose '+k);for(const id of ['carl','katia','goblin','hobgoblin'])ok(LOOKS[id]&&DEFS[id].look===LOOKS[id],'look '+id)});
 Test.add('rig solve returns all joints with feet on the floor line',()=>{const j=Rig.solve(LOOKS.carl,'idle',0,1);for(const b of Rig.bones)ok(j[b]&&isFinite(j[b].x)&&isFinite(j[b].y),b);ok(Math.abs(j.lFoot.y)<6&&Math.abs(j.rFoot.y)<6,'feet at y≈0');ok(j.head.y<j.hip.y,'head above hip')});
 Test.add('poses differ: light1 active frame moves the lead hand forward of idle',()=>{const a=Rig.solve(LOOKS.carl,'idle',0,1),b=Rig.solve(LOOKS.carl,'light1',0.5,1);ok(b.rHand.x>a.rHand.x+20,'punch extends')});
+// ---- Task 5.5: optional sprite atlas hook ----------------------------------------------------
+// Atlas.load never fetches unless enabled (settings.useAtlas or ?atlas=1); this run leaves useAtlas
+// at its default (false) so this first case also doubles as "disabled means no cache entry, no
+// fetch" -- it resolves synchronously-fast (no network attempted) and must still never throw.
+Test.add('Atlas.load resolves null (never throws) when disabled',async()=>{
+  const saved=Save.data.settings.useAtlas;Save.data.settings.useAtlas=false;
+  try{const r=await Atlas.load('__atlas_test_disabled__');eq(r,null)}
+  finally{Save.data.settings.useAtlas=saved}});
+// Enabled but the manifest doesn't exist (a real deploy 404s over HTTP -- stubbed here rather than
+// hitting the real file:// network layer, which fails at the SCHEME level under the headless
+// harness and logs its own browser-side console error unrelated to anything this code does).
+// Atlas.load's own try/catch turns any of missing/bad-JSON/network-error into a clean null
+// resolution, same contract as the disabled case above -- a missing atlas is never visible to a
+// caller as a thrown error, and never logs anything of its own either.
+Test.add('Atlas.load resolves null (never throws) for a missing manifest',async()=>{
+  const saved=Save.data.settings.useAtlas,savedFetch=window.fetch;
+  Save.data.settings.useAtlas=true;
+  window.fetch=async()=>({ok:false,status:404});
+  try{const r=await Atlas.load('__atlas_test_missing__');eq(r,null)}
+  finally{Save.data.settings.useAtlas=saved;window.fetch=savedFetch}});
+// G.startFight fires Atlas.load for both looks; with useAtlas off that must never reach fetch() at
+// all -- stubbing fetch to throw and starting a fight is the frozen way to prove the default path
+// stays fully offline.
+Test.add('default path never calls fetch: G.startFight with useAtlas off never invokes it',()=>{
+  const savedFetch=window.fetch,savedUseAtlas=Save.data.settings.useAtlas;
+  Save.data.settings.useAtlas=false;
+  window.fetch=()=>{throw new Error('fetch must not be called on the default (atlas-off) path')};
+  try{ok(G.startFight({p1:'carl',p2:'donut',ctrl1:Ctrl.idle()})!==false,'startFight should still succeed')}
+  finally{window.fetch=savedFetch;Save.data.settings.useAtlas=savedUseAtlas;G.toTitle()}});
+// A synthetic per-look atlas assigned straight onto ATLAS (as Atlas.load itself would once a real
+// fetch resolves) -- Rig.draw must short-circuit to the atlas path (Rig._drawAtlasFrame) instead of
+// the FK rig path whenever ATLAS[lookId] has a manifest with poses for the fighter's current key.
+function mkSyntheticAtlas(){
+  const oc=document.createElement('canvas');oc.width=4;oc.height=2;
+  const ox=oc.getContext('2d');
+  ox.fillStyle='#f00';ox.fillRect(0,0,2,2); // frame 0: red
+  ox.fillStyle='#0f0';ox.fillRect(2,0,2,2); // frame 1: green
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>resolve({img,meta:{frame:{w:2,h:2,anchorX:1,anchorY:2},poses:{idle:[[0,0],[2,0]]}}});
+    img.onerror=reject;
+    img.src=oc.toDataURL()})}
+Test.add('Rig.draw takes the atlas path (spy on Rig._drawAtlasFrame) when ATLAS[lookId] has the pose',async()=>{
+  const atlas=await mkSyntheticAtlas();
+  const savedAtlas=ATLAS.carl,savedHook=Rig._drawAtlasFrame;
+  ATLAS.carl=atlas;
+  const calls=[];
+  Rig._drawAtlasFrame=function(...args){calls.push(args);return savedHook.apply(this,args)};
+  const c=document.createElement('canvas').getContext('2d');
+  const F={x:0,def:{id:'carl',scale:1},face:1,state:'IDLE',f:0,dx:0};
+  try{
+    Rig.draw(c,F,null,0);
+    eq(calls.length,1,'the atlas hook should fire exactly once');
+    eq(calls[0][5],'idle','pose key passed through');
+    eq(calls[0][6],0,'t01 passed through (idle at f=0 is t01=0)')
+  }finally{Rig._drawAtlasFrame=savedHook;if(savedAtlas===undefined)delete ATLAS.carl;else ATLAS.carl=savedAtlas}});
+Test.add('Rig._drawAtlasFrame picks frame 0 at t01=0 and frame 1 at t01=1 (via each frame\'s sheet x)',async()=>{
+  const atlas=await mkSyntheticAtlas();
+  const c=document.createElement('canvas').getContext('2d');
+  const F={x:0,def:{id:'carl',scale:1},face:1};
+  const draws=[];
+  const origDrawImage=c.drawImage.bind(c);
+  c.drawImage=(...a)=>{draws.push(a);return origDrawImage(...a)};
+  Rig._drawAtlasFrame(c,F,null,0,atlas,'idle',0);
+  Rig._drawAtlasFrame(c,F,null,0,atlas,'idle',1);
+  eq(draws.length,2);
+  eq(draws[0][1],0,'t01=0 should sample frame 0 (sheet x=0)');
+  eq(draws[1][1],2,'t01=1 should sample frame 1 (sheet x=2)')});
+Test.add('Rig.draw falls back to the ordinary FK rig path (spy on Rig.solve) when no atlas is loaded',()=>{
+  ok(!ATLAS.carl,'test isolation: ATLAS.carl must be unset here');
+  const savedSolve=Rig.solve,calls=[];
+  Rig.solve=function(...a){calls.push(a);return savedSolve.apply(this,a)};
+  const c=document.createElement('canvas').getContext('2d');
+  const F={x:0,def:{id:'carl',scale:1},face:1,state:'IDLE',f:0,dx:0};
+  try{Rig.draw(c,F,null,0);ok(calls.length>=1,'the FK solve path should run when no atlas is present')}
+  finally{Rig.solve=savedSolve}});
+// Frozen constraint: nothing outside Atlas.load's own body may reference `fetch` at 68_rig.js's top
+// level -- the whole file's build.py-concatenated source lives verbatim in the page's one inline
+// <script> (no per-file wrapper), so this reads it back via document.scripts and isolates the
+// 68_rig.js segment between its own known first line and 70_render.js's own first line.
+Test.add('Atlas: fetch is referenced nowhere in 68_rig.js except inside Atlas.load',()=>{
+  const full=[...document.scripts].map(s=>s.textContent||'').join('\n');
+  const start=full.indexOf('// Stylized vector-rig renderer.');
+  const end=full.indexOf('const Render={ctx:canvas.getContext');
+  ok(start>=0&&end>start,'could not locate src/68_rig.js in the built page');
+  const rigSrc=full.slice(start,end);
+  const loadSrc=Atlas.load.toString();
+  ok(/fetch\s*\(/.test(loadSrc),'Atlas.load itself must fetch when enabled');
+  ok(rigSrc.indexOf(loadSrc)>=0,'Atlas.load\'s body should appear verbatim inside 68_rig.js source');
+  const withoutLoad=rigSrc.split(loadSrc).join('');
+  ok(!/\bfetch\s*\(/.test(withoutLoad),'fetch must not be referenced outside Atlas.load in 68_rig.js')});
 Test.add('poseFor maps fighter state to pose key and progress',()=>{const F=mkFighter();eq(Rig.poseFor(F).key,'idle');
   const W=mkFighter();W.dx=2;eq(Rig.poseFor(W).key,'walk','IDLE with dx beyond the deadzone must map to walk');
   F.act(Object.assign(Ctrl.EMPTY(),{light:true}));for(let i=0;i<3;i++)F.tick();const p=Rig.poseFor(F);eq(p.key,'light1');ok(p.t01>0&&p.t01<1);F.setState('KNOCKDOWN');F.f=35;eq(Rig.poseFor(F).key,'getup')});

@@ -1,5 +1,12 @@
+// Task 5.5: run() is now async so a case's fn may return a Promise (an async test, e.g. one that
+// awaits Atlas.load) -- `await`ing a plain non-Promise return value (every existing sync test) is a
+// same-tick no-op, so every sync case's pass/fail behavior is unchanged. Test.add itself needs no
+// change at all: async and sync fns are added identically, and a sync fn that throws synchronously
+// is still caught by the same try/catch (the throw happens before the `await` line is even reached).
+// tests/harness.py's `pg.evaluate('Test.run()')` already awaits whatever it evaluates to when that's
+// a Promise (Playwright's own behavior), so no harness change was needed for this either.
 const Test={cases:[],add(n,fn){this.cases.push({n,fn})},
-  run(){const out=[];for(const c of this.cases){try{c.fn();out.push({name:c.n,ok:true})}catch(e){out.push({name:c.n,ok:false,err:String(e&&e.message||e)})}}
+  async run(){const out=[];for(const c of this.cases){try{await c.fn();out.push({name:c.n,ok:true})}catch(e){out.push({name:c.n,ok:false,err:String(e&&e.message||e)})}}
     return{pass:out.filter(o=>o.ok).length,fail:out.filter(o=>!o.ok).length,results:out}}};
 const eq=(a,b,m)=>{if(a!==b)throw new Error((m||'')+' expected '+JSON.stringify(b)+' got '+JSON.stringify(a))};
 const ok=(v,m)=>{if(!v)throw new Error(m||'expected truthy')};
@@ -175,6 +182,97 @@ Test.add('fighters clamp to STAGE_W not W',()=>{const F=mkFighter();F.x=STAGE_W+
 Test.add('every look has every pose the state machine can reach',()=>{const need=['idle','walk','dash','light1','light2','light3','light4','light5','medium','heavyCharge','heavy','block','blockstun','hit','knockdown','getup','stunned','s1','s2','s3','win','ko'];for(const k of need)ok(POSES[k]&&POSES[k].length>=2,'pose '+k);for(const id of ['carl','katia','goblin','hobgoblin'])ok(LOOKS[id]&&DEFS[id].look===LOOKS[id],'look '+id)});
 Test.add('rig solve returns all joints with feet on the floor line',()=>{const j=Rig.solve(LOOKS.carl,'idle',0,1);for(const b of Rig.bones)ok(j[b]&&isFinite(j[b].x)&&isFinite(j[b].y),b);ok(Math.abs(j.lFoot.y)<6&&Math.abs(j.rFoot.y)<6,'feet at y≈0');ok(j.head.y<j.hip.y,'head above hip')});
 Test.add('poses differ: light1 active frame moves the lead hand forward of idle',()=>{const a=Rig.solve(LOOKS.carl,'idle',0,1),b=Rig.solve(LOOKS.carl,'light1',0.5,1);ok(b.rHand.x>a.rHand.x+20,'punch extends')});
+// ---- Task 5.5: optional sprite atlas hook ----------------------------------------------------
+// Atlas.load never fetches unless enabled (settings.useAtlas or ?atlas=1); this run leaves useAtlas
+// at its default (false) so this first case also doubles as "disabled means no cache entry, no
+// fetch" -- it resolves synchronously-fast (no network attempted) and must still never throw.
+Test.add('Atlas.load resolves null (never throws) when disabled',async()=>{
+  const saved=Save.data.settings.useAtlas;Save.data.settings.useAtlas=false;
+  try{const r=await Atlas.load('__atlas_test_disabled__');eq(r,null)}
+  finally{Save.data.settings.useAtlas=saved}});
+// Enabled but the manifest doesn't exist (a real deploy 404s over HTTP -- stubbed here rather than
+// hitting the real file:// network layer, which fails at the SCHEME level under the headless
+// harness and logs its own browser-side console error unrelated to anything this code does).
+// Atlas.load's own try/catch turns any of missing/bad-JSON/network-error into a clean null
+// resolution, same contract as the disabled case above -- a missing atlas is never visible to a
+// caller as a thrown error, and never logs anything of its own either.
+Test.add('Atlas.load resolves null (never throws) for a missing manifest',async()=>{
+  const saved=Save.data.settings.useAtlas,savedFetch=window.fetch;
+  Save.data.settings.useAtlas=true;
+  window.fetch=async()=>({ok:false,status:404});
+  try{const r=await Atlas.load('__atlas_test_missing__');eq(r,null)}
+  finally{Save.data.settings.useAtlas=saved;window.fetch=savedFetch}});
+// G.startFight fires Atlas.load for both looks; with useAtlas off that must never reach fetch() at
+// all -- stubbing fetch to throw and starting a fight is the frozen way to prove the default path
+// stays fully offline.
+Test.add('default path never calls fetch: G.startFight with useAtlas off never invokes it',()=>{
+  const savedFetch=window.fetch,savedUseAtlas=Save.data.settings.useAtlas;
+  Save.data.settings.useAtlas=false;
+  window.fetch=()=>{throw new Error('fetch must not be called on the default (atlas-off) path')};
+  try{ok(G.startFight({p1:'carl',p2:'donut',ctrl1:Ctrl.idle()})!==false,'startFight should still succeed')}
+  finally{window.fetch=savedFetch;Save.data.settings.useAtlas=savedUseAtlas;G.toTitle()}});
+// A synthetic per-look atlas assigned straight onto ATLAS (as Atlas.load itself would once a real
+// fetch resolves) -- Rig.draw must short-circuit to the atlas path (Rig._drawAtlasFrame) instead of
+// the FK rig path whenever ATLAS[lookId] has a manifest with poses for the fighter's current key.
+function mkSyntheticAtlas(){
+  const oc=document.createElement('canvas');oc.width=4;oc.height=2;
+  const ox=oc.getContext('2d');
+  ox.fillStyle='#f00';ox.fillRect(0,0,2,2); // frame 0: red
+  ox.fillStyle='#0f0';ox.fillRect(2,0,2,2); // frame 1: green
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>resolve({img,meta:{frame:{w:2,h:2,anchorX:1,anchorY:2},poses:{idle:[[0,0],[2,0]]}}});
+    img.onerror=reject;
+    img.src=oc.toDataURL()})}
+Test.add('Rig.draw takes the atlas path (spy on Rig._drawAtlasFrame) when ATLAS[lookId] has the pose',async()=>{
+  const atlas=await mkSyntheticAtlas();
+  const savedAtlas=ATLAS.carl,savedHook=Rig._drawAtlasFrame;
+  ATLAS.carl=atlas;
+  const calls=[];
+  Rig._drawAtlasFrame=function(...args){calls.push(args);return savedHook.apply(this,args)};
+  const c=document.createElement('canvas').getContext('2d');
+  const F={x:0,def:{id:'carl',scale:1},face:1,state:'IDLE',f:0,dx:0};
+  try{
+    Rig.draw(c,F,null,0);
+    eq(calls.length,1,'the atlas hook should fire exactly once');
+    eq(calls[0][5],'idle','pose key passed through');
+    eq(calls[0][6],0,'t01 passed through (idle at f=0 is t01=0)')
+  }finally{Rig._drawAtlasFrame=savedHook;if(savedAtlas===undefined)delete ATLAS.carl;else ATLAS.carl=savedAtlas}});
+Test.add('Rig._drawAtlasFrame picks frame 0 at t01=0 and frame 1 at t01=1 (via each frame\'s sheet x)',async()=>{
+  const atlas=await mkSyntheticAtlas();
+  const c=document.createElement('canvas').getContext('2d');
+  const F={x:0,def:{id:'carl',scale:1},face:1};
+  const draws=[];
+  const origDrawImage=c.drawImage.bind(c);
+  c.drawImage=(...a)=>{draws.push(a);return origDrawImage(...a)};
+  Rig._drawAtlasFrame(c,F,null,0,atlas,'idle',0);
+  Rig._drawAtlasFrame(c,F,null,0,atlas,'idle',1);
+  eq(draws.length,2);
+  eq(draws[0][1],0,'t01=0 should sample frame 0 (sheet x=0)');
+  eq(draws[1][1],2,'t01=1 should sample frame 1 (sheet x=2)')});
+Test.add('Rig.draw falls back to the ordinary FK rig path (spy on Rig.solve) when no atlas is loaded',()=>{
+  ok(!ATLAS.carl,'test isolation: ATLAS.carl must be unset here');
+  const savedSolve=Rig.solve,calls=[];
+  Rig.solve=function(...a){calls.push(a);return savedSolve.apply(this,a)};
+  const c=document.createElement('canvas').getContext('2d');
+  const F={x:0,def:{id:'carl',scale:1},face:1,state:'IDLE',f:0,dx:0};
+  try{Rig.draw(c,F,null,0);ok(calls.length>=1,'the FK solve path should run when no atlas is present')}
+  finally{Rig.solve=savedSolve}});
+// Frozen constraint: nothing outside Atlas.load's own body may reference `fetch` at 68_rig.js's top
+// level -- the whole file's build.py-concatenated source lives verbatim in the page's one inline
+// <script> (no per-file wrapper), so this reads it back via document.scripts and isolates the
+// 68_rig.js segment between its own known first line and 70_render.js's own first line.
+Test.add('Atlas: fetch is referenced nowhere in 68_rig.js except inside Atlas.load',()=>{
+  const full=[...document.scripts].map(s=>s.textContent||'').join('\n');
+  const start=full.indexOf('// Stylized vector-rig renderer.');
+  const end=full.indexOf('const Render={ctx:canvas.getContext');
+  ok(start>=0&&end>start,'could not locate src/68_rig.js in the built page');
+  const rigSrc=full.slice(start,end);
+  const loadSrc=Atlas.load.toString();
+  ok(/fetch\s*\(/.test(loadSrc),'Atlas.load itself must fetch when enabled');
+  ok(rigSrc.indexOf(loadSrc)>=0,'Atlas.load\'s body should appear verbatim inside 68_rig.js source');
+  const withoutLoad=rigSrc.split(loadSrc).join('');
+  ok(!/\bfetch\s*\(/.test(withoutLoad),'fetch must not be referenced outside Atlas.load in 68_rig.js')});
 Test.add('poseFor maps fighter state to pose key and progress',()=>{const F=mkFighter();eq(Rig.poseFor(F).key,'idle');
   const W=mkFighter();W.dx=2;eq(Rig.poseFor(W).key,'walk','IDLE with dx beyond the deadzone must map to walk');
   F.act(Object.assign(Ctrl.EMPTY(),{light:true}));for(let i=0;i<3;i++)F.tick();const p=Rig.poseFor(F);eq(p.key,'light1');ok(p.t01>0&&p.t01<1);F.setState('KNOCKDOWN');F.f=35;eq(Rig.poseFor(F).key,'getup')});
