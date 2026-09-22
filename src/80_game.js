@@ -471,35 +471,62 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(r.xp)parts.push('+'+r.xp+' XP');
     if(r.units)parts.push('+'+r.units+' UNITS');
     return parts.join('  ')},
-  // Task 5.4: an 854x480 offscreen canvas (never attached to the DOM — a share card renders exactly
-  // like a screenshot, with no live #wrap/#btns/overlay chrome in it) summarizing the just-finished
-  // (or in-progress; nothing here requires f.over) fight: champion portrait, name, PEAK VIEWERS,
-  // floor/boss-or-streak, and today's date via Meta.today() (never a raw Date/performance.now() —
-  // same injectable-clock rule Meta.today() itself already enforces). Returns a PNG data URL;
-  // G.share() (below) is the one real caller, tests/harness.py's --share calls this directly.
+  // Fix-wave item 8 (final review, Minor): the play URL, in one place so the share card and any
+  // future caller stay in sync with README.md's own "Play it now" link.
+  PLAY_URL:'javamomma.github.io/Carls-Arena',
+  // Task 5.4 (redesigned per fix-wave item 8): an 854x480 offscreen canvas (never attached to the
+  // DOM — a share card renders exactly like a screenshot, with no live #wrap/#btns/overlay chrome in
+  // it) summarizing the just-finished (or in-progress; nothing here requires f.over) fight. The final
+  // review called the original layout thin (portrait/name/peak-viewers/date on flat #090b12, over
+  // half the frame empty) for the only artifact players post publicly -- this pass gives it a gold
+  // card frame (the HUD's own hpBar/portrait stroke weight and color, not a new style), a dark stage
+  // strip behind the portrait (mirrors the in-fight HUD's own portrait-on-dark-stage read), the
+  // game's own title glyph up top, a larger PEAK VIEWERS line, and the play URL in small text at the
+  // bottom so a screenshot of this card is itself an invitation. Returns a PNG data URL; G.share()
+  // (below) is the one real caller, tests/harness.py's --share calls this directly.
   shareCard(){
     const cv=document.createElement('canvas');cv.width=854;cv.height=480;
     const c=cv.getContext('2d');
+    const inset=10;
     c.fillStyle='#090b12';c.fillRect(0,0,cv.width,cv.height);
+    // Title glyph: the game's own name, bold/gold/black-stroked -- same "condensed FIGHTER wordmark"
+    // treatment the in-fight HUD bakes into Render.hudCache().title, redrawn plain here since a
+    // share card is built once per click, not once per frame.
+    c.textAlign='center';c.textBaseline='alphabetic';c.font='900 26px ui-monospace,monospace';
+    c.lineWidth=4;c.strokeStyle='#000';c.strokeText("CARL'S DOORWAY BRAWL",cv.width/2,42);
+    c.fillStyle='#f4c542';c.fillText("CARL'S DOORWAY BRAWL",cv.width/2,42);
+    // Dark stage strip behind the portrait -- a band darker than the card's own background, the same
+    // read as the in-fight HUD's portrait sitting on the dungeon stage rather than flat black.
+    const stageY=58,stageH=178;
+    c.fillStyle='#05060c';c.fillRect(inset,stageY,cv.width-inset*2,stageH);
+    c.strokeStyle='#f4c542';c.lineWidth=1.5;c.strokeRect(inset+.75,stageY+.75,cv.width-inset*2-1.5,stageH-1.5);
     const champId=this.champ||Save.data.active,def=DEFS[champId];
     if(def){
-      const portrait=Rig.portrait(lookFor(def)),pw=140,ph=140,px=cv.width/2-pw/2,py=48;
+      const portrait=Rig.portrait(lookFor(def)),pw=140,ph=140,px=cv.width/2-pw/2,py=stageY+(stageH-ph)/2;
       c.drawImage(portrait,px,py,pw,ph);
       c.strokeStyle='#f4c542';c.lineWidth=3;c.strokeRect(px+1.5,py+1.5,pw-3,ph-3)}
-    c.textAlign='center';c.fillStyle='#fff';c.font='900 30px ui-monospace,monospace';
-    c.fillText(def?def.name:'CHAMPION',cv.width/2,232);
-    c.fillStyle='#f4c542';c.font='bold 24px ui-monospace,monospace';
-    c.fillText('PEAK VIEWERS '+Render.fmtViewers(Broadcast.state.peak||0),cv.width/2,276);
+    c.textAlign='center';c.fillStyle='#fff';c.font='900 26px ui-monospace,monospace';
+    c.fillText(def?def.name:'CHAMPION',cv.width/2,stageY+stageH+30);
+    // PEAK VIEWERS: the card's own headline stat, sized up from the original pass so it reads as the
+    // one number worth sharing, not one line among several the same size.
+    c.fillStyle='#f4c542';c.font='900 36px ui-monospace,monospace';
+    c.fillText('PEAK VIEWERS '+Render.fmtViewers(Broadcast.state.peak||0),cv.width/2,stageY+stageH+76);
     // floor/boss for a quest fight, streak for an arena one, nothing for a bare exhibition -- mirrors
     // onFightEnd's own mode/questTarget reads just below.
     let prog='';
     if(this.mode==='quest'&&this.questTarget)prog='FLOOR '+this.questTarget.floor+(this.questTarget.node==='boss'?' — BOSS':'');
     else if(this.mode==='arena')prog='STREAK '+(Save.data.arena.streak||0);
-    if(prog){c.font='16px ui-monospace,monospace';c.fillStyle='#ccc';c.fillText(prog,cv.width/2,308)}
+    if(prog){c.font='16px ui-monospace,monospace';c.fillStyle='#ccc';c.fillText(prog,cv.width/2,stageY+stageH+104)}
     c.font='12px ui-monospace,monospace';c.fillStyle='#888';
-    c.fillText(Meta.today(),cv.width/2,336);
-    c.font='bold 12px ui-monospace,monospace';c.fillStyle='#555';
-    c.fillText("CARL'S DOORWAY BRAWL",cv.width/2,440);
+    c.fillText(Meta.today(),cv.width/2,stageY+stageH+128);
+    // Play URL, small text near the bottom -- the card is itself an invitation, not just a trophy.
+    c.font='11px ui-monospace,monospace';c.fillStyle='#7fb0a8';
+    c.fillText(this.PLAY_URL,cv.width/2,cv.height-inset-10);
+    // Gold card frame, drawn last so it sits over the strip/stat text edges cleanly -- same stroke
+    // color/weight the HUD's own hpBar/portrait frames already use, just once around the whole card.
+    c.strokeStyle='#f4c542';c.lineWidth=3;
+    if(c.roundRect){c.beginPath();c.roundRect(inset,inset,cv.width-inset*2,cv.height-inset*2,10);c.stroke()}
+    else c.strokeRect(inset+1.5,inset+1.5,cv.width-inset*2-3,cv.height-inset*2-3);
     return cv.toDataURL('image/png')},
   // navigator.share({files:[...]}) when the platform supports sharing an actual file (most mobile
   // browsers); otherwise falls back to downloadShareCard's plain <a download> link, which every
