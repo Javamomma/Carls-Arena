@@ -928,6 +928,14 @@ const Audio={ac:null,muted:Save.data.mute,_t:0,
   // user gesture), so every recipe is safe to call from the headless test harness with no gesture.
   recipes:{
     lights(){Audio.tone(210,.05,'square',.045)},                                   // generic short thud (fallback)
+    // Task 7.2: MOVES.light1..5 collapsed into one MOVES.light entry (50_fighter.js's moveName is now
+    // always the literal 'light'), so G.onEvent's own Audio.recipes[a.moveName] lookup (80_game.js)
+    // needs a 'light' entry to actually resolve to a real per-move tone instead of always falling
+    // through to the generic 'lights' thud above -- same tone light1 always played, since node-1
+    // numbers are unchanged. light1..light5 stay defined below (still used as fixed sub-hit/testing
+    // tones elsewhere -- 80_game.js's multi-hit special sub-thud always plays light1 regardless of the
+    // landing move's own name), not dead code, just no longer reachable via a moveName lookup.
+    light(){Audio.tone(200,.05,'square',.045)},
     light1(){Audio.tone(200,.05,'square',.045)},
     light2(){Audio.tone(215,.05,'square',.045)},
     light3(){Audio.tone(230,.05,'square',.045)},
@@ -1043,6 +1051,11 @@ const Lines={
 //   hold in place (>= BLOCK_HOLD_FRAMES, drift < TAP_DRIFT)     -> held.block, until release
 //   swipe right (>= SWIPE_PX within SWIPE_FRAMES, dx>|dy|)      -> 'medium', pushed the frame it fires
 //   ...then still held HEAVY_HOLD_FRAMES after that             -> held.heavy, until release
+//   Task 7.2: this same "swipe right, keep holding" gesture (and the plain L key) also serves the
+//   combo grammar's in-combo heavy ender -- held.heavy just feeds intent.heavy every frame regardless
+//   of Fighter state, and Fighter.act (50_fighter.js) is what decides what THAT means: a normal
+//   22-frame heavy from IDLE, or, if this fighter is sitting in chainNode-4 recovery, the CHAIN.
+//   enders.heavy 14-frame shortened ender (40_movedata.js). No gesture-detection code changed here.
 //   swipe left  (>= SWIPE_PX within SWIPE_FRAMES, dx>|dy|)      -> 'dashBack', pushed the frame it fires
 //   ...then still held DASH_BACK.frames SIM FRAMES after that  -> held.block, until release (counted
 //     by tick(), called once per sim frame from Ctrl.player -- see its own comment below)
@@ -1217,7 +1230,13 @@ const Ctrl={
     return{next(fight,me,foe){
     const it=Ctrl.EMPTY();
     if(heavyHold>0){heavyHold--;it.heavy=true;return it}
-    if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){it.light=true;return it}
+    // Task 7.2: me.move.chain is gone (the fixed ladder no longer exists) -- me.chainNode>=1 &&
+    // <CHAIN.nodes is the grammar's own "still inside an open chain window" check, same one AI.make's
+    // decidePunish 'follow' phase uses. Ctrl.competent keeps the old flat all-light follow (not the
+    // mixed M-L-L-L-M grammar AI.make's t3+ tiers learn) -- it's the fixed win-rate yardstick bot, so
+    // minimizing its own behavior change keeps the tier-gate retune isolated to what the grammar/
+    // damage changes themselves actually shift, not an unrelated bot-behavior change on top.
+    if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){it.light=true;return it}
     if(me.busy())return it;
     if(foe.state==='ATTACK'&&(foe.moveName==='medium'||foe.moveName==='heavy')&&foe.f>=REACT){it.block=true;return it}
     if(foe.state==='CHARGE'&&foe.moveName==='heavy'&&me.hp/me.maxHp<LOW_HP){it.dashBack=true;return it}
@@ -1228,7 +1247,7 @@ const Ctrl={
       wasBlockstun=true;openings++;
       if(openings%MIXUP_EVERY===0){heavyHold=me.moveDef('heavy').charge+1;it.heavy=true;return it}}
     else if(!foeBlockstun)wasBlockstun=false;
-    const dist=Math.abs(foe.x-me.x)-me.width,lightRange=me.moveDef('light1').range+20;
+    const dist=Math.abs(foe.x-me.x)-me.width,lightRange=me.moveDef('light').range+20;
     if(dist<lightRange){it.light=true;return it}
     if(foe.state!=='ATTACK'&&closeCd===0){it.medium=true;closeCd=CLOSE_CD;return it}
     return it}}},
@@ -1271,7 +1290,9 @@ const Ctrl={
     // chain through its own recovery+chain+landed window (mirrors Ctrl.competent's own priority
     // order), otherwise start a fresh light the moment `me` isn't busy.
     const chainLight=(it,me)=>{
-      if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){it.light=true;return}
+      // Task 7.2: me.move.chain is gone -- see Ctrl.competent's own comment above for the chainNode
+      // replacement check.
+      if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){it.light=true;return}
       if(me.busy())return;
       it.light=true};
     return{next(fight,me,foe){
@@ -1281,7 +1302,7 @@ const Ctrl={
       if(step===1){
         // Don't let a light chain window (left open by step 0's own last hit) steal this step's
         // medium -- SWIPE RIGHT / KICK asks for a medium specifically, not another light.
-        if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed)return it;
+        if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes)return it;
         if(me.busy())return it;
         it.medium=true;return it}
       if(step===2){
@@ -1298,17 +1319,40 @@ const Ctrl={
       chainLight(it,me);return it}}}};
 
 // All frame counts at 60 Hz. dash = px the attacker advances during startup. push = px the defender is shoved on hit.
+// Task 7.2: the fixed light1->light5 ladder collapses into one MOVES.light entry (every node plays
+// the exact same startup/active/recovery/range/hitstun/blockstun/push/pow/dash timing -- only the
+// landed hit's effective damage varies by chain node, via CHAIN.chainDmg below) plus base MOVES.medium
+// keeping its own single entry the same way. MOVES.light's non-dmg fields are light1's own old values
+// verbatim (dmg:1 too -- node-1 numbers must stay unchanged), so a fresh opener light thrown from
+// neutral is bit-identical to the old light1. The old per-move `chain` pointers (light1->light2->...,
+// medium->light1) and every move's dead chain:null are deleted -- Fighter.chainNode/CHAIN (below) now
+// own the grammar; see 50_fighter.js's startMove/act for how chainNode replaces this.move.chain.
 const MOVES={
-  light1:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light2',dash:18,stepIn:110,hitstop:3},
-  light2:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light3',dash:18,hitstop:3},
-  light3:{startup:5,active:3,recovery:9, dmg:1.05,range:75, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light4',dash:18,hitstop:3},
-  light4:{startup:6,active:3,recovery:10,dmg:1.1, range:75, hitstun:15,blockstun:10,push:20,powHit:8, powTaken:4,chain:'light5',dash:20,hitstop:3},
-  light5:{startup:7,active:4,recovery:16,dmg:1.4, range:80, hitstun:20,blockstun:12,push:60,powHit:10,powTaken:5,chain:null,dash:10,knockdown:true,hitstop:5},
-  medium:{startup:10,active:4,recovery:14,dmg:1.6,range:120,hitstun:18,blockstun:11,push:24,powHit:12,powTaken:6,chain:'light1',track:300,hitstop:5},
-  heavy: {charge:22,startup:8,active:5,recovery:26,dmg:2.6,range:130,hitstun:26,blockstun:14,push:70,powHit:18,powTaken:9,chain:null,knockdown:true,hitstop:9},
-  s1:{startup:8, active:4,recovery:22,dmg:1.5,hits:3,gap:6,range:130,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:100,chain:null,knockdown:true,hitstop:6},
-  s2:{startup:10,active:4,recovery:28,dmg:1.6,hits:5,gap:6,range:150,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:200,chain:null,knockdown:true,hitstop:8},
-  s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,chain:null,knockdown:true,unblockable:true,hitstop:14}};
+  light: {startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,dash:18,stepIn:110,hitstop:3,
+    chainDmg:[1,1,1.05,1.1,1.4]},
+  medium:{startup:10,active:4,recovery:14,dmg:1.6,range:120,hitstun:18,blockstun:11,push:24,powHit:12,powTaken:6,track:300,hitstop:5,
+    chainDmg:[1.6,1.6,1.7,1.8,2.0]},
+  heavy: {charge:22,startup:8,active:5,recovery:26,dmg:2.6,range:130,hitstun:26,blockstun:14,push:70,powHit:18,powTaken:9,knockdown:true,hitstop:9},
+  s1:{startup:8, active:4,recovery:22,dmg:1.5,hits:3,gap:6,range:130,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:100,knockdown:true,hitstop:6},
+  s2:{startup:10,active:4,recovery:28,dmg:1.6,hits:5,gap:6,range:150,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:200,knockdown:true,hitstop:8},
+  s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,knockdown:true,unblockable:true,hitstop:14}};
+// Task 7.2 (frozen interface, exact values): the five-node combo grammar. openers are the two moves
+// that can start a chain from IDLE/BLOCK; nodes is the chain's max length (Fighter.chainNode runs
+// 1..5); enders describes what the FINAL blow of the chain does, keyed by which move type actually
+// lands it -- light: nothing extra (no push/knockdown bonus: a light-ended chain plays exactly like a
+// plain light hit); medium: shoves the defender out to `push` and knocks them down; heavy: a
+// "shortened ender" only offered at chainNode===4 (skips a would-be node 5 light/medium and swings a
+// heavy instead) that charges for just `charge` frames (not the normal MOVES.heavy.charge) and, once
+// it lands, fires the attacker's own def.sigEffect (see CHAMPS/MOBS below) via `sig:true` -- see
+// Fight.resolve's own comment (60_fight.js) for exactly where each of these three is read.
+// chainDmg lives on MOVES.light/medium themselves (not here) since Fight.resolve already has the
+// landed move's own merged data (m) in hand; CHAIN.enders is the only per-node data resolve() has to
+// look up separately, since a chain's own base move data never carries push/knockdown for the light/
+// medium case (those come only from the enders table, at node 5, or from heavy's own base data at the
+// node-4 shortened ender -- heavy already carries knockdown/push, so its ender never needs an override
+// for either).
+const CHAIN={openers:['light','medium'],nodes:5,
+  enders:{light:{},medium:{push:90,knockdown:true},heavy:{charge:14,sig:true}}};
 // Task 6.2 (movement inside moves): per-frame rates Fighter.setupDash uses for medium's track and
 // light1's stepIn. DASH_TRACK_SPEED preserves medium's old flat dash(140)/startup(10) rate exactly
 // (140/10=14) so an already-in-range medium (dashLeft 0, see setupDash) and a far one that only needs
@@ -1317,15 +1361,23 @@ const MOVES={
 // a step-in light never needs to run longer than the swing already does; it either closes the gap
 // within its own 5 frames or it doesn't connect, same as a real whiffed jab.
 const DASH_TRACK_SPEED=14,DASH_STEPIN_SPEED=22;
+// Task 7.2 (frozen interface): def.sigEffect={id,stacks,target?} -- fired only by the in-combo heavy
+// ender (CHAIN.enders.heavy, m.sig:true) once it lands, via Effects.apply (48_effects.js). `target`
+// is 'self'|'foe', default 'foe' (Fight.resolve's own ruling) -- Carl's fury (an attacker-side buff)
+// is the one champion whose signature targets itself; every mob/boss below has no sigEffect at all
+// (undefined), so the in-combo heavy ender is a plain hit for them, no bonus effect.
 const CHAMPS={
-  carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human'},
+  carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
+    sigEffect:{id:'fury',stacks:1,target:'self'}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
   // and Rig.solve's 'quad' branch in 68_rig.js).
-  donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad'},
+  donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',
+    sigEffect:{id:'weakness',stacks:1}},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
-    moves:{s1:{hits:5,gap:4,dmg:1.2}}},
+    moves:{s1:{hits:5,gap:4,dmg:1.2}},sigEffect:{id:'bleed',stacks:1}},
   // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
-  mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big'}};
+  mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',
+    sigEffect:{id:'armorBreak',stacks:1}}};
 // Task 6.1, ruling 3 (playtest note: "Hobgoblin Brute is impossible to defeat" at floor 1 door 3,
 // level 1): goblin/skeleton hp raised and atk lowered exactly to the plan's given numbers (360/30,
 // 320/28) -- longer, safer early fights instead of fast trades a level-1 player can lose to a bad
@@ -1738,6 +1790,16 @@ class Fighter{
     this.x=side===1?STAGE_W/2-160:STAGE_W/2+160;this.width=48;this.hp=def.hp;this.maxHp=def.hp;this.power=0;
     this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
     this.combo=0;this.stun=0;this.inv=0;this.blockAge=0;this.dx=0; // last tick's x delta; Rig.poseFor reads it to pick idle vs walk
+    // Task 7.2: chainNode is the frozen CHAIN grammar's own live state -- 0 when not chaining, 1..5
+    // while a light/medium opener/continuation is in flight (set by startMove's own node argument),
+    // never touched by any move outside the grammar (heavy from neutral, s1/s2/s3 always leave it at
+    // whatever it already was, which is 0 unless something is badly wrong -- see startMove/act below).
+    // Reset to 0 in exactly two places: tick()'s own ATTACK 'done' transition (covers a whiff, a
+    // player simply not continuing, and the ender's own post-recovery reset -- all three are "this
+    // fighter's ATTACK sequence just ended without a further continuation") and Fight.resolve's hit/
+    // parry branches (covers "taking a hit resets it" -- an interrupted mid-chain recovery never gets
+    // to end on its own).
+    this.chainNode=0;
     this.parryLock=0;this.blockPressedAt=0;this.pressTick=0;this._parried=false;this._mdCache=null;
     // Task 5.2: parryBonus widens PARRY_WINDOW by this many frames (Sponsor perk "Parry Insurance",
     // set by G.startFight from Sponsors.apply's parryWindow) -- 0 for every fighter that isn't the
@@ -1790,13 +1852,22 @@ class Fighter{
   moveDef(name){let c=this._mdCache;if(!c)c=this._mdCache=new Map();let d=c.get(name);
     if(!d){d=Object.assign({},MOVES[name],this.def.moves&&this.def.moves[name]);c.set(name,d)}
     return d}
-  startMove(name){this.move=this.moveDef(name);this.moveName=name;this.hits=new Set();this.landed=false;
+  // Task 7.2: `node` (1..5) is the CHAIN grammar's own node number for this move instance -- passed
+  // explicitly by every call site that's part of a chain (the IDLE/BLOCK opener branch and the
+  // ATTACK-recovery continuation branch in act(), below); omitted (0) for every move outside the
+  // grammar (heavy from neutral, s1/s2/s3), so this.chainNode stays the "0 when not chaining"
+  // invariant the frozen interface asks for. `overrides`, when given, is shallow-merged on top of the
+  // cached moveDef (used only by the in-combo heavy ender, CHAIN.enders.heavy -- see act()'s own
+  // node-4 branch) so the per-fighter moveDef cache itself is never mutated or duplicated per-variant.
+  startMove(name,node,overrides){
+    this.move=overrides?Object.assign({},this.moveDef(name),overrides):this.moveDef(name);
+    this.moveName=name;this.hits=new Set();this.landed=false;this.chainNode=node===undefined?0:node;
     if(this.move.cost)this.power-=this.move.cost;this.setupDash();this.setState(this.move.charge?'CHARGE':'ATTACK')}
   // Movement inside moves (Task 6.2): computes dashLeft/dashRate/effStartup once, from the move's own
   // track/stepIn/dash fields and the this.foeDist snapshot Fight.step wrote before this frame's act()
   // (or null, see the constructor's own comment). Three shapes, checked in this order:
   //  - m.track (medium): a range-tracking dash-in -- up to m.track px at DASH_TRACK_SPEED px/frame,
-  //    stopping the instant the gap closes to moveDef('light1').range so the move's own (longer)
+  //    stopping the instant the gap closes to moveDef('light').range so the move's own (longer)
   //    reach lands without ever overshooting into the foe (separate() would fight it every frame if
   //    it did). This is the only shape whose travel can outlast the move's own m.startup, since a far
   //    foe can need more frames than the swing's base startup to close -- effStartup grows to fit.
@@ -1808,7 +1879,7 @@ class Fighter{
   //    bit-for-bit unchanged -- m.dash px smoothly divided over the move's own m.startup frames.
   // No move data at all (e.g. heavy, the specials) leaves dashLeft 0 and effStartup at m.startup.
   setupDash(){
-    const m=this.move,lightRange=this.moveDef('light1').range;
+    const m=this.move,lightRange=this.moveDef('light').range;
     if(m.track){
       const need=this.foeDist==null?0:Math.max(0,this.foeDist-lightRange);
       this.dashLeft=Math.min(need,m.track);this.dashRate=DASH_TRACK_SPEED;
@@ -1848,13 +1919,34 @@ class Fighter{
     if(S==='IDLE'||S==='BLOCK'){
       if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special);
       if(intent.dashBack){this.inv=DASH_BACK.inv;return this.setState('DASH')}
-      if(intent.medium)return this.startMove('medium');
-      if(intent.light)return this.startMove('light1');
+      // Task 7.2: openers (CHAIN.openers) always start a brand-new chain at node 1, regardless of
+      // whatever chainNode a previous, already-finished chain left behind (it's already been reset to
+      // 0 by tick()'s own 'done' transition or Fight.resolve's hit-taken reset by the time IDLE/BLOCK
+      // can be acted on again -- this just makes the opener's own node explicit rather than relying on
+      // that).
+      if(intent.medium)return this.startMove('medium',1);
+      if(intent.light)return this.startMove('light',1);
       if(intent.heavy)return this.startMove('heavy');
       const want=intent.block?'BLOCK':'IDLE';if(want!==S)this.setState(want)}
-    else if(S==='ATTACK'&&this.phase()==='recovery'&&this.move.chain&&this.landed){
-      if(intent.light)return this.startMove(this.move.chain);
-      if(intent.medium&&this.moveName!=='medium')return this.startMove('medium')}
+    // Task 7.2: the five-node combo grammar (CHAIN, 40_movedata.js) replaces the old fixed
+    // light1->light5/medium->light1 `chain` pointers. Gated on this.chainNode (0 for every move
+    // outside the grammar -- heavy from neutral, s1/s2/s3 -- so neither branch below ever fires for
+    // them, exactly like the old `this.move.chain` falsy check did) instead of a per-move field.
+    // Nodes 1-3 (chainNode<4): either opener continues the chain one node further. Node 4: the last
+    // regular continuation (light or medium, becoming node 5 -- the chain's real ender, CHAIN.enders
+    // read by Fight.resolve at hit-resolve time) OR the shortened heavy ender (CHAIN.enders.heavy --
+    // a 14-frame charge instead of MOVES.heavy's normal 22, applying the attacker's own def.sigEffect
+    // once it lands). Node 5 offers no further continuation ("no sixth node") -- chainNode stays 5
+    // until the ender's own recovery ends and resets it to 0.
+    else if(S==='ATTACK'&&this.phase()==='recovery'&&this.landed){
+      const cn=this.chainNode;
+      if(cn>=1&&cn<CHAIN.nodes-1){
+        if(intent.light)return this.startMove('light',cn+1);
+        if(intent.medium)return this.startMove('medium',cn+1)}
+      else if(cn===CHAIN.nodes-1){
+        if(intent.light)return this.startMove('light',CHAIN.nodes);
+        if(intent.medium)return this.startMove('medium',CHAIN.nodes);
+        if(intent.heavy)return this.startMove('heavy',CHAIN.nodes,CHAIN.enders.heavy)}}
     // Fix-wave item 5 (final review, Important): releasing heavy early used to always cancel to IDLE
     // outright (clearMove, no swing) -- the README (and the swipe-and-hold gesture's own naming)
     // promised "release after a short charge to swing", which this branch never actually did; only a
@@ -1896,7 +1988,15 @@ class Fighter{
       // DASH_STEPIN_SPEED divides unevenly.
       case'ATTACK':{const m=this.move;
         if(this.dashLeft>0&&this.f<=this.effStartup){const step=Math.min(this.dashRate,this.dashLeft);this.x+=this.face*step;this.dashLeft-=step}
-        if(this.phase()==='done'){this.clearMove();this.landed=false;this.setState('IDLE')}break}
+        // Task 7.2: chainNode resets to 0 here whenever an ATTACK sequence ends on its own (a whiff --
+        // landed stayed false the whole active window; the player simply not pressing a continuation
+        // during a landed move's recovery; or the chain's own ender finishing its recovery) -- the
+        // single site that covers every "stopped chaining" case the frozen ruling lists, since act()'s
+        // own continuation branches above already require chainNode to still be in [1,CHAIN.nodes) to
+        // offer anything, so a fighter that reaches here with a non-zero chainNode is, by construction,
+        // one whose chain window just closed for good. Fight.resolve's own hit/parry branches cover the
+        // other reset case ("taking a hit resets it"), where this natural 'done' transition never runs.
+        if(this.phase()==='done'){this.clearMove();this.landed=false;this.chainNode=0;this.setState('IDLE')}break}
       case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
       case'HITSTUN':case'BLOCKSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
       case'KNOCKDOWN':if(this.f>=KNOCKDOWN.frames){this.inv=KNOCKDOWN.inv;this.setState('IDLE')}break}
@@ -1937,17 +2037,22 @@ class Fighter{
 // UNCHANGED here as the shared action cooldown (st.cd=p.react, every decideX 'trigger' phase) --
 // see docs/ARENA.md's fix-wave tier-gate section for the measured n=30/60/seed-base tables this
 // change (plus the review's own measured fallback) was checked against.
+// Task 7.2: comboMix (new field) gates the CHAIN grammar's mixed M-L-L-L-M follow-through (see
+// decidePunish/decideAttack's own comment below) -- true for t3/t4/t5 only, so t1/t2 keep pressing a
+// flat light-only follow exactly as before (their own rng draw sequence is untouched either way, since
+// the follow phase never rolls rng regardless of which plan array it's holding -- this field only
+// changes WHICH strings sit in st.comboPlan, never whether/when r.next() gets called).
 const AI_TIERS={
-  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0, approach:90,hold:26},
-  t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70,hold:16},
-  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5,approach:50,hold:10},
+  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0, approach:90,hold:26,comboMix:false},
+  t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70,hold:16,comboMix:false},
+  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5,approach:50,hold:10,comboMix:true},
   // Fix-wave item 3 (measured fallback -- see docs/ARENA.md's fix-wave tier-gate table): the `hold`
   // decoupling alone (react/dash unchanged) passed n=30 but still broke t5<=30 at n=60 (31.7%). The
   // final review's own measured retune -- react 5->8 here (still the shared action cooldown, not
   // block-hold; hold above already carries that meaning) -- restores it.
-  t4:{react:8, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8,approach:40,hold:10},
+  t4:{react:8, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8,approach:40,hold:10,comboMix:true},
   // Fix-wave item 3 (measured fallback): dash .08->.04, same reasoning/source as t4.react above.
-  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.04,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1, approach:30,hold:8}};
+  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.04,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1, approach:30,hold:8,comboMix:true}};
 const AI={
   TIERS:AI_TIERS,
   // profiles IS the alias table (not a copy of it) so old direct reads like AI.profiles.brute and
@@ -1957,7 +2062,7 @@ const AI={
     // Fix-wave item 3: hold:0 added for completeness (p.block:0 already means decideBlock's react
     // roll can never fire for the dummy, so p.hold is never actually read) -- matches AI_TIERS' own
     // new field so every AI_TIERS-shaped profile carries it.
-    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0,approach:0,hold:0},
+    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0,approach:0,hold:0,comboMix:false},
     basic:AI_TIERS.t2,
     brawl:AI_TIERS.t3,
     // brute keeps its Task 2.8 identity (a heavy-happy brawler) as a t3 clone with a higher heavy
@@ -1985,16 +2090,32 @@ const AI={
     // st: every closure local the six functions below read or write, grouped into one object instead
     // of one local per behaviour (same fields, same meanings, as the pre-refactor next()): hold
     // (block-hold countdown), cd (shared action cooldown), plan (parry timing state machine), hHold
-    // (heavy-charge hold countdown), baitHold/baitDashPending (bait feint state), comboFollow (combo
-    // follow-through countdown — Task 3.6 balance pass, chases either a punish medium or a landed
-    // spontaneous attack; see decidePunish/decideAttack).
+    // (heavy-charge hold countdown), baitHold/baitDashPending (bait feint state), comboPlan (combo
+    // follow-through plan — Task 3.6 balance pass, chases either a punish medium or a landed
+    // spontaneous attack; see decidePunish/decideAttack; Task 7.2 turned the old flat countdown into a
+    // plan array, see comboPlanFor below).
     // farFrames/approachCd (Task 6.2): decideApproach's own state -- see its comment below. Kept
     // separate from the shared cd/react cooldown every other behaviour reuses, so a guaranteed
     // approach press never blocks (or gets blocked by) an unrelated reactive block/attack/heavy roll
     // -- ruling (fix round 1): approach must never starve the AI's own offense/defense, only fill in
     // when nothing else already claimed the frame (decideApproach is called last in the waterfall,
     // below, and its own approachCd only gates itself, not st.cd).
-    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboFollow:0,farFrames:0,approachCd:0};
+    // Task 7.2: comboFollow (a blind countdown of "press light N more times") is replaced by
+    // comboPlan, an array of pending intent-type strings consumed one per frame by decidePunish's
+    // 'follow' phase below -- same blind-countdown shape (no rng draw either way), just carrying WHICH
+    // move to press next instead of always 'light'. See comboPlanFor's own comment just below.
+    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboPlan:[],farFrames:0,approachCd:0};
+    // comboPlanFor(openedMedium): the follow-through plan armed after a chain opener lands (a punish
+    // medium, always openedMedium=true, or decideAttack's own spontaneous opener, medium or light
+    // depending on range). Mixed tiers (p.comboMix -- t3+) only ever follow the frozen M-L-L-L-M
+    // pattern when the opener that started it really was a medium (node 1) -- three more lights then a
+    // final medium completes the 5-node chain, landing CHAIN.enders.medium's push/knockdown on node 5.
+    // A light opener (node 1 was 'light', only ever reachable via decideAttack's dist<lightRange
+    // branch) keeps the plain all-light plan for every tier, mixed or not -- the frozen interface only
+    // asks for the M-L-L-L-M shape specifically, not a light-opened mixed variant, so this is the
+    // narrowest change that satisfies it without inventing an unrequested pattern. t1/t2 (comboMix
+    // false) always get the plain plan regardless of opener, keeping their own draw sequence untouched.
+    function comboPlanFor(openedMedium){return(p.comboMix&&openedMedium)?['light','light','light','medium']:['light','light','light']}
 
     // Heavy: charge-hold continuation (phase:'hold') has to run before the busy() gate in next()
     // below — once startMove('heavy') has put `me` into CHARGE, Fighter.busy() reports true (it only
@@ -2053,13 +2174,17 @@ const AI={
     // foe.wasKnockedDown now, same as everything else it reads off foe.
     function decidePunish(it,me,foe,justGotUp,phase){
       if(phase==='follow'){
-        if(st.comboFollow>0){
-          if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){st.comboFollow--;it.light=true;return true}
+        if(st.comboPlan.length){
+          // Task 7.2: me.move.chain is gone (the fixed ladder it pointed along no longer exists) --
+          // me.chainNode>=1 && <CHAIN.nodes is the grammar's own "still inside an open chain window"
+          // check act() itself uses, so this stays in lockstep with whatever act() will actually accept.
+          if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){
+            const next=st.comboPlan.shift();it[next]=true;return true}
           if(me.busy())return true; // still mid-move (startup/active, or a recovery that isn't a chain window yet) — keep waiting
-          st.comboFollow=0} // fully back to IDLE/BLOCK without ever seeing a chain window: the combo is over
+          st.comboPlan.length=0} // fully back to IDLE/BLOCK without ever seeing a chain window: the combo is over
         return false}
       if(p.punish>0&&st.cd===0&&(foe.state==='STUNNED'||justGotUp||foe.parryLock>0)&&r.next()<p.punish){
-        it.medium=true;st.cd=p.react;st.comboFollow=3;return true}
+        it.medium=true;st.cd=p.react;st.comboPlan=comboPlanFor(true);return true}
       return false}
 
     // Intercept: read the dash-in medium's startup and punish it with a light before it lands,
@@ -2111,8 +2236,9 @@ const AI={
         if(dist<lightRange&&r.next()<p.dash){it.dashBack=true;return true}
         return false}
       if(st.cd===0&&r.next()<p.attack){
-        if(dist<lightRange)it.light=true;else it.medium=true;
-        st.cd=p.react;if(p.punish>0)st.comboFollow=3;return true}
+        const openedMedium=dist>=lightRange;
+        if(openedMedium)it.medium=true;else it.light=true;
+        st.cd=p.react;if(p.punish>0)st.comboPlan=comboPlanFor(openedMedium);return true}
       return false}
 
     // Approach (Task 6.2 -- playtest note: "the dummy never approaches", the goblin's own 320px spawn
@@ -2160,7 +2286,7 @@ const AI={
       // Derived from move data instead of hard-coded: light1.range(70)+20=90 and heavy.range(130)+10
       // =140 reproduce the old flat thresholds for the stock movesets while tracking per-move/per-
       // character overrides (none currently touch .range, but moveDef merges them if one ever does).
-      const lightRange=me.moveDef('light1').range+20,heavyRange=me.moveDef('heavy').range+10;
+      const lightRange=me.moveDef('light').range+20,heavyRange=me.moveDef('heavy').range+10;
       if(st.cd>0)st.cd--;
       if(st.approachCd>0)st.approachCd--;
       if(decideBlock(it,foe,'plan'))return it;
@@ -2257,12 +2383,27 @@ class Fight{
       if(def.blockAge<=PARRY_WINDOW+def.parryBonus&&def.parryLock===0&&!m.cost)return{type:'parry',att,def,idx};
       return{type:'block',att,def,idx,m}}
     return{type:'hit',att,def,idx,m,last}}
+  // Task 7.2: the landed move's own effective per-node damage -- MOVES.light/medium each carry a
+  // chainDmg[] indexed by chainNode (1..CHAIN.nodes), the frozen node multiplier table; every other
+  // move (heavy, s1-s3) has no chainDmg at all and falls back to its own flat m.dmg, bit-identical to
+  // before this task. att.chainNode is always 1..CHAIN.nodes by the time a chain move actually lands
+  // (Fighter.startMove sets it before setupDash/setState ever run), so the fallback ||1 only guards a
+  // hand-built fixture that skipped startMove entirely (a few unit tests construct hit/block records
+  // directly rather than driving a real chain).
+  nodeDmg(att,m){return m.chainDmg?m.chainDmg[Math.max(1,Math.min(att.chainNode||1,m.chainDmg.length))-1]:m.dmg}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
     if(type==='miss')return this.emit('miss',att,def,0);
-    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');
+    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;att.chainNode=0;def.setState('IDLE');
       this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
       return this.emit('parry',def,att,0)}
-    if(type==='block'){const m=r.m;const chipRef={chip:Math.round(att.def.atk*m.dmg*CHIP*(1-(def.def.blockProf||0)))};
+    if(type==='block'){const m=r.m;
+      // Task 7.2 ruling: chip must scale by the attacker's own Effects.mods.atkMul (fury/weakness),
+      // computed here exactly as the hit branch below computes it for its own dmg formula -- a fury
+      // stack chips harder through a raised guard too, not just on an unblocked hit. Also reads the
+      // same per-node dmg (nodeDmg) the hit branch uses, so a chained light/medium chips proportionally
+      // to whichever node it landed on, not a flat m.dmg.
+      const attMods=Effects.mods(att);
+      const chipRef={chip:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*CHIP*(1-(def.def.blockProf||0)))};
       // thorns lives here: the defender (the blocker) is the only side with an onBlock call.
       this.buffHook('onBlock',def,att,def,chipRef);
       const chip=chipRef.chip;
@@ -2298,12 +2439,25 @@ class Fight{
     // and powerGain's old `att.move` read silently no-op'd. ref is a fresh object built fresh for
     // THIS resolve() call, never touched by the other side's resolve, so ref.move is always the
     // move that actually landed this call.
-    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*m.dmg*cls*critMul*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
+    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*cls*critMul*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
     this.buffHook('onHit',def,att,def,ref);this.buffHook('onHit',att,att,def,ref);
     const dmg=ref.dmg;
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
     att.power=Math.min(POWER_MAX,att.power+ref.powHit);def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
-    def.clearMove();if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
+    // Task 7.2: CHAIN.enders (light:{}/medium:{push,knockdown}) only applies to the landed hit that's
+    // actually the chain's node-5 finisher (a plain light/medium at nodes 1-4 gets no bonus, so an
+    // early cancel into medium can't fish for the push/knockdown a full 5-hit chain earns) -- the
+    // 'medium as a combo ender' behavior this replaces used to key off att.combo>=3 (a global hit-
+    // streak counter unrelated to THIS chain's own length); att.chainNode===CHAIN.nodes is the real
+    // thing to check now. The in-combo heavy ender (moveName==='heavy', chainNode also CHAIN.nodes --
+    // see Fighter.act's node-4 branch) needs no override at all here: CHAIN.enders.heavy only carries
+    // {charge,sig}, so m (already merged with that override in startMove) still carries base MOVES.
+    // heavy's own knockdown/push untouched, same as a plain neutral heavy.
+    const isChainEnder=(att.moveName==='light'||att.moveName==='medium')&&att.chainNode===CHAIN.nodes;
+    const ender=isChainEnder?CHAIN.enders[att.moveName]:null;
+    const knockdown=ender?!!ender.knockdown:!!m.knockdown;
+    def.clearMove();if(knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
+    def.chainNode=0; // Task 7.2 ruling: taking a hit resets the DEFENDER's own chain (they were interrupted mid-recovery)
     // Task 7.1: m.applies -- on:'hit' entries fire on every landed hit, on:'crit' entries only when
     // this landed hit actually crit; both apply to the defender (the struck fighter), after the
     // HITSTUN/KNOCKDOWN transition above so an applied stun's own onApply (EFFECTS.stun) can still
@@ -2311,9 +2465,16 @@ class Fight{
     // `applies` yet, so this is a no-op in every fight today -- see the "bit-identical" test.
     if(m.applies)for(let i=0;i<m.applies.length;i++){const ap=m.applies[i];
       if(ap.on==='hit'||(ap.on==='crit'&&crit))Effects.apply(this,def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
-    // Medium landed as a combo ender (3rd+ hit of the combo, counting this one) shoves the defender
-    // out past light range instead of the move's normal push, so the follow-up can't just re-chain.
-    const push=(att.moveName==='medium'&&att.combo>=3)?90:m.push;
+    // Task 7.2: the in-combo heavy ender (m.sig:true, only ever true for CHAIN.enders.heavy's own
+    // merged move data) fires the ATTACKER's own def.sigEffect once it lands -- a champion-signature
+    // bonus effect (Carl fury targets himself; Donut weakness/Katia bleed/Mongo armorBreak all target
+    // the foe -- see CHAMPS' own sigEffect comment, 40_movedata.js). Mobs/bosses have no sigEffect
+    // (undefined), so this is a no-op for them; target defaults to 'foe' per the 7.1 review ruling.
+    if(m.sig&&att.def.sigEffect){const sig=att.def.sigEffect;
+      Effects.apply(this,sig.target==='self'?att:def,sig.id,{stacks:sig.stacks,source:att})}
+    // Task 7.2: the chain ender's own push (medium: 90, knockdown; light/heavy: the move's normal
+    // push) replaces the old att.combo>=3 special case -- see isChainEnder/ender above.
+    const push=ender&&ender.push!==undefined?ender.push:m.push;
     if(!m.hits||last)def.x+=att.face*push;
     // Sim freeze only on a single-hit move or the last blow of a multi-hit special (mirrors the
     // knockback gate above): a 4-hit S3 shouldn't stack four 14-frame freezes back to back. Every
@@ -3377,7 +3538,17 @@ const Rig={
     if(st==='STUNNED')return{key:'stunned',t01:clamp(f.f/(f.stun||1),0,1)};
     if(st==='KNOCKDOWN')return f.f<30?{key:'knockdown',t01:clamp(f.f/30,0,1)}:{key:'getup',t01:clamp((f.f-30)/(KNOCKDOWN.frames-30),0,1)};
     if(st==='CHARGE')return{key:'heavyCharge',t01:clamp(f.f/((f.move&&f.move.charge)||1),0,1)};
-    if(st==='ATTACK'&&f.move)return{key:f.moveName,t01:clamp(f.f/(f.move.startup+f.activeSpan()+f.move.recovery),0,1)};
+    // Task 7.2: MOVES.light1..5 collapsed into one MOVES.light entry (moveName is always the literal
+    // 'light', never 'light1'..'light5'), but the pose TABLE still keys its five jab keyframe sets as
+    // light1..light5 (POSES.light1..5, one per rig -- see 40_movedata.js's own comment for why only the
+    // landed damage varies by node, not the pose). f.chainNode (1..5, set by Fighter.startMove) is what
+    // picks which of those five poses plays; clamped defensively to [1,5] (a bare hand-built ATTACK
+    // fixture that skipped startMove would otherwise read chainNode 0). medium never needed a per-node
+    // pose split -- POSES.medium is a single set, so its own moveName key already resolves correctly
+    // with no remapping, same as every other move (heavy, s1-s3).
+    if(st==='ATTACK'&&f.move){
+      const key=f.moveName==='light'?'light'+clamp(f.chainNode||1,1,5):f.moveName;
+      return{key,t01:clamp(f.f/(f.move.startup+f.activeSpan()+f.move.recovery),0,1)}}
     if(st==='WIN')return{key:'win',t01:clamp(f.f/30,0,1)};
     if(st==='KO')return{key:'ko',t01:clamp(f.f/20,0,1)};
     return{key:'idle',t01:0}},
@@ -5243,11 +5414,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       idle:{state:'IDLE',f:0},
       walk:{state:'IDLE',f:0}, // no dedicated sim state for locomotion yet; idle stands in
       dash:{state:'DASH',f:6},
-      light1:{state:'ATTACK',moveName:'light1',f:6},
-      light2:{state:'ATTACK',moveName:'light2',f:6},
-      light3:{state:'ATTACK',moveName:'light3',f:7},
-      light4:{state:'ATTACK',moveName:'light4',f:7},
-      light5:{state:'ATTACK',moveName:'light5',f:9},
+      // Task 7.2: MOVES.light1..5 collapsed into one MOVES.light entry, but --pose still asks for the
+      // five distinct light1..light5 SCREENSHOT keys (Rig.poseFor maps moveName:'light'+chainNode back
+      // to the matching POSES.light1..5 pose, see 68_rig.js) -- moveName is always the literal 'light'
+      // now; chainNode is what actually selects which of the five poses freezes.
+      light1:{state:'ATTACK',moveName:'light',chainNode:1,f:6},
+      light2:{state:'ATTACK',moveName:'light',chainNode:2,f:6},
+      light3:{state:'ATTACK',moveName:'light',chainNode:3,f:7},
+      light4:{state:'ATTACK',moveName:'light',chainNode:4,f:7},
+      light5:{state:'ATTACK',moveName:'light',chainNode:5,f:9},
       medium:{state:'ATTACK',moveName:'medium',f:12},
       heavyCharge:{state:'CHARGE',moveName:'heavy',f:12},
       heavy:{state:'ATTACK',moveName:'heavy',f:4}, // still high in the overhead arc, well before medium's peak-lunge silhouette
@@ -5265,6 +5440,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     const m=map[key];if(!m)throw new Error('unknown pose: '+key);
     const p=this.fight.p1;
     if(m.moveName){p.move=MOVES[m.moveName];p.moveName=m.moveName}
+    if(m.chainNode!==undefined)p.chainNode=m.chainNode;
     p.state=m.state;p.f=m.f;
     if(m.stun!==undefined)p.stun=m.stun;
     this.sim=true},
@@ -5991,12 +6167,34 @@ Test.add('an explicit o.seed (every harness/test/batch call site) is used verbat
   eq(Save.data.fightSeed,before,'an explicit seed must never touch Save.data.fightSeed');
   G.toTitle()});
 Test.add('move table is complete and sane',()=>{
-  for(const k of ['light1','light2','light3','light4','light5','medium','heavy','s1','s2','s3']){const m=MOVES[k];ok(m,k+' missing');
-    for(const f of ['startup','active','recovery','dmg','range','hitstun','blockstun','push','powHit','powTaken'])ok(typeof m[f]==='number',k+'.'+f)}
-  eq(MOVES.light1.chain,'light2');eq(MOVES.light5.chain,null);ok(MOVES.light5.knockdown);ok(MOVES.s3.unblockable);
+  // Task 7.2: light1..light5 collapsed into one MOVES.light entry; the old chain:'light2'/chain:null
+  // pointers are gone entirely (deleted, not bypassed -- see CHAIN's own comment, 40_movedata.js).
+  for(const k of ['light','medium','heavy','s1','s2','s3']){const m=MOVES[k];ok(m,k+' missing');
+    for(const f of ['startup','active','recovery','dmg','range','hitstun','blockstun','push','powHit','powTaken'])ok(typeof m[f]==='number',k+'.'+f)
+    ok(m.chain===undefined,k+'.chain must not exist -- the grammar (CHAIN) replaces it')}
+  ok(MOVES.heavy.knockdown);ok(MOVES.s3.unblockable);
   eq(MOVES.s1.cost,100);eq(MOVES.s2.cost,200);eq(MOVES.s3.cost,300);
   eq(CLASS_BEATS[CLASS_BEATS[CLASS_BEATS.brawler]],'brawler');eq(CLASS_BEATS[CLASS_BEATS[CLASS_BEATS.tank]],'tank');
   ok(CHAMPS.carl.hp>0&&CHAMPS.donut.atk>0)});
+// Task 7.2 (frozen interface, exact values): CHAIN's own shape and per-node damage tables.
+Test.add('CHAIN grammar: frozen shape (openers/nodes/enders) and per-node chainDmg tables',()=>{
+  eq(JSON.stringify(CHAIN.openers),JSON.stringify(['light','medium']));
+  eq(CHAIN.nodes,5);
+  eq(JSON.stringify(CHAIN.enders.light),JSON.stringify({}));
+  eq(CHAIN.enders.medium.push,90);eq(CHAIN.enders.medium.knockdown,true);
+  eq(CHAIN.enders.heavy.charge,14);eq(CHAIN.enders.heavy.sig,true);
+  eq(JSON.stringify(MOVES.light.chainDmg),JSON.stringify([1,1,1.05,1.1,1.4]));
+  eq(JSON.stringify(MOVES.medium.chainDmg),JSON.stringify([1.6,1.6,1.7,1.8,2.0]));
+  eq(MOVES.light.dmg,1,'MOVES.light\'s base dmg must equal the old light1 base -- node-1 numbers unchanged');
+  eq(MOVES.medium.dmg,1.6,'MOVES.medium\'s base dmg is unchanged from before this task')});
+// Task 7.2 (frozen interface): def.sigEffect placeholders, one per champion, none for mobs/bosses.
+Test.add('sigEffect: one placeholder per champion, mobs/bosses have none',()=>{
+  eq(JSON.stringify(CHAMPS.carl.sigEffect),JSON.stringify({id:'fury',stacks:1,target:'self'}));
+  eq(CHAMPS.donut.sigEffect.id,'weakness');eq(CHAMPS.donut.sigEffect.stacks,1);
+  eq(CHAMPS.katia.sigEffect.id,'bleed');eq(CHAMPS.katia.sigEffect.stacks,1);
+  eq(CHAMPS.mongo.sigEffect.id,'armorBreak');eq(CHAMPS.mongo.sigEffect.stacks,1);
+  for(const id of['goblin','hobgoblin','skeleton','shaman','grub','grull','mother_rat'])
+    ok(DEFS[id].sigEffect===undefined,id+' must have no sigEffect')});
 function mkFighter(ctrl){return new Fighter(CHAMPS.carl,1,ctrl||Ctrl.idle())}
 Test.add('fighter light attack walks startup/active/recovery then idles',()=>{
   const F=mkFighter();F.act(Object.assign(Ctrl.EMPTY(),{light:true}));eq(F.state,'ATTACK');eq(F.phase(),'startup');
@@ -6059,8 +6257,27 @@ function mkFight(o={}){return new Fight(Object.assign({seed:1,p1:CHAMPS.carl,p2:
 function run(f,n){for(let i=0;i<n;i++)f.step()}
 function closeIn(f){f.p1.x=f.p2.x-f.p1.width-10}   // p1 within light range of p2
 const L=(f,until)=>({f,until,intent:{light:true}});
+// Task 7.2: the five-node combo grammar (CHAIN, 40_movedata.js) replaces the old fixed
+// light1->light5/medium->light1 `chain` ladder and the att.combo>=3 medium-push special case, both
+// deleted. chainSeq(seq) is a small state-driven controller (mirrors Ctrl.tutorialBot's own
+// chainLight pattern) that presses seq[i] the instant the chain window for the i-th input actually
+// opens -- checked by state/phase/landed/chainNode, not a guessed frame number, so tests built on it
+// aren't sensitive to exact startup/active/recovery timings the way a hand-scripted frame table
+// would be. Defined here (not down by its own chain-grammar tests) so the earlier Phase-1-era tests
+// just below can use it too, now that holding light no longer stops on its own at 5 hits.
+const chainSeq=seq=>{let idx=0;return{next(fight,me,foe){
+  const it=Ctrl.EMPTY();
+  // A heavy (the in-combo shortened ender) must be HELD every frame through its own CHARGE, exactly
+  // like a real gesture/keyboard hold -- Fighter.act's CHARGE branch cancels to IDLE the instant
+  // intent.heavy reads false before HEAVY_MIN_CHARGE frames have elapsed (50_fighter.js). Checked
+  // ahead of everything else, same priority AI.make's own decideHeavy 'hold' phase uses.
+  if(me.state==='CHARGE'){it.heavy=true;return it}
+  if(idx>=seq.length)return it;
+  if(me.state==='IDLE'){it[seq[idx]]=true;idx++;return it}
+  if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){it[seq[idx]]=true;idx++;return it}
+  return it}}};
 Test.add('light connects on first active frame for atk*dmg',()=>{
-  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.p2.hp,940);eq(f.p2.state,'HITSTUN');eq(f.hitstop,MOVES.light1.hitstop);eq(f.p1.combo,1)});
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.p2.hp,940);eq(f.p2.state,'HITSTUN');eq(f.hitstop,MOVES.light.hitstop);eq(f.p1.combo,1)});
 Test.add('held block takes chip and blockstun, attacker may chain',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(f);run(f,15);
   eq(f.p2.hp,995);eq(f.p2.state,'BLOCKSTUN');eq(f.p1.landed,true);eq(f.log.filter(e=>e.type==='block').length,1)});
@@ -6073,13 +6290,33 @@ Test.add('specials cannot be parried',()=>{
 Test.add('dash back evades a light',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{dashBack:true}}])});closeIn(f);run(f,5);
   eq(f.p2.hp,1000);eq(f.log[f.log.length-1].type,'miss')});
-Test.add('holding light chains five hits into a knockdown and hits stop landing while down',()=>{
-  const f=mkFight({ctrl1:Ctrl.script([L(0,200)])});closeIn(f);run(f,90);
-  eq(f.log.filter(e=>e.type==='hit').length,5);eq(f.p2.hp,667);eq(f.p2.state,'KNOCKDOWN');
-  run(f,20);eq(f.log.filter(e=>e.type==='hit').length,5)});
+// Task 7.2: holding light no longer stops on its own at 5 hits -- CHAIN.enders.light is {} (no
+// knockdown bonus), so once the 5th hit's own recovery ends, a STILL-HELD light simply reads as a
+// fresh opener and starts a brand-new chain (see the dedicated 'holding light plays back-to-back
+// five-node chains' test below for that looping behavior). Amended to drive exactly five hits with
+// chainSeq instead of an indefinite hold, since "stops at 5, knocks down" is no longer this move's
+// own behavior to test.
+Test.add('a scripted five-node light chain (L-L-L-L-L) lands five hits; the light ender has no knockdown, unlike the old ladder',()=>{
+  const f=mkFight({ctrl1:chainSeq(['light','light','light','light','light'])});closeIn(f);
+  for(let i=0;i<200&&f.log.filter(e=>e.type==='hit').length<5;i++)f.step();
+  eq(f.log.filter(e=>e.type==='hit').length,5);
+  eq(f.p2.hp,1000-MOVES.light.chainDmg.reduce((s,mul)=>s+Math.round(CHAMPS.carl.atk*mul),0));
+  ok(f.p2.state!=='KNOCKDOWN','CHAIN.enders.light is {} -- unlike the old light5, this ender never knocks down')});
+Test.add('holding light plays back-to-back five-node chains (no knockdown -- CHAIN.enders.light is {}), each ender looping into a fresh opener while light stays held',()=>{
+  const nodes=[];
+  const f=mkFight({ctrl1:Ctrl.script([L(0,600)]),onEvent:(type,a)=>{if(type==='hit'&&a.side===1)nodes.push(a.chainNode)}});
+  closeIn(f);run(f,300);
+  ok(nodes.length>=10,'at least two full 5-node chains must land holding light this long: got '+nodes.length);
+  eq(JSON.stringify(nodes.slice(0,10)),JSON.stringify([1,2,3,4,5,1,2,3,4,5]),
+    'chain nodes must cycle 1..5 back to back, never interrupted by a knockdown');
+  ok(f.p2.state!=='KNOCKDOWN','a light-ended chain never knocks down, so held light must never get cut off by one')});
 Test.add('power accrues for both sides and caps',()=>{
-  const f=mkFight({ctrl1:Ctrl.script([L(0,200)])});closeIn(f);run(f,90);
-  eq(f.p1.power,7+7+7+8+10);eq(f.p2.power,4+4+4+4+5);f.p1.power=299;f.p1.hits=new Set();f.p1.power=Math.min(POWER_MAX,f.p1.power+50);eq(f.p1.power,300)});
+  const f=mkFight({ctrl1:chainSeq(['light','light','light','light','light'])});closeIn(f);
+  for(let i=0;i<200&&f.log.filter(e=>e.type==='hit').length<5;i++)f.step();
+  // Task 7.2: every node uses the same base MOVES.light.powHit/powTaken now (only chainDmg varies by
+  // node) -- the old per-node 7/7/7/8/10 and 4/4/4/4/5 ladders are gone; a flat 5x7 / 5x4 replaces them.
+  eq(f.p1.power,MOVES.light.powHit*5);eq(f.p2.power,MOVES.light.powTaken*5);
+  f.p1.power=299;f.p1.hits=new Set();f.p1.power=Math.min(POWER_MAX,f.p1.power+50);eq(f.p1.power,300)});
 Test.add('S3 is unblockable, costs three bars, knocks down on last hit',()=>{
   // Amended for Task 2.7: s3 leaving startup now arms a 72-frame cinematic freeze that raw step()
   // never decrements on its own (only G.tick does), so the freeze has to be cleared by hand here,
@@ -6108,11 +6345,33 @@ Test.add('AI vs random bot is deterministic',()=>{
 Test.add('an unknown AI profile throws instead of silently falling back to basic',()=>{
   ok(threw(()=>AI.make('nope',1)))});
 Test.add('brawl AI blocks a medium at least once in 20 seconds',()=>{
-  const f=mkFight({ctrl1:Ctrl.script(Array.from({length:40},(_,i)=>({f:i*30,intent:{medium:true}}))),ctrl2:AI.make('brawl',11)});run(f,1200);
+  const f=mkFight({ctrl1:Ctrl.script(Array.from({length:40},(_,i)=>({f:i*30,intent:{medium:true}}))),ctrl2:AI.make('brawl',11)});
+  // Task 7.2: p1 never blocks the AI's own offense in this script, and a comboMix (t3+) AI's own
+  // spontaneous/punish attacks now sometimes run the full 5-node grammar (up to a 2.0x-multiplier
+  // ender) instead of the old ladder's shorter combos -- against an undefended target that lands
+  // fast enough to KO p1 well before this test's 1200-frame budget elapses (the fight simply ends,
+  // f.step() no-ops once f.over, and no further block ever gets a chance to roll). Padding p1's hp
+  // keeps the exchange alive for the test's own actual purpose (does the AI ever block a scripted
+  // medium), independent of how much damage its own offense now deals.
+  f.p1.hp=f.p1.maxHp=100000;
+  run(f,1200);
   ok(f.log.some(e=>e.type==='block'||e.type==='parry'))});
 Test.add('tiers t1..t5 exist, aliases resolve, dummy stays inert',()=>{for(const t of ['t1','t2','t3','t4','t5'])ok(AI.TIERS[t]);eq(AI.resolveProfile('basic'),AI.TIERS.t2);eq(AI.resolveProfile('brawl'),AI.TIERS.t3);ok(AI.resolveProfile('brute').heavy>=.5);const f=mkFight({ctrl2:AI.make('dummy',3)});run(f,600);eq(f.log.filter(e=>e.type==='hit'&&e.who===-1).length,0)});
-Test.add('t5 intercepts a dash-in medium with a light',()=>{const f=mkFight({ctrl1:Ctrl.script(Array.from({length:20},(_,i)=>({f:i*40,intent:{medium:true}}))),ctrl2:AI.make('t5',4)});f.p1.x=f.p2.x-260;run(f,800);const ai=f.log.filter(e=>e.type==='hit'&&e.who===-1);ok(ai.length>0,'ai landed');ok(f.log.some(e=>e.type==='hit'&&e.who===-1&&e.move==='light1'),'a light interrupted')});
+Test.add('t5 intercepts a dash-in medium with a light',()=>{const f=mkFight({ctrl1:Ctrl.script(Array.from({length:20},(_,i)=>({f:i*40,intent:{medium:true}}))),ctrl2:AI.make('t5',4)});f.p1.x=f.p2.x-260;run(f,800);const ai=f.log.filter(e=>e.type==='hit'&&e.who===-1);ok(ai.length>0,'ai landed');ok(f.log.some(e=>e.type==='hit'&&e.who===-1&&e.move==='light'),'a light interrupted')});
 Test.add('t4 punishes a parried (stunned) player',()=>{const f=mkFight({ctrl1:Ctrl.script([{f:0,until:600,intent:{light:true}}]),ctrl2:AI.make('t4',5)});closeIn(f);run(f,900);ok(f.log.some((e,i)=>e.type==='parry'&&f.log.slice(i+1,i+30).some(h=>h.type==='hit'&&h.who===-1)),'hit within 30 frames after a parry')});
+// Task 7.2: AI_TIERS.t3/t4/t5 (comboMix:true) learn the mixed M-L-L-L-M grammar -- decidePunish's
+// opener is always a medium, so a comboMix tier's own follow-through plan is ['light','light','light',
+// 'medium'] (see 55_ai.js's comboPlanFor), landing a medium specifically at the chain's own node 5.
+// p1 is held STUNNED (a large stun value, never decaying) so the AI has a permanently punishable,
+// always-in-range target and can freely run its own combo to completion without interruption.
+Test.add('AI t3+ (comboMix tiers) follow a punish opener with the mixed grammar, landing a medium at chain node 5',()=>{
+  let sawMediumAtNode5=false;
+  const f=mkFight({ctrl1:Ctrl.idle(),ctrl2:AI.make('t4',3),
+    onEvent:(type,a)=>{if(type==='hit'&&a&&a.side===-1&&a.moveName==='medium'&&a.chainNode===CHAIN.nodes)sawMediumAtNode5=true}});
+  closeIn(f);
+  f.p1.state='STUNNED';f.p1.stun=1e6;f.p1.f=0;
+  for(let i=0;i<2000&&!sawMediumAtNode5;i++)f.step();
+  ok(sawMediumAtNode5,'a comboMix (t4) AI must eventually land a medium at the chain\'s own node 5')});
 // Fix wave item 1: a t4 boss with power banked must actually throw its S3 (the *STEP per-second
 // scaling bug made this ~1-in-880-held-power-frames before the fix — see 55_ai.js's special check).
 Test.add('a t4 boss with power fires a special within 300 frames',()=>{
@@ -6407,7 +6666,7 @@ Test.add('poseFor maps fighter state to pose key and progress',()=>{const F=mkFi
   const W=mkFighter();W.dx=2;eq(Rig.poseFor(W).key,'walk','IDLE with dx beyond the deadzone must map to walk');
   F.act(Object.assign(Ctrl.EMPTY(),{light:true}));for(let i=0;i<3;i++)F.tick();const p=Rig.poseFor(F);eq(p.key,'light1');ok(p.t01>0&&p.t01<1);F.setState('KNOCKDOWN');F.f=35;eq(Rig.poseFor(F).key,'getup')});
 Test.add('mob defs have hp/atk/scale and resolve through DEFS',()=>{ok(DEFS.goblin.hp<DEFS.carl.hp);ok(DEFS.hobgoblin.scale>1);eq(DEFS.katia.cls,'trickster');ok(DEFS.goblin.rig==='human')});
-Test.add('hitstop is per move',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.hitstop,MOVES.light1.hitstop);ok(MOVES.heavy.hitstop>MOVES.light1.hitstop&&MOVES.s3.hitstop>MOVES.heavy.hitstop)});
+Test.add('hitstop is per move',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.hitstop,MOVES.light.hitstop);ok(MOVES.heavy.hitstop>MOVES.light.hitstop&&MOVES.s3.hitstop>MOVES.heavy.hitstop)});
 Test.add('a hit queues spark, popup and shake fx; a block queues dust',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);const kinds=f.fx.map(e=>e.kind);ok(kinds.includes('spark')&&kinds.includes('popup')&&kinds.includes('shake'),kinds.join());const g=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(g);run(g,15);ok(g.fx.some(e=>e.kind==='dust'))});
 Test.add('KO starts slow-mo and G steps the sim every 4th tick during it',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);f.p2.hp=1;run(f,5);ok(f.over&&f.slowmo>0);const before=f.slowmo;G.fight=f;G.state='FIGHT';G._tickN=0;for(let i=0;i<8;i++)G.tick();eq(f.slowmo,before-2);G.fight=null;G.state='TITLE'});
 Test.add('a parry works again after PARRY_LOCKOUT expires',()=>{
@@ -6667,12 +6926,14 @@ Test.add('a multi-hit special plays its recipe once and a light thud per landed 
 Test.add('crit rolls from the fight rng and multiplies damage; noCrit disables',()=>{const a=mkFight({ctrl1:Ctrl.script([L(0)]),noCrit:false,seed:3});a.p1.def=Object.assign({},CHAMPS.carl,{crit:1});closeIn(a);run(a,5);eq(a.p2.hp,1000-Math.round(60*1.6));const b=mkFight({ctrl1:Ctrl.script([L(0)])});b.p1.def=Object.assign({},CHAMPS.carl,{crit:1});closeIn(b);run(b,5);eq(b.p2.hp,940)});
 Test.add('block proficiency reduces chip',()=>{const f=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});f.p2.def=Object.assign({},CHAMPS.carl,{blockProf:.5});closeIn(f);run(f,15);eq(f.p2.hp,Math.round(1000-5*.5))});
 Test.add('a missed parry locks out re-parry for PARRY_LOCKOUT frames',()=>{const mash=Ctrl.script(Array.from({length:40},(_,i)=>({f:i*7,until:i*7+5,intent:{block:true}})));const f=mkFight({ctrl1:Ctrl.script([L(0,300)]),ctrl2:mash});closeIn(f);run(f,300);const parries=f.log.filter(e=>e.type==='parry').length;ok(parries<=2,'mash parries: '+parries);const hold=mkFight({ctrl1:Ctrl.script([L(0,300)]),ctrl2:Ctrl.hold({block:true})});closeIn(hold);run(hold,300);ok(hold.p2.hp>=f.p2.hp-50,'holding is not much worse than mashing')});
-Test.add('per-champion move overrides merge over MOVES',()=>{const F=new Fighter(DEFS.goblin,-1,Ctrl.idle());eq(F.moveDef('heavy').charge,14);eq(F.moveDef('light1').startup,MOVES.light1.startup);const H=new Fighter(DEFS.hobgoblin,-1,Ctrl.idle());eq(H.moveDef('heavy').hitstop,12)});
+Test.add('per-champion move overrides merge over MOVES',()=>{const F=new Fighter(DEFS.goblin,-1,Ctrl.idle());eq(F.moveDef('heavy').charge,14);eq(F.moveDef('light').startup,MOVES.light.startup);const H=new Fighter(DEFS.hobgoblin,-1,Ctrl.idle());eq(H.moveDef('heavy').hitstop,12)});
 // --- Task 6.2: movement inside moves (dash-in medium, step-in light) and AI approach ---
-Test.add('move table gains movement-inside-moves fields: medium.track, light1.stepIn, others untouched',()=>{
-  eq(MOVES.medium.track,300);eq(MOVES.light1.stepIn,110);
-  eq(MOVES.light1.dash,18,'light1 keeps its normal dash for when it starts already in range');
-  for(const k of['light2','light3','light4','light5'])ok(typeof MOVES[k].dash==='number'&&MOVES[k].track===undefined&&MOVES[k].stepIn===undefined,k+' must be untouched')});
+// Task 7.2: light1..light5's per-node dash/track/stepIn split is gone -- there's only one MOVES.light
+// entry now, shared by every chain node (see 40_movedata.js's own comment for why only chainDmg varies
+// by node). This just checks that single entry keeps medium's track and light's stepIn/dash intact.
+Test.add('move table keeps movement-inside-moves fields: medium.track, light.stepIn/dash',()=>{
+  eq(MOVES.medium.track,300);eq(MOVES.light.stepIn,110);
+  eq(MOVES.light.dash,18,'light keeps its normal dash for when it starts already in range')});
 Test.add('Fight.step writes fighter.foeDist symmetrically before act() runs, matching the hurtbox-edge gap',()=>{
   const f=mkFight();f.p1.x=STAGE_W/2-100;f.p2.x=STAGE_W/2+100;
   f.step();
@@ -6683,12 +6944,12 @@ Test.add('a step-in light closes distance and lands when the foe starts beyond l
   f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-150-48; // foeDist ~150px: beyond light1.range(70), within stepIn's max reach (110+70=180)
   run(f,12);
   ok(f.log.some(e=>e.type==='hit'&&e.who===1),'the step-in light should land within 12 frames')});
-Test.add('light1 already in range keeps its normal dash and startup (stepIn does not trigger)',()=>{
+Test.add('light already in range keeps its normal dash and startup (stepIn does not trigger)',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});
-  closeIn(f); // well inside light1.range
+  closeIn(f); // well inside light.range
   f.step();
-  eq(f.p1.effStartup,MOVES.light1.startup,'no stepIn extension when already in range');
-  eq(f.p1.dashRate,MOVES.light1.dash/MOVES.light1.startup,'falls back to the plain dash/startup rate')});
+  eq(f.p1.effStartup,MOVES.light.startup,'no stepIn extension when already in range');
+  eq(f.p1.dashRate,MOVES.light.dash/MOVES.light.startup,'falls back to the plain dash/startup rate')});
 Test.add('a medium dash-in tracks the foe from spawn distance, stops at light range, never overshoots',()=>{
   // Isolated from Fight.step/detect/resolve on purpose: once the dash-in closes the gap the same
   // tick the hitbox goes active (see the 'ender push' test's own comment on that overlap), so a real
@@ -6704,7 +6965,7 @@ Test.add('a medium dash-in tracks the foe from spawn distance, stops at light ra
     F.tick();
     ok(F.x<=foeX-F.width,'attacker must never cross past the foe (both fighters share width 48)')}
   const gap=foeX-F.x-F.width;
-  ok(Math.abs(gap-MOVES.light1.range)<2,'foeDist should be ~light range once the dash-in ends, got '+gap)});
+  ok(Math.abs(gap-MOVES.light.range)<2,'foeDist should be ~light range once the dash-in ends, got '+gap)});
 Test.add('a medium dash-in from spawn distance actually lands (end to end, through a real Fight)',()=>{
   const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});
   f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-320-48; // ~320px: the playtest note's spawn gap
@@ -6784,32 +7045,103 @@ Test.add('Ctrl.tutorialDummy never approaches: it only ever holds or throws its 
   for(let i=0;i<600;i++){
     const it=c.next(null,me,me);
     ok(!it.light&&!it.dashBack&&!it.block&&!it.special,'the tutorial dummy is a controller, not an AI profile -- unaffected by AI approach')}});
-Test.add('medium as a combo ender pushes the defender out of light range',()=>{
-  // Chain 3 lights (light1/2/3 all have a non-null .chain) then, from light3's recovery, cancel
-  // into a medium (script: light only through frame 23, medium from frame 24 on — the frame light3
-  // enters recovery, verified against the fight's own frame counter, not guessed) so the ender
-  // branch (att.moveName==='medium'&&att.combo>=3) is actually exercised, not just incidentally
-  // satisfied by prior pushback. Capture the landing hit's attacker via a wrapped onEvent (Fight.emit
-  // hands it the live Fighter, so a.moveName/a.combo reflect that exact hit) and diff its knockback
-  // against a plain medium thrown from IDLE with combo 0. Both scenarios share identical dash/
-  // separate() contamination on the hit-landing step (medium's approach dash runs through
-  // f<=startup, which is also its first active frame, so the last dash increment and the hit
-  // resolve in the same step), so the *difference* between the two deltas isolates the push
-  // (90 vs MOVES.medium.push) exactly, independent of that shared collision noise.
-  let capture=null;
-  const f=mkFight({ctrl1:Ctrl.script([{f:0,until:23,intent:{light:true}},{f:24,until:60,intent:{medium:true}}]),
-    onEvent:(type,a)=>{if(type==='hit'&&a.moveName==='medium'&&!capture)capture={moveName:a.moveName,combo:a.combo}}});
-  f.p2.x=STAGE_W/2;closeIn(f); // room to be pushed; hitstop pauses Fight.frame for a few steps per landed hit, so budget generously
-  let dx=0;
-  for(let i=0;i<70&&dx===0;i++){const before=f.p2.x;f.step();const last=f.log[f.log.length-1];
-    if(capture&&last&&last.type==='hit'&&last.f===f.frame&&last.who===1)dx=f.p2.x-before}
-  ok(capture,'medium landed as the chain-cancel finisher');eq(capture.moveName,'medium');ok(capture.combo>=4,'combo at ender: '+capture.combo);
-  const g=mkFight();closeIn(g);g.p1.combo=0;g.p1.startMove('medium');
-  let dx2=0;
-  for(let i=0;i<40&&dx2===0;i++){const before=g.p2.x;g.step();const last=g.log[g.log.length-1];
-    if(last&&last.type==='hit'&&last.f===g.frame)dx2=g.p2.x-before}
-  ok(dx2<60,'non-ender medium push stays well under 90, got '+dx2);
-  eq(dx-dx2,90-MOVES.medium.push,'ender push (90) vs normal push ('+MOVES.medium.push+') differential; dx='+dx+' dx2='+dx2)});
+Test.add('chain grammar: L-L-L-L-L lands five light hits with per-node damage; the light ender has no push/knockdown bonus',()=>{
+  const hits=[];
+  const f=mkFight({ctrl1:chainSeq(['light','light','light','light','light']),
+    onEvent:(type,a,b,val)=>{if(type==='hit'&&a.side===1)hits.push(val)}});
+  closeIn(f);
+  for(let i=0;i<300&&hits.length<5;i++)f.step();
+  eq(hits.length,5,'all five light nodes must land');
+  const expect=MOVES.light.chainDmg.map(mul=>Math.round(CHAMPS.carl.atk*mul));
+  eq(JSON.stringify(hits),JSON.stringify(expect),'per-node damage must follow MOVES.light.chainDmg');
+  ok(f.p2.state!=='KNOCKDOWN','CHAIN.enders.light is {} -- a light-ended chain must not knock down');
+  run(f,30); // let the 5th (ender) hit's own recovery fully elapse -- chainNode only resets at phase 'done'
+  eq(f.p1.chainNode,0,'chainNode resets to 0 once the ender\'s own recovery ends')});
+Test.add('chain grammar: M-L-L-L-M lands five hits with per-node damage; the medium ender pushes 90 and knocks down',()=>{
+  const hits=[];
+  const f=mkFight({ctrl1:chainSeq(['medium','light','light','light','medium']),
+    onEvent:(type,a,b,val)=>{if(type==='hit'&&a.side===1)hits.push(val)}});
+  closeIn(f);
+  for(let i=0;i<300&&hits.length<5;i++)f.step();
+  eq(hits.length,5,'all five nodes of M-L-L-L-M must land');
+  const mL=MOVES.light.chainDmg,mM=MOVES.medium.chainDmg,atk=CHAMPS.carl.atk;
+  const expect=[Math.round(atk*mM[0]),Math.round(atk*mL[1]),Math.round(atk*mL[2]),Math.round(atk*mL[3]),Math.round(atk*mM[4])];
+  eq(JSON.stringify(hits),JSON.stringify(expect),'per-node damage must follow each node\'s own move type');
+  eq(f.p2.state,'KNOCKDOWN','CHAIN.enders.medium knocks down on the chain\'s node-5 finisher');
+  run(f,30); // let the 5th (ender) hit's own recovery fully elapse -- chainNode only resets at phase 'done'
+  eq(f.p1.chainNode,0,'chainNode resets to 0 once the ender\'s own recovery ends')});
+Test.add('chain grammar: L-M-L-M-L lands five hits (medium is a valid continuation at any node, not just the ender)',()=>{
+  const hits=[];
+  const f=mkFight({ctrl1:chainSeq(['light','medium','light','medium','light']),
+    onEvent:(type,a,b,val)=>{if(type==='hit'&&a.side===1)hits.push(val)}});
+  closeIn(f);
+  for(let i=0;i<300&&hits.length<5;i++)f.step();
+  eq(hits.length,5,'all five nodes of L-M-L-M-L must land');
+  const mL=MOVES.light.chainDmg,mM=MOVES.medium.chainDmg,atk=CHAMPS.carl.atk;
+  const expect=[Math.round(atk*mL[0]),Math.round(atk*mM[1]),Math.round(atk*mL[2]),Math.round(atk*mM[3]),Math.round(atk*mL[4])];
+  eq(JSON.stringify(hits),JSON.stringify(expect));
+  ok(f.p2.state!=='KNOCKDOWN','the ender here is light (CHAIN.enders.light is {}) -- no knockdown bonus')});
+Test.add('chain grammar: a whiff resets chainNode to 0',()=>{
+  // Default (non-closeIn) spawn distance is beyond light range, so this light simply whiffs.
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});
+  run(f,3);
+  eq(f.p1.state,'ATTACK');eq(f.p1.chainNode,1,'chainNode is set to 1 the instant the opener starts');
+  run(f,30); // well past startup+active+recovery
+  eq(f.p1.state,'IDLE');eq(f.p1.landed,false,'sanity: the light must have whiffed at this spawn distance');
+  eq(f.p1.chainNode,0,'chainNode resets to 0 once a whiffed move\'s recovery ends')});
+Test.add('chain grammar: taking a hit resets the struck fighter\'s own chainNode to 0',()=>{
+  const f=mkFight({ctrl2:Ctrl.script([L(0)])});closeIn(f);
+  f.p1.chainNode=3; // pretend p1 was mid-chain (waiting out a node-3 recovery) when struck
+  run(f,10);
+  ok(f.log.some(e=>e.type==='hit'&&e.who===-1),'sanity: p2 must land on p1');
+  eq(f.p1.chainNode,0,'a hit taken must reset the defender\'s own chainNode to 0');
+  // Same poke, but via a PARRY this time (att.chainNode reset lives in that branch too, not just the
+  // plain hit branch) -- p2 holds block inside the parry window against p1's own scripted light.
+  const h=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:2,until:40,intent:{block:true}}])});closeIn(h);
+  h.p1.chainNode=2;
+  run(h,6);
+  eq(h.p1.state,'STUNNED','sanity: p1 must have been parried');
+  eq(h.p1.chainNode,0,'a parried attacker\'s own chainNode must also reset to 0')});
+Test.add('chain grammar: no sixth node -- the ender\'s own recovery accepts no further continuation',()=>{
+  const F=mkFighter();
+  F.startMove('medium',CHAIN.nodes); // pretend node 5 (the ender) just started
+  for(let i=0;i<F.move.startup+F.activeSpan();i++)F.tick();
+  eq(F.phase(),'recovery');
+  F.landed=true; // pretend the ender's hit landed
+  const before={moveName:F.moveName,chainNode:F.chainNode};
+  F.act(Object.assign(Ctrl.EMPTY(),{light:true}));
+  eq(F.moveName,before.moveName,'a light press during the ender\'s own recovery must not start a 6th node');
+  eq(F.chainNode,before.chainNode,'chainNode must stay at 5, never advance to 6');
+  F.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
+  eq(F.moveName,before.moveName,'nor must a medium press');
+  F.act(Object.assign(Ctrl.EMPTY(),{heavy:true}));
+  eq(F.moveName,before.moveName,'nor must a heavy press -- the shortened ender is only ever offered at node 4')});
+Test.add('chain grammar: the in-combo heavy ender at node 4 charges CHAIN.enders.heavy.charge (14) frames, not MOVES.heavy\'s normal 22, and applies the attacker\'s own sigEffect once it lands',()=>{
+  const f=mkFight({ctrl1:chainSeq(['light','light','light','light','heavy'])});closeIn(f);
+  let sawCharge=false,chargeFrames=-1,sawNode5AtCharge=false;
+  for(let i=0;i<400;i++){
+    f.step();
+    if(f.p1.state==='CHARGE'&&f.p1.moveName==='heavy'&&!sawCharge){
+      sawCharge=true;chargeFrames=f.p1.move.charge;sawNode5AtCharge=f.p1.chainNode===CHAIN.nodes}
+    if(f.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='heavy'))break}
+  ok(sawCharge,'the in-combo heavy ender must actually reach CHARGE');
+  eq(chargeFrames,CHAIN.enders.heavy.charge,'charges for 14 frames, not MOVES.heavy\'s normal 22');
+  ok(sawNode5AtCharge,'the shortened ender counts as the chain\'s own node 5 -- no further continuation offered');
+  ok(f.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='heavy'),'the shortened heavy ender must land');
+  eq(Effects.stacks(f.p1,'fury'),1,'Carl\'s own sigEffect (fury, target:self) must land on the ATTACKER himself');
+  eq(f.p2.state,'KNOCKDOWN','the ender still carries base MOVES.heavy\'s own knockdown (CHAIN.enders.heavy has no push/knockdown override)')});
+Test.add('chain grammar: mobs/bosses have no sigEffect, so their own in-combo heavy ender applies nothing',()=>{
+  const f=mkFight({p1:DEFS.goblin,ctrl1:chainSeq(['light','light','light','light','heavy'])});closeIn(f);
+  for(let i=0;i<400&&!f.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='heavy');i++)f.step();
+  ok(f.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='heavy'),'sanity: the goblin\'s own shortened ender must land');
+  ok(!f.log.some(e=>e.type==='effect'&&e.who===1),'no sigEffect must ever be applied for a mob with none defined')});
+Test.add('block chip scales by the attacker\'s own Effects.mods.atkMul (a fury stack chips harder on block)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,until:0,intent:{medium:true}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);
+  Effects.apply(f,f.p1,'fury',{stacks:3});
+  run(f,40);
+  const chip=1000-f.p2.hp;
+  const expect=Math.round(CHAMPS.carl.atk*(1+0.12*3)*MOVES.medium.chainDmg[0]*CHIP*(1-(CHAMPS.carl.blockProf||0)));
+  eq(chip,expect,'blocked chip must scale by the attacker\'s own atkMul, via the exact Fight.resolve chip formula')});
 Test.add('S3 freezes the sim for the cinematic then lands all hits',()=>{const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;run(f,21);ok(f.cinematic>0,'cinematic armed');const hpBefore=f.p2.hp;run(f,30);eq(f.p2.hp,hpBefore,'frozen');f.cinematic=0;run(f,120);eq(f.log.filter(e=>e.type==='hit').length,4)});
 Test.add('G.tick decrements cinematic without stepping the sim',()=>{const f=mkFight();f.cinematic=5;const fr=f.frame;G.fight=f;G.state='FIGHT';G.tick();eq(f.cinematic,4);eq(f.frame,fr);G.fight=null;G.state='TITLE'});
 Test.add('brute profile exists and prefers heavies',()=>{ok(AI.profiles.brute);ok(AI.profiles.brute.heavy>=.5)});
@@ -6937,10 +7269,10 @@ Test.add('armorUp multiplies incoming damage by .7 when the holder defends',()=>
 Test.add('powerGain scales the holder power delta by 1.5x, on its own hits and on being hit',()=>{
   const a=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(a);Buffs.apply(a,a.p1,['powerGain']);
   run(a,5);
-  eq(a.p1.power,Math.round(MOVES.light1.powHit*1.5),'attacker with the buff gains 1.5x powHit');
+  eq(a.p1.power,Math.round(MOVES.light.powHit*1.5),'attacker with the buff gains 1.5x powHit');
   const b=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(b);Buffs.apply(b,b.p2,['powerGain']);
   run(b,5);
-  eq(b.p2.power,Math.round(MOVES.light1.powTaken*1.5),'defender with the buff gains 1.5x powTaken')});
+  eq(b.p2.power,Math.round(MOVES.light.powTaken*1.5),'defender with the buff gains 1.5x powTaken')});
 // Fix-wave item 6: on a true mutual trade (both sides' hits detected before either resolves —
 // Fight.step's c1/c2), resolve(c1) nulls def.move where that same fighter is c2's attacker, so the
 // old `att.move` read inside powerGain's onHit was already null by the time resolve(c2) ran and
@@ -6950,7 +7282,7 @@ Test.add('powerGain scales power gained on a true mutual trade (both lights land
   Buffs.apply(f,f.p1,['powerGain']);
   run(f,6);
   eq(f.log.filter(e=>e.type==='hit').length,2,'both lights must land the same tick for a true mutual trade');
-  eq(f.p1.power,Math.round(MOVES.light1.powHit*1.5)+Math.round(MOVES.light1.powTaken*1.5),
+  eq(f.p1.power,Math.round(MOVES.light.powHit*1.5)+Math.round(MOVES.light.powTaken*1.5),
     'p1 (holder) must get 1.5x on both the hit it landed (attacker in c1) and the hit it took (defender in c2)')});
 Test.add('unblockableSpecials makes a blocked special land as a hit',()=>{
   const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:1}}]),ctrl2:Ctrl.hold({block:true})});
@@ -8657,16 +8989,19 @@ Test.add('settings.sfx===false makes G.playRecipe (every Audio.recipes.* call si
   Save.data.settings.sfx=true;
   G.playRecipe(stub);
   eq(called,true,'the same stub must be called once sfx is back on')});
-Test.add('a landed hit does not call Audio.recipes.light1 when settings.sfx is off',()=>{
+Test.add('a landed hit does not call Audio.recipes.lights when settings.sfx is off',()=>{
+  // Task 7.2: moveName is now the literal 'light' (not 'light1'), so G.onEvent's own
+  // (Audio.recipes[a.moveName]||Audio.recipes.lights) lookup falls through to the generic 'lights'
+  // recipe for a plain single-hit light -- that's the real call site to stub now.
   Save.data=Meta.defaults();Save.data.settings.sfx=false;
-  const orig=Audio.recipes.light1;let called=false;
-  Audio.recipes.light1=()=>{called=true};
+  const orig=Audio.recipes.lights;let called=false;
+  Audio.recipes.lights=()=>{called=true};
   try{
     G.startFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
     closeIn(G.fight);G.sim=true;
     for(let i=0;i<8;i++)G.tick();
-    eq(called,false,'Audio.recipes.light1 must not be called with sfx off')
-  }finally{Audio.recipes.light1=orig;Save.data.settings.sfx=true;G.toTitle();G.sim=false}});
+    eq(called,false,'Audio.recipes.lights must not be called with sfx off')
+  }finally{Audio.recipes.lights=orig;Save.data.settings.sfx=true;G.toTitle();G.sim=false}});
 Test.add('settings.announcer===false makes G.say a no-op (the toast stays empty)',()=>{
   Save.data=Meta.defaults();Save.data.settings.announcer=false;
   const el=document.getElementById('toast');el.textContent='';
@@ -9370,7 +9705,10 @@ Test.add('kick: medium\'s active-phase pose drives a striking limb >=60px forwar
 // introduced or is in scope to fix, and one that (at Mongo's larger legLen) pushes his own foot drift
 // during light1 past 20px on its own. See the Task 6.5 report for the full per-look numbers.
 Test.add('light1 (the arm jab, unchanged) keeps the legs/hind paws within 20px of idle -- contrast with the new kick',()=>{
-  const T=activeStartT01('light1');
+  // Task 7.2: MOVES.light1 is gone (collapsed into MOVES.light, same frame timing for every node) --
+  // activeStartT01 needs a real MOVES key, so this passes 'light' for the timing lookup while still
+  // solving the POSES table (unaffected, light1..5 pose keys remain) at pose key 'light1' below.
+  const T=activeStartT01('light');
   {const idle=Rig.solve(LOOKS.carl,'idle',0,1),l1=Rig.solve(LOOKS.carl,'light1',T,1);
     const lDrift=Math.abs(l1.lFoot.x-idle.lFoot.x),rDrift=Math.abs(l1.rFoot.x-idle.rFoot.x);
     ok(lDrift<=20,'human left foot must stay within 20px of idle during light1: '+lDrift.toFixed(1));
@@ -9504,19 +9842,19 @@ Test.add('fury on the attacker scales their own outgoing damage via Effects.mods
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
   Effects.apply(f,f.p1,'fury',{stacks:3});
   run(f,5);
-  const dmg=Math.round(CHAMPS.carl.atk*(1+0.12*3)*MOVES.light1.dmg*1*1*(1-CHAMPS.carl.armor));
+  const dmg=Math.round(CHAMPS.carl.atk*(1+0.12*3)*MOVES.light.dmg*1*1*(1-CHAMPS.carl.armor));
   eq(f.p2.hp,1000-dmg)});
 Test.add('weakness on the attacker scales their own outgoing damage down via Effects.mods.atkMul',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
   Effects.apply(f,f.p1,'weakness',{stacks:3});
   run(f,5);
-  const dmg=Math.round(CHAMPS.carl.atk*(1-0.12*3)*MOVES.light1.dmg*1*1*(1-CHAMPS.carl.armor));
+  const dmg=Math.round(CHAMPS.carl.atk*(1-0.12*3)*MOVES.light.dmg*1*1*(1-CHAMPS.carl.armor));
   eq(f.p2.hp,1000-dmg)});
 Test.add('armorBreak on the defender reduces their own effective armor via Effects.mods.armorDelta',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
   Effects.apply(f,f.p2,'armorBreak',{stacks:2});
   run(f,5);
-  const dmg=Math.round(CHAMPS.carl.atk*1*MOVES.light1.dmg*1*1*(1-(CHAMPS.carl.armor-0.15*2)));
+  const dmg=Math.round(CHAMPS.carl.atk*1*MOVES.light.dmg*1*1*(1-(CHAMPS.carl.armor-0.15*2)));
   eq(f.p2.hp,1000-dmg)});
 Test.add('active effects do not change the fight\'s rng draw count (Effects consumes no RNG)',()=>{
   const f1=mkFight({noCrit:false,ctrl1:Ctrl.script([L(0)])});closeIn(f1);
@@ -9528,17 +9866,17 @@ Test.add('active effects do not change the fight\'s rng draw count (Effects cons
   run(f2,5);
   eq(n2,n1,'the number of fight.rng draws must be identical whether or not effects are active')});
 Test.add('move data applies:[{id,stacks,on:"hit"}] applies the effect to the defender on a landed hit, and logs the event',()=>{
-  const P1=Object.assign({},CHAMPS.carl,{moves:{light1:{applies:[{id:'bleed',stacks:2,on:'hit'}]}}});
+  const P1=Object.assign({},CHAMPS.carl,{moves:{light:{applies:[{id:'bleed',stacks:2,on:'hit'}]}}});
   const f=mkFight({p1:P1,ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
   eq(Effects.stacks(f.p2,'bleed'),2,'a landed hit with an on:"hit" applies entry must apply the effect to the defender');
   ok(f.log.some(e=>e.type==='effect'&&e.id==='bleed'&&e.applied),'an applied effect event must be logged')});
 Test.add('move data applies:[{...,on:"block"}] applies the effect to the defender when the hit is blocked (not on:"hit")',()=>{
-  const P1=Object.assign({},CHAMPS.carl,{moves:{light1:{applies:[{id:'weakness',stacks:1,on:'block'},{id:'bleed',stacks:1,on:'hit'}]}}});
+  const P1=Object.assign({},CHAMPS.carl,{moves:{light:{applies:[{id:'weakness',stacks:1,on:'block'},{id:'bleed',stacks:1,on:'hit'}]}}});
   const f=mkFight({p1:P1,ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(f);run(f,15);
   eq(Effects.stacks(f.p2,'weakness'),1,'a blocked hit with on:"block" must apply that effect to the blocker');
   eq(Effects.stacks(f.p2,'bleed'),0,'an on:"hit" entry must not fire when the exchange was actually blocked')});
 Test.add('move data applies:[{...,on:"crit"}] only fires when the landed hit actually crit',()=>{
-  const P1=Object.assign({},CHAMPS.carl,{moves:{light1:{applies:[{id:'armorBreak',stacks:1,on:'crit'}]}}});
+  const P1=Object.assign({},CHAMPS.carl,{moves:{light:{applies:[{id:'armorBreak',stacks:1,on:'crit'}]}}});
   const noCritF=mkFight({p1:P1,ctrl1:Ctrl.script([L(0)]),noCrit:true});closeIn(noCritF);run(noCritF,5);
   eq(Effects.stacks(noCritF.p2,'armorBreak'),0,'on:"crit" must not fire on a non-crit hit');
   const critF=mkFight({p1:P1,ctrl1:Ctrl.script([L(0)]),noCrit:false});closeIn(critF);critF.rng.next=()=>0;run(critF,5);

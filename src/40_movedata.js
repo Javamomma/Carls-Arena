@@ -1,15 +1,38 @@
 // All frame counts at 60 Hz. dash = px the attacker advances during startup. push = px the defender is shoved on hit.
+// Task 7.2: the fixed light1->light5 ladder collapses into one MOVES.light entry (every node plays
+// the exact same startup/active/recovery/range/hitstun/blockstun/push/pow/dash timing -- only the
+// landed hit's effective damage varies by chain node, via CHAIN.chainDmg below) plus base MOVES.medium
+// keeping its own single entry the same way. MOVES.light's non-dmg fields are light1's own old values
+// verbatim (dmg:1 too -- node-1 numbers must stay unchanged), so a fresh opener light thrown from
+// neutral is bit-identical to the old light1. The old per-move `chain` pointers (light1->light2->...,
+// medium->light1) and every move's dead chain:null are deleted -- Fighter.chainNode/CHAIN (below) now
+// own the grammar; see 50_fighter.js's startMove/act for how chainNode replaces this.move.chain.
 const MOVES={
-  light1:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light2',dash:18,stepIn:110,hitstop:3},
-  light2:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light3',dash:18,hitstop:3},
-  light3:{startup:5,active:3,recovery:9, dmg:1.05,range:75, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light4',dash:18,hitstop:3},
-  light4:{startup:6,active:3,recovery:10,dmg:1.1, range:75, hitstun:15,blockstun:10,push:20,powHit:8, powTaken:4,chain:'light5',dash:20,hitstop:3},
-  light5:{startup:7,active:4,recovery:16,dmg:1.4, range:80, hitstun:20,blockstun:12,push:60,powHit:10,powTaken:5,chain:null,dash:10,knockdown:true,hitstop:5},
-  medium:{startup:10,active:4,recovery:14,dmg:1.6,range:120,hitstun:18,blockstun:11,push:24,powHit:12,powTaken:6,chain:'light1',track:300,hitstop:5},
-  heavy: {charge:22,startup:8,active:5,recovery:26,dmg:2.6,range:130,hitstun:26,blockstun:14,push:70,powHit:18,powTaken:9,chain:null,knockdown:true,hitstop:9},
-  s1:{startup:8, active:4,recovery:22,dmg:1.5,hits:3,gap:6,range:130,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:100,chain:null,knockdown:true,hitstop:6},
-  s2:{startup:10,active:4,recovery:28,dmg:1.6,hits:5,gap:6,range:150,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:200,chain:null,knockdown:true,hitstop:8},
-  s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,chain:null,knockdown:true,unblockable:true,hitstop:14}};
+  light: {startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,dash:18,stepIn:110,hitstop:3,
+    chainDmg:[1,1,1.05,1.1,1.4]},
+  medium:{startup:10,active:4,recovery:14,dmg:1.6,range:120,hitstun:18,blockstun:11,push:24,powHit:12,powTaken:6,track:300,hitstop:5,
+    chainDmg:[1.6,1.6,1.7,1.8,2.0]},
+  heavy: {charge:22,startup:8,active:5,recovery:26,dmg:2.6,range:130,hitstun:26,blockstun:14,push:70,powHit:18,powTaken:9,knockdown:true,hitstop:9},
+  s1:{startup:8, active:4,recovery:22,dmg:1.5,hits:3,gap:6,range:130,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:100,knockdown:true,hitstop:6},
+  s2:{startup:10,active:4,recovery:28,dmg:1.6,hits:5,gap:6,range:150,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:200,knockdown:true,hitstop:8},
+  s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,knockdown:true,unblockable:true,hitstop:14}};
+// Task 7.2 (frozen interface, exact values): the five-node combo grammar. openers are the two moves
+// that can start a chain from IDLE/BLOCK; nodes is the chain's max length (Fighter.chainNode runs
+// 1..5); enders describes what the FINAL blow of the chain does, keyed by which move type actually
+// lands it -- light: nothing extra (no push/knockdown bonus: a light-ended chain plays exactly like a
+// plain light hit); medium: shoves the defender out to `push` and knocks them down; heavy: a
+// "shortened ender" only offered at chainNode===4 (skips a would-be node 5 light/medium and swings a
+// heavy instead) that charges for just `charge` frames (not the normal MOVES.heavy.charge) and, once
+// it lands, fires the attacker's own def.sigEffect (see CHAMPS/MOBS below) via `sig:true` -- see
+// Fight.resolve's own comment (60_fight.js) for exactly where each of these three is read.
+// chainDmg lives on MOVES.light/medium themselves (not here) since Fight.resolve already has the
+// landed move's own merged data (m) in hand; CHAIN.enders is the only per-node data resolve() has to
+// look up separately, since a chain's own base move data never carries push/knockdown for the light/
+// medium case (those come only from the enders table, at node 5, or from heavy's own base data at the
+// node-4 shortened ender -- heavy already carries knockdown/push, so its ender never needs an override
+// for either).
+const CHAIN={openers:['light','medium'],nodes:5,
+  enders:{light:{},medium:{push:90,knockdown:true},heavy:{charge:14,sig:true}}};
 // Task 6.2 (movement inside moves): per-frame rates Fighter.setupDash uses for medium's track and
 // light1's stepIn. DASH_TRACK_SPEED preserves medium's old flat dash(140)/startup(10) rate exactly
 // (140/10=14) so an already-in-range medium (dashLeft 0, see setupDash) and a far one that only needs
@@ -18,15 +41,23 @@ const MOVES={
 // a step-in light never needs to run longer than the swing already does; it either closes the gap
 // within its own 5 frames or it doesn't connect, same as a real whiffed jab.
 const DASH_TRACK_SPEED=14,DASH_STEPIN_SPEED=22;
+// Task 7.2 (frozen interface): def.sigEffect={id,stacks,target?} -- fired only by the in-combo heavy
+// ender (CHAIN.enders.heavy, m.sig:true) once it lands, via Effects.apply (48_effects.js). `target`
+// is 'self'|'foe', default 'foe' (Fight.resolve's own ruling) -- Carl's fury (an attacker-side buff)
+// is the one champion whose signature targets itself; every mob/boss below has no sigEffect at all
+// (undefined), so the in-combo heavy ender is a plain hit for them, no bonus effect.
 const CHAMPS={
-  carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human'},
+  carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
+    sigEffect:{id:'fury',stacks:1,target:'self'}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
   // and Rig.solve's 'quad' branch in 68_rig.js).
-  donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad'},
+  donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',
+    sigEffect:{id:'weakness',stacks:1}},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
-    moves:{s1:{hits:5,gap:4,dmg:1.2}}},
+    moves:{s1:{hits:5,gap:4,dmg:1.2}},sigEffect:{id:'bleed',stacks:1}},
   // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
-  mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big'}};
+  mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',
+    sigEffect:{id:'armorBreak',stacks:1}}};
 // Task 6.1, ruling 3 (playtest note: "Hobgoblin Brute is impossible to defeat" at floor 1 door 3,
 // level 1): goblin/skeleton hp raised and atk lowered exactly to the plan's given numbers (360/30,
 // 320/28) -- longer, safer early fights instead of fast trades a level-1 player can lose to a bad

@@ -32,17 +32,22 @@
 // UNCHANGED here as the shared action cooldown (st.cd=p.react, every decideX 'trigger' phase) --
 // see docs/ARENA.md's fix-wave tier-gate section for the measured n=30/60/seed-base tables this
 // change (plus the review's own measured fallback) was checked against.
+// Task 7.2: comboMix (new field) gates the CHAIN grammar's mixed M-L-L-L-M follow-through (see
+// decidePunish/decideAttack's own comment below) -- true for t3/t4/t5 only, so t1/t2 keep pressing a
+// flat light-only follow exactly as before (their own rng draw sequence is untouched either way, since
+// the follow phase never rolls rng regardless of which plan array it's holding -- this field only
+// changes WHICH strings sit in st.comboPlan, never whether/when r.next() gets called).
 const AI_TIERS={
-  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0, approach:90,hold:26},
-  t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70,hold:16},
-  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5,approach:50,hold:10},
+  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0, approach:90,hold:26,comboMix:false},
+  t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70,hold:16,comboMix:false},
+  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5,approach:50,hold:10,comboMix:true},
   // Fix-wave item 3 (measured fallback -- see docs/ARENA.md's fix-wave tier-gate table): the `hold`
   // decoupling alone (react/dash unchanged) passed n=30 but still broke t5<=30 at n=60 (31.7%). The
   // final review's own measured retune -- react 5->8 here (still the shared action cooldown, not
   // block-hold; hold above already carries that meaning) -- restores it.
-  t4:{react:8, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8,approach:40,hold:10},
+  t4:{react:8, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8,approach:40,hold:10,comboMix:true},
   // Fix-wave item 3 (measured fallback): dash .08->.04, same reasoning/source as t4.react above.
-  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.04,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1, approach:30,hold:8}};
+  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.04,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1, approach:30,hold:8,comboMix:true}};
 const AI={
   TIERS:AI_TIERS,
   // profiles IS the alias table (not a copy of it) so old direct reads like AI.profiles.brute and
@@ -52,7 +57,7 @@ const AI={
     // Fix-wave item 3: hold:0 added for completeness (p.block:0 already means decideBlock's react
     // roll can never fire for the dummy, so p.hold is never actually read) -- matches AI_TIERS' own
     // new field so every AI_TIERS-shaped profile carries it.
-    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0,approach:0,hold:0},
+    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0,approach:0,hold:0,comboMix:false},
     basic:AI_TIERS.t2,
     brawl:AI_TIERS.t3,
     // brute keeps its Task 2.8 identity (a heavy-happy brawler) as a t3 clone with a higher heavy
@@ -80,16 +85,32 @@ const AI={
     // st: every closure local the six functions below read or write, grouped into one object instead
     // of one local per behaviour (same fields, same meanings, as the pre-refactor next()): hold
     // (block-hold countdown), cd (shared action cooldown), plan (parry timing state machine), hHold
-    // (heavy-charge hold countdown), baitHold/baitDashPending (bait feint state), comboFollow (combo
-    // follow-through countdown — Task 3.6 balance pass, chases either a punish medium or a landed
-    // spontaneous attack; see decidePunish/decideAttack).
+    // (heavy-charge hold countdown), baitHold/baitDashPending (bait feint state), comboPlan (combo
+    // follow-through plan — Task 3.6 balance pass, chases either a punish medium or a landed
+    // spontaneous attack; see decidePunish/decideAttack; Task 7.2 turned the old flat countdown into a
+    // plan array, see comboPlanFor below).
     // farFrames/approachCd (Task 6.2): decideApproach's own state -- see its comment below. Kept
     // separate from the shared cd/react cooldown every other behaviour reuses, so a guaranteed
     // approach press never blocks (or gets blocked by) an unrelated reactive block/attack/heavy roll
     // -- ruling (fix round 1): approach must never starve the AI's own offense/defense, only fill in
     // when nothing else already claimed the frame (decideApproach is called last in the waterfall,
     // below, and its own approachCd only gates itself, not st.cd).
-    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboFollow:0,farFrames:0,approachCd:0};
+    // Task 7.2: comboFollow (a blind countdown of "press light N more times") is replaced by
+    // comboPlan, an array of pending intent-type strings consumed one per frame by decidePunish's
+    // 'follow' phase below -- same blind-countdown shape (no rng draw either way), just carrying WHICH
+    // move to press next instead of always 'light'. See comboPlanFor's own comment just below.
+    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboPlan:[],farFrames:0,approachCd:0};
+    // comboPlanFor(openedMedium): the follow-through plan armed after a chain opener lands (a punish
+    // medium, always openedMedium=true, or decideAttack's own spontaneous opener, medium or light
+    // depending on range). Mixed tiers (p.comboMix -- t3+) only ever follow the frozen M-L-L-L-M
+    // pattern when the opener that started it really was a medium (node 1) -- three more lights then a
+    // final medium completes the 5-node chain, landing CHAIN.enders.medium's push/knockdown on node 5.
+    // A light opener (node 1 was 'light', only ever reachable via decideAttack's dist<lightRange
+    // branch) keeps the plain all-light plan for every tier, mixed or not -- the frozen interface only
+    // asks for the M-L-L-L-M shape specifically, not a light-opened mixed variant, so this is the
+    // narrowest change that satisfies it without inventing an unrequested pattern. t1/t2 (comboMix
+    // false) always get the plain plan regardless of opener, keeping their own draw sequence untouched.
+    function comboPlanFor(openedMedium){return(p.comboMix&&openedMedium)?['light','light','light','medium']:['light','light','light']}
 
     // Heavy: charge-hold continuation (phase:'hold') has to run before the busy() gate in next()
     // below — once startMove('heavy') has put `me` into CHARGE, Fighter.busy() reports true (it only
@@ -148,13 +169,17 @@ const AI={
     // foe.wasKnockedDown now, same as everything else it reads off foe.
     function decidePunish(it,me,foe,justGotUp,phase){
       if(phase==='follow'){
-        if(st.comboFollow>0){
-          if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){st.comboFollow--;it.light=true;return true}
+        if(st.comboPlan.length){
+          // Task 7.2: me.move.chain is gone (the fixed ladder it pointed along no longer exists) --
+          // me.chainNode>=1 && <CHAIN.nodes is the grammar's own "still inside an open chain window"
+          // check act() itself uses, so this stays in lockstep with whatever act() will actually accept.
+          if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){
+            const next=st.comboPlan.shift();it[next]=true;return true}
           if(me.busy())return true; // still mid-move (startup/active, or a recovery that isn't a chain window yet) — keep waiting
-          st.comboFollow=0} // fully back to IDLE/BLOCK without ever seeing a chain window: the combo is over
+          st.comboPlan.length=0} // fully back to IDLE/BLOCK without ever seeing a chain window: the combo is over
         return false}
       if(p.punish>0&&st.cd===0&&(foe.state==='STUNNED'||justGotUp||foe.parryLock>0)&&r.next()<p.punish){
-        it.medium=true;st.cd=p.react;st.comboFollow=3;return true}
+        it.medium=true;st.cd=p.react;st.comboPlan=comboPlanFor(true);return true}
       return false}
 
     // Intercept: read the dash-in medium's startup and punish it with a light before it lands,
@@ -206,8 +231,9 @@ const AI={
         if(dist<lightRange&&r.next()<p.dash){it.dashBack=true;return true}
         return false}
       if(st.cd===0&&r.next()<p.attack){
-        if(dist<lightRange)it.light=true;else it.medium=true;
-        st.cd=p.react;if(p.punish>0)st.comboFollow=3;return true}
+        const openedMedium=dist>=lightRange;
+        if(openedMedium)it.medium=true;else it.light=true;
+        st.cd=p.react;if(p.punish>0)st.comboPlan=comboPlanFor(openedMedium);return true}
       return false}
 
     // Approach (Task 6.2 -- playtest note: "the dummy never approaches", the goblin's own 320px spawn
@@ -255,7 +281,7 @@ const AI={
       // Derived from move data instead of hard-coded: light1.range(70)+20=90 and heavy.range(130)+10
       // =140 reproduce the old flat thresholds for the stock movesets while tracking per-move/per-
       // character overrides (none currently touch .range, but moveDef merges them if one ever does).
-      const lightRange=me.moveDef('light1').range+20,heavyRange=me.moveDef('heavy').range+10;
+      const lightRange=me.moveDef('light').range+20,heavyRange=me.moveDef('heavy').range+10;
       if(st.cd>0)st.cd--;
       if(st.approachCd>0)st.approachCd--;
       if(decideBlock(it,foe,'plan'))return it;

@@ -882,7 +882,17 @@ const Rig={
     if(st==='STUNNED')return{key:'stunned',t01:clamp(f.f/(f.stun||1),0,1)};
     if(st==='KNOCKDOWN')return f.f<30?{key:'knockdown',t01:clamp(f.f/30,0,1)}:{key:'getup',t01:clamp((f.f-30)/(KNOCKDOWN.frames-30),0,1)};
     if(st==='CHARGE')return{key:'heavyCharge',t01:clamp(f.f/((f.move&&f.move.charge)||1),0,1)};
-    if(st==='ATTACK'&&f.move)return{key:f.moveName,t01:clamp(f.f/(f.move.startup+f.activeSpan()+f.move.recovery),0,1)};
+    // Task 7.2: MOVES.light1..5 collapsed into one MOVES.light entry (moveName is always the literal
+    // 'light', never 'light1'..'light5'), but the pose TABLE still keys its five jab keyframe sets as
+    // light1..light5 (POSES.light1..5, one per rig -- see 40_movedata.js's own comment for why only the
+    // landed damage varies by node, not the pose). f.chainNode (1..5, set by Fighter.startMove) is what
+    // picks which of those five poses plays; clamped defensively to [1,5] (a bare hand-built ATTACK
+    // fixture that skipped startMove would otherwise read chainNode 0). medium never needed a per-node
+    // pose split -- POSES.medium is a single set, so its own moveName key already resolves correctly
+    // with no remapping, same as every other move (heavy, s1-s3).
+    if(st==='ATTACK'&&f.move){
+      const key=f.moveName==='light'?'light'+clamp(f.chainNode||1,1,5):f.moveName;
+      return{key,t01:clamp(f.f/(f.move.startup+f.activeSpan()+f.move.recovery),0,1)}}
     if(st==='WIN')return{key:'win',t01:clamp(f.f/30,0,1)};
     if(st==='KO')return{key:'ko',t01:clamp(f.f/20,0,1)};
     return{key:'idle',t01:0}},

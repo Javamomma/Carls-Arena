@@ -3,6 +3,16 @@ class Fighter{
     this.x=side===1?STAGE_W/2-160:STAGE_W/2+160;this.width=48;this.hp=def.hp;this.maxHp=def.hp;this.power=0;
     this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
     this.combo=0;this.stun=0;this.inv=0;this.blockAge=0;this.dx=0; // last tick's x delta; Rig.poseFor reads it to pick idle vs walk
+    // Task 7.2: chainNode is the frozen CHAIN grammar's own live state -- 0 when not chaining, 1..5
+    // while a light/medium opener/continuation is in flight (set by startMove's own node argument),
+    // never touched by any move outside the grammar (heavy from neutral, s1/s2/s3 always leave it at
+    // whatever it already was, which is 0 unless something is badly wrong -- see startMove/act below).
+    // Reset to 0 in exactly two places: tick()'s own ATTACK 'done' transition (covers a whiff, a
+    // player simply not continuing, and the ender's own post-recovery reset -- all three are "this
+    // fighter's ATTACK sequence just ended without a further continuation") and Fight.resolve's hit/
+    // parry branches (covers "taking a hit resets it" -- an interrupted mid-chain recovery never gets
+    // to end on its own).
+    this.chainNode=0;
     this.parryLock=0;this.blockPressedAt=0;this.pressTick=0;this._parried=false;this._mdCache=null;
     // Task 5.2: parryBonus widens PARRY_WINDOW by this many frames (Sponsor perk "Parry Insurance",
     // set by G.startFight from Sponsors.apply's parryWindow) -- 0 for every fighter that isn't the
@@ -55,13 +65,22 @@ class Fighter{
   moveDef(name){let c=this._mdCache;if(!c)c=this._mdCache=new Map();let d=c.get(name);
     if(!d){d=Object.assign({},MOVES[name],this.def.moves&&this.def.moves[name]);c.set(name,d)}
     return d}
-  startMove(name){this.move=this.moveDef(name);this.moveName=name;this.hits=new Set();this.landed=false;
+  // Task 7.2: `node` (1..5) is the CHAIN grammar's own node number for this move instance -- passed
+  // explicitly by every call site that's part of a chain (the IDLE/BLOCK opener branch and the
+  // ATTACK-recovery continuation branch in act(), below); omitted (0) for every move outside the
+  // grammar (heavy from neutral, s1/s2/s3), so this.chainNode stays the "0 when not chaining"
+  // invariant the frozen interface asks for. `overrides`, when given, is shallow-merged on top of the
+  // cached moveDef (used only by the in-combo heavy ender, CHAIN.enders.heavy -- see act()'s own
+  // node-4 branch) so the per-fighter moveDef cache itself is never mutated or duplicated per-variant.
+  startMove(name,node,overrides){
+    this.move=overrides?Object.assign({},this.moveDef(name),overrides):this.moveDef(name);
+    this.moveName=name;this.hits=new Set();this.landed=false;this.chainNode=node===undefined?0:node;
     if(this.move.cost)this.power-=this.move.cost;this.setupDash();this.setState(this.move.charge?'CHARGE':'ATTACK')}
   // Movement inside moves (Task 6.2): computes dashLeft/dashRate/effStartup once, from the move's own
   // track/stepIn/dash fields and the this.foeDist snapshot Fight.step wrote before this frame's act()
   // (or null, see the constructor's own comment). Three shapes, checked in this order:
   //  - m.track (medium): a range-tracking dash-in -- up to m.track px at DASH_TRACK_SPEED px/frame,
-  //    stopping the instant the gap closes to moveDef('light1').range so the move's own (longer)
+  //    stopping the instant the gap closes to moveDef('light').range so the move's own (longer)
   //    reach lands without ever overshooting into the foe (separate() would fight it every frame if
   //    it did). This is the only shape whose travel can outlast the move's own m.startup, since a far
   //    foe can need more frames than the swing's base startup to close -- effStartup grows to fit.
@@ -73,7 +92,7 @@ class Fighter{
   //    bit-for-bit unchanged -- m.dash px smoothly divided over the move's own m.startup frames.
   // No move data at all (e.g. heavy, the specials) leaves dashLeft 0 and effStartup at m.startup.
   setupDash(){
-    const m=this.move,lightRange=this.moveDef('light1').range;
+    const m=this.move,lightRange=this.moveDef('light').range;
     if(m.track){
       const need=this.foeDist==null?0:Math.max(0,this.foeDist-lightRange);
       this.dashLeft=Math.min(need,m.track);this.dashRate=DASH_TRACK_SPEED;
@@ -113,13 +132,34 @@ class Fighter{
     if(S==='IDLE'||S==='BLOCK'){
       if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special);
       if(intent.dashBack){this.inv=DASH_BACK.inv;return this.setState('DASH')}
-      if(intent.medium)return this.startMove('medium');
-      if(intent.light)return this.startMove('light1');
+      // Task 7.2: openers (CHAIN.openers) always start a brand-new chain at node 1, regardless of
+      // whatever chainNode a previous, already-finished chain left behind (it's already been reset to
+      // 0 by tick()'s own 'done' transition or Fight.resolve's hit-taken reset by the time IDLE/BLOCK
+      // can be acted on again -- this just makes the opener's own node explicit rather than relying on
+      // that).
+      if(intent.medium)return this.startMove('medium',1);
+      if(intent.light)return this.startMove('light',1);
       if(intent.heavy)return this.startMove('heavy');
       const want=intent.block?'BLOCK':'IDLE';if(want!==S)this.setState(want)}
-    else if(S==='ATTACK'&&this.phase()==='recovery'&&this.move.chain&&this.landed){
-      if(intent.light)return this.startMove(this.move.chain);
-      if(intent.medium&&this.moveName!=='medium')return this.startMove('medium')}
+    // Task 7.2: the five-node combo grammar (CHAIN, 40_movedata.js) replaces the old fixed
+    // light1->light5/medium->light1 `chain` pointers. Gated on this.chainNode (0 for every move
+    // outside the grammar -- heavy from neutral, s1/s2/s3 -- so neither branch below ever fires for
+    // them, exactly like the old `this.move.chain` falsy check did) instead of a per-move field.
+    // Nodes 1-3 (chainNode<4): either opener continues the chain one node further. Node 4: the last
+    // regular continuation (light or medium, becoming node 5 -- the chain's real ender, CHAIN.enders
+    // read by Fight.resolve at hit-resolve time) OR the shortened heavy ender (CHAIN.enders.heavy --
+    // a 14-frame charge instead of MOVES.heavy's normal 22, applying the attacker's own def.sigEffect
+    // once it lands). Node 5 offers no further continuation ("no sixth node") -- chainNode stays 5
+    // until the ender's own recovery ends and resets it to 0.
+    else if(S==='ATTACK'&&this.phase()==='recovery'&&this.landed){
+      const cn=this.chainNode;
+      if(cn>=1&&cn<CHAIN.nodes-1){
+        if(intent.light)return this.startMove('light',cn+1);
+        if(intent.medium)return this.startMove('medium',cn+1)}
+      else if(cn===CHAIN.nodes-1){
+        if(intent.light)return this.startMove('light',CHAIN.nodes);
+        if(intent.medium)return this.startMove('medium',CHAIN.nodes);
+        if(intent.heavy)return this.startMove('heavy',CHAIN.nodes,CHAIN.enders.heavy)}}
     // Fix-wave item 5 (final review, Important): releasing heavy early used to always cancel to IDLE
     // outright (clearMove, no swing) -- the README (and the swipe-and-hold gesture's own naming)
     // promised "release after a short charge to swing", which this branch never actually did; only a
@@ -161,7 +201,15 @@ class Fighter{
       // DASH_STEPIN_SPEED divides unevenly.
       case'ATTACK':{const m=this.move;
         if(this.dashLeft>0&&this.f<=this.effStartup){const step=Math.min(this.dashRate,this.dashLeft);this.x+=this.face*step;this.dashLeft-=step}
-        if(this.phase()==='done'){this.clearMove();this.landed=false;this.setState('IDLE')}break}
+        // Task 7.2: chainNode resets to 0 here whenever an ATTACK sequence ends on its own (a whiff --
+        // landed stayed false the whole active window; the player simply not pressing a continuation
+        // during a landed move's recovery; or the chain's own ender finishing its recovery) -- the
+        // single site that covers every "stopped chaining" case the frozen ruling lists, since act()'s
+        // own continuation branches above already require chainNode to still be in [1,CHAIN.nodes) to
+        // offer anything, so a fighter that reaches here with a non-zero chainNode is, by construction,
+        // one whose chain window just closed for good. Fight.resolve's own hit/parry branches cover the
+        // other reset case ("taking a hit resets it"), where this natural 'done' transition never runs.
+        if(this.phase()==='done'){this.clearMove();this.landed=false;this.chainNode=0;this.setState('IDLE')}break}
       case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
       case'HITSTUN':case'BLOCKSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
       case'KNOCKDOWN':if(this.f>=KNOCKDOWN.frames){this.inv=KNOCKDOWN.inv;this.setState('IDLE')}break}

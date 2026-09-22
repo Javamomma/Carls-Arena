@@ -73,12 +73,27 @@ class Fight{
       if(def.blockAge<=PARRY_WINDOW+def.parryBonus&&def.parryLock===0&&!m.cost)return{type:'parry',att,def,idx};
       return{type:'block',att,def,idx,m}}
     return{type:'hit',att,def,idx,m,last}}
+  // Task 7.2: the landed move's own effective per-node damage -- MOVES.light/medium each carry a
+  // chainDmg[] indexed by chainNode (1..CHAIN.nodes), the frozen node multiplier table; every other
+  // move (heavy, s1-s3) has no chainDmg at all and falls back to its own flat m.dmg, bit-identical to
+  // before this task. att.chainNode is always 1..CHAIN.nodes by the time a chain move actually lands
+  // (Fighter.startMove sets it before setupDash/setState ever run), so the fallback ||1 only guards a
+  // hand-built fixture that skipped startMove entirely (a few unit tests construct hit/block records
+  // directly rather than driving a real chain).
+  nodeDmg(att,m){return m.chainDmg?m.chainDmg[Math.max(1,Math.min(att.chainNode||1,m.chainDmg.length))-1]:m.dmg}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
     if(type==='miss')return this.emit('miss',att,def,0);
-    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');
+    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;att.chainNode=0;def.setState('IDLE');
       this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
       return this.emit('parry',def,att,0)}
-    if(type==='block'){const m=r.m;const chipRef={chip:Math.round(att.def.atk*m.dmg*CHIP*(1-(def.def.blockProf||0)))};
+    if(type==='block'){const m=r.m;
+      // Task 7.2 ruling: chip must scale by the attacker's own Effects.mods.atkMul (fury/weakness),
+      // computed here exactly as the hit branch below computes it for its own dmg formula -- a fury
+      // stack chips harder through a raised guard too, not just on an unblocked hit. Also reads the
+      // same per-node dmg (nodeDmg) the hit branch uses, so a chained light/medium chips proportionally
+      // to whichever node it landed on, not a flat m.dmg.
+      const attMods=Effects.mods(att);
+      const chipRef={chip:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*CHIP*(1-(def.def.blockProf||0)))};
       // thorns lives here: the defender (the blocker) is the only side with an onBlock call.
       this.buffHook('onBlock',def,att,def,chipRef);
       const chip=chipRef.chip;
@@ -114,12 +129,25 @@ class Fight{
     // and powerGain's old `att.move` read silently no-op'd. ref is a fresh object built fresh for
     // THIS resolve() call, never touched by the other side's resolve, so ref.move is always the
     // move that actually landed this call.
-    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*m.dmg*cls*critMul*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
+    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*cls*critMul*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
     this.buffHook('onHit',def,att,def,ref);this.buffHook('onHit',att,att,def,ref);
     const dmg=ref.dmg;
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
     att.power=Math.min(POWER_MAX,att.power+ref.powHit);def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
-    def.clearMove();if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
+    // Task 7.2: CHAIN.enders (light:{}/medium:{push,knockdown}) only applies to the landed hit that's
+    // actually the chain's node-5 finisher (a plain light/medium at nodes 1-4 gets no bonus, so an
+    // early cancel into medium can't fish for the push/knockdown a full 5-hit chain earns) -- the
+    // 'medium as a combo ender' behavior this replaces used to key off att.combo>=3 (a global hit-
+    // streak counter unrelated to THIS chain's own length); att.chainNode===CHAIN.nodes is the real
+    // thing to check now. The in-combo heavy ender (moveName==='heavy', chainNode also CHAIN.nodes --
+    // see Fighter.act's node-4 branch) needs no override at all here: CHAIN.enders.heavy only carries
+    // {charge,sig}, so m (already merged with that override in startMove) still carries base MOVES.
+    // heavy's own knockdown/push untouched, same as a plain neutral heavy.
+    const isChainEnder=(att.moveName==='light'||att.moveName==='medium')&&att.chainNode===CHAIN.nodes;
+    const ender=isChainEnder?CHAIN.enders[att.moveName]:null;
+    const knockdown=ender?!!ender.knockdown:!!m.knockdown;
+    def.clearMove();if(knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
+    def.chainNode=0; // Task 7.2 ruling: taking a hit resets the DEFENDER's own chain (they were interrupted mid-recovery)
     // Task 7.1: m.applies -- on:'hit' entries fire on every landed hit, on:'crit' entries only when
     // this landed hit actually crit; both apply to the defender (the struck fighter), after the
     // HITSTUN/KNOCKDOWN transition above so an applied stun's own onApply (EFFECTS.stun) can still
@@ -127,9 +155,16 @@ class Fight{
     // `applies` yet, so this is a no-op in every fight today -- see the "bit-identical" test.
     if(m.applies)for(let i=0;i<m.applies.length;i++){const ap=m.applies[i];
       if(ap.on==='hit'||(ap.on==='crit'&&crit))Effects.apply(this,def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
-    // Medium landed as a combo ender (3rd+ hit of the combo, counting this one) shoves the defender
-    // out past light range instead of the move's normal push, so the follow-up can't just re-chain.
-    const push=(att.moveName==='medium'&&att.combo>=3)?90:m.push;
+    // Task 7.2: the in-combo heavy ender (m.sig:true, only ever true for CHAIN.enders.heavy's own
+    // merged move data) fires the ATTACKER's own def.sigEffect once it lands -- a champion-signature
+    // bonus effect (Carl fury targets himself; Donut weakness/Katia bleed/Mongo armorBreak all target
+    // the foe -- see CHAMPS' own sigEffect comment, 40_movedata.js). Mobs/bosses have no sigEffect
+    // (undefined), so this is a no-op for them; target defaults to 'foe' per the 7.1 review ruling.
+    if(m.sig&&att.def.sigEffect){const sig=att.def.sigEffect;
+      Effects.apply(this,sig.target==='self'?att:def,sig.id,{stacks:sig.stacks,source:att})}
+    // Task 7.2: the chain ender's own push (medium: 90, knockdown; light/heavy: the move's normal
+    // push) replaces the old att.combo>=3 special case -- see isChainEnder/ender above.
+    const push=ender&&ender.push!==undefined?ender.push:m.push;
     if(!m.hits||last)def.x+=att.face*push;
     // Sim freeze only on a single-hit move or the last blow of a multi-hit special (mirrors the
     // knockback gate above): a 4-hit S3 shouldn't stack four 14-frame freezes back to back. Every

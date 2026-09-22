@@ -7,6 +7,14 @@ const Audio={ac:null,muted:Save.data.mute,_t:0,
   // user gesture), so every recipe is safe to call from the headless test harness with no gesture.
   recipes:{
     lights(){Audio.tone(210,.05,'square',.045)},                                   // generic short thud (fallback)
+    // Task 7.2: MOVES.light1..5 collapsed into one MOVES.light entry (50_fighter.js's moveName is now
+    // always the literal 'light'), so G.onEvent's own Audio.recipes[a.moveName] lookup (80_game.js)
+    // needs a 'light' entry to actually resolve to a real per-move tone instead of always falling
+    // through to the generic 'lights' thud above -- same tone light1 always played, since node-1
+    // numbers are unchanged. light1..light5 stay defined below (still used as fixed sub-hit/testing
+    // tones elsewhere -- 80_game.js's multi-hit special sub-thud always plays light1 regardless of the
+    // landing move's own name), not dead code, just no longer reachable via a moveName lookup.
+    light(){Audio.tone(200,.05,'square',.045)},
     light1(){Audio.tone(200,.05,'square',.045)},
     light2(){Audio.tone(215,.05,'square',.045)},
     light3(){Audio.tone(230,.05,'square',.045)},

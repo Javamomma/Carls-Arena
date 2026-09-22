@@ -6,6 +6,11 @@
 //   hold in place (>= BLOCK_HOLD_FRAMES, drift < TAP_DRIFT)     -> held.block, until release
 //   swipe right (>= SWIPE_PX within SWIPE_FRAMES, dx>|dy|)      -> 'medium', pushed the frame it fires
 //   ...then still held HEAVY_HOLD_FRAMES after that             -> held.heavy, until release
+//   Task 7.2: this same "swipe right, keep holding" gesture (and the plain L key) also serves the
+//   combo grammar's in-combo heavy ender -- held.heavy just feeds intent.heavy every frame regardless
+//   of Fighter state, and Fighter.act (50_fighter.js) is what decides what THAT means: a normal
+//   22-frame heavy from IDLE, or, if this fighter is sitting in chainNode-4 recovery, the CHAIN.
+//   enders.heavy 14-frame shortened ender (40_movedata.js). No gesture-detection code changed here.
 //   swipe left  (>= SWIPE_PX within SWIPE_FRAMES, dx>|dy|)      -> 'dashBack', pushed the frame it fires
 //   ...then still held DASH_BACK.frames SIM FRAMES after that  -> held.block, until release (counted
 //     by tick(), called once per sim frame from Ctrl.player -- see its own comment below)
@@ -180,7 +185,13 @@ const Ctrl={
     return{next(fight,me,foe){
     const it=Ctrl.EMPTY();
     if(heavyHold>0){heavyHold--;it.heavy=true;return it}
-    if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){it.light=true;return it}
+    // Task 7.2: me.move.chain is gone (the fixed ladder no longer exists) -- me.chainNode>=1 &&
+    // <CHAIN.nodes is the grammar's own "still inside an open chain window" check, same one AI.make's
+    // decidePunish 'follow' phase uses. Ctrl.competent keeps the old flat all-light follow (not the
+    // mixed M-L-L-L-M grammar AI.make's t3+ tiers learn) -- it's the fixed win-rate yardstick bot, so
+    // minimizing its own behavior change keeps the tier-gate retune isolated to what the grammar/
+    // damage changes themselves actually shift, not an unrelated bot-behavior change on top.
+    if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){it.light=true;return it}
     if(me.busy())return it;
     if(foe.state==='ATTACK'&&(foe.moveName==='medium'||foe.moveName==='heavy')&&foe.f>=REACT){it.block=true;return it}
     if(foe.state==='CHARGE'&&foe.moveName==='heavy'&&me.hp/me.maxHp<LOW_HP){it.dashBack=true;return it}
@@ -191,7 +202,7 @@ const Ctrl={
       wasBlockstun=true;openings++;
       if(openings%MIXUP_EVERY===0){heavyHold=me.moveDef('heavy').charge+1;it.heavy=true;return it}}
     else if(!foeBlockstun)wasBlockstun=false;
-    const dist=Math.abs(foe.x-me.x)-me.width,lightRange=me.moveDef('light1').range+20;
+    const dist=Math.abs(foe.x-me.x)-me.width,lightRange=me.moveDef('light').range+20;
     if(dist<lightRange){it.light=true;return it}
     if(foe.state!=='ATTACK'&&closeCd===0){it.medium=true;closeCd=CLOSE_CD;return it}
     return it}}},
@@ -234,7 +245,9 @@ const Ctrl={
     // chain through its own recovery+chain+landed window (mirrors Ctrl.competent's own priority
     // order), otherwise start a fresh light the moment `me` isn't busy.
     const chainLight=(it,me)=>{
-      if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){it.light=true;return}
+      // Task 7.2: me.move.chain is gone -- see Ctrl.competent's own comment above for the chainNode
+      // replacement check.
+      if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){it.light=true;return}
       if(me.busy())return;
       it.light=true};
     return{next(fight,me,foe){
@@ -244,7 +257,7 @@ const Ctrl={
       if(step===1){
         // Don't let a light chain window (left open by step 0's own last hit) steal this step's
         // medium -- SWIPE RIGHT / KICK asks for a medium specifically, not another light.
-        if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed)return it;
+        if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes)return it;
         if(me.busy())return it;
         it.medium=true;return it}
       if(step===2){

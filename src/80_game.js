@@ -778,11 +778,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       idle:{state:'IDLE',f:0},
       walk:{state:'IDLE',f:0}, // no dedicated sim state for locomotion yet; idle stands in
       dash:{state:'DASH',f:6},
-      light1:{state:'ATTACK',moveName:'light1',f:6},
-      light2:{state:'ATTACK',moveName:'light2',f:6},
-      light3:{state:'ATTACK',moveName:'light3',f:7},
-      light4:{state:'ATTACK',moveName:'light4',f:7},
-      light5:{state:'ATTACK',moveName:'light5',f:9},
+      // Task 7.2: MOVES.light1..5 collapsed into one MOVES.light entry, but --pose still asks for the
+      // five distinct light1..light5 SCREENSHOT keys (Rig.poseFor maps moveName:'light'+chainNode back
+      // to the matching POSES.light1..5 pose, see 68_rig.js) -- moveName is always the literal 'light'
+      // now; chainNode is what actually selects which of the five poses freezes.
+      light1:{state:'ATTACK',moveName:'light',chainNode:1,f:6},
+      light2:{state:'ATTACK',moveName:'light',chainNode:2,f:6},
+      light3:{state:'ATTACK',moveName:'light',chainNode:3,f:7},
+      light4:{state:'ATTACK',moveName:'light',chainNode:4,f:7},
+      light5:{state:'ATTACK',moveName:'light',chainNode:5,f:9},
       medium:{state:'ATTACK',moveName:'medium',f:12},
       heavyCharge:{state:'CHARGE',moveName:'heavy',f:12},
       heavy:{state:'ATTACK',moveName:'heavy',f:4}, // still high in the overhead arc, well before medium's peak-lunge silhouette
@@ -800,6 +804,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     const m=map[key];if(!m)throw new Error('unknown pose: '+key);
     const p=this.fight.p1;
     if(m.moveName){p.move=MOVES[m.moveName];p.moveName=m.moveName}
+    if(m.chainNode!==undefined)p.chainNode=m.chainNode;
     p.state=m.state;p.f=m.f;
     if(m.stun!==undefined)p.stun=m.stun;
     this.sim=true},
