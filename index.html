@@ -1126,10 +1126,14 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     else if(t==='block')Audio.recipes.block();
     else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.rng)}
     else if(t==='miss'){if(b&&b.state==='DASH')Audio.recipes.dash()}
-    else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.rng)}
-    if(t!=='ko')return;
-    this.state='RESULT';document.getElementById('resultTitle').textContent=a.side===1?'VICTORY':'DEFEATED';
-    document.getElementById('resultLine').textContent=a.def.name+' wins with '+Math.round(100*a.hp/a.maxHp)+'% health.';
+    else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.rng)}},
+  // Called from tick() once the KO slow-mo has fully counted down (fight.slowmo hits 0). Split out
+  // of onEvent('ko',...) because the KO event fires synchronously inside the same f.step() that ends
+  // the fight, well before slow-mo has had a chance to play; flipping state here on the frame it
+  // actually happens (RESULT is set from tick(), not from Fight's own onEvent callback).
+  showResult(winner){
+    this.state='RESULT';document.getElementById('resultTitle').textContent=winner.side===1?'VICTORY':'DEFEATED';
+    document.getElementById('resultLine').textContent=winner.def.name+' wins with '+Math.round(100*winner.hp/winner.maxHp)+'% health.';
     this.show('result',true);this.show('btns',false)},
   // Freeze p1 into a named pose for screenshotting (tests/harness.py --pose). Maps a pose key to the
   // Fighter state/moveName/f (and, where poseFor divides by it, stun) that Rig.poseFor resolves back
@@ -1192,7 +1196,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     FX.pushAll(f.fx);f.fx.length=0;
     // Same determinism note as the cinematic branch above.
     if(this.sim)FX.update();
-    this.syncSpecials()},
+    this.syncSpecials();
+    // f.over flips true inside f.step() the instant a KO/timeout resolves, well before slow-mo has
+    // played; f.slowmo (armed to 90 by Fight.finish) is what keeps this branch re-entering FIGHT and
+    // counting down every 4th tick above (f.step() itself is a no-op once over, per Fight.step's own
+    // guard) instead of bailing out on the very next tick's `if(this.state!=='FIGHT')return`. Only
+    // once it hits 0 do we actually leave FIGHT for RESULT.
+    if(f.over&&f.slowmo<=0)this.showResult(f.winner)},
   // Detects a fighter's moveName transitioning into s1/s2/s3 this tick (the sim itself never
   // references Audio/G, so this has to be watched from outside) and plays that special's recipe
   // plus an announcer line. s3 is excluded here: it gets its recipe + announcer line once from
@@ -1387,6 +1397,14 @@ Test.add('mob defs have hp/atk/scale and resolve through DEFS',()=>{ok(DEFS.gobl
 Test.add('hitstop is per move',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.hitstop,MOVES.light1.hitstop);ok(MOVES.heavy.hitstop>MOVES.light1.hitstop&&MOVES.s3.hitstop>MOVES.heavy.hitstop)});
 Test.add('a hit queues spark, popup and shake fx; a block queues dust',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);const kinds=f.fx.map(e=>e.kind);ok(kinds.includes('spark')&&kinds.includes('popup')&&kinds.includes('shake'),kinds.join());const g=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(g);run(g,15);ok(g.fx.some(e=>e.kind==='dust'))});
 Test.add('KO starts slow-mo and G steps the sim every 4th tick during it',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);f.p2.hp=1;run(f,5);ok(f.over&&f.slowmo>0);const before=f.slowmo;G.fight=f;G.state='FIGHT';G._tickN=0;for(let i=0;i<8;i++)G.tick();eq(f.slowmo,before-2);G.fight=null;G.state='TITLE'});
+Test.add('KO plays 90 frames of slow-mo before the result overlay',()=>{
+  G.startFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<5;i++)G.tick();
+  ok(G.fight.over,'fight must be over after the KO hit lands');eq(G.state,'FIGHT','state stays FIGHT while slow-mo counts down');
+  for(let i=0;i<360;i++)G.tick();
+  eq(G.state,'RESULT');ok(document.getElementById('result').classList.contains('show'),'result overlay shown');
+  G.toTitle();G.sim=false});
 Test.add('FX updates and expires particles deterministically',()=>{FX.reset();FX.push({kind:'spark',x:0,y:0,n:6,col:'#fff'});eq(FX.list.length,6);for(let i=0;i<120;i++)FX.update();eq(FX.list.length,0);FX.push({kind:'shake',amt:8});FX.update();ok(FX.shake>0&&FX.shake<8)});
 Test.add('on-screen buttons map to intents',()=>{Input.q.length=0;const btn=id=>document.getElementById(id);ok(btn('btnBlock')&&btn('btnPunch')&&btn('btnKick')&&btn('btnPower'));btn('btnPunch').dispatchEvent(new PointerEvent('pointerdown',{pointerId:7,bubbles:true}));btn('btnKick').dispatchEvent(new PointerEvent('pointerdown',{pointerId:8,bubbles:true}));ok(Input.q.includes('light')&&Input.q.includes('medium'));btn('btnBlock').dispatchEvent(new PointerEvent('pointerdown',{pointerId:9,bubbles:true}));eq(Input.held.block,true);btn('btnBlock').dispatchEvent(new PointerEvent('pointerup',{pointerId:9,bubbles:true}));eq(Input.held.block,false);Input.q.length=0});
 Test.add('POWER tap fires the highest affordable special',()=>{const f=mkFight();G.fight=f;f.p1.power=250;Input.q.push('powerAuto');eq(Input.drain().special,2);f.p1.power=50;Input.q.push('powerAuto');eq(Input.drain().special,0);G.fight=null});

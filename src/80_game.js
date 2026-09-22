@@ -48,10 +48,14 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     else if(t==='block')Audio.recipes.block();
     else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.rng)}
     else if(t==='miss'){if(b&&b.state==='DASH')Audio.recipes.dash()}
-    else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.rng)}
-    if(t!=='ko')return;
-    this.state='RESULT';document.getElementById('resultTitle').textContent=a.side===1?'VICTORY':'DEFEATED';
-    document.getElementById('resultLine').textContent=a.def.name+' wins with '+Math.round(100*a.hp/a.maxHp)+'% health.';
+    else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.rng)}},
+  // Called from tick() once the KO slow-mo has fully counted down (fight.slowmo hits 0). Split out
+  // of onEvent('ko',...) because the KO event fires synchronously inside the same f.step() that ends
+  // the fight, well before slow-mo has had a chance to play; flipping state here on the frame it
+  // actually happens (RESULT is set from tick(), not from Fight's own onEvent callback).
+  showResult(winner){
+    this.state='RESULT';document.getElementById('resultTitle').textContent=winner.side===1?'VICTORY':'DEFEATED';
+    document.getElementById('resultLine').textContent=winner.def.name+' wins with '+Math.round(100*winner.hp/winner.maxHp)+'% health.';
     this.show('result',true);this.show('btns',false)},
   // Freeze p1 into a named pose for screenshotting (tests/harness.py --pose). Maps a pose key to the
   // Fighter state/moveName/f (and, where poseFor divides by it, stun) that Rig.poseFor resolves back
@@ -114,7 +118,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     FX.pushAll(f.fx);f.fx.length=0;
     // Same determinism note as the cinematic branch above.
     if(this.sim)FX.update();
-    this.syncSpecials()},
+    this.syncSpecials();
+    // f.over flips true inside f.step() the instant a KO/timeout resolves, well before slow-mo has
+    // played; f.slowmo (armed to 90 by Fight.finish) is what keeps this branch re-entering FIGHT and
+    // counting down every 4th tick above (f.step() itself is a no-op once over, per Fight.step's own
+    // guard) instead of bailing out on the very next tick's `if(this.state!=='FIGHT')return`. Only
+    // once it hits 0 do we actually leave FIGHT for RESULT.
+    if(f.over&&f.slowmo<=0)this.showResult(f.winner)},
   // Detects a fighter's moveName transitioning into s1/s2/s3 this tick (the sim itself never
   // references Audio/G, so this has to be watched from outside) and plays that special's recipe
   // plus an announcer line. s3 is excluded here: it gets its recipe + announcer line once from

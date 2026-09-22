@@ -25,20 +25,27 @@ def build_soak_js(seed, p1n, p2n, ain, ctrl_expr, ticks, enc='', probes=()):
     closure's `seed` param to get a fresh Ctrl.random() draw per restart). `probes` are raw JS
     expressions sampled once every 60 ticks (one simulated second) into a returned {expr: [...]}
     map, matching the old per-second Python-side sampling cadence.
+
+    Also returns `koTicks`: the number of G.tick() calls spent with G.fight.over already true (the
+    KO slow-mo grace period G.tick keeps counting down every 4th tick before flipping to RESULT).
+    Those ticks legitimately consume the wall-clock `ticks` budget without advancing G.fight.frame,
+    so the caller's stall/short-soak floor checks `framesTotal+koTicks`, not `framesTotal` alone,
+    against the requested budget.
     """
     probe_init = ','.join('%s:[]' % json.dumps(e) for e in probes)
     probe_push = ''.join('probes[%s].push(%s);' % (json.dumps(e), e) for e in probes)
-    return ("(()=>{G.sim=true;let s=%d,fights=1,framesTotal=0,p1wins=0,ticks=%d;"
+    return ("(()=>{G.sim=true;let s=%d,fights=1,framesTotal=0,p1wins=0,ticks=%d,koTicks=0;"
             "const probes={%s};"
             "const start=seed=>G.startFight({seed,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s%s});"
             "start(s);"
             "for(let i=0;i<ticks;i++){G.tick();"
+            "if(G.fight&&G.fight.over)koTicks++;"
             "if((i+1)%%60===0){%s}"
             "if(G.state==='RESULT'){framesTotal+=G.fight.frame;"
             "if(G.fight.winner&&G.fight.winner.side===1)p1wins++;"
             "s++;fights++;start(s)}}"
             "framesTotal+=G.fight.frame;"
-            "return{fights,framesTotal,p1wins,probes}})()"
+            "return{fights,framesTotal,p1wins,probes,koTicks}})()"
             ) % (seed, ticks, probe_init, p1n, p2n, ain, ctrl_expr, enc, probe_push)
 
 def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
@@ -56,7 +63,7 @@ def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
     r = pg.evaluate(js)
     pg.close()
     return {'p1': p1n, 'p2': p2n, 'ai': ain, 'seed': seed, 'fights': r['fights'], 'p1wins': r['p1wins'],
-            'frames_total': r['framesTotal'], 'errors': len(cell_errors),
+            'frames_total': r['framesTotal'], 'ko_ticks': r['koTicks'], 'errors': len(cell_errors),
             'req_frames': sim_seconds * 60}
 
 def run_matrix():
@@ -83,7 +90,11 @@ def run_matrix():
     for r in rows:
         lines.append('%-6s %-10s %-6s %-5d %-7d %-7d %-13d %-7d' % (
             r['p1'], r['p2'], r['ai'], r['seed'], r['fights'], r['p1wins'], r['frames_total'], r['errors']))
-        if r['errors'] or r['frames_total'] < r['req_frames'] * 0.9:
+        # frames_total alone undercounts progress: the KO slow-mo grace period (90 frames, stepped
+        # one per 4 ticks -> 360 ticks) legitimately consumes wall-clock ticks without advancing
+        # G.fight.frame, once per fight. ko_ticks credits that time back so the floor only catches
+        # an actual stall (state stuck, no fights completing), not a healthy KO-heavy matchup.
+        if r['errors'] or r['frames_total'] + r['ko_ticks'] < r['req_frames'] * 0.9:
             bad = True
     total_wall = sum(r['wall'] for r in rows)
     print('\n'.join(lines))
@@ -197,6 +208,7 @@ def main():
             r = pg.evaluate(js)
             out['frames_total'] = r['framesTotal']
             out['fights'] = r['fights']
+            out['ko_ticks'] = r['koTicks']
             probes = r['probes']
         else:
             t0 = time.time()
@@ -213,7 +225,9 @@ def main():
             pg.screenshot(path=a.shot)
         b.close()
     print(json.dumps(out, indent=1))
-    short_soak = a.sim and out.get('frames_total', 0) < a.seconds * 60 * 0.9
+    # See run_matrix()'s bad-cell check: ko_ticks credits back the wall-clock ticks legitimately
+    # spent in the KO slow-mo grace period, which frames_total alone doesn't advance through.
+    short_soak = a.sim and out.get('frames_total', 0) + out.get('ko_ticks', 0) < a.seconds * 60 * 0.9
     sys.exit(1 if errors or console or out['state'] == 'TITLE' or short_soak else 0)
 
 if __name__ == '__main__':
