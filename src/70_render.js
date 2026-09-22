@@ -36,7 +36,12 @@ const Render={ctx:canvas.getContext('2d'),
       floorCanvas:mk(400,16),floorLabel:null,
       // p1's "LVL n ★★★" sub-label, same cached-canvas-keyed-by-string pattern as floorLine just
       // above; p1SubLabel is the composite string tests assert against instead of reading pixels.
-      p1SubCanvas:mk(140,14),p1SubLabel:null}},
+      p1SubCanvas:mk(140,14),p1SubLabel:null,
+      // Task 5.1: "VIEWERS 12,340" — same cached-canvas pattern, keyed by the formatted label (so a
+      // steady viewer count across frames costs nothing beyond the one drawImage every HUD already
+      // pays). Sized 12px tall and drawn with its bottom edge pinned exactly at HUD_LINE (104) so it
+      // sits directly under the floor line (80..96) without ever entering the zoom-cap region above it.
+      viewersCanvas:mk(200,12),viewersLabel:null}},
   floorLine(c,label){
     const hc=this.hudCache();
     if(hc.floorLabel!==label){
@@ -59,6 +64,28 @@ const Render={ctx:canvas.getContext('2d'),
       sc.fillStyle='#f4c542';sc.fillText('★'.repeat(Math.max(0,stars)),w,10);
       hc.p1SubLabel=label}
     c.drawImage(hc.p1SubCanvas,x,y-10)},
+  // Comma-grouped viewer counts ("12,340"); shared by the HUD counter here and the result/arena
+  // screens (85_screens.js, loaded after this file, calls Render.fmtViewers directly).
+  fmtViewers(n){return Math.round(n).toLocaleString('en-US')},
+  // Task 5.1: the ratings/viewers counter, centered directly under the floor line (drawn at y 80-96;
+  // this canvas is 12px tall, drawn at y=92 so its bottom edge lands exactly on HUD_LINE=104 -- never
+  // reaching into the region the per-fight zoom cap keeps clear for the fighters themselves). Only
+  // redraws its offscreen canvas when the ROUNDED value actually changes (Broadcast.state.viewers
+  // drifts by fractional amounts every HITSTUN frame via decay; rounding first means a decay that
+  // hasn't yet crossed an integer boundary costs nothing beyond the drawImage every HUD frame pays
+  // anyway). The small gold "×N" multiplier badge beside it is cheap enough to just draw live.
+  viewersHud(c){
+    const hc=this.hudCache(),v=Math.round(Broadcast.state.viewers),label='VIEWERS '+this.fmtViewers(v);
+    if(hc.viewersLabel!==label){
+      const vc=hc.viewersCanvas,vx=vc.getContext('2d');vx.clearRect(0,0,vc.width,vc.height);
+      vx.font='10px ui-monospace,monospace';vx.fillStyle='#f4c542';vx.textAlign='center';vx.letterSpacing='1px';
+      vx.fillText(label,vc.width/2,10);hc.viewersLabel=label}
+    c.drawImage(hc.viewersCanvas,W/2-hc.viewersCanvas.width/2,92);
+    if(Broadcast.state.mult>1){
+      c.save();c.font='bold 10px ui-monospace,monospace';c.fillStyle='#f4c542';
+      c.textAlign='left';c.textBaseline='alphabetic';
+      c.fillText('×'+Broadcast.state.mult,W/2+hc.viewersCanvas.width/2+4,102);
+      c.restore()}},
   // Quad looks have no legLen/torsoLen (see LOOKS.donut/grub/mother_rat in 68_rig.js) — hipH+neckLen
   // stands in for legLen+torsoLen as "how tall the body's base is off the ground before the head".
   overlayY(F){const l=lookFor(F.def),h=l.rig==='quad'?(l.hipH+l.neckLen):(l.legLen+l.torsoLen);
@@ -181,6 +208,7 @@ const Render={ctx:canvas.getContext('2d'),
     // Floor line: reads G.encounter (a plain fight without one shows an exhibition label instead).
     // floorLine() only redraws its offscreen text when the label string itself changes.
     this.floorLine(c,G.encounter?(G.encounter.floor!=null?('FLOOR '+G.encounter.floor+' • '+G.encounter.name):G.encounter.name):'EXHIBITION • DOORWAY');
+    this.viewersHud(c);
     if(a.combo>1)this.combo(c,56,190,a.combo+' HITS',-6,'#f4c542','left');
     if(b.combo>1)this.combo(c,W-56,190,b.combo+' HITS',6,'#f66','right');
     this.chevrons(c,a.power);

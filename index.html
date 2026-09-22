@@ -111,6 +111,13 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .enemyprev{display:flex;align-items:center;justify-content:center;gap:10px;margin:10px 0}
 .enemyprev canvas{background:#101422;border-radius:6px}
 #arenaFight{min-height:48px;width:220px;padding:12px;font-size:15px;letter-spacing:2px;background:#f4c542;color:#111;border:0;border-radius:6px;font-family:inherit}
+/* Task 5.1: local top-5 viewers leaderboard on the arena screen (Save.data.leaderboard, top 10,
+   Meta.recordScore -- this only ever shows the first 5). One .lbrow per entry, its five <span>
+   cells (rank/viewers/champ/floor-or-streak/date) laid out in a flex row like .curstrip's own. */
+.leaderboard{width:100%;max-width:420px;margin:8px auto 0;font-size:11px;color:#ccc;overflow:hidden}
+.leaderboard h3{margin:0 0 4px;font-size:11px;color:#f4c542;letter-spacing:1px}
+.leaderboard .lbrow{display:flex;justify-content:space-between;gap:8px;padding:3px 6px;border-bottom:1px solid #222}
+.leaderboard .lbrow span:first-child{color:#f4c542;min-width:14px;text-align:left}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
 <button id="btnBlock" class="cbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
@@ -165,6 +172,7 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 <div class="enemyprev" id="arenaEnemy"></div>
 <button id="arenaFight">FIGHT</button>
 </div>
+<div class="leaderboard" id="arenaLeaderboard"></div>
 <button class="backbtn" id="arenaBack">BACK</button>
 </div></div>
 <!-- Fix-wave item 6: #toast moved here, after every overlay, so it paints ON TOP of a browsing
@@ -203,6 +211,11 @@ const Meta={
       floors:{1:{nodes:['open','locked','locked','locked','locked'],boss:'locked'}},
       energy:{n:Energy.max,max:Energy.max,ts:0},
       arena:{best:0,streak:0},
+      // Task 5.1: local top-10 viewers leaderboard ({viewers,champ,floor|streak,date}, insert/sort-
+      // desc/cap-at-10 via Meta.recordScore below). A plain top-level default key, so a pre-5.1 v2
+      // save picks it up for free through migrate()'s generic "fill anything missing" loop below --
+      // no dedicated migrate branch needed, same as pity (see its own comment just above).
+      leaderboard:[],
       // pity[kind]: opens of that crystal kind since its last pity-floor trigger (Task 4.2's
       // Crystal.open); not part of the Phase 4 plan's original defaults() shape (frozen before
       // pity was designed), added here so migrate()'s generic top-level fill loop below covers
@@ -257,7 +270,18 @@ const Meta={
     if(item.grant)for(const c in item.grant)Save.data[c]=(Save.data[c]||0)+item.grant[c];
     Save.put();
     return true},
-  buyIso(){return Meta.buy('isoPack')}};
+  buyIso(){return Meta.buy('isoPack')},
+  // Task 5.1: the one place Save.data.leaderboard is ever inserted into -- push, sort desc by
+  // viewers, cap at 10. G.onFightEnd is the only caller today (a quest/arena win, entry shaped
+  // {viewers,champ,floor|streak,date}), kept generic here so nothing else has to re-implement the
+  // insert/sort/cap rule.
+  recordScore(entry){
+    const lb=Save.data.leaderboard=Save.data.leaderboard||[];
+    lb.push(entry);
+    lb.sort((a,b)=>b.viewers-a.viewers);
+    lb.length=Math.min(10,lb.length);
+    Save.put();
+    return lb}};
 const Stats={
   caps:{stars:[1,5],rank:stars=>stars,level:rank=>10*rank},
   xpToLevel(level){return 40*level},
@@ -514,6 +538,80 @@ const Arena={
       Save.data.gold=(Save.data.gold||0)+60*a.streak}
     else a.streak=0;
     Save.put()}};
+
+// Broadcast: Phase 5 ruling #1 ("viewers are the score; gold is the economy") — pure math derived
+// from fight events, kept strictly on the same side of the sim boundary as Fight/Fighter/AI: no
+// DOM, no Audio/FX/Render calls, no Math.random, no Date.now()/performance.now() (see the
+// source-scan test in 90_tests.js, same pattern as "sim files contain no DOM or presentation
+// identifiers"). G/Screens/Render are the only things that ever act on Broadcast.state.
+//
+// Wiring (all in 80_game.js): G.startFight calls Broadcast.reset(); G.onEvent forwards every
+// Fight.emit'd event here via Broadcast.onEvent(type,a,b,val,fight) (fight is G.fight, the live
+// instance the event came from — Fight.onEvent itself only ever passes (type,a,b,val)); G.tick
+// calls Broadcast.tick(fight) once per sim frame for the hitstun decay and the multiplier-window
+// countdown, since Broadcast has no frame counter of its own and must never read a wall clock.
+const Broadcast={
+  state:{viewers:0,peak:0,combo:0,mult:1,lastPop:null},
+  // Flat bonus for a player special's first landed hit, keyed by moveName — this REPLACES (not
+  // adds to) the normal dmg*2*mult hit gain for that one event, so a 4-hit S3 doesn't also collect
+  // the ordinary per-hit formula on top of its own cinematic bonus. "First hit" is read off the
+  // Fighter itself: Fighter.startMove sets `this.hits=new Set()` fresh for every new move, and
+  // Fight.resolve does `att.hits.add(idx)` before it ever calls onEvent, so `a.hits.size===1` on a
+  // 'hit' event where a.moveName is s1/s2/s3 means idx 0 (the move's first landed hit) just resolved.
+  SPECIAL_BONUS:{s1:400,s2:800,s3:1500},
+  reset(){
+    this.state.viewers=0;this.state.peak=0;this.state.combo=0;this.state.mult=1;this.state.lastPop=null;
+    this._multVal=1;this._multFrames=0;
+    // "First blood" (ruling #1's +250) is the PLAYER's own first landed hit of the fight, not
+    // literally whichever side strikes first — an enemy hit landing on the player first doesn't
+    // consume or block it; it just waits for the player's first landed hit, whenever that comes.
+    this._firstBlood=false},
+  // Every viewer delta funnels through here: floors at 0 (decay or a taken hit can never push the
+  // count negative) and keeps peak as the running max across both event gains and tick()'s decay.
+  _gain(n){
+    this.state.viewers=Math.max(0,this.state.viewers+n);
+    if(this.state.viewers>this.state.peak)this.state.peak=this.state.viewers},
+  // Ratings multiplier windows are frame-countdown and never stack: a new trigger only takes over
+  // when its value is >= whatever's currently active, so a parry landing mid-S3-window can't
+  // downgrade ×3 back down to ×1.5 (a tie refreshes the window's duration instead of no-op'ing).
+  // lastPop is a one-shot flag for whoever reads Broadcast.state next (G.onEvent) to pop a gold FX
+  // popup off of and clear — Broadcast itself never pushes into fight.fx.
+  _setMult(val,frames){
+    if(val>=this._multVal){
+      this._multVal=val;this._multFrames=frames;this.state.mult=val;
+      this.state.lastPop={mult:val,text:'RATINGS ×'+val+'!'}}},
+  onEvent(type,a,b,val,fight){
+    if(!fight)return;
+    const p1=fight.p1;
+    if(type==='hit'){
+      if(a===p1){
+        const mv=a.moveName,firstSpecialHit=(mv==='s1'||mv==='s2'||mv==='s3')&&a.hits&&a.hits.size===1;
+        let gain=firstSpecialHit?this.SPECIAL_BONUS[mv]:val*2*this.state.mult;
+        const fiveHit=a.combo===5;
+        if(fiveHit)gain+=500;
+        if(!this._firstBlood){this._firstBlood=true;gain+=250}
+        this._gain(gain);
+        // Highest-wins ordering: an S3's first hit always tries for ×3 even if it also happens to be
+        // the 5th combo hit (a 5-hit ×2 attempt right after would just no-op against _setMult's >=
+        // guard, which is exactly the "not stacked" rule doing its job).
+        if(mv==='s3'&&firstSpecialHit)this._setMult(3,240);
+        else if(fiveHit)this._setMult(2,180)
+      }else if(b===p1){
+        this._gain(-val)}
+      // Live mirror of the player's own combo counter (Fight.resolve is what actually increments/
+      // resets fight.p1.combo) — not itself a scoring input, just carried on state for any HUD/combo
+      // tie-in that wants it without reaching into fight.p1 directly.
+      this.state.combo=p1.combo
+    }else if(type==='parry'&&a===p1){
+      this._gain(300);this._setMult(1.5,180)}
+  },
+  tick(fight){
+    if(fight&&fight.p1&&fight.p1.state==='HITSTUN')this._gain(-0.5);
+    if(this._multFrames>0){
+      this._multFrames--;
+      if(this._multFrames<=0){this._multVal=1;this.state.mult=1}}
+  }
+};
 
 const Save={key:'carlsArena.v1',data:null,
   load(){let raw=null;try{raw=JSON.parse(localStorage.getItem(this.key))}catch(e){raw=null}
@@ -2765,7 +2863,12 @@ const Render={ctx:canvas.getContext('2d'),
       floorCanvas:mk(400,16),floorLabel:null,
       // p1's "LVL n ★★★" sub-label, same cached-canvas-keyed-by-string pattern as floorLine just
       // above; p1SubLabel is the composite string tests assert against instead of reading pixels.
-      p1SubCanvas:mk(140,14),p1SubLabel:null}},
+      p1SubCanvas:mk(140,14),p1SubLabel:null,
+      // Task 5.1: "VIEWERS 12,340" — same cached-canvas pattern, keyed by the formatted label (so a
+      // steady viewer count across frames costs nothing beyond the one drawImage every HUD already
+      // pays). Sized 12px tall and drawn with its bottom edge pinned exactly at HUD_LINE (104) so it
+      // sits directly under the floor line (80..96) without ever entering the zoom-cap region above it.
+      viewersCanvas:mk(200,12),viewersLabel:null}},
   floorLine(c,label){
     const hc=this.hudCache();
     if(hc.floorLabel!==label){
@@ -2788,6 +2891,28 @@ const Render={ctx:canvas.getContext('2d'),
       sc.fillStyle='#f4c542';sc.fillText('★'.repeat(Math.max(0,stars)),w,10);
       hc.p1SubLabel=label}
     c.drawImage(hc.p1SubCanvas,x,y-10)},
+  // Comma-grouped viewer counts ("12,340"); shared by the HUD counter here and the result/arena
+  // screens (85_screens.js, loaded after this file, calls Render.fmtViewers directly).
+  fmtViewers(n){return Math.round(n).toLocaleString('en-US')},
+  // Task 5.1: the ratings/viewers counter, centered directly under the floor line (drawn at y 80-96;
+  // this canvas is 12px tall, drawn at y=92 so its bottom edge lands exactly on HUD_LINE=104 -- never
+  // reaching into the region the per-fight zoom cap keeps clear for the fighters themselves). Only
+  // redraws its offscreen canvas when the ROUNDED value actually changes (Broadcast.state.viewers
+  // drifts by fractional amounts every HITSTUN frame via decay; rounding first means a decay that
+  // hasn't yet crossed an integer boundary costs nothing beyond the drawImage every HUD frame pays
+  // anyway). The small gold "×N" multiplier badge beside it is cheap enough to just draw live.
+  viewersHud(c){
+    const hc=this.hudCache(),v=Math.round(Broadcast.state.viewers),label='VIEWERS '+this.fmtViewers(v);
+    if(hc.viewersLabel!==label){
+      const vc=hc.viewersCanvas,vx=vc.getContext('2d');vx.clearRect(0,0,vc.width,vc.height);
+      vx.font='10px ui-monospace,monospace';vx.fillStyle='#f4c542';vx.textAlign='center';vx.letterSpacing='1px';
+      vx.fillText(label,vc.width/2,10);hc.viewersLabel=label}
+    c.drawImage(hc.viewersCanvas,W/2-hc.viewersCanvas.width/2,92);
+    if(Broadcast.state.mult>1){
+      c.save();c.font='bold 10px ui-monospace,monospace';c.fillStyle='#f4c542';
+      c.textAlign='left';c.textBaseline='alphabetic';
+      c.fillText('×'+Broadcast.state.mult,W/2+hc.viewersCanvas.width/2+4,102);
+      c.restore()}},
   // Quad looks have no legLen/torsoLen (see LOOKS.donut/grub/mother_rat in 68_rig.js) — hipH+neckLen
   // stands in for legLen+torsoLen as "how tall the body's base is off the ground before the head".
   overlayY(F){const l=lookFor(F.def),h=l.rig==='quad'?(l.hipH+l.neckLen):(l.legLen+l.torsoLen);
@@ -2910,6 +3035,7 @@ const Render={ctx:canvas.getContext('2d'),
     // Floor line: reads G.encounter (a plain fight without one shows an exhibition label instead).
     // floorLine() only redraws its offscreen text when the label string itself changes.
     this.floorLine(c,G.encounter?(G.encounter.floor!=null?('FLOOR '+G.encounter.floor+' • '+G.encounter.name):G.encounter.name):'EXHIBITION • DOORWAY');
+    this.viewersHud(c);
     if(a.combo>1)this.combo(c,56,190,a.combo+' HITS',-6,'#f4c542','left');
     if(b.combo>1)this.combo(c,W-56,190,b.combo+' HITS',6,'#f66','right');
     this.chevrons(c,a.power);
@@ -3156,7 +3282,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
      const tallestTop=Math.max(p1ext.top,p2ext.top);
      const ratio=(Camera.anchorY-HUD_LINE)/tallestTop;
      this.zoomCap=Math.min(1.12,ratio);this.cineZoomCap=Math.min(1.28,ratio)}
-    this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();
+    this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();Broadcast.reset();
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
     // regardless of how recently the previous fight's last toast landed.
@@ -3187,7 +3313,17 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   hideToast(){const el=document.getElementById('toast');clearTimeout(Audio._t);el.textContent='';el.classList.add('hidden')},
   showToast(){document.getElementById('toast').classList.remove('hidden')},
   // Per-move sound recipe dispatch + announcer hookup. `a`/`b`/`val` mirror Fight.emit's args.
+  // Task 5.1: Broadcast.onEvent is fed first, on every event, unconditionally -- Broadcast itself
+  // never reads Audio/FX/DOM (see its own header), so this is the one seam that turns a ratings
+  // multiplier window just starting (Broadcast.state.lastPop) into an actual gold FX popup, pushed
+  // into the live fight's own fx queue (drained by G.tick -> FX.pushAll, same pipe every hit/parry/
+  // combo popup already uses) and immediately cleared so it never re-pops for the rest of that window.
   onEvent(t,a,b,val){
+    if(this.fight)Broadcast.onEvent(t,a,b,val,this.fight);
+    if(Broadcast.state.lastPop){
+      const pop=Broadcast.state.lastPop;Broadcast.state.lastPop=null;
+      if(this.fight)this.fight.fx.push({kind:'popup',
+        x:(this.fight.p1.x+this.fight.p2.x)/2,y:FLOOR-200,text:pop.text,col:'#f4c542',big:true})}
     if(t==='hit'){const mv=MOVES[a.moveName];
       // Multi-hit specials (s1/s2/s3) already got their one full recipe burst from checkSpecial on
       // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
@@ -3277,13 +3413,25 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       Rewards.grant(rewards);
       if(entry&&entry.level>lvlBefore)leveledUp=true}
     this.lastRewards=rewards;
+    // Task 5.1: peak viewers this fight ever reached (Broadcast tracks it live off fight events;
+    // it's only ever reset again at the NEXT G.startFight, so it's still exactly right here, before
+    // the result screen or the leaderboard read it). A quest/arena WIN also banks it into
+    // Save.data.leaderboard (top 10 by viewers, insert/sort/cap via Meta.recordScore) -- a loss or
+    // an exhibition/arena-loss fight still shows PEAK VIEWERS on the result screen, it just never
+    // enters the local leaderboard.
+    const peakViewers=Broadcast.state.peak;
+    if(won&&(this.mode==='quest'||this.mode==='arena')){
+      const scoreCtx=this.mode==='quest'?{floor:this.questTarget.floor}:{streak:Save.data.arena.streak};
+      Meta.recordScore(Object.assign({viewers:peakViewers,champ:this.champ,
+        date:new Date().toISOString().slice(0,10)},scoreCtx))}
     this.state='RESULT';
-    if(typeof Screens!=='undefined'&&Screens.result)Screens.result(rewards,won);
+    if(typeof Screens!=='undefined'&&Screens.result)Screens.result(rewards,won,peakViewers);
     else{
       document.getElementById('resultTitle').textContent=won?'VICTORY':'DEFEATED';
       const hpLine=winner.def.name+' wins with '+Math.round(100*winner.hp/winner.maxHp)+'% health.';
       const rewardLine=rewards?(leveledUp?'LEVEL UP!':this.rewardsText(rewards)):'';
-      document.getElementById('resultLine').textContent=rewardLine?hpLine+'  '+rewardLine:hpLine;
+      const peakLine='PEAK VIEWERS '+Render.fmtViewers(peakViewers);
+      document.getElementById('resultLine').textContent=(rewardLine?hpLine+'  '+rewardLine:hpLine)+'  '+peakLine;
       this.show('result',true);this.show('btns',false)}},
   // Freeze p1 into a named pose for screenshotting (tests/harness.py --pose). Maps a pose key to the
   // Fighter state/moveName/f (and, where poseFor divides by it, stun) that Rig.poseFor resolves back
@@ -3365,6 +3513,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
       else f.step();
       this.frameNow=f.frame;
+      Broadcast.tick(f);
       this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
       this.checkCinematicFx(f);
       this.syncSpecials()}
@@ -3521,7 +3670,10 @@ const Screens={
   crystal(){this._reveal=null;this.show('crystal')},
   shop(){this.show('shop')},
   arena(){this.show('arena')},
-  result(rewards,won){this._rewards=rewards;this._won=won;this.show('result')},
+  // Task 5.1: peakViewers (G.onFightEnd's Broadcast.state.peak snapshot) is a third, optional arg --
+  // no other caller in the codebase passes it (G's own no-Screens fallback in onFightEnd builds its
+  // #resultLine text directly instead), but every real click-through path (Screens.show->this) does.
+  result(rewards,won,peakViewers){this._rewards=rewards;this._won=won;this._peakViewers=peakViewers;this.show('result')},
   // Called from G.startFight the instant a fight actually begins (title/result/pauseMenu are
   // already hidden there directly) -- a fight can be launched from any browsing screen (a map
   // node, arena's FIGHT, exhibition off the title screen), so whichever one is still up needs
@@ -3763,6 +3915,20 @@ const Screens={
     const nm=document.createElement('div');nm.textContent=enc.enemy.name+' ('+enc.tier.toUpperCase()+')';
     prev.appendChild(cv);prev.appendChild(nm);
     document.getElementById('arenaFight').onclick=()=>{Screens._origin={name:'arena'};G.startArena()};
+    // Task 5.1: top 5 of Save.data.leaderboard (already sorted/capped at 10 by Meta.recordScore) --
+    // one row per entry, each cell its own <span> (renderCurrency's own pattern above) so a test can
+    // assert on textContent without depending on exact spacing/punctuation.
+    const lb=document.getElementById('arenaLeaderboard');
+    if(lb){
+      lb.innerHTML='';
+      const h3=document.createElement('h3');h3.textContent='TOP VIEWERS';lb.appendChild(h3);
+      (Save.data.leaderboard||[]).slice(0,5).forEach((e,i)=>{
+        const row=document.createElement('div');row.className='lbrow';
+        const champName=(CHAMPS[e.champ]&&CHAMPS[e.champ].name)||e.champ;
+        const prog=e.floor!=null?('FLOOR '+e.floor):('STREAK '+e.streak);
+        row.innerHTML=[String(i+1),Render.fmtViewers(e.viewers)+' VIEWERS',champName,prog,e.date]
+          .map(s=>'<span>'+s+'</span>').join('');
+        lb.appendChild(row)})}
     document.getElementById('arenaBack').onclick=()=>Screens.title()},
   // ---- result ----------------------------------------------------------------------------------
   // G.onFightEnd calls this with exactly (rewards, won) -- G.fight is still set at that point (not
@@ -3778,6 +3944,9 @@ const Screens={
     if(rewards){
       const rt=G.rewardsText(rewards);
       if(rt)line=line?line+'  '+rt:rt}
+    // Task 5.1: the ratings recap -- shown for every fight (win or loss), independent of rewards,
+    // since viewers accrue off the fight itself, not off the quest/arena outcome.
+    if(this._peakViewers!=null)line=(line?line+'  ':'')+'PEAK VIEWERS '+Render.fmtViewers(this._peakViewers);
     document.getElementById('resultLine').textContent=line;
     // FIGHT AGAIN replays the exact same options (G.lastFightOpts) -- meaningless right after a
     // quest win, since that node is now 'done' and Quest.start would just refuse it; hidden then,
@@ -5057,6 +5226,138 @@ Test.add('a scripted arena win records the streak/gold via Arena.record and neve
   eq(G.lastRewards,null,'arena wins go through Arena.record, not Rewards.forNode');
   eq(Quest.floor(1).nodes[0].state,'open','arena must never touch quest floor state');
   G.toTitle();G.sim=false});
+// Task 5.1: Broadcast (viewers, ratings multipliers, leaderboard) -------------------------------
+// Fake-fight helpers below build the minimal {p1,p2} shape Broadcast.onEvent/tick actually read
+// (identity via ===, .combo, .moveName, .hits, .state) rather than driving a real Fight through a
+// script -- isolates the pure math from sim timing, matching how mkFighter/mkFight isolate the sim
+// itself from the rest of the game. Broadcast._firstBlood is poked directly to neutralize the
+// one-time +250 first-blood bonus in tests that are isolating a different formula.
+Test.add('Broadcast: a hit landed by the player at mult 1 gains dmg*2',()=>{
+  Broadcast.reset();Broadcast._firstBlood=true;
+  const f={p1:{combo:1,moveName:'light1',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,60,f);
+  eq(Broadcast.state.viewers,120)});
+Test.add('Broadcast: a player parry gains +300 and sets mult 1.5 for 180 frames',()=>{
+  Broadcast.reset();
+  const f={p1:{state:'IDLE'},p2:{}};
+  Broadcast.onEvent('parry',f.p1,f.p2,0,f);
+  eq(Broadcast.state.viewers,300);eq(Broadcast.state.mult,1.5);
+  for(let i=0;i<179;i++)Broadcast.tick(f);
+  eq(Broadcast.state.mult,1.5,'must still be active one frame before the window ends');
+  Broadcast.tick(f);
+  eq(Broadcast.state.mult,1,'must revert to 1 once the 180-frame window elapses')});
+Test.add('Broadcast: an S3 first hit gains the flat +1500 bonus (not dmg*2*mult) and sets mult 3 for 240 frames',()=>{
+  Broadcast.reset();Broadcast._firstBlood=true;
+  const f={p1:{combo:1,moveName:'s3',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,999,f); // val (dmg) must be ignored -- the bonus is flat
+  eq(Broadcast.state.viewers,1500);eq(Broadcast.state.mult,3);
+  for(let i=0;i<239;i++)Broadcast.tick({p1:{state:'IDLE'}});
+  eq(Broadcast.state.mult,3);
+  Broadcast.tick({p1:{state:'IDLE'}});
+  eq(Broadcast.state.mult,1)});
+Test.add('Broadcast: a 5-hit combo adds +500 and sets mult 2 for 180 frames',()=>{
+  Broadcast.reset();Broadcast._firstBlood=true;
+  const f={p1:{combo:5,moveName:'light1',hits:new Set([0,1,2])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,10,f); // 10*2*1 + 500
+  eq(Broadcast.state.viewers,520);eq(Broadcast.state.mult,2)});
+Test.add('Broadcast: the player\'s own first landed hit of the fight adds a one-time +250 first-blood bonus',()=>{
+  Broadcast.reset();
+  const f={p1:{combo:1,moveName:'light1',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,10,f); // 10*2*1 + 250
+  eq(Broadcast.state.viewers,270);
+  Broadcast.onEvent('hit',f.p1,f.p2,10,f); // no more first-blood on a later hit
+  eq(Broadcast.state.viewers,290)});
+Test.add('Broadcast: a lower-value trigger cannot downgrade or reset an active higher multiplier window',()=>{
+  Broadcast.reset();Broadcast._firstBlood=true;
+  const f={p1:{combo:1,moveName:'s3',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,10,f); // mult -> 3, 240 frames
+  for(let i=0;i<100;i++)Broadcast.tick({p1:{state:'IDLE'}}); // 140 frames left
+  Broadcast.onEvent('parry',f.p1,f.p2,0,f); // a would-be x1.5 must not win against the active x3
+  eq(Broadcast.state.mult,3,'the active x3 must not be downgraded by a later x1.5 trigger');
+  for(let i=0;i<139;i++)Broadcast.tick({p1:{state:'IDLE'}});
+  eq(Broadcast.state.mult,3,'the original window (not reset by the parry) must still be counting down');
+  Broadcast.tick({p1:{state:'IDLE'}});
+  eq(Broadcast.state.mult,1)});
+Test.add('Broadcast: the player taking a hit loses dmg viewers, floored at 0',()=>{
+  Broadcast.reset();Broadcast.state.viewers=40;Broadcast.state.peak=40;
+  const f={p1:{combo:0},p2:{combo:1,moveName:'light1',hits:new Set([0])}};
+  Broadcast.onEvent('hit',f.p2,f.p1,60,f); // enemy (a) hits the player (b); dmg 60 > current 40
+  eq(Broadcast.state.viewers,0,'40-60 must floor at 0, not go negative')});
+Test.add('Broadcast.tick decays 0.5 viewers/frame while the player is in HITSTUN',()=>{
+  Broadcast.reset();Broadcast.state.viewers=100;Broadcast.state.peak=100;
+  const f={p1:{state:'HITSTUN'}};
+  for(let i=0;i<20;i++)Broadcast.tick(f);
+  eq(Broadcast.state.viewers,90)});
+Test.add('Broadcast.state.peak tracks the running max and is unaffected by later decay',()=>{
+  Broadcast.reset();Broadcast._firstBlood=true;
+  const f={p1:{combo:1,moveName:'light1',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,100,f); // +200
+  eq(Broadcast.state.viewers,200);eq(Broadcast.state.peak,200);
+  Broadcast.tick({p1:{state:'HITSTUN'}});
+  eq(Broadcast.state.viewers,199.5);eq(Broadcast.state.peak,200,'peak must not drop with decay')});
+Test.add('Broadcast source contains no Math.random or wall-clock reads (same rule as the sim boundary)',()=>{
+  for(const fn of[Broadcast.reset,Broadcast.onEvent,Broadcast.tick,Broadcast._gain,Broadcast._setMult])
+    ok(!/Math\.random|Date\.now|performance\.now/.test(fn.toString()),(fn.name||'?')+' must stay pure')});
+Test.add('Meta.recordScore inserts, sorts desc by viewers, and caps at 10',()=>{
+  Save.data=Meta.defaults();
+  for(let i=0;i<12;i++)Meta.recordScore({viewers:i*100,champ:'carl',floor:1,date:'2026-01-0'+(i%9+1)});
+  eq(Save.data.leaderboard.length,10,'must cap at 10');
+  eq(Save.data.leaderboard[0].viewers,1100,'must be sorted descending');
+  eq(Save.data.leaderboard[9].viewers,200,'the lowest 2 of 12 entries must have been dropped')});
+Test.add('G wires Broadcast: startFight resets it, a scripted landed hit raises viewers, and tick() drives decay',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p2:'donut',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  eq(Broadcast.state.viewers,0,'G.startFight must call Broadcast.reset()');
+  closeIn(G.fight);G.sim=true;
+  for(let i=0;i<8;i++)G.tick();
+  ok(Broadcast.state.viewers>0,'a landed player hit must raise viewers via G.onEvent -> Broadcast.onEvent');
+  G.toTitle();G.sim=false});
+Test.add('a scripted quest KO win records a leaderboard entry (peak viewers) and the result text shows PEAK VIEWERS',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0,champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Save.data.leaderboard.length,1,'a quest win must record exactly one leaderboard entry');
+  const entry=Save.data.leaderboard[0];
+  eq(entry.champ,'carl');eq(entry.floor,1);ok(entry.viewers>0,'recorded viewers must be > 0');
+  ok(!!entry.date,'entry must carry a date');
+  const line=document.getElementById('resultLine').textContent;
+  ok(line.includes('PEAK VIEWERS'),'result text must include PEAK VIEWERS: '+line);
+  G.toTitle();G.sim=false});
+Test.add('a quest loss still shows PEAK VIEWERS on the result screen but records no leaderboard entry',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0,ctrl2:AI.make('basic',9),seed:3});
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Save.data.leaderboard.length,0,'a loss must never record a leaderboard entry');
+  ok(document.getElementById('resultLine').textContent.includes('PEAK VIEWERS'));
+  G.toTitle();G.sim=false});
+Test.add('HUD viewers counter is a cached label, updated only when the rounded value changes',()=>{
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  Broadcast.state.viewers=1234;
+  Render.frame(G.fight);
+  eq(Render.hudCache().viewersLabel,'VIEWERS 1,234','cached HUD label, not pixels');
+  Broadcast.state.viewers=1234.4; // rounds to the same 1234 -- label must not change
+  Render.frame(G.fight);
+  eq(Render.hudCache().viewersLabel,'VIEWERS 1,234');
+  Broadcast.state.viewers=5000;
+  Render.frame(G.fight);
+  eq(Render.hudCache().viewersLabel,'VIEWERS 5,000');
+  G.toTitle()});
+Test.add('the arena screen renders the top 5 leaderboard rows (viewers, champ, floor/streak, date)',()=>{
+  Save.data=Meta.defaults();
+  Save.data.leaderboard=[
+    {viewers:900,champ:'carl',floor:2,date:'2026-09-01'},
+    {viewers:800,champ:'carl',streak:3,date:'2026-09-02'}];
+  Screens.arena();
+  const lb=document.getElementById('arenaLeaderboard');
+  eq(lb.querySelectorAll('.lbrow').length,2);
+  ok(lb.textContent.includes('900')&&lb.textContent.includes('CARL'),'row must show viewers and champ name: '+lb.textContent);
+  ok(lb.textContent.includes('FLOOR 2')&&lb.textContent.includes('STREAK 3'),
+    'must show floor for one entry and streak for the other: '+lb.textContent);
+  Screens.title()});
 // Fix-wave item 2 (Critical): FIGHT AGAIN's 'again' button (bound once in G.init()) always replayed
 // this.lastFightOpts verbatim, which for arena still carried the ALREADY-RESOLVED Arena.start()
 // object (enemy/tier/hpMul) from the fight that just ended -- so a win at streak 0 re-fought the

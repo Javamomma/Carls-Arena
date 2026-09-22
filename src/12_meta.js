@@ -12,6 +12,11 @@ const Meta={
       floors:{1:{nodes:['open','locked','locked','locked','locked'],boss:'locked'}},
       energy:{n:Energy.max,max:Energy.max,ts:0},
       arena:{best:0,streak:0},
+      // Task 5.1: local top-10 viewers leaderboard ({viewers,champ,floor|streak,date}, insert/sort-
+      // desc/cap-at-10 via Meta.recordScore below). A plain top-level default key, so a pre-5.1 v2
+      // save picks it up for free through migrate()'s generic "fill anything missing" loop below --
+      // no dedicated migrate branch needed, same as pity (see its own comment just above).
+      leaderboard:[],
       // pity[kind]: opens of that crystal kind since its last pity-floor trigger (Task 4.2's
       // Crystal.open); not part of the Phase 4 plan's original defaults() shape (frozen before
       // pity was designed), added here so migrate()'s generic top-level fill loop below covers
@@ -66,7 +71,18 @@ const Meta={
     if(item.grant)for(const c in item.grant)Save.data[c]=(Save.data[c]||0)+item.grant[c];
     Save.put();
     return true},
-  buyIso(){return Meta.buy('isoPack')}};
+  buyIso(){return Meta.buy('isoPack')},
+  // Task 5.1: the one place Save.data.leaderboard is ever inserted into -- push, sort desc by
+  // viewers, cap at 10. G.onFightEnd is the only caller today (a quest/arena win, entry shaped
+  // {viewers,champ,floor|streak,date}), kept generic here so nothing else has to re-implement the
+  // insert/sort/cap rule.
+  recordScore(entry){
+    const lb=Save.data.leaderboard=Save.data.leaderboard||[];
+    lb.push(entry);
+    lb.sort((a,b)=>b.viewers-a.viewers);
+    lb.length=Math.min(10,lb.length);
+    Save.put();
+    return lb}};
 const Stats={
   caps:{stars:[1,5],rank:stars=>stars,level:rank=>10*rank},
   xpToLevel(level){return 40*level},

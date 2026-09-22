@@ -40,7 +40,10 @@ const Screens={
   crystal(){this._reveal=null;this.show('crystal')},
   shop(){this.show('shop')},
   arena(){this.show('arena')},
-  result(rewards,won){this._rewards=rewards;this._won=won;this.show('result')},
+  // Task 5.1: peakViewers (G.onFightEnd's Broadcast.state.peak snapshot) is a third, optional arg --
+  // no other caller in the codebase passes it (G's own no-Screens fallback in onFightEnd builds its
+  // #resultLine text directly instead), but every real click-through path (Screens.show->this) does.
+  result(rewards,won,peakViewers){this._rewards=rewards;this._won=won;this._peakViewers=peakViewers;this.show('result')},
   // Called from G.startFight the instant a fight actually begins (title/result/pauseMenu are
   // already hidden there directly) -- a fight can be launched from any browsing screen (a map
   // node, arena's FIGHT, exhibition off the title screen), so whichever one is still up needs
@@ -282,6 +285,20 @@ const Screens={
     const nm=document.createElement('div');nm.textContent=enc.enemy.name+' ('+enc.tier.toUpperCase()+')';
     prev.appendChild(cv);prev.appendChild(nm);
     document.getElementById('arenaFight').onclick=()=>{Screens._origin={name:'arena'};G.startArena()};
+    // Task 5.1: top 5 of Save.data.leaderboard (already sorted/capped at 10 by Meta.recordScore) --
+    // one row per entry, each cell its own <span> (renderCurrency's own pattern above) so a test can
+    // assert on textContent without depending on exact spacing/punctuation.
+    const lb=document.getElementById('arenaLeaderboard');
+    if(lb){
+      lb.innerHTML='';
+      const h3=document.createElement('h3');h3.textContent='TOP VIEWERS';lb.appendChild(h3);
+      (Save.data.leaderboard||[]).slice(0,5).forEach((e,i)=>{
+        const row=document.createElement('div');row.className='lbrow';
+        const champName=(CHAMPS[e.champ]&&CHAMPS[e.champ].name)||e.champ;
+        const prog=e.floor!=null?('FLOOR '+e.floor):('STREAK '+e.streak);
+        row.innerHTML=[String(i+1),Render.fmtViewers(e.viewers)+' VIEWERS',champName,prog,e.date]
+          .map(s=>'<span>'+s+'</span>').join('');
+        lb.appendChild(row)})}
     document.getElementById('arenaBack').onclick=()=>Screens.title()},
   // ---- result ----------------------------------------------------------------------------------
   // G.onFightEnd calls this with exactly (rewards, won) -- G.fight is still set at that point (not
@@ -297,6 +314,9 @@ const Screens={
     if(rewards){
       const rt=G.rewardsText(rewards);
       if(rt)line=line?line+'  '+rt:rt}
+    // Task 5.1: the ratings recap -- shown for every fight (win or loss), independent of rewards,
+    // since viewers accrue off the fight itself, not off the quest/arena outcome.
+    if(this._peakViewers!=null)line=(line?line+'  ':'')+'PEAK VIEWERS '+Render.fmtViewers(this._peakViewers);
     document.getElementById('resultLine').textContent=line;
     // FIGHT AGAIN replays the exact same options (G.lastFightOpts) -- meaningless right after a
     // quest win, since that node is now 'done' and Quest.start would just refuse it; hidden then,

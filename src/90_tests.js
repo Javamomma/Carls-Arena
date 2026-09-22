@@ -1267,6 +1267,138 @@ Test.add('a scripted arena win records the streak/gold via Arena.record and neve
   eq(G.lastRewards,null,'arena wins go through Arena.record, not Rewards.forNode');
   eq(Quest.floor(1).nodes[0].state,'open','arena must never touch quest floor state');
   G.toTitle();G.sim=false});
+// Task 5.1: Broadcast (viewers, ratings multipliers, leaderboard) -------------------------------
+// Fake-fight helpers below build the minimal {p1,p2} shape Broadcast.onEvent/tick actually read
+// (identity via ===, .combo, .moveName, .hits, .state) rather than driving a real Fight through a
+// script -- isolates the pure math from sim timing, matching how mkFighter/mkFight isolate the sim
+// itself from the rest of the game. Broadcast._firstBlood is poked directly to neutralize the
+// one-time +250 first-blood bonus in tests that are isolating a different formula.
+Test.add('Broadcast: a hit landed by the player at mult 1 gains dmg*2',()=>{
+  Broadcast.reset();Broadcast._firstBlood=true;
+  const f={p1:{combo:1,moveName:'light1',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,60,f);
+  eq(Broadcast.state.viewers,120)});
+Test.add('Broadcast: a player parry gains +300 and sets mult 1.5 for 180 frames',()=>{
+  Broadcast.reset();
+  const f={p1:{state:'IDLE'},p2:{}};
+  Broadcast.onEvent('parry',f.p1,f.p2,0,f);
+  eq(Broadcast.state.viewers,300);eq(Broadcast.state.mult,1.5);
+  for(let i=0;i<179;i++)Broadcast.tick(f);
+  eq(Broadcast.state.mult,1.5,'must still be active one frame before the window ends');
+  Broadcast.tick(f);
+  eq(Broadcast.state.mult,1,'must revert to 1 once the 180-frame window elapses')});
+Test.add('Broadcast: an S3 first hit gains the flat +1500 bonus (not dmg*2*mult) and sets mult 3 for 240 frames',()=>{
+  Broadcast.reset();Broadcast._firstBlood=true;
+  const f={p1:{combo:1,moveName:'s3',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,999,f); // val (dmg) must be ignored -- the bonus is flat
+  eq(Broadcast.state.viewers,1500);eq(Broadcast.state.mult,3);
+  for(let i=0;i<239;i++)Broadcast.tick({p1:{state:'IDLE'}});
+  eq(Broadcast.state.mult,3);
+  Broadcast.tick({p1:{state:'IDLE'}});
+  eq(Broadcast.state.mult,1)});
+Test.add('Broadcast: a 5-hit combo adds +500 and sets mult 2 for 180 frames',()=>{
+  Broadcast.reset();Broadcast._firstBlood=true;
+  const f={p1:{combo:5,moveName:'light1',hits:new Set([0,1,2])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,10,f); // 10*2*1 + 500
+  eq(Broadcast.state.viewers,520);eq(Broadcast.state.mult,2)});
+Test.add('Broadcast: the player\'s own first landed hit of the fight adds a one-time +250 first-blood bonus',()=>{
+  Broadcast.reset();
+  const f={p1:{combo:1,moveName:'light1',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,10,f); // 10*2*1 + 250
+  eq(Broadcast.state.viewers,270);
+  Broadcast.onEvent('hit',f.p1,f.p2,10,f); // no more first-blood on a later hit
+  eq(Broadcast.state.viewers,290)});
+Test.add('Broadcast: a lower-value trigger cannot downgrade or reset an active higher multiplier window',()=>{
+  Broadcast.reset();Broadcast._firstBlood=true;
+  const f={p1:{combo:1,moveName:'s3',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,10,f); // mult -> 3, 240 frames
+  for(let i=0;i<100;i++)Broadcast.tick({p1:{state:'IDLE'}}); // 140 frames left
+  Broadcast.onEvent('parry',f.p1,f.p2,0,f); // a would-be x1.5 must not win against the active x3
+  eq(Broadcast.state.mult,3,'the active x3 must not be downgraded by a later x1.5 trigger');
+  for(let i=0;i<139;i++)Broadcast.tick({p1:{state:'IDLE'}});
+  eq(Broadcast.state.mult,3,'the original window (not reset by the parry) must still be counting down');
+  Broadcast.tick({p1:{state:'IDLE'}});
+  eq(Broadcast.state.mult,1)});
+Test.add('Broadcast: the player taking a hit loses dmg viewers, floored at 0',()=>{
+  Broadcast.reset();Broadcast.state.viewers=40;Broadcast.state.peak=40;
+  const f={p1:{combo:0},p2:{combo:1,moveName:'light1',hits:new Set([0])}};
+  Broadcast.onEvent('hit',f.p2,f.p1,60,f); // enemy (a) hits the player (b); dmg 60 > current 40
+  eq(Broadcast.state.viewers,0,'40-60 must floor at 0, not go negative')});
+Test.add('Broadcast.tick decays 0.5 viewers/frame while the player is in HITSTUN',()=>{
+  Broadcast.reset();Broadcast.state.viewers=100;Broadcast.state.peak=100;
+  const f={p1:{state:'HITSTUN'}};
+  for(let i=0;i<20;i++)Broadcast.tick(f);
+  eq(Broadcast.state.viewers,90)});
+Test.add('Broadcast.state.peak tracks the running max and is unaffected by later decay',()=>{
+  Broadcast.reset();Broadcast._firstBlood=true;
+  const f={p1:{combo:1,moveName:'light1',hits:new Set([0])},p2:{}};
+  Broadcast.onEvent('hit',f.p1,f.p2,100,f); // +200
+  eq(Broadcast.state.viewers,200);eq(Broadcast.state.peak,200);
+  Broadcast.tick({p1:{state:'HITSTUN'}});
+  eq(Broadcast.state.viewers,199.5);eq(Broadcast.state.peak,200,'peak must not drop with decay')});
+Test.add('Broadcast source contains no Math.random or wall-clock reads (same rule as the sim boundary)',()=>{
+  for(const fn of[Broadcast.reset,Broadcast.onEvent,Broadcast.tick,Broadcast._gain,Broadcast._setMult])
+    ok(!/Math\.random|Date\.now|performance\.now/.test(fn.toString()),(fn.name||'?')+' must stay pure')});
+Test.add('Meta.recordScore inserts, sorts desc by viewers, and caps at 10',()=>{
+  Save.data=Meta.defaults();
+  for(let i=0;i<12;i++)Meta.recordScore({viewers:i*100,champ:'carl',floor:1,date:'2026-01-0'+(i%9+1)});
+  eq(Save.data.leaderboard.length,10,'must cap at 10');
+  eq(Save.data.leaderboard[0].viewers,1100,'must be sorted descending');
+  eq(Save.data.leaderboard[9].viewers,200,'the lowest 2 of 12 entries must have been dropped')});
+Test.add('G wires Broadcast: startFight resets it, a scripted landed hit raises viewers, and tick() drives decay',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p2:'donut',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  eq(Broadcast.state.viewers,0,'G.startFight must call Broadcast.reset()');
+  closeIn(G.fight);G.sim=true;
+  for(let i=0;i<8;i++)G.tick();
+  ok(Broadcast.state.viewers>0,'a landed player hit must raise viewers via G.onEvent -> Broadcast.onEvent');
+  G.toTitle();G.sim=false});
+Test.add('a scripted quest KO win records a leaderboard entry (peak viewers) and the result text shows PEAK VIEWERS',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0,champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Save.data.leaderboard.length,1,'a quest win must record exactly one leaderboard entry');
+  const entry=Save.data.leaderboard[0];
+  eq(entry.champ,'carl');eq(entry.floor,1);ok(entry.viewers>0,'recorded viewers must be > 0');
+  ok(!!entry.date,'entry must carry a date');
+  const line=document.getElementById('resultLine').textContent;
+  ok(line.includes('PEAK VIEWERS'),'result text must include PEAK VIEWERS: '+line);
+  G.toTitle();G.sim=false});
+Test.add('a quest loss still shows PEAK VIEWERS on the result screen but records no leaderboard entry',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0,ctrl2:AI.make('basic',9),seed:3});
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Save.data.leaderboard.length,0,'a loss must never record a leaderboard entry');
+  ok(document.getElementById('resultLine').textContent.includes('PEAK VIEWERS'));
+  G.toTitle();G.sim=false});
+Test.add('HUD viewers counter is a cached label, updated only when the rounded value changes',()=>{
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  Broadcast.state.viewers=1234;
+  Render.frame(G.fight);
+  eq(Render.hudCache().viewersLabel,'VIEWERS 1,234','cached HUD label, not pixels');
+  Broadcast.state.viewers=1234.4; // rounds to the same 1234 -- label must not change
+  Render.frame(G.fight);
+  eq(Render.hudCache().viewersLabel,'VIEWERS 1,234');
+  Broadcast.state.viewers=5000;
+  Render.frame(G.fight);
+  eq(Render.hudCache().viewersLabel,'VIEWERS 5,000');
+  G.toTitle()});
+Test.add('the arena screen renders the top 5 leaderboard rows (viewers, champ, floor/streak, date)',()=>{
+  Save.data=Meta.defaults();
+  Save.data.leaderboard=[
+    {viewers:900,champ:'carl',floor:2,date:'2026-09-01'},
+    {viewers:800,champ:'carl',streak:3,date:'2026-09-02'}];
+  Screens.arena();
+  const lb=document.getElementById('arenaLeaderboard');
+  eq(lb.querySelectorAll('.lbrow').length,2);
+  ok(lb.textContent.includes('900')&&lb.textContent.includes('CARL'),'row must show viewers and champ name: '+lb.textContent);
+  ok(lb.textContent.includes('FLOOR 2')&&lb.textContent.includes('STREAK 3'),
+    'must show floor for one entry and streak for the other: '+lb.textContent);
+  Screens.title()});
 // Fix-wave item 2 (Critical): FIGHT AGAIN's 'again' button (bound once in G.init()) always replayed
 // this.lastFightOpts verbatim, which for arena still carried the ALREADY-RESOLVED Arena.start()
 // object (enemy/tier/hpMul) from the fight that just ended -- so a win at streak 0 re-fought the

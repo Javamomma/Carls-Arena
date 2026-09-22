@@ -138,7 +138,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
      const tallestTop=Math.max(p1ext.top,p2ext.top);
      const ratio=(Camera.anchorY-HUD_LINE)/tallestTop;
      this.zoomCap=Math.min(1.12,ratio);this.cineZoomCap=Math.min(1.28,ratio)}
-    this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();
+    this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();Broadcast.reset();
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
     // regardless of how recently the previous fight's last toast landed.
@@ -169,7 +169,17 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   hideToast(){const el=document.getElementById('toast');clearTimeout(Audio._t);el.textContent='';el.classList.add('hidden')},
   showToast(){document.getElementById('toast').classList.remove('hidden')},
   // Per-move sound recipe dispatch + announcer hookup. `a`/`b`/`val` mirror Fight.emit's args.
+  // Task 5.1: Broadcast.onEvent is fed first, on every event, unconditionally -- Broadcast itself
+  // never reads Audio/FX/DOM (see its own header), so this is the one seam that turns a ratings
+  // multiplier window just starting (Broadcast.state.lastPop) into an actual gold FX popup, pushed
+  // into the live fight's own fx queue (drained by G.tick -> FX.pushAll, same pipe every hit/parry/
+  // combo popup already uses) and immediately cleared so it never re-pops for the rest of that window.
   onEvent(t,a,b,val){
+    if(this.fight)Broadcast.onEvent(t,a,b,val,this.fight);
+    if(Broadcast.state.lastPop){
+      const pop=Broadcast.state.lastPop;Broadcast.state.lastPop=null;
+      if(this.fight)this.fight.fx.push({kind:'popup',
+        x:(this.fight.p1.x+this.fight.p2.x)/2,y:FLOOR-200,text:pop.text,col:'#f4c542',big:true})}
     if(t==='hit'){const mv=MOVES[a.moveName];
       // Multi-hit specials (s1/s2/s3) already got their one full recipe burst from checkSpecial on
       // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
@@ -259,13 +269,25 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       Rewards.grant(rewards);
       if(entry&&entry.level>lvlBefore)leveledUp=true}
     this.lastRewards=rewards;
+    // Task 5.1: peak viewers this fight ever reached (Broadcast tracks it live off fight events;
+    // it's only ever reset again at the NEXT G.startFight, so it's still exactly right here, before
+    // the result screen or the leaderboard read it). A quest/arena WIN also banks it into
+    // Save.data.leaderboard (top 10 by viewers, insert/sort/cap via Meta.recordScore) -- a loss or
+    // an exhibition/arena-loss fight still shows PEAK VIEWERS on the result screen, it just never
+    // enters the local leaderboard.
+    const peakViewers=Broadcast.state.peak;
+    if(won&&(this.mode==='quest'||this.mode==='arena')){
+      const scoreCtx=this.mode==='quest'?{floor:this.questTarget.floor}:{streak:Save.data.arena.streak};
+      Meta.recordScore(Object.assign({viewers:peakViewers,champ:this.champ,
+        date:new Date().toISOString().slice(0,10)},scoreCtx))}
     this.state='RESULT';
-    if(typeof Screens!=='undefined'&&Screens.result)Screens.result(rewards,won);
+    if(typeof Screens!=='undefined'&&Screens.result)Screens.result(rewards,won,peakViewers);
     else{
       document.getElementById('resultTitle').textContent=won?'VICTORY':'DEFEATED';
       const hpLine=winner.def.name+' wins with '+Math.round(100*winner.hp/winner.maxHp)+'% health.';
       const rewardLine=rewards?(leveledUp?'LEVEL UP!':this.rewardsText(rewards)):'';
-      document.getElementById('resultLine').textContent=rewardLine?hpLine+'  '+rewardLine:hpLine;
+      const peakLine='PEAK VIEWERS '+Render.fmtViewers(peakViewers);
+      document.getElementById('resultLine').textContent=(rewardLine?hpLine+'  '+rewardLine:hpLine)+'  '+peakLine;
       this.show('result',true);this.show('btns',false)}},
   // Freeze p1 into a named pose for screenshotting (tests/harness.py --pose). Maps a pose key to the
   // Fighter state/moveName/f (and, where poseFor divides by it, stun) that Rig.poseFor resolves back
@@ -347,6 +369,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
       else f.step();
       this.frameNow=f.frame;
+      Broadcast.tick(f);
       this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
       this.checkCinematicFx(f);
       this.syncSpecials()}

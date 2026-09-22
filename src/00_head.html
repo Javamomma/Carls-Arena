@@ -111,6 +111,13 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .enemyprev{display:flex;align-items:center;justify-content:center;gap:10px;margin:10px 0}
 .enemyprev canvas{background:#101422;border-radius:6px}
 #arenaFight{min-height:48px;width:220px;padding:12px;font-size:15px;letter-spacing:2px;background:#f4c542;color:#111;border:0;border-radius:6px;font-family:inherit}
+/* Task 5.1: local top-5 viewers leaderboard on the arena screen (Save.data.leaderboard, top 10,
+   Meta.recordScore -- this only ever shows the first 5). One .lbrow per entry, its five <span>
+   cells (rank/viewers/champ/floor-or-streak/date) laid out in a flex row like .curstrip's own. */
+.leaderboard{width:100%;max-width:420px;margin:8px auto 0;font-size:11px;color:#ccc;overflow:hidden}
+.leaderboard h3{margin:0 0 4px;font-size:11px;color:#f4c542;letter-spacing:1px}
+.leaderboard .lbrow{display:flex;justify-content:space-between;gap:8px;padding:3px 6px;border-bottom:1px solid #222}
+.leaderboard .lbrow span:first-child{color:#f4c542;min-width:14px;text-align:left}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
 <button id="btnBlock" class="cbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
@@ -165,6 +172,7 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 <div class="enemyprev" id="arenaEnemy"></div>
 <button id="arenaFight">FIGHT</button>
 </div>
+<div class="leaderboard" id="arenaLeaderboard"></div>
 <button class="backbtn" id="arenaBack">BACK</button>
 </div></div>
 <!-- Fix-wave item 6: #toast moved here, after every overlay, so it paints ON TOP of a browsing
