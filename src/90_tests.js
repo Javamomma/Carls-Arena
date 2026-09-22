@@ -1196,6 +1196,31 @@ Test.add('a scripted arena win records the streak/gold via Arena.record and neve
   eq(G.lastRewards,null,'arena wins go through Arena.record, not Rewards.forNode');
   eq(Quest.floor(1).nodes[0].state,'open','arena must never touch quest floor state');
   G.toTitle();G.sim=false});
+// Fix-wave item 2 (Critical): FIGHT AGAIN's 'again' button (bound once in G.init()) always replayed
+// this.lastFightOpts verbatim, which for arena still carried the ALREADY-RESOLVED Arena.start()
+// object (enemy/tier/hpMul) from the fight that just ended -- so a win at streak 0 re-fought the
+// exact same (now stale) opponent while still banking the streak, unlimited farming of the easiest
+// arena matchup with one button. Fix: the 'again' handler now routes through G.startArena() when
+// G.mode==='arena' (which draws a fresh Arena.start() for the NEW streak) instead of startFight
+// with the stale encounter object.
+Test.add('Arena FIGHT AGAIN draws a fresh Arena.start() encounter for the post-win streak, not the stale resolved one (fix-wave item 2)',()=>{
+  Save.data=Meta.defaults();Save.data.arena={best:0,streak:0};
+  G.startArena({ctrl1:Ctrl.script([L(0)]),seed:1}); // streak 0 -> goblin/t1/hpMul 1.00
+  const staleEnemyId=G.fight.p2.def.id,staleHp=G.fight.p2.maxHp;
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Save.data.arena.streak,1,'the win must have banked the streak to 1 first');
+  document.getElementById('again').click();
+  eq(G.mode,'arena','FIGHT AGAIN must still be an arena fight');
+  const expect=Arena.start(); // pure query off the now-current streak (1) -- goblin/t1 no longer,
+  // per the Arena.start() sequence test: streak 1 -> skeleton/t1/hpMul 1.08
+  eq(G.fight.p2.def.id,expect.enemy.id,'the new fight must use the CURRENT streak\'s encounter');
+  eq(G.encounter.tier,expect.tier);
+  ok(Math.abs(G.encounter.hpMul-expect.hpMul)<1e-9);
+  ok(G.fight.p2.def.id!==staleEnemyId,'must not be the same stale enemy the fight just beat');
+  ok(G.fight.p2.maxHp!==staleHp||G.fight.p2.def.id!==staleEnemyId,'must not be the stale resolved encounter object');
+  G.toTitle();G.sim=false});
 // Task 4.5: Screens (title, map, roster, crystal, shop, arena, result) ---------------------------
 Test.add('every Phase 4 screen\'s DOM ids exist',()=>{
   const ids=['title','map','roster','crystal','shop','arena','result','pauseMenu',

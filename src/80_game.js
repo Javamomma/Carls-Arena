@@ -411,8 +411,22 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // Reuses the previous fight's full options (p1/p2/ai/ctrl1/ctrl2/encounter/clock), overriding only
     // the seed — previously this passed just {seed,encounter}, silently dropping a custom p2/ai back
     // to the startFight defaults (donut/basic) on every rematch.
-    document.getElementById('again').onclick=()=>this.startFight(Object.assign({},this.lastFightOpts,
-      {seed:this.fight?this.fight.rng.int(1e9)+1:this.seed}));
+    //
+    // Fix-wave item 2 (Critical): for arena, this.lastFightOpts.encounter is the ALREADY-RESOLVED
+    // Arena.start() object from the fight that just ended (stale enemy/tier/hpMul for the OLD
+    // streak) -- replaying it via startFight re-fought the exact same opponent while Arena.record
+    // still banked the new streak, an unlimited farm of the easiest matchup off one button. Routing
+    // through startArena() instead draws a fresh Arena.start() for the CURRENT streak: it builds
+    // Object.assign({},o,{encounter:Arena.start(),mode:'arena'}) internally, so passing it
+    // lastFightOpts (still carrying the stale encounter/mode) is safe -- the trailing
+    // {encounter,mode} in that assign always wins over whatever o.encounter/o.mode already were.
+    // Quest mode is unaffected: it keeps replaying lastFightOpts's {floor,node} sugar directly through
+    // startFight below, which re-spends energy and re-checks the lock via the real Quest.start path
+    // (FIGHT AGAIN is only ever shown for a quest LOSS -- see Screens.renderResult -- so the node is
+    // still 'open' and this is exactly the intended retry).
+    document.getElementById('again').onclick=()=>{
+      const opts=Object.assign({},this.lastFightOpts,{seed:this.fight?this.fight.rng.int(1e9)+1:this.seed});
+      if(this.mode==='arena')this.startArena(opts);else this.startFight(opts)};
     document.getElementById('resultTitleBtn').onclick=()=>this.backToOrigin();
     document.getElementById('resume').onclick=()=>this.togglePause();
     document.getElementById('quit').onclick=()=>this.backToOrigin();
