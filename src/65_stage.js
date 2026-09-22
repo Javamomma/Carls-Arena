@@ -107,7 +107,10 @@ const Stage={cache:{},
       c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
       c.fillStyle=`rgba(255,${210+Math.floor(20*flick)},150,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
 const Camera={
-  update(cam,f){const t=f.camTarget;cam.x+=(t.x-cam.x)*.12;cam.zoom+=(t.zoom-cam.zoom)*.12;
+  // override, when given, replaces fight.camTarget for the lerp (G passes {x:attacker.x,zoom:1.6}
+  // while fight.cinematic>0 for the S3 punch-in; Fight itself never knows about this, it only ever
+  // exposes camTarget).
+  update(cam,f,override){const t=override||f.camTarget;cam.x+=(t.x-cam.x)*.12;cam.zoom+=(t.zoom-cam.zoom)*.12;
     const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
   apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.62);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
   toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.62+(y-FLOOR)*cam.zoom}}};

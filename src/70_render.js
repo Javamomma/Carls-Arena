@@ -90,4 +90,7 @@ const Render={ctx:canvas.getContext('2d'),
     FX.draw(c,cam,fr);
     c.setTransform(1,0,0,1,0,0);
     if(FX.flash>0){c.globalAlpha=Math.min(1,FX.flash/6);c.fillStyle='#fff';c.fillRect(0,0,W,H);c.globalAlpha=1}
-    if(f)this.hud(c,f)}};
+    if(f)this.hud(c,f);
+    // S3 cinematic card: drawn last, in screen space (transform already reset above), so it sits
+    // over the HUD and is immune to camera zoom/shake.
+    FX.drawScreen(c,fr)}};

@@ -30,6 +30,11 @@ def main():
     ap.add_argument('--pre', default=None, help='JS run after load, before start')
     ap.add_argument('--pose', default=None, help='freeze p1 in a named Rig pose (via G.debugPose) and screenshot')
     ap.add_argument('--encounter', default=None, help="start via G.startFight({encounter:ID}) instead of --p2/--ai")
+    ap.add_argument('--cinematic', action='store_true',
+                     help="run G.debugCinematic() (starts its own fight, arms an s3, sim-steps past "
+                          "the card trigger, advances FX) and screenshot; skips the normal --p2/--ai "
+                          "startFight below entirely so it never races G.debugCinematic()'s own "
+                          "G.startFight() call")
     a = ap.parse_args()
     errors, console = [], []
     with sync_playwright() as p:
@@ -48,6 +53,16 @@ def main():
             print(json.dumps(out, indent=1))
             b.close()
             sys.exit(0 if r['fail'] == 0 and not errors else 1)
+        if a.cinematic:
+            pg.evaluate('G.debugCinematic()')
+            out['state'] = pg.evaluate('G.state')
+            out['fight'] = pg.evaluate(
+                'G.fight&&{frame:G.fight.frame,cinematic:G.fight.cinematic,p1power:G.fight.p1.power}')
+            if a.shot:
+                pg.screenshot(path=a.shot)
+            b.close()
+            print(json.dumps(out, indent=1))
+            sys.exit(1 if errors or console else 0)
         ctrl = 'Ctrl.random(%d)' % a.seed if a.bot == 'random' else 'Ctrl.idle()'
         enc = ",encounter:'%s'" % a.encounter if a.encounter else ''
         pg.evaluate("G.sim=%s;G.startFight({seed:%d,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s%s})"

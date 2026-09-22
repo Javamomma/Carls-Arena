@@ -6,10 +6,11 @@ class Fight{
     this.updateCam()}
   updateCam(){const dist=Math.abs(this.p2.x-this.p1.x);
     this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.35-(dist-120)/380*0.35,1,1.35)}}
-  step(){if(this.over)return;if(this.hitstop>0){this.hitstop--;return}
+  step(){if(this.over)return;if(this.cinematic>0)return;if(this.hitstop>0){this.hitstop--;return}
     this.frame++;this.clock-=STEP;
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);
     this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();this.separate();this.updateCam();
+    this.checkCinematic(this.p1);this.checkCinematic(this.p2);
     // Detect both sides' hits against the pre-resolve state before applying either, so a true
     // mutual trade lands both instead of the first resolve knocking out the second's hitbox.
     const c1=this.detect(this.p1,this.p2),c2=this.detect(this.p2,this.p1);
@@ -17,6 +18,15 @@ class Fight{
     if(this.p2.state==='IDLE'&&this.p2.f>20)this.p1.combo=0;if(this.p1.state==='IDLE'&&this.p1.f>20)this.p2.combo=0;
     if(this.p1.hp<=0||this.p2.hp<=0||this.clock<=0)this.finish()}
   separate(){const a=this.p1,b=this.p2,min=a.width/2+b.width/2+4,d=b.x-a.x;if(d<min){const p=(min-d)/2;a.x-=p;b.x+=p}}
+  // Fires exactly once, on the single frame an s3 leaves startup for the first time (att.f lands
+  // on att.move.startup right after tick()). Arms the 72-frame cinematic freeze and queues the card
+  // FX; guarded by this.cinematic===0 so a same-frame double-trigger (both sides popping s3 at once)
+  // can't stack two freezes — first side checked (p1) wins, an accepted arbitrary tie-break.
+  checkCinematic(att){
+    if(this.cinematic===0&&att.state==='ATTACK'&&att.moveName==='s3'&&att.f===att.move.startup){
+      this.cinematic=72;
+      this.fx.push({kind:'card',name:att.def.name,frames:72});
+      this.fx.push({kind:'flash',frames:4})}}
   detect(att,def){const hb=att.hitbox();if(!hb)return null;const idx=att.hitIndex();if(idx<0||att.hits.has(idx))return null;
     const hu=def.hurtbox();if(hb.x1<hu.x0||hb.x0>hu.x1)return null;const m=att.move,last=idx===(m.hits||1)-1;
     if(def.inv>0||def.state==='KNOCKDOWN'||def.state==='KO'||def.state==='WIN')return{type:'miss',att,def,idx};

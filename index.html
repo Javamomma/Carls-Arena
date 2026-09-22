@@ -360,10 +360,11 @@ class Fight{
     this.updateCam()}
   updateCam(){const dist=Math.abs(this.p2.x-this.p1.x);
     this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.35-(dist-120)/380*0.35,1,1.35)}}
-  step(){if(this.over)return;if(this.hitstop>0){this.hitstop--;return}
+  step(){if(this.over)return;if(this.cinematic>0)return;if(this.hitstop>0){this.hitstop--;return}
     this.frame++;this.clock-=STEP;
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);
     this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();this.separate();this.updateCam();
+    this.checkCinematic(this.p1);this.checkCinematic(this.p2);
     // Detect both sides' hits against the pre-resolve state before applying either, so a true
     // mutual trade lands both instead of the first resolve knocking out the second's hitbox.
     const c1=this.detect(this.p1,this.p2),c2=this.detect(this.p2,this.p1);
@@ -371,6 +372,15 @@ class Fight{
     if(this.p2.state==='IDLE'&&this.p2.f>20)this.p1.combo=0;if(this.p1.state==='IDLE'&&this.p1.f>20)this.p2.combo=0;
     if(this.p1.hp<=0||this.p2.hp<=0||this.clock<=0)this.finish()}
   separate(){const a=this.p1,b=this.p2,min=a.width/2+b.width/2+4,d=b.x-a.x;if(d<min){const p=(min-d)/2;a.x-=p;b.x+=p}}
+  // Fires exactly once, on the single frame an s3 leaves startup for the first time (att.f lands
+  // on att.move.startup right after tick()). Arms the 72-frame cinematic freeze and queues the card
+  // FX; guarded by this.cinematic===0 so a same-frame double-trigger (both sides popping s3 at once)
+  // can't stack two freezes — first side checked (p1) wins, an accepted arbitrary tie-break.
+  checkCinematic(att){
+    if(this.cinematic===0&&att.state==='ATTACK'&&att.moveName==='s3'&&att.f===att.move.startup){
+      this.cinematic=72;
+      this.fx.push({kind:'card',name:att.def.name,frames:72});
+      this.fx.push({kind:'flash',frames:4})}}
   detect(att,def){const hb=att.hitbox();if(!hb)return null;const idx=att.hitIndex();if(idx<0||att.hits.has(idx))return null;
     const hu=def.hurtbox();if(hb.x1<hu.x0||hb.x0>hu.x1)return null;const m=att.move,last=idx===(m.hits||1)-1;
     if(def.inv>0||def.state==='KNOCKDOWN'||def.state==='KO'||def.state==='WIN')return{type:'miss',att,def,idx};
@@ -525,7 +535,10 @@ const Stage={cache:{},
       c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
       c.fillStyle=`rgba(255,${210+Math.floor(20*flick)},150,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
 const Camera={
-  update(cam,f){const t=f.camTarget;cam.x+=(t.x-cam.x)*.12;cam.zoom+=(t.zoom-cam.zoom)*.12;
+  // override, when given, replaces fight.camTarget for the lerp (G passes {x:attacker.x,zoom:1.6}
+  // while fight.cinematic>0 for the S3 punch-in; Fight itself never knows about this, it only ever
+  // exposes camTarget).
+  update(cam,f,override){const t=override||f.camTarget;cam.x+=(t.x-cam.x)*.12;cam.zoom+=(t.zoom-cam.zoom)*.12;
     const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
   apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,H*.62);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
   toScreen(cam,x,y){return{sx:W/2+(x-cam.x)*cam.zoom,sy:H*.62+(y-FLOOR)*cam.zoom}}};
@@ -917,15 +930,18 @@ const Render={ctx:canvas.getContext('2d'),
     FX.draw(c,cam,fr);
     c.setTransform(1,0,0,1,0,0);
     if(FX.flash>0){c.globalAlpha=Math.min(1,FX.flash/6);c.fillStyle='#fff';c.fillRect(0,0,W,H);c.globalAlpha=1}
-    if(f)this.hud(c,f)}};
+    if(f)this.hud(c,f);
+    // S3 cinematic card: drawn last, in screen space (transform already reset above), so it sits
+    // over the HUD and is immune to camera zoom/shake.
+    FX.drawScreen(c,fr)}};
 
 // Hit-feel FX: particles, damage popups, camera shake, hit-flash. Pure presentation — it only
 // reads the plain event objects Fight.resolve()/finish() queue into fight.fx (which G drains here
 // every sim tick via FX.pushAll) and never touches Fight/Fighter state. Spread uses its own seeded
 // RNG, keyed off the current fight frame and particle index, never Math.random, so --sim
 // screenshots reproduce identically frame for frame.
-const FX={list:[],shake:0,flash:0,
-  reset(){this.list.length=0;this.shake=0;this.flash=0},
+const FX={list:[],shake:0,flash:0,card:null,
+  reset(){this.list.length=0;this.shake=0;this.flash=0;this.card=null},
   _seed(i){const fr=(G.fight&&G.fight.frame)||0;return((fr*97+i*131+1)>>>0)||1},
   push(ev){
     switch(ev.kind){
@@ -946,8 +962,10 @@ const FX={list:[],shake:0,flash:0,
       case'flash':
         this.flash=Math.max(this.flash,ev.frames||0);
         break;
-      // 'slowmo' is driven directly through fight.slowmo/G.tick; 'card' lands with the S3
-      // cinematic (a later task). Both are reserved kinds in the frozen interface but no-ops here.
+      // 'slowmo' is driven directly through fight.slowmo/G.tick, still a no-op here.
+      case'card':
+        this.card={name:ev.name,frames:ev.frames,t:0};
+        break;
       default:break}
     if(this.list.length>200)this.list.splice(0,this.list.length-200)},
   pushAll(evs){for(const e of evs)this.push(e)},
@@ -956,7 +974,11 @@ const FX={list:[],shake:0,flash:0,
       if(p.kind==='spark'||p.kind==='dust'){p.x+=p.vx;p.y+=p.vy;p.vy+=0.15}
       if(p.life>=p.max)this.list.splice(i,1)}
     this.shake*=.85;if(this.shake<.05)this.shake=0;
-    if(this.flash>0)this.flash--},
+    if(this.flash>0)this.flash--;
+    // Card runs on its own clock (advanced only here, from the wall-clock/screenshot render loop),
+    // independent of fight.cinematic (G.tick decrements that once per sim tick); both count down
+    // from the same 72-frame duration so they empty out together under normal play.
+    if(this.card){this.card.t++;if(this.card.t>=this.card.frames)this.card=null}},
   draw(c,cam,frame){
     for(const p of this.list){
       if(p.kind==='spark'){c.globalAlpha=Math.max(0,1-p.life/p.max);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,2.5,0,Math.PI*2);c.fill()}
@@ -964,10 +986,34 @@ const FX={list:[],shake:0,flash:0,
       else if(p.kind==='popup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);c.fillStyle=p.col;
         c.font=(p.big?'bold 26px ':'bold 16px ')+'ui-monospace,monospace';c.textAlign='center';
         c.fillText(p.text,p.x,p.y-t*30)}}
-    c.globalAlpha=1}};
+    c.globalAlpha=1},
+  // Screen-space overlay for the S3 cinematic card: darken, a diagonal gold band that sweeps in
+  // from the left over the first 12 frames, holds, then sweeps out to the right over the last 12.
+  // Called by Render.frame AFTER the camera transform is reset and the HUD is drawn, so it always
+  // sits on top and is unaffected by camera zoom/shake. Unskippable: purely a function of card.t,
+  // which only Fight.checkCinematic (via the 'card' fx push) can (re)start.
+  drawScreen(c,frame){
+    if(!this.card)return;
+    const cd=this.card,t=cd.t,frames=cd.frames,slide=12;
+    c.save();c.setTransform(1,0,0,1,0,0);
+    c.globalAlpha=.55;c.fillStyle='#000';c.fillRect(0,0,W,H);
+    c.globalAlpha=1;
+    const enter=Math.min(1,t/slide),exit=t>frames-slide?Math.min(1,(t-(frames-slide))/slide):0;
+    const offsetX=-W*(1-enter)+W*exit;
+    c.save();c.translate(offsetX,0);c.rotate(-.12);
+    c.fillStyle='#f4c542';c.fillRect(-120,H*.28,W+240,H*.3);
+    c.strokeStyle='#8a6a12';c.lineWidth=3;c.strokeRect(-120,H*.28,W+240,H*.3);
+    c.restore();
+    c.save();c.translate(W/2+offsetX,H/2);c.rotate(-.12);
+    c.textAlign='center';c.fillStyle='#1a1208';
+    c.font='900 34px ui-monospace,monospace';c.fillText(cd.name,0,-6);
+    c.font='bold 16px ui-monospace,monospace';c.fillText('SPECIAL 3',0,22);
+    c.restore();
+    c.restore()}};
 
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
+  cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
   fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px'},
   show(id,on){document.getElementById(id).classList.toggle('show',on)},
   // Canvas hit-test for the HUD's pause glyph (drawn by Render.hud at Render.pauseRect), consulted
@@ -985,7 +1031,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       ai=enc.tier}
     this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:p2def,clock:o.clock,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
-    this.cam={x:STAGE_W/2,zoom:1};FX.reset();
+    this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();
     Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
     // regardless of how recently the previous fight's last toast landed.
@@ -1046,34 +1092,62 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(m.stun!==undefined)p.stun=m.stun;
     this.sim=true},
   togglePause(){if(this.state==='FIGHT'){this.state='PAUSED';this.show('pauseMenu',true)}else if(this.state==='PAUSED'){this.state='FIGHT';this.show('pauseMenu',false);this.acc=0}},
-  toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)},
+  toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)},
   // Steps the sim one tick, handling KO slow-mo (step every 4th tick while fight.slowmo>0) and
   // draining fight.fx into FX after any step. No rAF/wall-clock dependency, so tests can call it
   // directly. G.loop drives this once per accumulated STEP; simFrames/stepFrame delegate to it too.
   tick(){if(this.state!=='FIGHT')return;const f=this.fight;
+    if(f.cinematic>0){
+      // Sim frozen (Fight.step() itself no-ops while cinematic>0); G is the one counting the 72
+      // frames down, one per tick, so FX/Render keep animating around a frozen sim. Input is
+      // drained and discarded so nothing queued during the card fires the instant it clears.
+      f.cinematic--;this.frameNow=f.frame;Input.drain();FX.pushAll(f.fx);f.fx.length=0;return}
     const pm1=f.p1.moveName,pm2=f.p2.moveName;
     if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
     else f.step();
     this.frameNow=f.frame;
     this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
+    this.checkCinematicFx(f);
     FX.pushAll(f.fx);f.fx.length=0;
     this.syncSpecials()},
   // Detects a fighter's moveName transitioning into s1/s2/s3 this tick (the sim itself never
   // references Audio/G, so this has to be watched from outside) and plays that special's recipe
-  // plus an announcer line.
+  // plus an announcer line. s3 is excluded here: it gets its recipe + announcer line once from
+  // checkCinematicFx below, off the 'card' fx event, instead of here off the moveName transition —
+  // both fire on the exact same tick, so doing it in both places would double-play the sound.
   checkSpecial(fighter,prevMoveName){const mn=fighter.moveName;
-    if(mn&&mn!==prevMoveName&&(mn==='s1'||mn==='s2'||mn==='s3')){
+    if(mn&&mn!==prevMoveName&&(mn==='s1'||mn==='s2')){
       (Audio.recipes[mn]||Audio.recipes.lights)();
       // Recipe plays for either side (game feel); the announcer line is reserved for the human's
       // own specials only, so it doesn't caption every mob/AI special too.
       if(fighter===this.fight.p1)Audio.announce('special',this.fight.rng)}},
+  // Watches the fx this tick's f.step() (if any) just queued for a 'card' event — the S3 cinematic
+  // trigger — and, off that, plays the s3 recipe once, sets G.cinemFocus (read by loop() to punch
+  // the camera in on the attacker while fight.cinematic>0), and announces for the human's own s3.
+  checkCinematicFx(f){
+    if(!f.fx.some(e=>e.kind==='card'))return;
+    const att=(f.p1.state==='ATTACK'&&f.p1.moveName==='s3')?f.p1:f.p2;
+    this.cinemFocus=att;
+    Audio.recipes.s3();
+    if(att===f.p1)Audio.announce('special',f.rng)},
+  // Test/debug helper (also used by tests/harness.py --cinematic): starts a fight, arms p1 with a
+  // scripted s3, sim-steps until the cinematic is up, then advances FX so a screenshot shows the
+  // card fully in (past its 12-frame slide-in) rather than mid-slide.
+  debugCinematic(){
+    this.sim=true;
+    this.startFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});
+    this.fight.p1.power=300;
+    for(let i=0;i<25;i++)this.tick();
+    for(let i=0;i<20;i++)FX.update()},
   stepFrame(){this.tick()},
   simFrames(n){for(let i=0;i<n;i++)this.stepFrame()},
   syncSpecials(){const p=this.fight.p1.power;
     document.getElementById('btnPower').classList.toggle('ready',p>=100);
     for(const n of[1,2,3])document.getElementById('pk'+n).disabled=p<100*n},
   loop(t){if(!this.sim){const dt=Math.min(.1,(t-this.last)/1000||0);this.last=t;this.acc+=dt;while(this.acc>=STEP){this.tick();this.acc-=STEP}}
-    if(this.fight)Camera.update(this.cam,this.fight);
+    if(this.fight){
+      const punchIn=this.fight.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.6}:null;
+      Camera.update(this.cam,this.fight,punchIn)}
     FX.update();
     Render.frame(this.fight);requestAnimationFrame(t=>this.loop(t))},
   init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
@@ -1149,7 +1223,11 @@ Test.add('power accrues for both sides and caps',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0,200)])});closeIn(f);run(f,90);
   eq(f.p1.power,7+7+7+8+10);eq(f.p2.power,4+4+4+4+5);f.p1.power=299;f.p1.hits=new Set();f.p1.power=Math.min(POWER_MAX,f.p1.power+50);eq(f.p1.power,300)});
 Test.add('S3 is unblockable, costs three bars, knocks down on last hit',()=>{
-  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;run(f,90);
+  // Amended for Task 2.7: s3 leaving startup now arms a 72-frame cinematic freeze that raw step()
+  // never decrements on its own (only G.tick does), so the freeze has to be cleared by hand here,
+  // same as the dedicated cinematic test below, before the remaining three hits can land.
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;
+  run(f,21);f.cinematic=0;run(f,90);
   eq(f.p1.power,0);eq(f.log.filter(e=>e.type==='hit').length,4);eq(f.p2.hp,1000-4*180);eq(f.p2.state,'KNOCKDOWN')});
 Test.add('class advantage adds 15%',()=>{
   const f=mkFight({p1:CHAMPS.donut,p2:CHAMPS.carl,ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.p2.hp,1000-Math.round(70*1.15))});
@@ -1264,5 +1342,7 @@ Test.add('medium as a combo ender pushes the defender out of light range',()=>{
     if(last&&last.type==='hit'&&last.f===g.frame)dx2=g.p2.x-before}
   ok(dx2<60,'non-ender medium push stays well under 90, got '+dx2);
   eq(dx-dx2,90-MOVES.medium.push,'ender push (90) vs normal push ('+MOVES.medium.push+') differential; dx='+dx+' dx2='+dx2)});
+Test.add('S3 freezes the sim for the cinematic then lands all hits',()=>{const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;run(f,21);ok(f.cinematic>0,'cinematic armed');const hpBefore=f.p2.hp;run(f,30);eq(f.p2.hp,hpBefore,'frozen');f.cinematic=0;run(f,120);eq(f.log.filter(e=>e.type==='hit').length,4)});
+Test.add('G.tick decrements cinematic without stepping the sim',()=>{const f=mkFight();f.cinematic=5;const fr=f.frame;G.fight=f;G.state='FIGHT';G.tick();eq(f.cinematic,4);eq(f.frame,fr);G.fight=null;G.state='TITLE'});
 
 </script></body></html>

@@ -60,7 +60,11 @@ Test.add('power accrues for both sides and caps',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0,200)])});closeIn(f);run(f,90);
   eq(f.p1.power,7+7+7+8+10);eq(f.p2.power,4+4+4+4+5);f.p1.power=299;f.p1.hits=new Set();f.p1.power=Math.min(POWER_MAX,f.p1.power+50);eq(f.p1.power,300)});
 Test.add('S3 is unblockable, costs three bars, knocks down on last hit',()=>{
-  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;run(f,90);
+  // Amended for Task 2.7: s3 leaving startup now arms a 72-frame cinematic freeze that raw step()
+  // never decrements on its own (only G.tick does), so the freeze has to be cleared by hand here,
+  // same as the dedicated cinematic test below, before the remaining three hits can land.
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;
+  run(f,21);f.cinematic=0;run(f,90);
   eq(f.p1.power,0);eq(f.log.filter(e=>e.type==='hit').length,4);eq(f.p2.hp,1000-4*180);eq(f.p2.state,'KNOCKDOWN')});
 Test.add('class advantage adds 15%',()=>{
   const f=mkFight({p1:CHAMPS.donut,p2:CHAMPS.carl,ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.p2.hp,1000-Math.round(70*1.15))});
@@ -175,3 +179,5 @@ Test.add('medium as a combo ender pushes the defender out of light range',()=>{
     if(last&&last.type==='hit'&&last.f===g.frame)dx2=g.p2.x-before}
   ok(dx2<60,'non-ender medium push stays well under 90, got '+dx2);
   eq(dx-dx2,90-MOVES.medium.push,'ender push (90) vs normal push ('+MOVES.medium.push+') differential; dx='+dx+' dx2='+dx2)});
+Test.add('S3 freezes the sim for the cinematic then lands all hits',()=>{const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;run(f,21);ok(f.cinematic>0,'cinematic armed');const hpBefore=f.p2.hp;run(f,30);eq(f.p2.hp,hpBefore,'frozen');f.cinematic=0;run(f,120);eq(f.log.filter(e=>e.type==='hit').length,4)});
+Test.add('G.tick decrements cinematic without stepping the sim',()=>{const f=mkFight();f.cinematic=5;const fr=f.frame;G.fight=f;G.state='FIGHT';G.tick();eq(f.cinematic,4);eq(f.frame,fr);G.fight=null;G.state='TITLE'});
