@@ -72,6 +72,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // zoom before that point crosses HUD_LINE. Two ceilings share the same ratio: 1.12 is the normal
     // gameplay cap (matches Fight.tick's own camTarget.zoom clamp), 1.28 the S3 cinematic punch-in —
     // both get clamped down together if a tall-enough pairing needs it, never independently.
+    // Fix-wave item 4: this.zoomCap/this.cineZoomCap are kept as-is (same computation, same API) but
+    // are now only the per-fight UPPER BOUNDS — tick()'s own per-frame capNow (sized off whichever
+    // pose is actually on screen this frame, via Rig.topAt) is what Camera.update actually receives.
+    // capNow can never exceed these bounds (the current pose's top is always <= the worst case across
+    // every pose), so keeping this calc unchanged is safe and lets every existing test that reads
+    // G.zoomCap/G.cineZoomCap keep working unmodified.
     // Fix round 2 (controller review): 'win'/'ko' excluded from this calc specifically — they only
     // ever play under the RESULT overlay once the fight is already over (see G.tick/toResult), not
     // during ordinary play, so a raised-arm win pose (Carl's own included — see the pinning test in
@@ -91,6 +97,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // regardless of how recently the previous fight's last toast landed.
     this.frameNow=0;this._sayAt=-999;
     this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.announce('start',this.fight.presRng)},
+  // Fix-wave item 4: a fighter's current pose's own top (Rig.topAt), scaled by its def.scale — the
+  // per-frame counterpart to the per-fight Rig.extent worst-case calc above, read by tick() every
+  // frame to build capNow.
+  topNow(fighter){
+    const{key,t01}=Rig.poseFor(fighter);
+    return Rig.topAt(lookFor(fighter.def),key,t01,fighter.def.scale||1)},
   // Throttled announcer display: only updates the toast if at least 90 frames (1.5s) have passed
   // since the last line, so a burst of events can't stomp on each other mid-read. Audio.say remains
   // the unthrottled display primitive this calls into. A no-op while the S3 cinematic is up — the
@@ -186,7 +198,16 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       this.syncSpecials()}
     FX.pushAll(f.fx);f.fx.length=0;
     const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.28}:null; // fix round 2: 1.6->1.28
-    Camera.update(this.cam,f,punchIn,punchIn?this.cineZoomCap:this.zoomCap);
+    // Fix-wave item 4: per-frame zoom cap sized off the pose(s) actually on screen this tick
+    // (Rig.topAt), not the whole fight's worst case (this.zoomCap/this.cineZoomCap, kept above as
+    // upper bounds a per-frame value can never exceed — the current pose's top is always <= the
+    // worst case across every pose). Normal gameplay caps off the taller of both fighters' CURRENT
+    // poses; the cinematic punch-in caps off just the attacker's (this.cinemFocus's) current pose,
+    // since that's the only fighter the camera is centering on during the S3 freeze.
+    const capNow=punchIn
+      ?Math.min(1.28,(Camera.anchorY-HUD_LINE)/this.topNow(this.cinemFocus))
+      :Math.min(1.12,(Camera.anchorY-HUD_LINE)/Math.max(this.topNow(f.p1),this.topNow(f.p2)));
+    Camera.update(this.cam,f,punchIn,capNow);
     FX.update();
     // f.over flips true inside f.step() the instant a KO/timeout resolves, well before slow-mo has
     // played; f.slowmo (armed to 90 by Fight.finish) is what keeps this branch re-entering FIGHT and

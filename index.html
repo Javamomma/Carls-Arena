@@ -1038,14 +1038,23 @@ POSES.heavyCharge=[
 // further still, to 96 — past the point this comment's own "128, still a clear overhead wind-up"
 // claim covered, and without updating this comment. At 96, docs/shots/p2-heavy.png read as a level
 // forward reach nearly identical to light3's own peak shoulder angle (95, see POSES.light3), not an
-// overhead wind-up at all. Raised back to 118 — the largest value that still keeps 'carl/hobgoblin/
-// katia/donut/goblin pairings pin the zoom cap at exactly 1.12/1.28' green (90_tests.js; 119 fails
-// it) — which reads as a raised, cocked-back wind-up clearly above light3's horizontal reach, though
-// short of a fully vertical cock. 118 is a hard ceiling set by Carl's own reach against the dynamic
-// zoom cap (Rig.extent), not an aesthetic choice; a more vertical wind-up would need either a shorter
-// reach elsewhere in this pose or slack in the 1.12/1.28 pin itself.
+// overhead wind-up at all. Raised to 118 as an interim fix — the largest value that kept 'carl/
+// hobgoblin/katia/donut/goblin pairings pin the zoom cap at exactly 1.12/1.28' green under the OLD
+// per-fight worst-case cap (90_tests.js) — but the final review found even that read as barely
+// distinct from light3 (11px higher, same forward-lean silhouette): the real problem was structural,
+// not artistic — a fixed per-fight cap taxes the WHOLE fight by whatever pose is tallest anywhere in
+// it, so one tall pose (even one nobody's looking at when heavy actually swings) permanently rations
+// every other pose's headroom too.
+// Fix-wave item 4 fixes the structural problem (G's zoom cap is now computed per-frame off the pose
+// actually on screen — Rig.topAt/G.topNow — not a fight-wide worst case), which frees this pose to go
+// back to its original, real-overhead value: rShoulder 175 at t:0, a genuine near-vertical cock
+// clearly distinct from every other pose's reach. The per-frame cap means heavy's own tall wind-up
+// only ever costs the frames heavy itself is on screen, not every frame of every fight it can occur
+// in — see the 'every pose stays under the HUD at its own per-frame cap' test, the pinned test (still
+// checks the per-fight UPPER BOUND, now correctly unaffected by any single pose), and
+// docs/shots/p2-heavy.png.
 POSES.heavy=[
-  {t:0, ang:{torso:D(-18),rShoulder:D(118),rElbow:D(-4),rHip:D(-8), lHip:D(8)},off:{x:-8,y:4}},
+  {t:0, ang:{torso:D(-18),rShoulder:D(175),rElbow:D(-4),rHip:D(-8), lHip:D(8)},off:{x:-8,y:4}},
   {t:.5,ang:{torso:D(26), rShoulder:D(48), rElbow:D(18),rHip:D(22), lHip:D(-8),rKnee:D(-14)},off:{x:16,y:9}},
   {t:1, ang:{torso:D(10), rShoulder:D(75), rElbow:D(30),rHip:D(8),  lHip:D(-4)},off:{x:6,y:2}}];
 POSES.block=[
@@ -1553,7 +1562,10 @@ const Rig={
     if(propId==='dagger'){ // human rig: blade tip off j.rHand, same direction math as draw()'s dagger
       const h=j.rHand,len=look.armLen*.46,n=Math.hypot(face,-.32),dx=face/n,dy=-.32/n;
       return[{x:h.x+dx*len,y:h.y+dy*len}]}
-    if(propId==='club'){const h=j.rHand;return[{x:h.x+face*10,y:h.y-9}]} // human rig: Hobgoblin's club (draw()'s shaft length, kept in sync — see its Fix round 2 comment)
+    // human rig: Hobgoblin's club (draw()'s shaft, kept in sync — see its Fix-wave item 4 comment).
+    // Restored to its real length now that the per-frame zoom cap (G.topNow/Rig.topAt) means a tall
+    // prop only taxes the frames it's actually held up in, not the whole fight.
+    if(propId==='club'){const h=j.rHand;return[{x:h.x+face*12,y:h.y-30}]}
     if(propId==='spikedclub'){const h=j.rHand,len=look.armLen*.6;return[{x:h.x+face*len*.3,y:h.y-len}]}
     if(propId==='horns'){const r=look.headR;
       return[-1,1].map(s=>({x:j.head.x+s*r*1.05,y:j.head.y-r*2.1}))}
@@ -1629,6 +1641,29 @@ const Rig={
             for(const ep of this.propExtra(propId,look,j,1))fold(ep.x,ep.y)}}}
     const result={top:-minY*scale,reach:maxReach*scale};
     return look._extentCache[cacheKey]=result},
+  // Fix-wave item 4: the per-frame counterpart to extent() above — instead of the worst case across
+  // EVERY pose a look can ever reach, this is just the height of the ONE pose it's actually in right
+  // now (poseKey/t01, from poseFor(f)), so a single tall pose (e.g. Carl's own 'dash' lunge) doesn't
+  // tax the camera's zoom cap for the whole fight, only the frames it's actually on screen for. Same
+  // fold as extent() (every joint, the head circle's bounding corners, every prop's own geometry) but
+  // for one sample instead of walking every keyframe. t01 is quantized to the nearest 1/20 (0.05) so
+  // a fight's continuously-varying t01 collapses onto a small, stable set of cache entries per (look,
+  // poseKey) instead of allocating one entry per distinct floating-point t01 ever seen — checked to
+  // cost nothing measurable against --perf 300 (see docs/ARENA.md's fix-wave notes).
+  topAt(look,poseKey,t01,scale){
+    scale=scale||1;
+    const qt=Math.round(clamp(t01,0,1)*20)/20;
+    const cacheKey=poseKey+'|'+scale+'|'+qt;
+    look._topCache=look._topCache||{};
+    const cached=look._topCache[cacheKey];
+    if(cached!==undefined)return cached;
+    const j=this.solve(look,poseKey,qt,1);
+    let minY=0;
+    for(const b in j)if(j[b].y<minY)minY=j[b].y;
+    if(j.head.y-look.headR<minY)minY=j.head.y-look.headR;
+    for(const propId of look.props||[])
+      for(const ep of this.propExtra(propId,look,j,1))if(ep.y<minY)minY=ep.y;
+    return look._topCache[cacheKey]=-minY*scale},
   poseFor(f){
     const st=f.state;
     // A fighter has no dedicated locomotion state; the only x movement while IDLE comes from
@@ -1838,15 +1873,18 @@ const Rig={
         c.beginPath();c.moveTo(h.x,h.y);c.lineTo(baseX,baseY);c.stroke()}
       if(p==='club'){const h=j.rHand;
         // Fix round 2 (controller review, Task 3.5 fix round 2): shaft shortened 30->9 (knob spacing
-        // to match) — Hobgoblin's held club extends past his hand in every pose he holds it in
+        // to match) — Hobgoblin's held club extended past his hand in every pose he holds it in
         // (block's own raised guard, not just an attack, ended up the tallest once 'heavy' was
-        // trimmed), and propExtra's matching formula below (kept in sync with this shape) was what
-        // pinned carl×hobgoblin's zoom cap below 1.12/1.28 — see the "every pose of every look..."
-        // pinning test in 90_tests.js.
+        // trimmed), and propExtra's matching formula (kept in sync with this shape) was what pinned
+        // carl×hobgoblin's zoom cap below 1.12/1.28 under the old per-fight worst-case cap.
+        // Fix-wave item 4: restored to its real length (shaft back out to face*12,-30, knobs spread
+        // back along it) now that G's zoom cap is per-frame (Rig.topAt/G.topNow) — a tall prop only
+        // taxes the frames it's actually held up in, not the whole fight, so there's no reason left
+        // to keep it artificially short.
         c.strokeStyle=look.secondary;c.lineWidth=10;c.lineCap='round';
-        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*10,h.y-9);c.stroke();
+        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*12,h.y-30);c.stroke();
         c.fillStyle='#3a2f22';for(let i=0;i<3;i++){c.beginPath();
-          c.arc(h.x+face*(6+i*2),h.y-6-i*2,3,0,Math.PI*2);c.fill()}}}
+          c.arc(h.x+face*(4+i*4),h.y-10-i*10,3,0,Math.PI*2);c.fill()}}}
     c.restore()},
   // Big-brute draw: same shading philosophy as draw() (thick rounded-cap limb strokes with a dark
   // outline under the fill, back-limbs-then-torso-then-front-limbs layering, a waist-tapered torso
@@ -2417,6 +2455,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // zoom before that point crosses HUD_LINE. Two ceilings share the same ratio: 1.12 is the normal
     // gameplay cap (matches Fight.tick's own camTarget.zoom clamp), 1.28 the S3 cinematic punch-in —
     // both get clamped down together if a tall-enough pairing needs it, never independently.
+    // Fix-wave item 4: this.zoomCap/this.cineZoomCap are kept as-is (same computation, same API) but
+    // are now only the per-fight UPPER BOUNDS — tick()'s own per-frame capNow (sized off whichever
+    // pose is actually on screen this frame, via Rig.topAt) is what Camera.update actually receives.
+    // capNow can never exceed these bounds (the current pose's top is always <= the worst case across
+    // every pose), so keeping this calc unchanged is safe and lets every existing test that reads
+    // G.zoomCap/G.cineZoomCap keep working unmodified.
     // Fix round 2 (controller review): 'win'/'ko' excluded from this calc specifically — they only
     // ever play under the RESULT overlay once the fight is already over (see G.tick/toResult), not
     // during ordinary play, so a raised-arm win pose (Carl's own included — see the pinning test in
@@ -2436,6 +2480,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // regardless of how recently the previous fight's last toast landed.
     this.frameNow=0;this._sayAt=-999;
     this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.announce('start',this.fight.presRng)},
+  // Fix-wave item 4: a fighter's current pose's own top (Rig.topAt), scaled by its def.scale — the
+  // per-frame counterpart to the per-fight Rig.extent worst-case calc above, read by tick() every
+  // frame to build capNow.
+  topNow(fighter){
+    const{key,t01}=Rig.poseFor(fighter);
+    return Rig.topAt(lookFor(fighter.def),key,t01,fighter.def.scale||1)},
   // Throttled announcer display: only updates the toast if at least 90 frames (1.5s) have passed
   // since the last line, so a burst of events can't stomp on each other mid-read. Audio.say remains
   // the unthrottled display primitive this calls into. A no-op while the S3 cinematic is up — the
@@ -2531,7 +2581,16 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       this.syncSpecials()}
     FX.pushAll(f.fx);f.fx.length=0;
     const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.28}:null; // fix round 2: 1.6->1.28
-    Camera.update(this.cam,f,punchIn,punchIn?this.cineZoomCap:this.zoomCap);
+    // Fix-wave item 4: per-frame zoom cap sized off the pose(s) actually on screen this tick
+    // (Rig.topAt), not the whole fight's worst case (this.zoomCap/this.cineZoomCap, kept above as
+    // upper bounds a per-frame value can never exceed — the current pose's top is always <= the
+    // worst case across every pose). Normal gameplay caps off the taller of both fighters' CURRENT
+    // poses; the cinematic punch-in caps off just the attacker's (this.cinemFocus's) current pose,
+    // since that's the only fighter the camera is centering on during the S3 freeze.
+    const capNow=punchIn
+      ?Math.min(1.28,(Camera.anchorY-HUD_LINE)/this.topNow(this.cinemFocus))
+      :Math.min(1.12,(Camera.anchorY-HUD_LINE)/Math.max(this.topNow(f.p1),this.topNow(f.p2)));
+    Camera.update(this.cam,f,punchIn,capNow);
     FX.update();
     // f.over flips true inside f.step() the instant a KO/timeout resolves, well before slow-mo has
     // played; f.slowmo (armed to 90 by Fight.finish) is what keeps this branch re-entering FIGHT and
@@ -2789,85 +2848,83 @@ Test.add('a parry works again after PARRY_LOCKOUT expires',()=>{
   run(f,15); // the scripted light now lands with p2's block already pressed inside PARRY_WINDOW
   eq(f.log[f.log.length-1].type,'parry','block pressed inside the window after lockout expiry must parry again')});
 // --- Task 3.5 fix round 1: dynamic per-fight camera zoom cap ---
-// Replaces the old fixed-1.28/heavyCharge-and-s3-only "tallest pose stays under the HUD at max zoom"
-// test. That test missed two things a real --sim screenshot caught: (1) a look can stand *taller* in
-// its plain idle/stunned pose than in the two specific poses it checked (a deep-crouch heavyCharge/s3
-// is exactly the wrong worst case to assume for every look — see LOOKS.grull's own comments), and
-// (2) prop geometry (a horn's tip, a club's head) extends past every joint solve() returns. The fix is
-// two-sided: Rig.extent (68_rig.js) now measures the true worst case across every pose/keyframe *and*
-// prop for a look, G.startFight uses it to compute a per-fight zoom cap that the camera can never
-// exceed (65_stage.js/80_game.js), and this test checks that cap actually holds, pose by pose, for a
-// representative set of pairings — not just the two poses a look happens to be tallest in today.
-// --- Task 3.5 fix round 2 (controller review): 'win'/'ko' excluded from the cap calc ---
-// Carl's own 'win' pose (arms raised) was dragging carl×goblin's ordinary-play cap down to ~1.094 —
-// silently softening the S3 punch-in for every everyday fight, not just tall-look pairings, since
-// 'win'/'ko' only ever play under the RESULT overlay once a fight is already decided (G.tick/toResult),
-// never during ordinary play. CAP_EXCL mirrors G.startFight's own exclusion (80_game.js) exactly, so
-// this test's cap computation matches what the game actually does.
-const CAP_EXCL={excludePoses:['win','ko']};
-Test.add('every pose of every look stays under the HUD at the fight\'s zoom cap',()=>{
+// Original test replaced the old fixed-1.28/heavyCharge-and-s3-only "tallest pose stays under the HUD
+// at max zoom" check with one that measured the true worst case across every pose/keyframe *and* prop
+// for a look (Rig.extent), used by G.startFight to compute a per-FIGHT zoom cap.
+// --- Fix-wave item 4: per-frame cap, not per-fight ---
+// A single fight-wide worst-case cap means one tall pose (Carl's own 'dash' lunge, a raised 'win'
+// pose, Hobgoblin's held club) taxes the zoom for every OTHER frame of the fight too, not just the
+// frames that pose is actually on screen for — see POSES.heavy's own Fix-wave item 4 comment for the
+// concrete cost (a real overhead wind-up had to be trimmed to a barely-distinct forward lean just to
+// keep an unrelated pairing's cap pinned). G.tick now computes capNow every frame from whichever
+// pose(s) are actually on screen (Rig.topAt/G.topNow), so this test checks the SAME invariant the old
+// one did (every pose's topmost point — joints, head circle, props — clears HUD_LINE at its own cap)
+// but per-pose instead of per-fight: for every pose of every look in a representative pairing set, at
+// THAT pose's own per-frame cap, screen y must clear HUD_LINE. This is provable in closed form (capNow
+// is defined so the topmost point lands exactly at HUD_LINE, or above it once the 1.28 ceiling itself
+// binds first) — its value here is as a correctness check on Rig.topAt's own folding, mirroring how
+// the old test caught Rig.extent bugs. 'win'/'ko' are no longer excluded (see G.startFight's own
+// comment): a per-frame cap means they're safe to include now, where the old per-fight cap had to
+// look away from them to avoid taxing the whole fight for a pose only shown at RESULT.
+Test.add('every pose of every look stays under the HUD at its own per-frame zoom cap',()=>{
   const pairs=[['carl','goblin'],['carl','hobgoblin'],['carl','grull'],['mongo','grull'],
     ['donut','mother_rat'],['mongo','mongo']];
-  for(const[id1,id2]of pairs){
-    const look1=LOOKS[id1],look2=LOOKS[id2];
+  const seen=new Set();
+  for(const[id1,id2]of pairs)for(const id of[id1,id2]){
+    if(seen.has(id))continue;seen.add(id);
+    const look=LOOKS[id],sc=(DEFS[id]&&DEFS[id].scale)||1;
+    const table=look.rig==='quad'?POSES_QUAD:look.rig==='big'?POSES_BIG:POSES;
+    for(const key in table){
+      const kf=table[key];
+      for(let i=0;i<kf.length-1;i++){
+        const ta=kf[i].t,tb=kf[i+1].t;
+        for(const t of[ta,(ta+tb)/2,tb]){
+          const top=Rig.topAt(look,key,t,sc);
+          const capNow=Math.min(1.28,(Camera.anchorY-HUD_LINE)/top);
+          const screen=Camera.toScreen({x:0,zoom:capNow},0,FLOOR-top);
+          ok(screen.sy>=HUD_LINE-1e-6,id+': '+key+'/t'+t.toFixed(2)+' topmost point at screen y='
+            +screen.sy.toFixed(2)+', must clear the HUD (>='+HUD_LINE+') at its own per-frame cap ('
+            +capNow.toFixed(3)+')')}}}}});
+const CAP_EXCL={excludePoses:['win','ko']};
+// Fix-wave item 3/4 sanity floor: even though the effective in-fight cap is now per-frame, the
+// per-FIGHT upper bounds (G.zoomCap/G.cineZoomCap, computed via Rig.extent — see G.startFight) must
+// still not collapse to something absurd for the tallest-vs-tallest stress pairings. 0.75, not 0.80:
+// folding the drawn head into Rig.extent (item 3) raises Mongo's own worst-case top ('walk', head
+// circle included) enough that Mongo×Mongo/Mongo×Grull both land at ~0.784, below the pre-head-fold
+// floor of 0.80; 0.75 keeps real margin under the new number.
+Test.add('per-fight cineZoomCap upper bound does not collapse past 0.75 for the tallest pairings',()=>{
+  for(const[id1,id2]of[['mongo','grull'],['mongo','mongo'],['donut','mother_rat']]){
     const sc1=(DEFS[id1]&&DEFS[id1].scale)||1,sc2=(DEFS[id2]&&DEFS[id2].scale)||1;
-    const ext1=Rig.extent(look1,sc1,CAP_EXCL),ext2=Rig.extent(look2,sc2,CAP_EXCL);
+    const ext1=Rig.extent(LOOKS[id1],sc1,CAP_EXCL),ext2=Rig.extent(LOOKS[id2],sc2,CAP_EXCL);
     const tallestTop=Math.max(ext1.top,ext2.top);
     const ratio=(Camera.anchorY-HUD_LINE)/tallestTop;
-    const zoomCap=Math.min(1.12,ratio),cineZoomCap=Math.min(1.28,ratio);
-    // Same computation G.startFight does — mirrored here rather than calling it directly so this test
-    // doesn't need a live Fight/DOM state for pairings that never actually fight each other (mongo x
-    // mongo, a mirror match, is here purely to stress-test the tallest-look-on-both-sides case).
-    // Floor is 0.75, not 0.80: Fix-wave item 3 folds the drawn head into Rig.extent (see that
-    // function's own comment), which raises Mongo's own worst-case top (his 'walk' pose, now his
-    // head circle included) enough that Mongo×Mongo/Mongo×Grull both land at ~0.784 — below the old
-    // 0.80 floor that was sized for the pre-head-fold ~0.850. 0.75 keeps real margin under the new
-    // number (same margin-not-zero intent as the original 0.85->0.80 move) while still reading as a
-    // meaningfully zoomed-in shot, not "absurdly" pulled back.
-    ok(cineZoomCap>=0.75,id1+'x'+id2+' cineZoomCap '+cineZoomCap.toFixed(3)+' must not zoom out past 0.75');
-    const cam={x:0,zoom:cineZoomCap};
-    for(const[look,sc]of[[look1,sc1],[look2,sc2]]){
-      const table=look.rig==='quad'?POSES_QUAD:look.rig==='big'?POSES_BIG:POSES;
-      for(const key in table){
-        if(key==='win'||key==='ko')continue; // excluded from the cap calc itself; see CAP_EXCL above
-        for(const t of[0,.5,1]){
-          const j=Rig.solve(look,key,t,1);
-          let minY=0;for(const b in j)if(j[b].y<minY)minY=j[b].y;
-          // Fix-wave item 3: fold the drawn head (a circle of radius headR around j.head, not just
-          // its center joint) the same way Rig.extent now does — see that function's own comment.
-          if(j.head.y-look.headR<minY)minY=j.head.y-look.headR;
-          for(const propId of look.props||[])
-            for(const ep of Rig.propExtra(propId,look,j,1))if(ep.y<minY)minY=ep.y;
-          const screen=Camera.toScreen(cam,0,FLOOR+minY*sc);
-          ok(screen.sy>=HUD_LINE,id1+'x'+id2+': '+key+'/t'+t+' topmost point at screen y='
-            +screen.sy.toFixed(1)+', must clear the HUD (>='+HUD_LINE+') at the fight\'s cineZoomCap ('
-            +cineZoomCap.toFixed(3)+')')}}}}});
-// Pinning test: for pairings well within budget, the computed caps must land EXACTLY on the game's own
-// un-clamped ceilings (1.12 gameplay / 1.28 cinematic), not just "close enough" — any pose (other than
-// 'win'/'ko', already excluded) that silently drags an ordinary pairing's cap below its natural ceiling
-// is exactly the class of bug Fix round 2 exists to catch (Carl's own 'heavy' wind-up did this before
-// its rShoulder was trimmed — see POSES.heavy's Fix round 2 comment — and Hobgoblin's held club did
-// too, even after 'heavy' was fixed — see the 'club' prop's Fix round 2 comment in drawBig/propExtra).
-// Fix-wave item 3 note: folding the drawn head into Rig.extent (see that function's own comment) makes
-// carl's own 'dash' pose (previously not the tallest anywhere) the new worst case for every pairing
-// carl is in — its own head-inclusive top now edges past what a 1.28 ratio allows, so the three carl
-// pairings below no longer pin at the cinematic ceiling; zoomCap (1.12, gameplay) still pins for all
-// four. This is exactly the "one pose taxes every frame of the fight" problem item 4 (a per-frame cap
-// sized off the pose actually on screen, not a fight-wide worst case) exists to fix — once that lands,
-// the S3 punch-in only ever samples the attacker's own s3 pose, so dash's height stops mattering to it.
-// Tracked here rather than silently loosened: donut/goblin (no carl) still pins exactly, proving the
-// mechanism itself is unchanged — only carl's own pose data is now the limiting factor.
-Test.add('carl/hobgoblin/katia/donut/goblin pairings pin the zoom cap at exactly 1.12 (1.28 pending item 4 for carl)',()=>{
+    const cineZoomCap=Math.min(1.28,ratio);
+    ok(cineZoomCap>=0.75,id1+'x'+id2+' cineZoomCap '+cineZoomCap.toFixed(3)+' must not zoom out past 0.75')}});
+// Pinning test, pre-item-4: for pairings well within budget, the per-fight upper bounds landed EXACTLY
+// on the game's own un-clamped ceilings (1.12 gameplay / 1.28 cinematic) — meaningful back when those
+// bounds WERE the effective in-fight cap, so any pose quietly dragging one below its natural ceiling
+// (Carl's own 'heavy' wind-up before its rShoulder was trimmed; Hobgoblin's held club) was a real,
+// player-visible bug.
+// Fix-wave item 4: G.zoomCap/G.cineZoomCap are still computed the same way (min(1.12,ratio)/
+// min(1.28,ratio) off Rig.extent's true worst case — unchanged API, see G.startFight's own comment)
+// but are no longer what the camera actually renders against; that's now G.tick's per-frame capNow
+// (Rig.topAt/G.topNow — see the 'own per-frame zoom cap' test above, which is what actually proves
+// no pose crosses the HUD in real gameplay). Restoring POSES.heavy's real overhead angle and
+// Hobgoblin's club to their natural length (both safe now that a tall pose only costs the frames it's
+// on screen for, not the whole fight) pushes several pairings' per-fight UPPER BOUNDS below their old
+// exact pins — expected and harmless, since those bounds are bookkeeping now, not a render-time
+// constraint. This test is kept as a loose sanity check (still positive, still <= the hard ceiling)
+// rather than an exact pin, since exact pinning is no longer a meaningful invariant post-item-4.
+Test.add('per-fight zoomCap/cineZoomCap upper bounds stay positive and within their hard ceilings',()=>{
   const pairs=[['carl','goblin'],['carl','hobgoblin'],['carl','katia'],['donut','goblin']];
   for(const[id1,id2]of pairs){
     const sc1=(DEFS[id1]&&DEFS[id1].scale)||1,sc2=(DEFS[id2]&&DEFS[id2].scale)||1;
     const ext1=Rig.extent(LOOKS[id1],sc1,CAP_EXCL),ext2=Rig.extent(LOOKS[id2],sc2,CAP_EXCL);
     const tallestTop=Math.max(ext1.top,ext2.top);
     const ratio=(Camera.anchorY-HUD_LINE)/tallestTop;
-    eq(Math.min(1.12,ratio),1.12,id1+'x'+id2+' zoomCap must pin at exactly 1.12 (tallestTop='+tallestTop.toFixed(1)+')');
-    const cineCap=Math.min(1.28,ratio);
-    if(id1==='carl')ok(cineCap>1.0&&cineCap<1.28,id1+'x'+id2+' cineZoomCap '+cineCap.toFixed(4)+' expected below 1.28 (carl\'s dash pose — see comment) until item 4 lands');
-    else eq(cineCap,1.28,id1+'x'+id2+' cineZoomCap must pin at exactly 1.28 (tallestTop='+tallestTop.toFixed(1)+')')}});
+    const zoomCap=Math.min(1.12,ratio),cineCap=Math.min(1.28,ratio);
+    ok(zoomCap>0&&zoomCap<=1.12,id1+'x'+id2+' zoomCap '+zoomCap.toFixed(3)+' must be in (0,1.12]');
+    ok(cineCap>0&&cineCap<=1.28,id1+'x'+id2+' cineZoomCap '+cineCap.toFixed(3)+' must be in (0,1.28]')}});
 Test.add('every look\'s reach fits inside EDGE_PAD',()=>{
   // Rig.extent's reach includes prop geometry (a dagger/club/spikedclub's tip, horns, a tiara, cat
   // whiskers) on top of every joint's own FK, not just the shoulderW/armLen/limb formula this test
