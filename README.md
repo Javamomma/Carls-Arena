@@ -121,7 +121,12 @@ assets/
 ```
 
 A look with no folder, no `sheet.json`, or a `sheet.png` that fails to load just draws the rig —
-silently, with no error and no console noise, at the exact frame it would've drawn anyway.
+silently, at the exact frame it would've drawn anyway, with no thrown error and no app-code console
+message (`Atlas.load`'s own try/catch turns every failure mode into a clean resolved `null`). The
+browser's own devtools network log still records the failed fetch itself (two `error`-level lines per
+missing asset on a real HTTP server, or under `file://`) — the same log entry any missing resource
+produces, not something this game's code emits; see `docs/ARENA.md`'s release rubric for the verified
+detail.
 
 **Manifest** (`sheet.json`):
 
