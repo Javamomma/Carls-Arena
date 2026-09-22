@@ -95,7 +95,10 @@ const BOSSES={
   // wave table's own 5/30, as variance worth re-checking here): `python3 tests/batch.py --n 30 --p1
   // carl --encounter f2_mother` lands at 16.7% (n=30) — the retune trigger was "under 10% at n=30",
   // not hit, so no further change; see docs/ARENA.md's Phase 4 exit table for the full command output.
-  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1100,atk:35,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',
+  // Phase 6 fix-wave close-out: the RNG warm-up (10_util.js) shifted every AI stream and this boss
+  // drifted to 46.7% (band 10-35%); hp 1100->1350, atk 35->36 measured at 23.3% (seed-base 1) and
+  // 13.3% (seed-base 101), n=30 — chosen over atk-only bumps that fell under 10% on base 101.
+  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:36,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
