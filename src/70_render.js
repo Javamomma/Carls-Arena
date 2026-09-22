@@ -1,4 +1,40 @@
 const Render={ctx:canvas.getContext('2d'),
+  // HUD statics (title glyph, chevron cell masks) never change frame to frame, so they're baked into
+  // offscreen canvases once and just drawImage'd every frame instead of re-running the path/gradient/
+  // text-shaping work behind strokeText/fillText and the chevron polygon fills. Built lazily on the
+  // first Render.frame() call (with or without a live fight) rather than at module-eval time, so a
+  // fresh page load pays the cost once, off the hot per-frame path, not on script parse.
+  _hudCache:null,
+  hudCache(){
+    if(this._hudCache)return this._hudCache;
+    const mk=(w,h)=>{const cv=document.createElement('canvas');cv.width=w;cv.height=h;return cv};
+    // Title: baked at its final on-canvas size/position (W/2,30) with the .82/1.12 condensed
+    // squeeze already applied, so the frame draw is a single drawImage at (0,0).
+    const title=mk(W,60),tc=title.getContext('2d');
+    tc.save();tc.translate(W/2,30);tc.scale(.82,1.12);tc.textAlign='center';tc.lineWidth=4;tc.strokeStyle='#000';
+    tc.font='900 24px ui-monospace,monospace';tc.strokeText('FIGHTER',0,0);tc.fillStyle='#f4c542';tc.fillText('FIGHTER',0,0);tc.restore();
+    // Chevron cells: the only thing that varies per frame is how many of the 3 cells are "filled"
+    // (0..3), so bake all four variants once instead of rebuilding each skewed polygon path per frame.
+    const cellW=90,cellH=14,gap=6,total=cellW*3+gap*2;
+    const chevrons=[];
+    for(let filled=0;filled<=3;filled++){
+      const cv=mk(total,cellH),cc=cv.getContext('2d'),skew=8;
+      for(let i=0;i<3;i++){const x=i*(cellW+gap);
+        cc.fillStyle=i<filled?'#f4c542':'#26262c';
+        cc.beginPath();cc.moveTo(x+skew,0);cc.lineTo(x+cellW,0);cc.lineTo(x+cellW-skew,cellH);cc.lineTo(x,cellH);cc.closePath();
+        cc.fill();cc.strokeStyle='#000';cc.lineWidth=1.2;cc.stroke()}
+      chevrons.push(cv)}
+    return this._hudCache={title,chevrons,cellW,cellH,gap,total,
+      // Floor line text is rebuilt only when the label string changes (once per fight/encounter, not
+      // per frame): cached on a fixed-size canvas keyed by the last label drawn onto it.
+      floorCanvas:mk(400,16),floorLabel:null}},
+  floorLine(c,label){
+    const hc=this.hudCache();
+    if(hc.floorLabel!==label){
+      const fc=hc.floorCanvas.getContext('2d');fc.clearRect(0,0,hc.floorCanvas.width,hc.floorCanvas.height);
+      fc.font='11px ui-monospace,monospace';fc.fillStyle='#ccc';fc.textAlign='center';fc.letterSpacing='1px';
+      fc.fillText(label,hc.floorCanvas.width/2,12);hc.floorLabel=label}
+    c.drawImage(hc.floorCanvas,W/2-hc.floorCanvas.width/2,80)},
   overlayY(F){const l=F.def.look;return FLOOR-(l.legLen+l.torsoLen+l.headR*2.4)*(F.def.scale||1)-14},
   reflection(c,F,cam,frame){c.save();c.beginPath();c.rect(0,FLOOR,STAGE_W,90);c.clip();
     c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.18;Rig.draw(c,F,cam,frame);c.restore()},
@@ -41,13 +77,11 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='900 26px ui-monospace,monospace';c.lineWidth=3;c.strokeStyle='#000';c.strokeText(text,0,0);
     c.fillStyle=col;c.fillText(text,0,0);c.restore()},
   // Three chevron cells, filled from p1's power (the rendition shows one power bar for the player,
-  // not a per-side pair), one cell per 100 power toward the POWER_MAX of 300.
+  // not a per-side pair), one cell per 100 power toward the POWER_MAX of 300. Draws whichever of the
+  // 4 baked fill-level variants (0..3) matches, instead of rebuilding the polygon paths every frame.
   chevrons(c,power){
-    const cellW=90,cellH=14,gap=6,total=cellW*3+gap*2,x0=W/2-total/2,y=H-24,skew=8;
-    for(let i=0;i<3;i++){const x=x0+i*(cellW+gap),filled=power>=100*(i+1);
-      c.fillStyle=filled?'#f4c542':'#26262c';
-      c.beginPath();c.moveTo(x+skew,y);c.lineTo(x+cellW,y);c.lineTo(x+cellW-skew,y+cellH);c.lineTo(x,y+cellH);c.closePath();
-      c.fill();c.strokeStyle='#000';c.lineWidth=1.2;c.stroke()}},
+    const hc=this.hudCache(),filled=Math.min(3,Math.floor(power/100));
+    c.drawImage(hc.chevrons[filled],W/2-hc.total/2,H-24)},
   hud(c,f){const a=f.p1,b=f.p2;
     // Portraits + numeric hp bars: p1 left (green), p2 right (red->orange, drains from the right).
     const p1x=18,p2x=W-74,barW=300,barH=18,p1barX=84,p2barX=W-74-10-barW;
@@ -64,18 +98,18 @@ const Render={ctx:canvas.getContext('2d'),
     c.fillText(Math.max(0,Math.round(a.hp))+' / '+a.maxHp,p1barX+barW/2,48+barH-4);
     c.fillText(Math.max(0,Math.round(b.hp))+' / '+b.maxHp,p2barX+barW/2,48+barH-4);
     // Title (a horizontal squeeze approximates a condensed face without loading a web font) + pause.
-    c.save();c.translate(W/2,30);c.scale(.82,1.12);c.textAlign='center';c.lineWidth=4;c.strokeStyle='#000';
-    c.font='900 24px ui-monospace,monospace';c.strokeText('FIGHTER',0,0);c.fillStyle='#f4c542';c.fillText('FIGHTER',0,0);c.restore();
+    // Baked into an offscreen canvas by hudCache(): it never changes, so this is one drawImage.
+    c.drawImage(this.hudCache().title,0,0);
     this.pauseGlyph(c);
     // Floor line: reads G.encounter (a plain fight without one shows an exhibition label instead).
-    c.font='11px ui-monospace,monospace';c.fillStyle='#ccc';c.textAlign='center';c.letterSpacing='1px';
-    c.fillText(G.encounter?('FLOOR '+G.encounter.floor+' • '+G.encounter.name):'EXHIBITION • DOORWAY',W/2,88);
-    c.letterSpacing='0px';
+    // floorLine() only redraws its offscreen text when the label string itself changes.
+    this.floorLine(c,G.encounter?('FLOOR '+G.encounter.floor+' • '+G.encounter.name):'EXHIBITION • DOORWAY');
     if(a.combo>1)this.combo(c,56,190,a.combo+' HITS',-6,'#f4c542','left');
     if(b.combo>1)this.combo(c,W-56,190,b.combo+' HITS',6,'#f66','right');
     this.chevrons(c,a.power);
     if(f.over){c.textAlign='center';c.fillStyle='#fff';c.font='bold 40px ui-monospace,monospace';c.fillText('K.O.',W/2,H/2)}},
   frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
+    this.hudCache(); // built once, before any HUD draw so it's ready whether or not f/hud runs this call
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
     Camera.apply(c,cam);
     // Shake offsets the already-applied camera transform: translate by (screen px)/zoom so the

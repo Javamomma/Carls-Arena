@@ -187,3 +187,4 @@ Test.add('brute AI lands a heavy on an idle target within 600 frames',()=>{
   const f=mkFight({ctrl2:AI.make('brute',13),onEvent:(type,a)=>{if(type==='hit'&&a&&a.side===-1&&a.moveName==='heavy')landed=true}});
   closeIn(f);run(f,600);
   ok(landed,'brute AI should land at least one heavy on an idle p1 within 600 frames')});
+Test.add('HUD statics are cached across frames',()=>{Render.frame(null);const a=Render._hudCache;Render.frame(null);ok(a&&a===Render._hudCache)});

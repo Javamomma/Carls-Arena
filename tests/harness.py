@@ -100,9 +100,35 @@ def main():
                           "for 120s of simulated frames (auto-reduced to 60s if the first cell's wall "
                           "time exceeds 40s); prints a table and exits 1 on any page/console error or "
                           "a frames shortfall in any cell")
+    ap.add_argument('--perf', type=int, default=None, metavar='N',
+                     help="run N frames of G.stepFrame()+Render.frame(G.fight) under G.sim=true on a "
+                          "started fight (Ctrl.random bot vs brawl AI), timing with performance.now() "
+                          "in the page-evaluate only; prints {ms_per_frame, ms_step, ms_render} and "
+                          "exits 1 if ms_per_frame >= 6")
     a = ap.parse_args()
     if a.matrix:
         sys.exit(run_matrix())
+    if a.perf:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page(viewport={'width': 854, 'height': 480})
+            perf_errors = []
+            pg.on('pageerror', lambda e: perf_errors.append(str(e)))
+            pg.on('console', lambda m: perf_errors.append(m.text) if m.type == 'error' else None)
+            pg.goto(INDEX)
+            pg.wait_for_function('typeof G!=="undefined"')
+            js = ("(()=>{G.sim=true;G.startFight({seed:1,p1:'carl',p2:'donut',ai:'brawl',ctrl1:Ctrl.random(1)});"
+                  "const N=%d;let tStep=0,tRender=0;"
+                  "for(let i=0;i<N;i++){"
+                  "const a=performance.now();G.stepFrame();const b=performance.now();"
+                  "Render.frame(G.fight);const c=performance.now();"
+                  "tStep+=(b-a);tRender+=(c-b);}"
+                  "return{ms_per_frame:(tStep+tRender)/N,ms_step:tStep/N,ms_render:tRender/N}})()"
+                  ) % a.perf
+            r = pg.evaluate(js)
+            b.close()
+        print(json.dumps(r, indent=1))
+        sys.exit(1 if perf_errors or r['ms_per_frame'] >= 6 else 0)
     errors, console = [], []
     with sync_playwright() as p:
         b = p.chromium.launch()
