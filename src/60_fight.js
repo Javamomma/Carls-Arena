@@ -53,7 +53,7 @@ class Fight{
       return this.emit('parry',def,att,0)}
     if(type==='block'){const m=r.m;const chip=Math.round(att.def.atk*m.dmg*CHIP*(1-(def.def.blockProf||0)));def.hp=Math.max(0,def.hp-chip);def.stun=m.blockstun;def.setState('BLOCKSTUN');
       def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;
-      this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip)}
+      this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip,att.moveName)}
     const m=r.m,last=r.last;
     const cls=CLASS_BEATS[att.def.cls]===def.def.cls?CLASS_BONUS:1;
     // Crit rolls once per landed hit, after the class bonus and before armor.
@@ -75,10 +75,12 @@ class Fight{
     this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:crit?'#ff5a4a':'#ffd86b'});
     this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit});
     this.fx.push({kind:'shake',amt:m.hitstop});
-    this.emit('hit',att,def,dmg)}
+    this.emit('hit',att,def,dmg,att.moveName)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
     this.winner=a.hp<=0?b:b.hp<=0?a:(a.hp/a.maxHp>=b.hp/b.maxHp?a:b);
     a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');
     this.slowmo=90;this.fx.push({kind:'flash',frames:6});
     this.emit('ko',this.winner,null,0)}
-  emit(type,a,b,val){this.log.push({f:this.frame,type,who:a?a.side:0,val});this.onEvent(type,a,b,val)}}
+  // move is only meaningful (and only passed) for 'hit'/'block'; other event types leave it
+  // undefined, which existing log consumers already ignore.
+  emit(type,a,b,val,move){this.log.push({f:this.frame,type,who:a?a.side:0,val,move});this.onEvent(type,a,b,val)}}
