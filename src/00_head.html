@@ -30,10 +30,10 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .sub{font-size:11px;color:#999;margin:0 0 10px}
 .scr{box-sizing:border-box;text-align:center;padding:10px 14px;width:820px;max-width:96vw;max-height:456px;overflow:hidden;display:flex;flex-direction:column}
 .scr h2{margin:0 0 8px;font-size:17px;letter-spacing:3px;color:#f4c542;text-transform:uppercase;transform:scaleX(.92)}
-.backbtn{margin-top:8px;width:180px;min-height:44px;align-self:center;padding:10px;font-size:13px;letter-spacing:1px;background:#1a1f33;color:#f4c542;border:2px solid #f4c542;border-radius:6px}
+.backbtn{margin-top:14px;width:180px;min-height:44px;align-self:center;padding:10px;font-size:13px;letter-spacing:1px;background:#1a1f33;color:#f4c542;border:2px solid #f4c542;border-radius:6px;flex:none}
 .curstrip{display:flex;gap:14px;justify-content:center;font-size:12px;color:#f4c542;margin:0 0 10px;flex-wrap:wrap}
 .ftabs{display:flex;gap:6px;justify-content:center;margin-bottom:8px}
-.ftab{min-height:32px;padding:6px 16px;font-size:12px;letter-spacing:1px;background:#1a1f33;color:#999;border:1px solid #444;border-radius:4px}
+.ftab{min-height:44px;padding:6px 16px;font-size:12px;letter-spacing:1px;background:#1a1f33;color:#999;border:1px solid #444;border-radius:4px}
 .ftab.active{color:#f4c542;border-color:#f4c542}
 .path{display:flex;flex-direction:column-reverse;align-items:center;gap:6px;overflow:hidden;flex:1;justify-content:center}
 .node{width:320px;max-width:84%;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;
@@ -46,22 +46,28 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .energy{display:flex;gap:4px;justify-content:center;margin:6px 0}
 .pip{width:14px;height:14px;border-radius:3px;background:#2a2a2a;border:1px solid #555}
 .pip.full{background:#f4c542;border-color:#f4c542}
-.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;overflow:hidden;flex:1}
-.card{box-sizing:border-box;background:#181c2b;border:2px solid #333;border-radius:8px;padding:8px;display:flex;gap:8px;align-items:flex-start;text-align:left}
+/* Fix round 1: cards are a single-column, full-width row (portrait | info | action row) instead of
+   a 2-column grid of tall cards -- a 2-column layout could only fit 3 stacked action buttons at
+   26px each; a single wide row fits the same 3 actions SIDE BY SIDE at a real 44px+ touch height,
+   and still stacks up to 4 champions (carl/katia/donut/mongo) at 854x480 with no scroll. */
+.cards{display:flex;flex-direction:column;gap:8px;overflow:hidden;flex:1;justify-content:flex-start}
+.card{box-sizing:border-box;background:#181c2b;border:2px solid #333;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:10px;text-align:left}
 .card.active{border-color:#f4c542}
 .card canvas{width:52px;height:52px;flex:none;background:#101422;border-radius:4px}
-.card .info{flex:1;min-width:0}
+.card .info{flex:1 1 auto;min-width:0}
 .card .name{font-size:12px;color:#fff;font-weight:bold;letter-spacing:1px}
-.card .stars{color:#f4c542;font-size:11px;margin-top:2px}
-.card .pips{display:flex;gap:2px;margin:3px 0}
-.card .rp{display:inline-block;width:8px;height:8px;border-radius:50%;background:#333;border:1px solid #555}
+.card .stars{color:#f4c542;font-size:11px;margin-left:6px}
+.card .rankline{display:flex;align-items:center;gap:8px;margin:3px 0}
+.card .pips{display:flex;gap:2px}
+.card .rp{display:inline-block;width:7px;height:7px;border-radius:50%;background:#333;border:1px solid #555}
 .card .rp.on{background:#7fb0a8;border-color:#7fb0a8}
 .card .lvl{font-size:10px;color:#bbb}
-.card .xpbar{height:5px;background:#333;border-radius:3px;overflow:hidden;margin:3px 0}
+.card .xpbar{height:5px;background:#333;border-radius:3px;overflow:hidden;max-width:240px}
 .card .xpbar i{display:block;height:100%;background:#f4c542}
-.card button{display:block;font-size:9px;letter-spacing:.5px;padding:8px 4px;min-height:26px;margin:2px 0;width:100%;border-radius:4px;background:#1a1f33;color:#f4c542;border:1px solid #f4c542;font-family:inherit}
-.card button:disabled{opacity:.3}
-.card button.select{background:#f4c542;color:#111}
+.card .actions{flex:0 0 auto;display:flex;gap:6px}
+.card .actions button{min-width:96px;min-height:44px;padding:4px 6px;font-size:9px;line-height:1.3;letter-spacing:.3px;border-radius:4px;background:#1a1f33;color:#f4c542;border:1px solid #f4c542;font-family:inherit}
+.card .actions button:disabled{opacity:.3}
+.card .actions button.select{background:#f4c542;color:#111}
 .kcards{display:flex;gap:10px;justify-content:center;flex:1;align-items:flex-start;flex-wrap:wrap;overflow:hidden}
 .kcard{box-sizing:border-box;width:220px;background:#181c2b;border:2px solid #444;border-radius:8px;padding:10px}
 .kcard h3{margin:0 0 4px;font-size:12px;color:#f4c542;letter-spacing:1px}

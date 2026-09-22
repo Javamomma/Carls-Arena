@@ -287,6 +287,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     else{this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)}},
   backToOrigin(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     if(typeof Screens!=='undefined')Screens.toOrigin();else this.toTitle()},
+  // Fix round 1 (controller review, Critical): the title screen's own buttons only ever get their
+  // onclick bound inside Screens.renderTitle(), which only runs when some Screens.* function
+  // actually executes -- on a real page load nothing called one (the initial HTML markup already
+  // carries #title's 'show' class, so it LOOKED right, but every CAMPAIGN/ARENA/ROSTER/KIOSK/
+  // EXHIBITION/SOUND button was dead: .onclick===null). init() now calls this once at boot, after
+  // every other binding, so Screens.show('title') runs exactly once with a real DOM and binds them.
+  bootScreens(){if(typeof Screens!=='undefined')Screens.show('title')},
   // Steps the sim one tick, handling KO slow-mo (step every 4th tick while fight.slowmo>0) and
   // draining fight.fx into FX after any step. No rAF/wall-clock dependency, so tests can call it
   // directly. G.loop drives this once per accumulated STEP; simFrames/stepFrame delegate to it too.
@@ -404,5 +411,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     document.getElementById('titleMute').onclick=e=>{Audio.muted=!Audio.muted;Save.data.mute=Audio.muted;Save.put();
       e.target.textContent='SOUND: '+(Audio.muted?'OFF':'ON')};
     document.addEventListener('visibilitychange',()=>{if(document.hidden&&this.state==='FIGHT')this.togglePause()});
-    requestAnimationFrame(t=>{this.last=t;this.loop(t)})}};
+    // bootScreens() must NOT be called synchronously here: init() (and the `G.init();` call below
+    // that runs it) executes mid-parse, at the point the script has only gotten through this file --
+    // 85_screens.js's `const Screens=...` hasn't run yet, so even `typeof Screens` would still throw
+    // (a TDZ reference, not a plain "undefined") and take the whole script down before 90_tests.js's
+    // Test.add calls ever ran (fix round 1, Critical: this exact crash, caught by --unit erroring
+    // with "Test is not defined" once bootScreens() was first added here directly). Deferred one
+    // frame instead, same as every button's onclick already safely is.
+    requestAnimationFrame(t=>{this.last=t;this.bootScreens();this.loop(t)})}};
 G.init();

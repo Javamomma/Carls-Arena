@@ -38,7 +38,18 @@ const Meta={
       for(const k in d.stats)if(!(k in data.stats))data.stats[k]=d.stats[k];
       if(!data.roster||typeof data.roster!=='object'||!Object.keys(data.roster).length)data.roster=d.roster;
       return data}
-    return Meta.defaults()}};
+    return Meta.defaults()},
+  // Fix round 1 (Task 4.5 controller review, Minor): the SPONSOR PERK KIOSK's ISO PACK (200 gold ->
+  // 60 iso) has no dedicated Meta function of its own yet -- added here rather than left as a
+  // Screens-side Rewards.grant({gold:-200,...}) reuse, same refuse-when-short/deduct-then-Save.put
+  // shape as Roster.levelUp/rankUp right below.
+  buyIso(){
+    const cost=200,gain=60;
+    if((Save.data.gold||0)<cost)return false;
+    Save.data.gold-=cost;
+    Save.data.iso=(Save.data.iso||0)+gain;
+    Save.put();
+    return true}};
 const Stats={
   caps:{stars:[1,5],rank:stars=>stars,level:rank=>10*rank},
   xpToLevel(level){return 40*level},

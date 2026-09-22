@@ -109,6 +109,9 @@ const Screens={
       const p=document.createElement('div');p.className='pip'+(i<e.n?' full':'');erow.appendChild(p)}
     document.getElementById('mapBack').onclick=()=>Screens.title()},
   // ---- roster --------------------------------------------------------------------------------
+  // Fix round 1 (controller review, Important): cards are a single-column, full-width row --
+  // portrait | info | a horizontal action row -- so LEVEL UP/RANK UP/SELECT can be real 44px+
+  // touch targets side by side, instead of the old 2-column grid's 3 stacked 26px buttons.
   renderRoster(){
     const wrap=document.getElementById('rosterCards');wrap.innerHTML='';
     for(const id of Object.keys(Save.data.roster)){
@@ -120,12 +123,13 @@ const Screens={
       const xpNeed=Stats.xpToLevel(entry.level+1);
       const pct=atCap?100:Math.max(0,Math.min(100,Math.round(100*entry.xp/xpNeed)));
       info.innerHTML=
-        '<div class="name">'+def.name+'</div>'+
-        '<div class="stars">'+'★'.repeat(entry.stars)+'☆'.repeat(5-entry.stars)+'</div>'+
-        '<div class="pips">'+Array.from({length:entry.stars},(_,i)=>
-          '<span class="rp'+(i<entry.rank?' on':'')+'"></span>').join('')+'</div>'+
-        '<div class="lvl">LVL '+entry.level+(atCap?' (MAX)':'')+'</div>'+
+        '<div class="name">'+def.name+'<span class="stars">'+
+          '★'.repeat(entry.stars)+'☆'.repeat(5-entry.stars)+'</span></div>'+
+        '<div class="rankline"><span class="pips">'+Array.from({length:entry.stars},(_,i)=>
+          '<span class="rp'+(i<entry.rank?' on':'')+'"></span>').join('')+
+          '</span><span class="lvl">LVL '+entry.level+(atCap?' (MAX)':'')+'</span></div>'+
         '<div class="xpbar"><i style="width:'+pct+'%"></i></div>';
+      const actions=document.createElement('div');actions.className='actions';
       const lvlCost=10*entry.level;
       const lvlBtn=document.createElement('button');
       lvlBtn.textContent='LEVEL UP ('+lvlCost+' ISO)';
@@ -142,8 +146,8 @@ const Screens={
       selBtn.textContent=isActive?'ACTIVE':'SELECT';
       selBtn.disabled=isActive;
       selBtn.onclick=()=>{Roster.setActive(id);Screens.refresh()};
-      info.appendChild(lvlBtn);info.appendChild(rankBtn);info.appendChild(selBtn);
-      card.appendChild(portrait);card.appendChild(info);
+      actions.appendChild(lvlBtn);actions.appendChild(rankBtn);actions.appendChild(selBtn);
+      card.appendChild(portrait);card.appendChild(info);card.appendChild(actions);
       wrap.appendChild(card)}
     document.getElementById('rosterBack').onclick=()=>Screens.title()},
   // ---- crystal (open) -------------------------------------------------------------------------
@@ -209,11 +213,9 @@ const Screens={
     if(!rv||rv.frame>=Screens.REVEAL_FRAMES)return;
     rv.frame++;Screens.drawReveal(rv)},
   // ---- shop (SPONSOR PERK KIOSK) --------------------------------------------------------------
-  // ISO PACK isn't a Crystal.KINDS entry (no draw, just a currency conversion), so it has no
-  // dedicated Meta function of its own -- Rewards.grant already applies signed currency deltas
-  // unconditionally, so a -200 gold/+60 iso grant is exactly a purchase, without adding a new
-  // Meta-layer function for one card. Affordability is still checked here (read-only) before
-  // calling it, same as every other buy button.
+  // ISO PACK isn't a Crystal.KINDS entry (no draw, just a currency conversion) -- Meta.buyIso()
+  // (fix round 1) is the dedicated Meta function for it, cost/gain kept here only for the card's
+  // own cost text and affordability check (both read-only).
   ISO_PACK:{cost:{gold:200},iso:60},
   renderShop(){
     const cur=document.getElementById('shopCurrency');
@@ -235,10 +237,7 @@ const Screens={
     mk('buyPremium','PREMIUM CRYSTAL',Crystal.KINDS.premium.cost,Screens.canAfford('premium'),
       ()=>Screens.openCrystal('premium'));
     const isoAfford=(Save.data.gold||0)>=Screens.ISO_PACK.cost.gold;
-    mk('buyIso','ISO PACK',Screens.ISO_PACK.cost,isoAfford,()=>{
-      if((Save.data.gold||0)<Screens.ISO_PACK.cost.gold)return;
-      Rewards.grant({gold:-Screens.ISO_PACK.cost.gold,iso:Screens.ISO_PACK.iso});
-      Screens.refresh()});
+    mk('buyIso','ISO PACK',Screens.ISO_PACK.cost,isoAfford,()=>{Meta.buyIso();Screens.refresh()});
     document.getElementById('shopBack').onclick=()=>Screens.title()},
   // ---- arena ---------------------------------------------------------------------------------
   renderArena(){

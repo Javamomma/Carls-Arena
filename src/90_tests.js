@@ -1181,6 +1181,14 @@ Test.add('every Phase 4 screen\'s DOM ids exist',()=>{
     'arenaStreak','arenaBest','arenaEnemy','arenaFight','arenaBack',
     'resultTitle','resultLine','again','resultTitleBtn'];
   for(const id of ids)ok(document.getElementById(id),'#'+id+' must exist')});
+Test.add('G.bootScreens() binds the title screen\'s buttons on real page load (fix round 1, Critical: they were unbound until some other Screens.* function had run once -- Screens.renderTitle is the only place they get an onclick, and nothing called any Screens function at boot)',()=>{
+  Screens._current=null;                       // simulate a fresh load: no Screens.* has rendered yet
+  document.getElementById('btnCampaign').onclick=null;
+  G.bootScreens();
+  ok(typeof document.getElementById('btnCampaign').onclick==='function','CAMPAIGN must be bound after boot');
+  document.getElementById('btnCampaign').click();
+  eq(Screens._current,'map','clicking the now-bound button must actually show the map screen');
+  G.toTitle()});
 Test.add('G.toTitle() shows the title screen only (every other Phase 4 overlay and pauseMenu hidden)',()=>{
   Save.data=Meta.defaults();
   Screens.show('roster'); // start from some other screen so this isn't a no-op
@@ -1277,7 +1285,15 @@ Test.add('shop BASIC CRYSTAL opens a crystal immediately on buy (ruling: buy == 
   ok(JSON.stringify(Save.data.roster)!==before,'roster must change (new champ or shards) via Crystal.open');
   eq(Screens._current,'crystal','buying navigates to the crystal screen to show the reveal');
   Screens.title()});
-Test.add('shop ISO PACK converts 200 gold into 60 iso via Rewards.grant (a screen may only mutate Save.data through a Meta function)',()=>{
+Test.add('Meta.buyIso converts 200 gold into 60 iso, refuses when short (fix round 1: was Screens reusing Rewards.grant with negative gold)',()=>{
+  Save.data=Meta.defaults();Save.data.gold=500;
+  ok(Meta.buyIso());
+  eq(Save.data.gold,300);eq(Save.data.iso,60);
+  Save.data.gold=100;
+  const before=JSON.stringify(Save.data);
+  eq(Meta.buyIso(),false,'short on gold');
+  eq(JSON.stringify(Save.data),before)});
+Test.add('shop ISO PACK buy button calls Meta.buyIso',()=>{
   Save.data=Meta.defaults();Save.data.gold=500;
   Screens.shop();
   document.getElementById('buyIso').click();
