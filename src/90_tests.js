@@ -5077,3 +5077,48 @@ Test.add('every rig lays its joint balls under both segments, inside the limb, a
     BodyStyle.joint=realJoint;BodyStyle.limb=realLimb;BodyStyle.seam=realSeam;
     CanvasRenderingContext2D.prototype.stroke=realStroke;
     G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+
+// ---- Task 8.2: the big and quad rigs join the body layer ---------------------------------------
+// The same "a drawing layer must not move a joint" guarantee the human snapshot carries, for the
+// big rig (Mongo/Grull, POSES_BIG/solveBig) and the quad rig (Donut/Grub/Mother Rat, POSES_QUAD/
+// solveQuad). Captured off commit 1a6d501 -- the end of Task 8.1, i.e. BEFORE any of this task's
+// drawing changes -- with the identical fold Rig.extent itself uses: every joint, the drawn head
+// circle's two top bounding corners, every prop's propExtra geometry, and each sample's own off.x
+// subtracted before folding reach. `all` is the whole-pose-set Rig.extent(look,1) that the per-fight
+// camera zoom cap and the EDGE_PAD reach test actually consume.
+const RIG_EXTENT_SNAPSHOT={
+  mongo:     {all:[334.5754,187.4256],idle:[333.9851,103.0334],light1:[333.0273,133.6164],
+              medium:[333.9851,165.8339],heavy:[310.8329,155.9732],s3:[259.8543,172.2391]},
+  grull:     {all:[363.7728,203.3896],idle:[362.4702,125.5216],light1:[361.0897,157.4792],
+              medium:[362.4702,154.4189],heavy:[336.3765,183.5089],s3:[285.8096,202.0061]},
+  donut:     {all:[210.0377,253.7186],idle:[167.0012,241.8271],light1:[177.2263,245.2749],
+              medium:[181.0170,253.7186],heavy:[199.2315,238.0660],s3:[210.0377,250.2928]},
+  grub:      {all:[139.9935,166.6493],idle:[ 95.3171,162.2700],light1:[107.9699,163.3302],
+              medium:[112.2700,166.6493],heavy:[132.3166,160.6234],s3:[132.6503,163.8746]},
+  mother_rat:{all:[203.9258,218.0666],idle:[163.5295,206.5849],light1:[172.7900,209.9745],
+              medium:[175.1072,218.0666],heavy:[192.4782,203.0485],s3:[203.9258,214.8900]}};
+Test.add('big/quad extent snapshot (per pose and whole-set) is unchanged by the body layer, to +/-0.5px',()=>{
+  const posesOf=(look,key)=>{
+    const table=look.rig==='quad'?POSES_QUAD:POSES_BIG;
+    const kf=table[key];let minY=0,maxReach=0;
+    for(let i=0;i<kf.length-1;i++){
+      const ta=kf[i].t,tb=kf[i+1].t;
+      for(const t of[ta,(ta+tb)/2,tb]){
+        const offX=samplePose(table,key,t).off.x||0;
+        const j=Rig.solve(look,key,t,1);
+        const fold=(x,y)=>{if(y<minY)minY=y;const rx=Math.abs(x-offX);if(rx>maxReach)maxReach=rx};
+        for(const b in j)fold(j[b].x,j[b].y);
+        fold(j.head.x-look.headR,j.head.y-look.headR);
+        fold(j.head.x+look.headR,j.head.y-look.headR);
+        for(const pid of look.props||[])for(const ep of Rig.propExtra(pid,look,j,1))fold(ep.x,ep.y)}}
+    return[-minY,maxReach]};
+  const near=(a,b,what)=>ok(Math.abs(a-b)<=0.5,what+': expected '+b.toFixed(4)+' +/-0.5, got '+a.toFixed(4));
+  for(const id in RIG_EXTENT_SNAPSHOT){
+    const look=LOOKS[id],snap=RIG_EXTENT_SNAPSHOT[id];
+    ok(look,'no look '+id);
+    ok(look.rig==='big'||look.rig==='quad',id+' must be a big or quad look');
+    const e=Rig.extent(look,1);
+    near(e.top,snap.all[0],id+'/extent.top');near(e.reach,snap.all[1],id+'/extent.reach');
+    for(const key of['idle','light1','medium','heavy','s3']){
+      const[top,reach]=posesOf(look,key);
+      near(top,snap[key][0],id+'/'+key+'.top');near(reach,snap[key][1],id+'/'+key+'.reach')}}});

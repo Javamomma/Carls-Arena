@@ -3734,7 +3734,19 @@ const LOOKS={
   // heavyCharge/s3/medium/s1/s2 were retuned to fit the new, much tighter reach budget.
   mongo:{rig:'big',skin:'#7a8a6a',hair:null,primary:'#2a2a24',secondary:'#4a3a28',
     limb:15,legLen:147,armLen:74,torsoLen:120,headR:26,shoulderW:84,hipW:52,waistW:59,hunch:D(4),
-    props:['trousers','scars']},
+    props:['trousers','scars'],
+    // Task 8.2: the big rig's own `.body` block, same frozen schema and the same purely-additive
+    // rule as the human looks above -- not one proportion, palette or prop field changed, so
+    // solveBig (and every zoom-cap/reach/HUD number tuned against it since Phase 3) is bit-identical.
+    // cloth.torso 'bare' is the barrel chest the 'scars' prop is drawn on; 'pants' is what the
+    // 'trousers' prop used to draw by hand and BodyStyle.hips now draws as real cloth.
+    // eyes 'human' under a heavy brow, ears 'human' (kept INSIDE the profile clip -- a pointed ear
+    // on a brute would put drawn geometry outside the head circle Rig.extent folds, for no gain),
+    // mouth 'human' drawn as the brute's own slab-jawed underbite, hair 'bald' for a scalp with no
+    // hairline. horns:false -- Grull's horns are the 'horns' PROP, already in the extent fold.
+    body:{outline:'#141a10',skinShade:[-0.32,0.19],
+      cloth:{torso:'bare',legs:'pants',primary:'#2a2a24',secondary:'#4a3a28'},
+      face:{eyes:'human',iris:'#c9b878',brow:true,mouth:'human',hair:'bald',ears:'human',horns:false}}},
   // PLACEHOLDER (Task 3.4/3.5): a copy of Katia's lean proportions with a bone-white palette and
   // rig:'human' set explicitly.
   skeleton:{skin:'#d8d0c0',hair:null,primary:'#2a2a2a',secondary:'#555555',
@@ -3800,7 +3812,16 @@ const LOOKS={
   // slightly longer torso/taller stance than Mongo while using the same trimmed shoulderW/armLen/limb.
   grull:{rig:'big',skin:'#4a5c34',hair:null,primary:'#2a2420',secondary:'#5c3a22',
     limb:15,legLen:135,armLen:76,torsoLen:140,headR:24,shoulderW:84,hipW:52,waistW:59,hunch:D(6),
-    props:['trousers','horns','spikedclub']},
+    props:['trousers','horns','spikedclub'],
+    // Task 8.2: same brute block as Mongo (see that comment) with the boss's own read -- darker
+    // olive skin, an ember iris instead of Mongo's dull yellow, and mouth 'fangs', which for the
+    // big rig is drawn as a pair of upward TUSKS off the lower jaw rather than the goblins' two
+    // downward fangs (BodyStyle._paintMouth's brute branch). horns:false: the curved horns are the
+    // 'horns' prop drawn by _drawBrute's own prop loop, which is what Rig.propExtra already folds
+    // into his extent -- a face-module horn on top of those would be a second pair.
+    body:{outline:'#101709',skinShade:[-0.34,0.21],
+      cloth:{torso:'bare',legs:'pants',primary:'#2a2420',secondary:'#5c3a22'},
+      face:{eyes:'human',iris:'#e07a2a',brow:true,mouth:'fangs',hair:'bald',ears:'human',horns:false}}},
   // Mother Rat (boss): Task 3.4's RigQuad bone set at boss scale (def.scale, 40_movedata.js's
   // BOSSES.mother_rat, applied on top of these already-large numbers). Grey-brown fur, a long pink
   // tail, big rounded ears, and yellow teeth drawn in drawQuad.
@@ -4117,7 +4138,11 @@ const BodyStyle={
     if(!bone){
       // A neck plus the trapezius wedge that ties it into the shoulders -- without the wedge the head
       // rides a bare stalk, which was the single worst read of the first pass.
-      const nw=Math.max(7,look.headR*.86);
+      // Task 8.2: the big rig gets a genuinely thick neck (1.18x its own headR against the human
+      // rig's .86x). The final review's look-and-feel note 4 on Mongo was that the pre-8.1 rig left
+      // nothing drawn between shoulders and head, so a brute read as a floating head; a human-width
+      // stalk under a brute's headR reads the same way.
+      const nw=Math.max(7,look.headR*(look.rig==='big'?1.18:.86));
       const neck=k=>{g.beginPath();
         g.moveTo(-nw/2*k,neckTop);g.lineTo(nw/2*k,neckTop);
         g.quadraticCurveTo(nw*.62*k,shY-limb*.10,sw*.32*k,shY+limb*.30);
@@ -4151,19 +4176,45 @@ const BodyStyle={
     sg.addColorStop(1,shade(look.skin,lo*.85));
     g.fillStyle=sg;body();g.fill();
     // --- chest / abdomen split
+    // Task 8.2: `brute` scales this up for the big rig. Mongo's torsoLen is 120 against an 84
+    // shoulderW -- the human rig's numbers (a pec pair 27% of shoulderW, three ab rungs at L*.115)
+    // covered the top third of that and left a featureless slab below it, which is exactly how the
+    // first pass of drawBig-through-BodyStyle read in the shot.
+    const brute=look.rig==='big';
     g.save();body();g.clip();
-    const pcY=shY+L*.24,pcR=Math.min(sw*.27,L*.21);
-    g.globalAlpha=.55;g.fillStyle=shade(look.skin,Math.min(.95,hi*1.15));
-    for(const s of[-1,1]){g.beginPath();g.ellipse(s*sw*.21,pcY,pcR,pcR*.64,s*.14,0,Math.PI*2);g.fill()}
-    g.globalAlpha=.42;g.strokeStyle=shade(look.skin,lo);g.lineCap='round';
-    g.lineWidth=Math.max(1.2,limb*.11);
+    const pcY=shY+L*(brute?.20:.24),pcR=Math.min(sw*(brute?.33:.27),L*(brute?.24:.21));
+    if(brute){ // flank form shadows, so the barrel reads as a cylinder rather than a cut-out
+      g.globalAlpha=.26;g.fillStyle=shade(look.skin,lo*1.2);
+      for(const s of[-1,1]){g.beginPath();
+        g.moveTo(s*sw*.52,shY);
+        g.quadraticCurveTo(s*sw*.46,wY,s*ww*.40,wY+L*.16);
+        g.quadraticCurveTo(s*hw*.46,limb*.5,s*hw*.72,limb*.7);
+        g.lineTo(s*sw*.62,limb*.7);g.closePath();g.fill()}
+      // and the lats: a wedge from each armpit in to the waist, the brute's own back mass
+      g.globalAlpha=.22;g.fillStyle=shade(look.skin,lo*.9);
+      for(const s of[-1,1]){g.beginPath();
+        g.moveTo(s*sw*.47,shY+limb*.5);
+        g.quadraticCurveTo(s*sw*.40,pcY+L*.10,s*ww*.34,wY+L*.06);
+        g.quadraticCurveTo(s*sw*.30,pcY,s*sw*.47,shY+limb*.5);g.closePath();g.fill()}}
+    g.globalAlpha=brute?.66:.55;g.fillStyle=shade(look.skin,Math.min(.95,hi*(brute?1.25:1.15)));
+    for(const s of[-1,1]){g.beginPath();g.ellipse(s*sw*(brute?.24:.21),pcY,pcR,pcR*.64,s*.14,0,Math.PI*2);g.fill()}
+    if(brute){ // a hard shadow UNDER the pec shelf: a brute's chest overhangs its own abdomen
+      g.globalAlpha=.30;g.fillStyle=shade(look.skin,lo*1.35);
+      g.beginPath();g.moveTo(-sw*.42,pcY+pcR*.60);
+      g.quadraticCurveTo(0,pcY+pcR*1.22,sw*.42,pcY+pcR*.60);
+      g.quadraticCurveTo(0,pcY+pcR*1.62,-sw*.42,pcY+pcR*.60);g.closePath();g.fill()}
+    g.globalAlpha=brute?.54:.42;g.strokeStyle=shade(look.skin,lo);g.lineCap='round';
+    g.lineWidth=Math.max(1.2,limb*(brute?.15:.11));
     g.beginPath();g.moveTo(0,pcY-pcR*.55);g.lineTo(0,pcY+pcR*.95);g.stroke();               // sternum
     g.beginPath();g.moveTo(-sw*.37,pcY+pcR*.58);
     g.quadraticCurveTo(0,pcY+pcR*1.06,sw*.37,pcY+pcR*.58);g.stroke();                        // pec shelf
-    g.lineWidth=Math.max(.9,limb*.075);
-    const abTop=pcY+pcR*1.40;
-    for(let i=0;i<3;i++){const y=abTop+i*(L*.115),hx=ww*.36*(1-i*.14);
-      g.beginPath();g.moveTo(-hx,y);g.lineTo(hx,y);g.stroke()}
+    g.lineWidth=Math.max(.9,limb*(brute?.11:.075));
+    const abTop=pcY+pcR*1.40,abRows=brute?4:3,abGap=L*(brute?.105:.115);
+    for(let i=0;i<abRows;i++){const y=abTop+i*abGap,hx=ww*(brute?.44:.36)*(1-i*.12);
+      g.beginPath();g.moveTo(-hx,y);g.lineTo(hx,y);g.stroke();
+      if(brute){g.save();g.globalAlpha=.22;g.strokeStyle=shade(look.skin,Math.min(.95,hi*1.4));
+        g.lineWidth=Math.max(.8,limb*.08);
+        g.beginPath();g.moveTo(-hx*.94,y-abGap*.22);g.lineTo(hx*.94,y-abGap*.22);g.stroke();g.restore()}}
     g.beginPath();g.moveTo(0,abTop-L*.05);g.lineTo(0,wY+L*.10);g.stroke();                   // linea alba
     g.beginPath();g.moveTo(-ww*.48,wY+L*.04);g.lineTo(-hw*.20,limb*.30);g.stroke();          // obliques
     g.beginPath();g.moveTo(ww*.48,wY+L*.04);g.lineTo(hw*.20,limb*.30);g.stroke();
@@ -4383,6 +4434,11 @@ const BodyStyle={
     const b=look.body,F=b.face,lo=b.skinShade[0],hi=b.skinShade[1];
     const fw=face<0?-1:1,front=face===0,skull=F.eyes==='skull';
     const hood=b.cloth.torso==='robe';
+    // Task 8.2. `brute` is the big rig (Mongo/Grull): the same face module, but a skull built the
+    // other way round from a human's -- a low sloping cranium, a brow SHELF that juts further
+    // forward than the nose does, deep-set small eyes under it, and a slab jaw past the lip line.
+    // `beast` is the quad rig, where look.species picks cat/rat/grub geometry (see _paintBeastHead).
+    const brute=look.rig==='big';
     g.lineJoin='round';g.lineCap='round';
     // --- hair behind the head (a long mane reads as mass BEHIND the skull, not a hat)
     if(F.hair==='long'){
@@ -4424,6 +4480,26 @@ const BodyStyle={
         g.quadraticCurveTo(-fw*r*.58,r*.94,-fw*r*.78,r*.30);
         g.quadraticCurveTo(-fw*r*.96,r*.10,-fw*r*.92,-r*.18);
         g.closePath();return}
+      if(brute){
+        // The brute profile. Every forward point is capped at 1.00r, so unlike the goblins' hook
+        // (see the note below) NOTHING here leaves the head circle Rig.extent/Rig.topAt fold --
+        // the big rig's silhouette is entirely new art at exactly zero extent cost.
+        // The JAW, not the brow, is the frontmost point (1.00r): a brow that out-reached the nose
+        // AND the chin read as the front edge of a helmet, which is exactly how the first pass
+        // came out. The brow overhangs the socket, the nose is short and flat, and the jaw carries
+        // the mass forward under it.
+        g.moveTo(-fw*r*.98,-r*.02);
+        g.quadraticCurveTo(-fw*r*.96,-r*.80,fw*r*.02,-r*.86);   // low, back-weighted cranium
+        g.quadraticCurveTo(fw*r*.58,-r*.86,fw*r*.80,-r*.50);    // forehead sloping down and forward
+        g.quadraticCurveTo(fw*r*.92,-r*.38,fw*r*.88,-r*.22);    // the brow shelf's short square jut
+        g.quadraticCurveTo(fw*r*.66,-r*.16,fw*r*.60,-r*.04);    // the deep socket notch under it
+        g.quadraticCurveTo(fw*r*.82,r*.06,fw*r*.74,r*.22);      // a short flat nose, not a wedge
+        g.quadraticCurveTo(fw*r*.58,r*.28,fw*r*.66,r*.40);      // philtrum in, then the lip
+        g.quadraticCurveTo(fw*r*1.00,r*.56,fw*r*.94,r*.80);     // the jaw's forward jut: the underbite
+        g.quadraticCurveTo(fw*r*.80,r*1.02,fw*r*.34,r*1.08);    // a heavy, wide chin
+        g.quadraticCurveTo(-fw*r*.30,r*1.06,-fw*r*.66,r*.72);   // jawline back to the hinge
+        g.quadraticCurveTo(-fw*r*1.06,r*.34,-fw*r*.98,-r*.02);
+        g.closePath();return}
       // A profile, not a disc. The decisive part is that the NOSE is cut INTO the silhouette rather
       // than painted on the cheek: a nose drawn inside the head's own clip can only ever read as a
       // loop sitting on the face, which is exactly how the earlier passes read at 6x. Cranium, brow
@@ -4462,14 +4538,57 @@ const BodyStyle={
     g.globalAlpha=1;
     // --- eye geometry: a 3/4 read -- the near eye large and forward, the far one smaller and tucked
     //     toward the far edge. Front-facing portraits get two equal eyes.
-    const eyeY=-r*.06;
+    // A brute's eye is small and set BACK under the shelf, not forward on the cheek: pushing it
+    // forward to the human position put it on top of the brow's own jut, where it read as a bead
+    // stuck to the front of the skull.
+    const eyeY=brute?-r*.08:-r*.06,eyeS=brute?.80:1;
     const eyes=front
-      ?[{x:-r*.33,y:eyeY,s:1,in:1},{x:r*.33,y:eyeY,s:1,in:-1}]
-      :[{x:fw*r*.32,y:eyeY,s:1,in:-fw}];
+      ?[{x:-r*(brute?.38:.33),y:eyeY,s:eyeS,in:1},{x:r*(brute?.38:.33),y:eyeY,s:eyeS,in:-1}]
+      :[{x:fw*r*(brute?.44:.32),y:eyeY,s:eyeS,in:-fw}];
     const open={idle:1,attack:.78,block:.60,hit:.42,win:.66,ko:0}[st];
     for(const e of eyes)this._paintEye(g,r,look,e,open,st,fw,front);
     // --- brow
-    if(F.brow&&!skull){
+    if(F.brow&&brute&&!skull){
+      // What makes a brow ridge read is not the ridge -- it is the SHADOW the ridge throws into the
+      // socket under it. The first pass drew the ridge as a light band across the whole skull and it
+      // read as a helmet strap. So: a deep socket shadow first (the eye is already drawn, and sits
+      // under it, which is exactly the deep-set look), then a narrow lit edge along the top of the
+      // jut only, then the hard gutter line where the bone overhangs.
+      const tilt={idle:0,attack:.40,block:.44,hit:-.26,win:-.12,ko:-.06}[st];
+      const dy=tilt*r*.10;
+      g.save();
+      g.globalAlpha=.42;g.fillStyle=shade(look.skin,lo*1.45);
+      g.beginPath();
+      if(front){ // two arched masses with a notch between them -- one straight band reads as a helmet
+        for(const s2 of[-1,1]){
+          g.moveTo(s2*r*.74,-r*(.28+s2*dy/r));g.quadraticCurveTo(s2*r*.40,-r*.48,s2*r*.10,-r*.28);
+          g.quadraticCurveTo(s2*r*.24,r*.06,s2*r*.42,r*.10);
+          g.quadraticCurveTo(s2*r*.66,r*.10,s2*r*.74,-r*(.28+s2*dy/r))}}
+      else{
+        g.moveTo(-fw*r*.16,-r*.30+dy);g.quadraticCurveTo(fw*r*.56,-r*.36-dy,fw*r*.92,-r*.22);
+        g.quadraticCurveTo(fw*r*.74,r*.12,fw*r*.44,r*.14);
+        g.quadraticCurveTo(fw*r*.06,r*.10,-fw*r*.16,-r*.30+dy)}
+      g.closePath();g.fill();
+      // the lit top edge of the jut, kept short so it cannot become a band
+      g.globalAlpha=.58;g.fillStyle=shade(look.skin,Math.min(.95,hi*1.7));
+      g.beginPath();
+      if(front){
+        for(const s2 of[-1,1]){
+          g.moveTo(s2*r*.78,-r*(.32+s2*dy/r));g.quadraticCurveTo(s2*r*.40,-r*.56,s2*r*.08,-r*.34);
+          g.quadraticCurveTo(s2*r*.40,-r*.44,s2*r*.78,-r*(.32+s2*dy/r))}}
+      else{
+        g.moveTo(-fw*r*.10,-r*.36+dy);g.quadraticCurveTo(fw*r*.58,-r*.46-dy,fw*r*.96,-r*.26);
+        g.quadraticCurveTo(fw*r*.56,-r*.34,-fw*r*.10,-r*.36+dy)}
+      g.closePath();g.fill();
+      g.globalAlpha=.55;g.strokeStyle=shade(look.skin,lo*1.9);
+      g.lineWidth=Math.max(1.3,r*.075);g.lineCap='round';
+      g.beginPath();
+      if(front){for(const s2 of[-1,1]){g.moveTo(s2*r*.72,-r*(.26+s2*dy/r));
+        g.quadraticCurveTo(s2*r*.38,-r*.46,s2*r*.10,-r*.26)}}
+      else{g.moveTo(-fw*r*.12,-r*.26+dy);g.quadraticCurveTo(fw*r*.54,-r*.32-dy,fw*r*.90,-r*.18)}
+      g.stroke();
+      g.restore()}
+    else if(F.brow&&!skull){
       const tilt={idle:0,attack:.34,block:.40,hit:-.30,win:-.10,ko:-.05}[st];
       g.strokeStyle=look.hair?shade(look.hair,.10):shade(look.skin,lo*1.55);
       g.lineWidth=Math.max(1.6,r*.11);g.lineCap='round';
@@ -4486,14 +4605,39 @@ const BodyStyle={
       // nostril itself.
       const gob2=F.eyes==='goblin';
       g.globalAlpha=.5;g.fillStyle=shade(look.skin,lo);
-      g.beginPath();g.moveTo(fw*r*.62,r*(gob2?.10:.02));
-      g.quadraticCurveTo(fw*r*(gob2?1.02:.88),r*(gob2?.30:.16),fw*r*.58,r*.30);
+      g.beginPath();g.moveTo(fw*r*(brute?.56:.62),r*(gob2?.10:.02));
+      g.quadraticCurveTo(fw*r*(gob2?1.02:brute?.80:.88),r*(gob2?.30:brute?.22:.16),fw*r*(brute?.54:.58),r*.30);
       g.closePath();g.fill();g.globalAlpha=1;
       g.fillStyle=shade(look.skin,lo*1.6);
-      g.beginPath();g.ellipse(fw*r*(gob2?.82:.72),r*(gob2?.30:.20),r*.085,r*.05,fw*.4,0,Math.PI*2);g.fill()}
+      g.beginPath();g.ellipse(fw*r*(gob2?.82:brute?.64:.72),r*(gob2?.30:brute?.18:.20),
+        r*(brute?.10:.085),r*(brute?.06:.05),fw*.4,0,Math.PI*2);g.fill()}
     else if(front&&!skull){
       g.strokeStyle=shade(look.skin,lo*1.2);g.lineWidth=Math.max(1.2,r*.08);
       g.beginPath();g.moveTo(r*.05,-r*.02);g.lineTo(r*.10,r*.22);g.lineTo(-r*.07,r*.24);g.stroke()}
+    if(brute&&!skull){
+      // The jaw slab. A brute's lower jaw is a separate mass from the cheek, so it needs its own
+      // plane: a crease from the ear hinge forward along the jawline, the cheek hollow above it,
+      // and a lit chin below -- without these three the silhouette's underbite read as a rounded
+      // blob, which is what the first pass did.
+      g.save();
+      g.globalAlpha=.32;g.fillStyle=shade(look.skin,lo*1.25);
+      g.beginPath();                                                  // cheek hollow over the jaw
+      if(front){g.ellipse(0,r*.34,r*.62,r*.20,0,0,Math.PI*2)}
+      else{g.moveTo(-fw*r*.60,r*.30);g.quadraticCurveTo(fw*r*.10,r*.46,fw*r*.66,r*.34);
+        g.quadraticCurveTo(fw*r*.10,r*.62,-fw*r*.58,r*.52);g.closePath()}
+      g.fill();
+      g.globalAlpha=.46;g.strokeStyle=shade(look.skin,lo*1.6);
+      g.lineWidth=Math.max(1.1,r*.06);g.lineCap='round';
+      g.beginPath();                                                  // the jawline crease itself
+      if(front){g.moveTo(-r*.56,r*.40);g.quadraticCurveTo(0,r*.66,r*.56,r*.40)}
+      else{g.moveTo(-fw*r*.56,r*.44);g.quadraticCurveTo(fw*r*.14,r*.56,fw*r*.74,r*.44)}
+      g.stroke();
+      g.globalAlpha=.30;g.fillStyle=shade(look.skin,Math.min(.95,hi*1.5));
+      g.beginPath();                                                  // the lit front of the chin
+      if(front)g.ellipse(0,r*.76,r*.30,r*.16,0,0,Math.PI*2);
+      else g.ellipse(fw*r*.50,r*.80,r*.26,r*.14,fw*.20,0,Math.PI*2);
+      g.fill();
+      g.restore()}
     this._paintMouth(g,r,look,st,fw,front,skull);
     g.restore();
     // --- hair on top (drawn after the clip is released so a fringe may overhang the silhouette)
@@ -4530,6 +4674,18 @@ const BodyStyle={
       g.strokeStyle=shade(hair,.20);g.lineWidth=Math.max(1,r*.055);
       for(let i=0;i<3;i++){const t=-.6+i*.5;
         g.beginPath();g.moveTo(fw*r*t,-r*.62);g.quadraticCurveTo(fw*r*(t+.1),-r*1.0,fw*r*(t+.02),-r*1.18);g.stroke()}}
+    else if(F.hair==='bald'){
+      // Not "no hair" (that is 'none', which draws nothing): a deliberately bald scalp, sold by the
+      // specular sheen a shaved head catches off an upper-left key light. Clipped to the skull so
+      // it cannot round off the brute's own flat cranium.
+      g.save();shape();g.clip();
+      g.globalAlpha=.15;g.fillStyle=shade(look.skin,Math.min(.95,hi*1.9));
+      g.beginPath();g.ellipse(front?0:-fw*r*.22,-r*.60,r*(front?.40:.34),r*.15,fw*.24,0,Math.PI*2);g.fill();
+      // and the occipital mass: a shadow down the BACK of the skull, so a bald head reads as a
+      // volume rather than as a smooth dome catching one big specular.
+      g.globalAlpha=.24;g.fillStyle=shade(look.skin,lo*1.1);
+      g.beginPath();g.ellipse(front?0:-fw*r*.72,r*.10,r*(front?.90:.34),r*.72,0,0,Math.PI*2);g.fill();
+      g.restore()}
     else if(F.hair==='mohawk'){
       g.fillStyle=hair;g.beginPath();
       g.moveTo(-fw*r*.50,-r*.86);
@@ -4618,7 +4774,11 @@ const BodyStyle={
       g.quadraticCurveTo(e.x,e.y-oh*.3,e.x+ew*.9,e.y+oh*.5);g.stroke()}},
   _paintMouth(g,r,look,st,fw,front,skull){
     const b=look.body,F=b.face,lo=b.skinShade[0];
-    const mx=front?0:fw*r*.34,my=r*.52,w=r*.34,fang=F.mouth==='fangs';
+    // A brute's mouth rides the jutting slab jaw, so it sits lower and further forward than a
+    // human's, and `fangs` means a pair of UPWARD tusks off the lower jaw (Grull) rather than the
+    // goblins' two downward fangs.
+    const brute=look.rig==='big';
+    const mx=front?0:fw*r*(brute?.56:.34),my=r*(brute?.50:.52),w=r*(brute?.34:.34),fang=F.mouth==='fangs';
     if(skull||F.mouth==='none'){
       // The skull's own teeth: a row of them across the jaw, dropped open when it is done.
       const drop=st==='ko'?r*.16:st==='attack'?r*.07:0;
@@ -4656,14 +4816,38 @@ const BodyStyle={
     if(st==='block'){ // clenched: a short, thick, hard line
       g.strokeStyle=shade(look.skin,lo*1.8);g.lineWidth=Math.max(2,r*.13);
       g.beginPath();g.moveTo(mx-w*.7,my);g.lineTo(mx+w*.7,my-r*.03);g.stroke()}
+    else if(brute){ // a brute's closed mouth is a hard dark slot cut across the jaw slab
+      g.strokeStyle=shade(look.skin,lo*2.1);g.lineWidth=Math.max(2,r*.12);g.lineCap='round';
+      g.beginPath();g.moveTo(mx-w*1.05,my-r*.04);g.quadraticCurveTo(mx,my+r*.08,mx+w*.95,my-r*.02);g.stroke();
+      g.strokeStyle=shade(look.skin,Math.min(.95,b.skinShade[1]*1.3));g.lineWidth=Math.max(.9,r*.05);
+      g.beginPath();g.moveTo(mx-w*.92,my+r*.08);g.quadraticCurveTo(mx,my+r*.18,mx+w*.84,my+r*.08);g.stroke()}
     else{ // idle: a relaxed flat line with a hint of a corner shadow
       g.strokeStyle=shade(look.skin,lo*1.5);g.lineWidth=Math.max(1.3,r*.08);
       g.beginPath();g.moveTo(mx-w*.75,my);g.quadraticCurveTo(mx,my+r*.05,mx+w*.75,my-r*.02);g.stroke()}
+    if(fang&&brute)return this._paintTusks(g,r,look,mx,my,w,fw,front);
     if(fang){ // two lower fangs riding over the closed lip
       g.fillStyle='#e8dcc0';g.strokeStyle=shade('#e8dcc0',-.45);g.lineWidth=.8;
       for(const s of[-.6,.6]){g.beginPath();
         g.moveTo(mx+s*w*.9,my+r*.02);g.lineTo(mx+s*w*.62,my-r*.18);g.lineTo(mx+s*w*1.16,my-r*.14);
         g.closePath();g.fill();g.stroke()}}},
+  // Grull's tusks: two heavy ivory curves growing UP out of the lower jaw and past the upper lip,
+  // the boss's own read against Mongo's plain slab jaw. Tips are capped at r*.28 above the mouth
+  // line, well inside the head circle, so they cost no extent -- the boss's tall geometry is the
+  // 'horns' PROP, which Rig.propExtra already folds.
+  _paintTusks(g,r,look,mx,my,w,fw,front){
+    const pairs=front?[[-1,w*.66],[1,w*.66]]:[[-1,w*.34],[1,w*.86]];
+    for(const p of pairs){
+      const s=p[0],off=p[1],bx=mx+(front?s*off:fw*s*off);
+      const tip=my-r*.28,lean=(front?s:fw*s)*r*.10;
+      const tusk=k=>{g.beginPath();
+        g.moveTo(bx-r*.09*k,my+r*.10);
+        g.quadraticCurveTo(bx-r*.13*k+lean*.4,my-r*.10,bx+lean,tip);
+        g.quadraticCurveTo(bx+r*.11*k+lean*.4,my-r*.08,bx+r*.09*k,my+r*.10);
+        g.closePath()};
+      g.fillStyle=shade('#e8dcc0',-.52);tusk(1.34);g.fill();
+      const tg=g.createLinearGradient(bx-r*.12,tip,bx+r*.12,my+r*.10);
+      tg.addColorStop(0,'#f4ecd8');tg.addColorStop(.6,'#e0d3b4');tg.addColorStop(1,'#b7a684');
+      g.fillStyle=tg;tusk(1);g.fill()}},
 
   // ---- hands and feet ---------------------------------------------------------------------------
   // The old rig drew no hand at all -- a forearm's round line cap was the fist. A real fist is what
@@ -5294,6 +5478,87 @@ const Rig={
         c.fillStyle='#3a2f22';for(let i=0;i<3;i++){c.beginPath();
           c.arc(h.x+face*(4+i*4),h.y-10-i*10,3,0,Math.PI*2);c.fill()}}}
     c.restore()},
+  // The layered brute body (Task 8.2). Same z-order and the same module set as _drawHuman -- back
+  // leg, back arm, torso, head, front leg, hips, front arm, held props -- because solveBig returns
+  // the SAME bone names as solve() does (Task 3.5's frozen interface reuses the human skeleton for
+  // 'big'), so nothing here needs a second joint vocabulary. What makes it a brute is the widths:
+  // every limb is authored thicker relative to look.limb than the human rig's are, and the fist is
+  // 1.55x the human rig's, which is what the pre-8.2 drawBig's own "1.5x" fist circle was for.
+  // Limb WIDTH is drawing only -- Rig.extent folds joints, the head circle and propExtra geometry,
+  // never a stroke width -- so none of these numbers can move a zoom cap or a reach budget.
+  _drawBrute(c,F,look,j,face,scale,poseKey,lit){
+    const limb=look.limb,fs=BodyStyle.faceState(poseKey);
+    const cf=part=>this.clothFor(look,part);
+    const armW=limb*1.06,foreW=limb*.86,thighW=limb*1.34,shinW=limb*1.04;
+    c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
+    const arm=(sh,el,hand)=>{
+      const jc=this.jointCol(look,'foreArm');
+      BodyStyle.joint(c,sh.x,sh.y,armW*.48,look,face,this.jointCol(look,'upperArm'));
+      BodyStyle.joint(c,el.x,el.y,Math.min(armW*.86,foreW)*.48,look,face,jc);
+      BodyStyle.limb(c,sh.x,sh.y,el.x,el.y,armW,look,{bone:'upperArm',cloth:cf('upperArm'),face,lit,w2:armW*.86});
+      BodyStyle.limb(c,el.x,el.y,hand.x,hand.y,foreW,look,{bone:'foreArm',cloth:cf('foreArm'),face,lit,w2:foreW*.92});
+      BodyStyle.seam(c,sh.x,sh.y,armW*.42,look,face,this.jointCol(look,'upperArm'));
+      BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5-1.4,look,face,jc);
+      BodyStyle.hand(c,hand.x,hand.y,limb*.62,look,face,Math.atan2(hand.y-el.y,hand.x-el.x),false)};
+    const leg=(hp,kn,ft)=>{
+      const jc=this.jointCol(look,'shin');
+      BodyStyle.joint(c,kn.x,kn.y,Math.min(thighW*.76,shinW)*.48,look,face,jc);
+      BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,thighW,look,{bone:'thigh',cloth:cf('thigh'),face,lit,w2:thighW*.76});
+      BodyStyle.limb(c,kn.x,kn.y,ft.x,ft.y,shinW,look,{bone:'shin',cloth:cf('shin'),face,lit,w2:shinW*.78});
+      BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.76,shinW)*.5-1.4,look,face,jc);
+      BodyStyle.foot(c,ft.x+face*limb*.30,ft.y+limb*.16,look,face,0)};
+    leg(j.lHip,j.lKnee,j.lFoot);
+    arm(j.lShoulder,j.lElbow,j.lHand);
+    BodyStyle.torso(c,j.neck,j.hip,look,face,lit);
+    const hx=j.head.x-j.neck.x,hy=j.head.y-j.neck.y;
+    c.save();c.translate(j.head.x,j.head.y);
+    if(hx||hy)c.rotate(Math.atan2(hx,-hy));
+    BodyStyle.head(c,0,0,look.headR,look,face,fs,lit);
+    c.restore();
+    leg(j.rHip,j.rKnee,j.rFoot);
+    BodyStyle.hips(c,j.hip.x,j.hip.y,look,face);
+    arm(j.rShoulder,j.rElbow,j.rHand);
+    for(const p of look.props||[]){
+      // 'trousers' is now real cloth (cloth.legs:'pants' -> BodyStyle.limb's pant overlay plus
+      // BodyStyle.hips), so it is skipped here for exactly the reason BODY_CLOTH_PROPS exists: the
+      // entry stays in look.props because that array is what Rig.extent/propExtra walk, and the
+      // extent snapshot is pinned against it. 'scars' is NOT skipped -- it is a decoration on a bare
+      // chest, not a garment, and still draws below.
+      if(p==='trousers')continue;
+      if(p==='scars'){ // a couple of jagged lighter lines across the bare chest, now with a shadow
+        const cx=(j.lShoulder.x+j.rShoulder.x)/2,cy=(j.lShoulder.y+j.rShoulder.y)/2+look.torsoLen*.16;
+        c.lineCap='round';
+        for(const sc of[[-13,-16,9,1],[6,-9,20,-1]]){
+          const x0=cx+sc[0],y0=cy+sc[1],x1=x0+sc[3]*9,y1=y0+sc[2];
+          c.strokeStyle=shade(look.skin,-.30);c.lineWidth=2.6;c.globalAlpha=.6;
+          c.beginPath();c.moveTo(x0,y0);c.quadraticCurveTo((x0+x1)/2+sc[3]*3,(y0+y1)/2,x1,y1);c.stroke();
+          c.strokeStyle=shade(look.skin,.26);c.lineWidth=1.3;c.globalAlpha=.85;
+          c.beginPath();c.moveTo(x0,y0);c.quadraticCurveTo((x0+x1)/2+sc[3]*3,(y0+y1)/2,x1,y1);c.stroke()}
+        c.globalAlpha=1}
+      if(p==='horns'){ // two curved horns sweeping up and back from the temples (geometry kept in
+        // sync with propExtra's own 'horns' entry, which is what folds them into Grull's extent)
+        const hr=look.headR;
+        const horn=(s,w,col)=>{c.strokeStyle=col;c.lineWidth=w;c.lineCap='round';
+          c.beginPath();c.moveTo(j.head.x+s*hr*.5,j.head.y-hr*.7);
+          c.quadraticCurveTo(j.head.x+s*hr*1.3,j.head.y-hr*1.5,j.head.x+s*hr*1.05,j.head.y-hr*2.1);
+          c.stroke()};
+        for(const s of[-1,1]){horn(s,7.5,look.body.outline);horn(s,5,'#e8ded0');
+          horn(s,1.8,shade('#e8ded0',-.24))}}
+      if(p==='spikedclub'){ // a bigger, spiked take on the human rig's 'club' prop
+        const h=j.rHand,len=look.armLen*.6;
+        c.strokeStyle=look.body.outline;c.lineWidth=19;c.lineCap='round';
+        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*len*.3,h.y-len);c.stroke();
+        const sg=c.createLinearGradient(h.x-8,h.y,h.x+10,h.y-len);
+        sg.addColorStop(0,shade(look.secondary,-.32));sg.addColorStop(.4,shade(look.secondary,.14));
+        sg.addColorStop(1,shade(look.secondary,-.26));
+        c.strokeStyle=sg;c.lineWidth=16;
+        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*len*.3,h.y-len);c.stroke();
+        for(let i=0;i<4;i++){const t=.25+i*.2,px=h.x+face*len*.3*t,py=h.y-len*t;
+          c.fillStyle=look.body.outline;
+          c.beginPath();c.moveTo(px,py-1);c.lineTo(px+face*9,py-4);c.lineTo(px,py+6.5);c.closePath();c.fill();
+          c.fillStyle='#c9c2b0';
+          c.beginPath();c.moveTo(px,py);c.lineTo(px+face*7,py-3);c.lineTo(px,py+5);c.closePath();c.fill()}}}
+    c.restore()},
   // Big-brute draw: same shading philosophy as draw() (thick rounded-cap limb strokes with a dark
   // outline under the fill, back-limbs-then-torso-then-front-limbs layering, a waist-tapered torso
   // hexagon) but built on solveBig's joints and with three brute-specific additions the human rig has
@@ -5307,6 +5572,10 @@ const Rig={
     look=look||lookFor(F.def);
     const scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solveBig(look,key,t01,face);
+    // Task 8.2: both big looks now ship a `.body` block, so this is the live path; everything
+    // below it is the pre-8.2 stroke rig, kept intact as the fallback for a big look that has none
+    // (there is none today). Exactly the shape of draw()'s own 8.1 short-circuit.
+    if(look.body)return this._drawBrute(c,F,look,j,face,scale,key);
     const skinDark=shade(look.skin,-.35);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
     const limb=(p,q,w)=>{c.lineCap='round';
@@ -12971,5 +13240,50 @@ Test.add('every rig lays its joint balls under both segments, inside the limb, a
     BodyStyle.joint=realJoint;BodyStyle.limb=realLimb;BodyStyle.seam=realSeam;
     CanvasRenderingContext2D.prototype.stroke=realStroke;
     G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+
+// ---- Task 8.2: the big and quad rigs join the body layer ---------------------------------------
+// The same "a drawing layer must not move a joint" guarantee the human snapshot carries, for the
+// big rig (Mongo/Grull, POSES_BIG/solveBig) and the quad rig (Donut/Grub/Mother Rat, POSES_QUAD/
+// solveQuad). Captured off commit 1a6d501 -- the end of Task 8.1, i.e. BEFORE any of this task's
+// drawing changes -- with the identical fold Rig.extent itself uses: every joint, the drawn head
+// circle's two top bounding corners, every prop's propExtra geometry, and each sample's own off.x
+// subtracted before folding reach. `all` is the whole-pose-set Rig.extent(look,1) that the per-fight
+// camera zoom cap and the EDGE_PAD reach test actually consume.
+const RIG_EXTENT_SNAPSHOT={
+  mongo:     {all:[334.5754,187.4256],idle:[333.9851,103.0334],light1:[333.0273,133.6164],
+              medium:[333.9851,165.8339],heavy:[310.8329,155.9732],s3:[259.8543,172.2391]},
+  grull:     {all:[363.7728,203.3896],idle:[362.4702,125.5216],light1:[361.0897,157.4792],
+              medium:[362.4702,154.4189],heavy:[336.3765,183.5089],s3:[285.8096,202.0061]},
+  donut:     {all:[210.0377,253.7186],idle:[167.0012,241.8271],light1:[177.2263,245.2749],
+              medium:[181.0170,253.7186],heavy:[199.2315,238.0660],s3:[210.0377,250.2928]},
+  grub:      {all:[139.9935,166.6493],idle:[ 95.3171,162.2700],light1:[107.9699,163.3302],
+              medium:[112.2700,166.6493],heavy:[132.3166,160.6234],s3:[132.6503,163.8746]},
+  mother_rat:{all:[203.9258,218.0666],idle:[163.5295,206.5849],light1:[172.7900,209.9745],
+              medium:[175.1072,218.0666],heavy:[192.4782,203.0485],s3:[203.9258,214.8900]}};
+Test.add('big/quad extent snapshot (per pose and whole-set) is unchanged by the body layer, to +/-0.5px',()=>{
+  const posesOf=(look,key)=>{
+    const table=look.rig==='quad'?POSES_QUAD:POSES_BIG;
+    const kf=table[key];let minY=0,maxReach=0;
+    for(let i=0;i<kf.length-1;i++){
+      const ta=kf[i].t,tb=kf[i+1].t;
+      for(const t of[ta,(ta+tb)/2,tb]){
+        const offX=samplePose(table,key,t).off.x||0;
+        const j=Rig.solve(look,key,t,1);
+        const fold=(x,y)=>{if(y<minY)minY=y;const rx=Math.abs(x-offX);if(rx>maxReach)maxReach=rx};
+        for(const b in j)fold(j[b].x,j[b].y);
+        fold(j.head.x-look.headR,j.head.y-look.headR);
+        fold(j.head.x+look.headR,j.head.y-look.headR);
+        for(const pid of look.props||[])for(const ep of Rig.propExtra(pid,look,j,1))fold(ep.x,ep.y)}}
+    return[-minY,maxReach]};
+  const near=(a,b,what)=>ok(Math.abs(a-b)<=0.5,what+': expected '+b.toFixed(4)+' +/-0.5, got '+a.toFixed(4));
+  for(const id in RIG_EXTENT_SNAPSHOT){
+    const look=LOOKS[id],snap=RIG_EXTENT_SNAPSHOT[id];
+    ok(look,'no look '+id);
+    ok(look.rig==='big'||look.rig==='quad',id+' must be a big or quad look');
+    const e=Rig.extent(look,1);
+    near(e.top,snap.all[0],id+'/extent.top');near(e.reach,snap.all[1],id+'/extent.reach');
+    for(const key of['idle','light1','medium','heavy','s3']){
+      const[top,reach]=posesOf(look,key);
+      near(top,snap[key][0],id+'/'+key+'.top');near(reach,snap[key][1],id+'/'+key+'.reach')}}});
 
 </script></body></html>
