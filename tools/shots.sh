@@ -95,4 +95,24 @@ for id in carl katia goblin skeleton; do
   $H --p1 "$id" --pose idle --shot "$S/p8-human-$id.png"
 done
 
+# ---- Phase 8: the big and quad rigs, and the cross-rig joint-seam polish (Task 8.2) -----------
+# Donut, Grull and Mother Rat use the same --pose idle fixture as the human shots above. Mongo does
+# NOT: --pose screenshots without ticking, so the camera sits at its initial zoom 1.0 and Mongo --
+# the tallest look in the roster -- has his head cut off by the HUD there (a pre-existing framing
+# quirk LOOKS.mongo's own Fix-round-2 comment already calls out; no test grades it). A one-second
+# deterministic --sim against an idle bot lets the per-fight zoom cap frame him properly.
+#
+# Note: a --sim shot has to clear the harness's own short-soak floor (frames_total + ko_ticks >=
+# 90% of the requested ticks). Hitstop does not advance G.fight.frame, so a hit-heavy matchup falls
+# under it and the harness exits 1 -- which is why these use an idle bot, and why the pre-existing
+# p3-mother line above already exits 1 on this tree (verified at 1a6d501 too; not this task's).
+#
+# p8-human-carl.png above is re-shot by the same loop it always was: it is the proof for the
+# joint-seam half of Task 8.2, so LOOK at it, not just at the new rigs -- a visible ring at a
+# shoulder, an elbow or a knee is a failure.
+$H --sim --seconds 1 --p1 mongo --p2 donut --bot idle --ai t1 --shot "$S/p8-mongo.png"
+$H --p1 donut --p2 goblin --pose idle --shot "$S/p8-donut.png"
+$H --p1 grull --p2 goblin --pose idle --shot "$S/p8-grull.png"
+$H --p1 mother_rat --p2 goblin --pose idle --shot "$S/p8-mother.png"
+
 echo "shots.sh: regenerated $(ls "$S"/*.png | wc -l | tr -d ' ') PNGs in $S"

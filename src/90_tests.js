@@ -5060,8 +5060,14 @@ Test.add('every rig lays its joint balls under both segments, inside the limb, a
         for(const L of ends){
           if(near(t,{x:L.x1,y:L.y1}))narrowest=Math.min(narrowest,L.w/2);
           if(near(t,{x:L.x2,y:L.y2}))narrowest=Math.min(narrowest,L.w2/2)}
-        ok(cap.r<narrowest,id+': the seam cap (r='+cap.r.toFixed(2)+') must sit strictly inside the '+
-          'narrowest segment it closes (half-width '+narrowest.toFixed(2)+'), or it breaks the outline');
+        // The cap must reach the dark outline ring (which _capsule grows 1.3 OUTSIDE the fill) or
+        // it cannot erase it -- that was the first pass's bug, plainly visible on the quad rig's
+        // 52px-wide barrel joint. It must also stop at that ring's own outer edge, or it would make
+        // the silhouette wider than the two segments already drew it.
+        ok(cap.r>=narrowest-.001,id+': the seam cap (r='+cap.r.toFixed(2)+') stops inside the fill '+
+          '(half-width '+narrowest.toFixed(2)+'), so the outline ring it exists to erase survives');
+        ok(cap.r<=narrowest+1.35,id+': the seam cap (r='+cap.r.toFixed(2)+') reaches past the outline '+
+          'the segments already draw (half-width '+narrowest.toFixed(2)+'+1.3) -- it would widen the silhouette');
         const capIdx=trace.indexOf(cap);
         for(const L of ends)ok(trace.indexOf(L)<capIdx,
           id+': the seam cap must be drawn AFTER both segments it closes, not before')}
@@ -5079,6 +5085,52 @@ Test.add('every rig lays its joint balls under both segments, inside the limb, a
     G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
 
 // ---- Task 8.2: the big and quad rigs join the body layer ---------------------------------------
+// Same schema walk as the human-look case above, but over EVERY look in LOOKS rather than a list,
+// so the eleven-look roster is checked as a whole and a new look cannot be added without one. The
+// enumerations are the Phase 8 frozen interface, spelled out again here deliberately: a typo'd
+// token fails silently (BodyStyle's switches fall through to "draw nothing"), which is exactly the
+// failure mode a schema test exists to catch.
+Test.add('every look in LOOKS carries a complete .body block with only schema-legal values',()=>{
+  const TORSO=['shirt','vest','bare','robe','chitin','fur','bone','plate'];
+  const LEGS=['pants','shorts','bare','robe','fur','bone'];
+  const EYES=['human','cat','rat','skull','goblin','none'];
+  const MOUTH=['human','fangs','snout','none'];
+  const HAIR=['crop','long','bald','mohawk','none'];
+  const EARS=['human','pointed','cat','rat','none'];
+  const HORNS=[false,'small','big'];
+  const hex=v=>typeof v==='string'&&/^#[0-9a-fA-F]{6}$/.test(v);
+  const ids=Object.keys(LOOKS);
+  eq(ids.length,11,'the roster is eleven looks; update this test if that changes');
+  for(const id of ids){
+    const look=LOOKS[id];
+    const b=look.body;ok(b,id+'.body must exist -- every rig now draws through BodyStyle');
+    ok(hex(b.outline),id+'.body.outline must be a #rrggbb hex, got '+b.outline);
+    ok(Array.isArray(b.skinShade)&&b.skinShade.length===2,id+'.body.skinShade must be a 2-entry array');
+    ok(b.skinShade[0]<0&&b.skinShade[0]>=-1,id+'.body.skinShade[0] must darken (in [-1,0)), got '+b.skinShade[0]);
+    ok(b.skinShade[1]>0&&b.skinShade[1]<=1,id+'.body.skinShade[1] must lighten (in (0,1]), got '+b.skinShade[1]);
+    const cl=b.cloth;ok(cl,id+'.body.cloth must exist');
+    ok(TORSO.includes(cl.torso),id+'.body.cloth.torso "'+cl.torso+'" is not one of '+TORSO.join('/'));
+    ok(LEGS.includes(cl.legs),id+'.body.cloth.legs "'+cl.legs+'" is not one of '+LEGS.join('/'));
+    ok(hex(cl.primary),id+'.body.cloth.primary must be a #rrggbb hex, got '+cl.primary);
+    ok(hex(cl.secondary),id+'.body.cloth.secondary must be a #rrggbb hex, got '+cl.secondary);
+    const fa=b.face;ok(fa,id+'.body.face must exist');
+    ok(EYES.includes(fa.eyes),id+'.body.face.eyes "'+fa.eyes+'" is not one of '+EYES.join('/'));
+    ok(hex(fa.iris),id+'.body.face.iris must be a #rrggbb hex, got '+fa.iris);
+    eq(typeof fa.brow,'boolean',id+'.body.face.brow must be a boolean');
+    ok(MOUTH.includes(fa.mouth),id+'.body.face.mouth "'+fa.mouth+'" is not one of '+MOUTH.join('/'));
+    ok(HAIR.includes(fa.hair),id+'.body.face.hair "'+fa.hair+'" is not one of '+HAIR.join('/'));
+    ok(EARS.includes(fa.ears),id+'.body.face.ears "'+fa.ears+'" is not one of '+EARS.join('/'));
+    ok(HORNS.includes(fa.horns),id+'.body.face.horns "'+fa.horns+'" is not one of false/small/big');
+    eq(look.id,id,id+'.id must be wired to its own LOOKS key (BodyStyle cache keys read it)')}
+  // The species-specific reads the Phase 8 ruling names, pinned so a palette edit cannot quietly
+  // turn Donut back into a generic head.
+  eq(LOOKS.donut.body.face.eyes,'cat','Donut must wear the cat face');
+  eq(LOOKS.donut.body.face.ears,'cat','Donut must have cat ears');
+  eq(LOOKS.mother_rat.body.face.eyes,'rat','Mother Rat must wear the rat face');
+  eq(LOOKS.mother_rat.body.face.mouth,'snout','Mother Rat must have a snout');
+  eq(LOOKS.grub.body.face.eyes,'none','the grub has no eyes');
+  eq(LOOKS.grull.body.face.mouth,'fangs','Grull must have tusks');
+  for(const id of['mongo','grull'])ok(LOOKS[id].body.face.brow,id+' is a brute: it must carry the heavy brow')});
 // The same "a drawing layer must not move a joint" guarantee the human snapshot carries, for the
 // big rig (Mongo/Grull, POSES_BIG/solveBig) and the quad rig (Donut/Grub/Mother Rat, POSES_QUAD/
 // solveQuad). Captured off commit 1a6d501 -- the end of Task 8.1, i.e. BEFORE any of this task's
@@ -5122,3 +5174,129 @@ Test.add('big/quad extent snapshot (per pose and whole-set) is unchanged by the 
     for(const key of['idle','light1','medium','heavy','s3']){
       const[top,reach]=posesOf(look,key);
       near(top,snap[key][0],id+'/'+key+'.top');near(reach,snap[key][1],id+'/'+key+'.reach')}}});
+// The HUD/roster bust must be the same character as the fight sprite for EVERY rig, not just the
+// human one: that is why the body layer exists at all. All eleven looks now have a .body block, so
+// all eleven go through BodyStyle.head, and each size caches separately (the head bitmap is
+// resolution-dependent, so a 112px roster card cannot be a rescaled 56px HUD bust).
+Test.add('every look\'s portrait is built from BodyStyle.head and cached per size',()=>{
+  for(const id in LOOKS){
+    const look=LOOKS[id];
+    look._portraits=null;look._portrait=null;
+    const a=Rig.portrait(look);
+    eq(a.width,56,id+' default portrait must be 56px');
+    ok(a===Rig.portrait(look),id+' must cache its 56px bust');
+    const b=Rig.portrait(look,112);
+    eq(b.width,112,id+' roster portrait must be 112px');
+    ok(b!==a,id+' must build the 112px bust separately, not rescale the 56px one');
+    ok(Rig.portrait(look,112)===b,id+' must cache its 112px bust')}
+  const real=BodyStyle.head;
+  try{
+    for(const id in LOOKS){
+      let calls=0;
+      BodyStyle.head=function(...a){calls++;return real.apply(this,a)};
+      LOOKS[id]._portraits=null;LOOKS[id]._portrait=null;
+      Rig.portrait(LOOKS[id]);
+      eq(calls,1,id+'\'s portrait must be drawn with BodyStyle.head, so the bust and the fight '+
+        'sprite cannot drift apart')}
+  }finally{BodyStyle.head=real;
+    for(const id in LOOKS){LOOKS[id]._portraits=null;LOOKS[id]._portrait=null}}});
+// The 8.1 perf contract, extended to the rigs this task added (the case above it covers the six
+// human looks and is left exactly as 8.1 wrote it). The quad rig is the one most at risk here: its
+// body is built from limb/blob/seam calls whose sizes are derived from bodyLen and the live joint
+// positions, so a width accidentally computed off a pose-varying quantity -- rather than off the
+// look's own constants -- would allocate a fresh bitmap every frame.
+Test.add('BodyStyle\'s cache stops growing for every rig: 600 drawn frames of one pose add no entries',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  try{
+    BodyStyle.clearCache();
+    const ids=Object.keys(LOOKS).filter(id=>DEFS[id]);
+    ok(ids.length>=11,'every look must have a DEFS entry to be drawn here, got '+ids.length);
+    const fighters=ids.map(id=>mkFight({p1:DEFS[id]}).p1);
+    const cam={x:0,zoom:1};
+    const drawAll=frame=>{
+      for(const F of fighters){
+        F.f=frame%60;
+        c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,frame);c.restore()}};
+    // Warm on ONE frame, not a whole cycle. Rig.poseFor quantizes an idle fighter's t01 to f%60, so
+    // a 60-frame warm-up saturates every t01 a later loop can produce and a key that (wrongly) folds
+    // t01 in would still come out flat. Warming a single frame and then sweeping the cycle is the
+    // version of this check that actually catches a pose-dependent key.
+    drawAll(0);
+    const warm=BodyStyle.cacheCount();
+    ok(warm>0,'the warm-up must actually have cached something, got '+warm);
+    for(let i=0;i<600;i++)drawAll(i);
+    eq(BodyStyle.cacheCount(),warm,'600 further frames of the same pose at the same zoom bucket must '+
+      'add no cache entries (a key folding in t01, a joint length or the frame counter grows here)');
+  }finally{G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+// The Phase 8 ruling's species faces have to reach the real draw, through BodyStyle.head, and not
+// be a helper nobody calls -- the same thing the 8.1 'Rig.draw bakes the head bitmap' case pins for
+// the human rig. Checked three ways: the head bitmap is baked at all, the species branch is the one
+// that painted it, and the six face states are six distinct bitmaps rather than one reused.
+Test.add('the big and quad rigs draw their faces through BodyStyle.head, with the species branch',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  const realBeast=BodyStyle._paintBeastHead,realGrub=BodyStyle._paintGrubHead;
+  try{
+    for(const id of['mongo','grull','donut','grub','mother_rat']){
+      BodyStyle.clearCache();
+      const f=mkFight({p1:DEFS[id]}),F=f.p1;
+      G.fight=f;G.state='FIGHT';F.state='IDLE';F.f=0;
+      c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,{x:0,zoom:1},0);c.restore();
+      const keys=Object.keys(BodyStyle._cache).filter(k=>k.indexOf('|head:')>=0);
+      ok(keys.some(k=>k.indexOf(id+'|head:idle:')>=0),
+        id+' must bake its own head bitmap through BodyStyle.head, got '+keys);
+      // and a fighter in hitstun must wear the hit face, i.e. the mapping reaches every rig
+      BodyStyle.clearCache();
+      F.state='HITSTUN';F.f=2;F.stun=12;
+      c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,{x:0,zoom:1},1);c.restore();
+      ok(Object.keys(BodyStyle._cache).some(k=>k.indexOf(id+'|head:hit:')>=0),
+        'a HITSTUN '+id+' must bake head:hit')}
+    // the species branch, not the human profile, is what paints a quad head
+    for(const id of['donut','mother_rat','grub']){
+      BodyStyle.clearCache();
+      let beast=0,grub=0;
+      BodyStyle._paintBeastHead=function(...a){beast++;return realBeast.apply(this,a)};
+      BodyStyle._paintGrubHead=function(...a){grub++;return realGrub.apply(this,a)};
+      BodyStyle.head(c,0,0,LOOKS[id].headR,LOOKS[id],1,'idle');
+      BodyStyle._paintBeastHead=realBeast;BodyStyle._paintGrubHead=realGrub;
+      ok(beast===1,id+' must paint through the quad species branch, got '+beast+' call(s)');
+      if(id==='grub')ok(grub===1,'the grub must reach its own head painter (mandibles, no eyes)')}
+    // six states, six bitmaps, for every look this task added
+    for(const id of['mongo','grull','donut','grub','mother_rat']){
+      BodyStyle.clearCache();
+      const seen=new Set();
+      for(const st of['idle','hit','ko','block','attack','win']){
+        BodyStyle.head(c,0,0,LOOKS[id].headR,LOOKS[id],1,st);
+        const n=BodyStyle.cacheCount();
+        ok(!seen.has(n),id+'/'+st+' must add its own cache entry (count stuck at '+n+')');
+        seen.add(n)}}
+  }finally{
+    BodyStyle._paintBeastHead=realBeast;BodyStyle._paintGrubHead=realGrub;
+    G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+// Donut's whiskers and tiara and Mother Rat's teeth stay WORLD-SPACE props, because Rig.propExtra
+// folds their geometry into each look's extent and the reach budget was tuned against exactly those
+// points (Donut's whisker tip is her own worst case -- see LOOKS.donut's fix-wave item 9 comment).
+// This pins that they are still drawn, and still drawn from the same anchor propExtra assumes.
+Test.add('the quad rig\'s head props stay world-space and keep propExtra\'s own anchors',()=>{
+  for(const id of['donut','mother_rat']){
+    const look=LOOKS[id];
+    ok(!look.body.face.horns,id+' must not grow a second set of face-module decorations');
+    const j=Rig.solve(look,'idle',0,1);
+    for(const pid of look.props){
+      const pts=Rig.propExtra(pid,look,j,1);
+      if(pid==='segments')continue;
+      ok(pts.length>0,id+"'s "+pid+' must still contribute extent geometry');
+      for(const p of pts)ok(isFinite(p.x)&&isFinite(p.y),id+'/'+pid+' extent point must be finite')}}
+  const j=Rig.solve(LOOKS.donut,'idle',0,1);
+  const w=Rig.propExtra('whiskers',LOOKS.donut,j,1)[0];
+  const r=LOOKS.donut.headR;
+  ok(Math.abs(w.x-(j.head.x+r*.68+r*1.35))<1e-6,
+    'the whisker tip anchor must stay head.x + headR*(0.68+1.35); the drawn whiskers are kept inside it');
+  // and no species muzzle may out-reach the props extent already folds
+  for(const id of['donut','mother_rat','grub']){
+    const look=LOOKS[id];
+    ok(look.rig==='quad',id+' must be a quad look');
+    ok(look.body.face.eyes!=='human',id+' must not fall back to the human face')}});

@@ -3695,7 +3695,18 @@ const LOOKS={
   donut:{rig:'quad',species:'cat',skin:'#f7ecdc',earInner:'#f6b8d6',eye:'#3f7fd6',accent:'#f4c542',
     hipH:65,legLen:65,bodyLen:134,neckLen:46,headR:26,tailLen:120,
     frontW:20,backW:24,legW:18,
-    props:['tiara','whiskers']},
+    props:['tiara','whiskers'],
+    // Task 8.2: the quad rig's `.body` block. Same frozen schema and the same purely-additive rule
+    // as every look above -- solveQuad and every extent/reach/zoom number tuned against it since
+    // Phase 3 are bit-identical. cloth 'fur' is not an overlay for a quad: Rig.clothFor maps every
+    // quad bone to 'bare' so the coat IS the skin gradient, which is what fur actually looks like
+    // at this size. skinShade darkens less than a human's because cream fur has nowhere to go.
+    // The cat face (almond eyes with a slit pupil, pink inner ears, a two-lobed muzzle) is the
+    // ruling's own list; the tiara and the whiskers stay world-space props so Rig.propExtra keeps
+    // folding them exactly as before.
+    body:{outline:'#57453a',skinShade:[-0.34,0.10],
+      cloth:{torso:'fur',legs:'fur',primary:'#f7ecdc',secondary:'#e4d2b8'},
+      face:{eyes:'cat',iris:'#3f7fd6',brow:false,mouth:'snout',hair:'none',ears:'cat',horns:false}}},
   // Mongo: Task 3.5's RigBig brute rig (see Rig.solve's 'big' branch below and Rig.solveBig).
   // Grey-green skin, bald with a heavy brow (drawn unconditionally in drawBig, not a props entry),
   // bare barrel chest with a couple of scars, dark trousers instead of a shirt. hunch is the per-look
@@ -3790,7 +3801,15 @@ const LOOKS={
   grub:{rig:'quad',species:'grub',skin:'#c7d19a',headFill:'#33401d',segDark:'#5a6a30',
     hipH:40,legLen:40,bodyLen:119,neckLen:15,headR:17,tailLen:36,
     frontW:13,backW:13,legW:14,
-    props:['segments']},
+    props:['segments'],
+    // Task 8.2: cloth.torso 'chitin' is what gives the body its banded plates (the 'segments' prop
+    // used to draw three flat rings; BodyStyle now draws real overlapping segment plates and the
+    // prop loop skips it). eyes 'none' and mouth 'fangs' are the ruling's "no eyes, mandibles" --
+    // 'fangs' is the schema's token for hard mouthparts, and _paintGrubHead draws the pair of
+    // mandibles it means for a larva. iris is required by the schema even with no eye to wear it.
+    body:{outline:'#1e2a0d',skinShade:[-0.30,0.22],
+      cloth:{torso:'chitin',legs:'bare',primary:'#5a6a30',secondary:'#33401d'},
+      face:{eyes:'none',iris:'#33401d',brow:false,mouth:'fangs',hair:'none',ears:'none',horns:false}}},
   // Grull (boss): Task 3.5's RigBig brute rig, same bone set and Fix-round-1 reasoning as Mongo (see
   // LOOKS.mongo's comment — a long torso can't carry a big permanent lean without reading as a
   // diagonal slab, and margin above the 1.25x height floor should be minimized to keep idle framing
@@ -3836,7 +3855,14 @@ const LOOKS={
     teeth:'#e8d24a',eye:'#1a1a1a',
     hipH:65,legLen:65,bodyLen:125,neckLen:42,headR:26,tailLen:170,
     frontW:22,backW:26,legW:20,
-    props:['teeth']}};
+    props:['teeth'],
+    // Task 8.2: the ruling's rat -- a long tapering snout, bead eyes with no visible sclera, and
+    // big rounded ears, the near one notched (a boss with a history). The snout tip stops at 1.10r,
+    // which is where the 'teeth' prop already puts drawn geometry (Rig.propExtra folds
+    // head.x + headR*0.85 + 7 = 1.12r), so the new silhouette adds no reach at all.
+    body:{outline:'#2a2018',skinShade:[-0.30,0.20],
+      cloth:{torso:'fur',legs:'fur',primary:'#6b5a4a',secondary:'#4a3d32'},
+      face:{eyes:'rat',iris:'#151515',brow:false,mouth:'snout',hair:'none',ears:'rat',horns:false}}}};
 // Task 8.1: every look learns its own key, so BodyStyle's offscreen cache can name its entries
 // (`look|bone|face|zoomBucket`) without every call site threading an id down. Assigned here rather
 // than written into each literal above so it can never drift from the key it is filed under.
@@ -3941,7 +3967,18 @@ const BodyStyle={
     if(c&&c.getTransform){
       const m=c.getTransform(),v=Math.hypot(m.a,m.b);
       if(isFinite(v)&&v>1e-4)s=v}
-    return Math.max(.5,Math.min(4,Math.round(s*2)/2))},
+    return Math.max(.5,Math.min(4,this._r(s,2)/2))},
+  // Task 8.2. Every rounded component of a cache key goes through this. Math.round breaks ties at
+  // exactly .5, and several of the numbers that end up in a key land exactly ON a tie:
+  //   * Mongo and Grull have def.scale 1.25, so zoomBucket rounds 2.5 -- and the CTM hypot comes
+  //     back as 1.25 or 1.2499999999 depending on the head's own rotation that frame, which flipped
+  //     the bucket between 1.5 and 1.0 frame to frame and cached every part of both brutes twice.
+  //   * A bone length is legLen*.5, so Mongo's thigh is 73.5 -- and it arrives via sin/cos, so it
+  //     is 73.5 or 73.49999999999999 and the key alternated between ':73:' and ':74:'.
+  // Neither is a visual bug, which is exactly why it needed a test to find: it doubles the bitmap
+  // count and re-paints a whole limb stack on the frames it flips. The epsilon is far larger than
+  // the float noise (1e-13 or so) and far smaller than any real difference a key should resolve.
+  _r(v,m){return Math.round(v*(m||1)+1e-6)},
   // look|part|face|zoomBucket -- the frozen key shape. face is folded into EVERY part, including the
   // ones whose art happens to be facing-symmetric today (a bone tube): Task 8.3's lighting makes
   // every part facing-dependent, and a key whose shape has to change then is a key that gets
@@ -4009,7 +4046,7 @@ const BodyStyle={
     // Bone lengths are constants of the look, so rounding len into the key is a no-op in practice --
     // it is here only so a caller passing an odd-length segment can never collide with a cached
     // bitmap of a different size.
-    const part='limb:'+bone+':'+cloth+':'+Math.round(len)+':'+Math.round(w*4)+':'+Math.round(w2*4);
+    const part='limb:'+bone+':'+cloth+':'+this._r(len)+':'+this._r(w,4)+':'+this._r(w2,4);
     const half=Math.max(w,w2)*.5+Math.max(4,w*.5); // outline + cloth bulge + bone-knob headroom
     const bw=Math.ceil((len+half*2)*px),bh=Math.ceil(half*2*px);
     const cv=this.cache(this.key(look,part,face,zb),bw,bh,g=>{
@@ -4107,7 +4144,7 @@ const BodyStyle={
       this.limb(c,hip.x,hip.y,chest.x,chest.y,tw,look,
         {bone:'trunk',cloth:b.cloth.torso==='bone'?'bare':covered?'full':b.cloth.torso==='robe'?'full':'bare',face,lit,w2:tw*.94});
       c.restore()}
-    const cv=this.cache(this.key(look,'torso:'+Math.round(L),face,zb),bw,bh,g=>{
+    const cv=this.cache(this.key(look,'torso:'+this._r(L),face,zb),bw,bh,g=>{
       g.scale(px,px);g.translate(MW/2,L+topPad);
       this._paintTorso(g,L,look,face)});
     c.save();
@@ -4420,10 +4457,16 @@ const BodyStyle={
     const fx=face>0?1:face<0?-1:0;
     const zb=this.zoomBucket(c),px=this.SS*zb;
     const ear=b.face.ears==='pointed'?this.earLen(look,r):0;
-    const halfW=r+Math.max(ear*1.15,r*.55)+4;
-    const up=r*1.62,down=r*1.60;
+    // The quad rig folds its ears INTO the head bitmap (the pre-8.2 drawQuad drew them separately
+    // in world space, so they stayed bolt-upright while the head turned), which needs more room
+    // above centre than a human head does. Both are still inside the bound the pre-8.2 art already
+    // used -- a cat ear tipped to 1.68r and a rat ear topped at 1.76r before this task -- so nothing
+    // here reaches higher than the silhouette Rig.extent has been folding as a circle all along.
+    const beast=look.rig==='quad';
+    const halfW=beast?r*1.72+4:r+Math.max(ear*1.15,r*.55)+4;
+    const up=beast?r*1.94:r*1.62,down=beast?r*1.34:r*1.60;
     const bw=Math.ceil(halfW*2*px),bh=Math.ceil((up+down)*px);
-    const cv=this.cache(this.key(look,'head:'+st+':'+Math.round(r),fx,zb),bw,bh,g=>{
+    const cv=this.cache(this.key(look,'head:'+st+':'+this._r(r),fx,zb),bw,bh,g=>{
       g.scale(px,px);g.translate(halfW,up);
       this._paintHead(g,r,look,fx,st)});
     c.drawImage(cv,x-halfW,y-up,cv.width/px,cv.height/px)},
@@ -4439,6 +4482,7 @@ const BodyStyle={
     // forward than the nose does, deep-set small eyes under it, and a slab jaw past the lip line.
     // `beast` is the quad rig, where look.species picks cat/rat/grub geometry (see _paintBeastHead).
     const brute=look.rig==='big';
+    if(look.rig==='quad')return this._paintBeastHead(g,r,look,fw,front,st);
     g.lineJoin='round';g.lineCap='round';
     // --- hair behind the head (a long mane reads as mass BEHIND the skull, not a hat)
     if(F.hair==='long'){
@@ -4722,6 +4766,250 @@ const BodyStyle={
       g.globalAlpha=.34;g.fillStyle='#0a0710';
       g.beginPath();g.rect(-r*1.2,-r*1.2,r*2.4,r*.90);g.fill();
       g.globalAlpha=1;g.restore()}},
+  // ---- the quad rig's three species heads (Task 8.2) ---------------------------------------------
+  // A cat, a rat and a larva do not share a skull with a human, so the profile module above is not
+  // reused for them at all -- only the surrounding machinery (the cache, the face state, the
+  // facing) is. Each species gets its own silhouette, and the EARS are part of that silhouette
+  // rather than world-space decorations bolted on after, which is what makes a turned head still
+  // look like the same animal.
+  //
+  // FORWARD BOUND, the one number that matters outside the art: every species' muzzle tip stops at
+  // or before 1.10r. That is where Donut's 'whiskers' and Mother Rat's 'teeth' props already put
+  // drawn geometry (Rig.propExtra folds head.x + headR*0.85 + 7 for the teeth, and headR*2.03 for
+  // the whisker tip), so no new drawn geometry reaches past what extent already accounts for.
+  _paintBeastHead(g,r,look,fw,front,st){
+    const b=look.body,F=b.face,lo=b.skinShade[0],hi=b.skinShade[1];
+    const sp=look.species||'cat';
+    const fill=look.headFill||look.skin;
+    g.lineJoin='round';g.lineCap='round';
+    const open={idle:1,attack:.74,block:.56,hit:.40,win:.62,ko:0}[st];
+    if(sp==='grub')return this._paintGrubHead(g,r,look,fw,front,st);
+    const rat=sp==='rat';
+    // --- ears, behind the skull so its own fill covers each base. Tips stop at 1.62r (cat) and
+    //     1.70r (rat) above centre -- tighter than the pre-8.2 art's own 1.68r/1.76r.
+    const ears=front
+      ?[[-1,-r*.58,1],[1,r*.58,1]]
+      :[[-1,-fw*r*.30,.86],[1,fw*r*.34,1]];
+    for(const e of ears){
+      const bx=front?e[1]:e[1],by=-r*(rat?.74:.80),k=e[2];
+      const drop=st==='ko'||st==='hit'?.34:st==='block'?.18:0;   // ears flatten when the animal is hurt
+      const tilt=(front?e[0]:fw*e[0]*.6)*(.22+drop*1.1);
+      g.save();g.translate(bx,by);g.rotate(tilt);
+      if(rat){ // big rounded discs with a notch bitten out of the near one
+        const er=r*.80*k;
+        g.fillStyle=b.outline;g.beginPath();g.ellipse(0,-er*.32,er*.94,er,0,0,Math.PI*2);g.fill();
+        const eg=g.createLinearGradient(-er,-er,er*.6,er);
+        eg.addColorStop(0,shade(look.skin,hi));eg.addColorStop(.55,look.skin);eg.addColorStop(1,shade(look.skin,lo));
+        g.fillStyle=eg;g.beginPath();g.ellipse(0,-er*.32,er*.82,er*.88,0,0,Math.PI*2);g.fill();
+        if(look.earInner){g.fillStyle=look.earInner;
+          g.beginPath();g.ellipse(0,-er*.26,er*.50,er*.56,0,0,Math.PI*2);g.fill();
+          g.globalAlpha=.35;g.fillStyle=shade(look.earInner,-.40);
+          g.beginPath();g.ellipse(er*.10,-er*.06,er*.34,er*.36,0,0,Math.PI*2);g.fill();g.globalAlpha=1}
+        if(k===1&&(!front||e[0]>0)){ // the notch: a torn ear is the boss's own history
+          g.fillStyle=b.outline;g.beginPath();
+          g.moveTo(er*.30,-er*1.18);g.lineTo(er*.06,-er*.72);g.lineTo(er*.62,-er*.78);g.closePath();g.fill()}}
+      else{ // cat: a tall triangle with a soft outer curve and a pink inner
+        const eh=r*.82*k,ew=r*.46*k;
+        const tri=(sx,sy)=>{g.beginPath();
+          g.moveTo(-ew*sx,eh*.34*sy);
+          g.quadraticCurveTo(-ew*.86*sx,-eh*.62*sy,0,-eh*sy);
+          g.quadraticCurveTo(ew*.86*sx,-eh*.60*sy,ew*sx,eh*.36*sy);
+          g.closePath()};
+        g.fillStyle=b.outline;tri(1.18,1.10);g.fill();
+        const eg=g.createLinearGradient(-ew,-eh,ew*.6,eh*.4);
+        eg.addColorStop(0,shade(look.skin,hi));eg.addColorStop(.6,look.skin);eg.addColorStop(1,shade(look.skin,lo));
+        g.fillStyle=eg;tri(1,1);g.fill();
+        if(look.earInner){g.fillStyle=look.earInner;tri(.54,.68);g.fill()}}
+      g.restore()}
+    // --- skull + muzzle, one path so the muzzle is cut INTO the silhouette (the same lesson the
+    //     human rig's nose taught in 8.1: a muzzle painted on the cheek only ever reads as a patch)
+    const shape=()=>{
+      g.beginPath();
+      if(front){
+        if(rat){
+          g.moveTo(-r*.86,-r*.28);
+          g.quadraticCurveTo(-r*.92,-r*.86,0,-r*.90);
+          g.quadraticCurveTo(r*.92,-r*.86,r*.86,-r*.28);
+          g.quadraticCurveTo(r*.72,r*.42,r*.26,r*.66);
+          g.quadraticCurveTo(0,r*1.06,-r*.26,r*.66);
+          g.quadraticCurveTo(-r*.72,r*.42,-r*.86,-r*.28)}
+        else{
+          g.moveTo(-r*.94,-r*.20);
+          g.quadraticCurveTo(-r*.92,-r*.94,0,-r*.96);
+          g.quadraticCurveTo(r*.92,-r*.94,r*.94,-r*.20);
+          g.quadraticCurveTo(r*.96,r*.56,r*.38,r*.86);
+          g.quadraticCurveTo(0,r*1.02,-r*.38,r*.86);
+          g.quadraticCurveTo(-r*.96,r*.56,-r*.94,-r*.20)}
+        g.closePath();return}
+      if(rat){ // a long wedge: heavy cranium behind, tapering to a pointed snout
+        g.moveTo(-fw*r*.92,r*.06);
+        g.quadraticCurveTo(-fw*r*.94,-r*.78,-fw*r*.10,-r*.84);   // cranium
+        g.quadraticCurveTo(fw*r*.48,-r*.80,fw*r*.74,-r*.36);     // brow sloping into the snout
+        g.quadraticCurveTo(fw*r*1.02,-r*.06,fw*r*1.10,r*.20);    // the snout's own tip
+        g.quadraticCurveTo(fw*r*.94,r*.40,fw*r*.62,r*.40);       // under the snout, back to the lip
+        g.quadraticCurveTo(fw*r*.34,r*.62,-fw*r*.12,r*.78);      // a soft jowl
+        g.quadraticCurveTo(-fw*r*.76,r*.74,-fw*r*.92,r*.06);
+        g.closePath();return}
+      // cat: a round skull with a short, blunt muzzle and a full cheek ruff
+      g.moveTo(-fw*r*.96,r*.02);
+      g.quadraticCurveTo(-fw*r*.94,-r*.86,-fw*r*.06,-r*.92);     // domed cranium
+      g.quadraticCurveTo(fw*r*.66,-r*.86,fw*r*.80,-r*.40);       // forehead down to the brow
+      g.quadraticCurveTo(fw*r*.72,-r*.20,fw*r*.70,-r*.08);       // the stop, just above the muzzle
+      g.quadraticCurveTo(fw*r*.96,r*.02,fw*r*.95,r*.22);         // the muzzle itself
+      g.quadraticCurveTo(fw*r*.86,r*.46,fw*r*.52,r*.52);         // chin
+      g.quadraticCurveTo(fw*r*.22,r*.86,-fw*r*.30,r*.88);        // cheek ruff
+      g.quadraticCurveTo(-fw*r*.92,r*.76,-fw*r*.96,r*.02);
+      g.closePath()};
+    g.strokeStyle=b.outline;g.lineWidth=Math.max(1.5,r*.11);shape();g.stroke();
+    const hg=g.createLinearGradient(-r*.8,-r*.9,r*.7,r*.9);
+    hg.addColorStop(0,shade(fill,hi));hg.addColorStop(.46,fill);hg.addColorStop(1,shade(fill,lo*.95));
+    g.fillStyle=hg;shape();g.fill();
+    g.save();shape();g.clip();
+    // --- fur/fleece: a soft darker mask over the back of the skull, and a lighter muzzle patch,
+    //     which is what gives a one-colour animal head any read at all
+    g.globalAlpha=.26;g.fillStyle=shade(fill,lo*1.15);
+    g.beginPath();g.ellipse(front?0:-fw*r*.62,r*.14,r*(front?.96:.46),r*.82,0,0,Math.PI*2);g.fill();
+    g.globalAlpha=.42;g.fillStyle=shade(fill,Math.min(.95,hi*1.5));
+    if(rat)g.beginPath(),g.ellipse(front?0:fw*r*.72,r*.16,r*(front?.40:.36),r*.26,fw*.30,0,Math.PI*2),g.fill();
+    else g.beginPath(),g.ellipse(front?0:fw*r*.64,r*.20,r*(front?.46:.34),r*.28,0,0,Math.PI*2),g.fill();
+    g.globalAlpha=1;
+    // --- eyes
+    const eyeX=rat?.30:.36,eyeY=rat?-.14:-.20;
+    const es=front?[{x:-r*(rat?.36:.42),y:r*eyeY,in:1},{x:r*(rat?.36:.42),y:r*eyeY,in:-1}]
+                  :[{x:fw*r*eyeX,y:r*eyeY,in:-fw}];
+    for(const e of es)this._paintBeastEye(g,r,look,e,open,st,fw,front,rat);
+    // --- nose + mouth
+    const nx=front?0:fw*r*(rat?.98:.86),ny=r*(rat?.16:.10);
+    const pink=look.earInner||shade(fill,lo*1.6);
+    if(st==='ko'){ // a slack open mouth: the animal equivalent of the human rig's dropped jaw
+      g.fillStyle='#3a1d18';g.beginPath();
+      g.ellipse(front?0:fw*r*(rat?.78:.72),r*(rat?.40:.36),r*.19,r*.15,0,0,Math.PI*2);g.fill()}
+    else if(st==='attack'){ // a hiss/snarl: open mouth with a fang pair
+      const mxo=front?0:fw*r*(rat?.76:.70),myo=r*(rat?.38:.34);
+      g.fillStyle='#3a1d18';g.beginPath();g.ellipse(mxo,myo,r*.22,r*.17,0,0,Math.PI*2);g.fill();
+      g.fillStyle='#f2ecdc';
+      for(const s of[-.55,.55]){g.beginPath();
+        g.moveTo(mxo+s*r*.16,myo-r*.14);g.lineTo(mxo+s*r*.05,myo+r*.09);g.lineTo(mxo+s*r*.26,myo+r*.04);
+        g.closePath();g.fill()}}
+    else{ // the closed muzzle line: a cat's two-lobed curve, a rat's single soft one
+      g.strokeStyle=shade(fill,lo*1.7);g.lineWidth=Math.max(1,r*.06);
+      const mxo=front?0:fw*r*(rat?.86:.78),myo=r*(rat?.30:.26);
+      if(rat){g.beginPath();g.moveTo(mxo-r*.20,myo);g.quadraticCurveTo(mxo-r*.04,myo+r*.14,mxo+r*.10,myo+r*.04);g.stroke()}
+      else{g.beginPath();g.moveTo(mxo,myo-r*.04);
+        g.quadraticCurveTo(mxo-r*.02,myo+r*.16,mxo-r*.20,myo+r*.06);g.stroke();
+        g.beginPath();g.moveTo(mxo,myo-r*.04);
+        g.quadraticCurveTo(mxo+r*.10,myo+r*.16,mxo+r*.24,myo+r*.02);g.stroke()}}
+    g.fillStyle=shade(pink,-.14);g.strokeStyle=b.outline;g.lineWidth=Math.max(.7,r*.045);
+    g.beginPath();                                                   // the nose leather itself
+    if(rat)g.ellipse(nx,ny,r*.12,r*.10,fw*.3,0,Math.PI*2);
+    else{g.moveTo(nx-r*.14,ny-r*.07);g.lineTo(nx+r*.14,ny-r*.07);g.lineTo(nx,ny+r*.11);g.closePath()}
+    g.fill();g.stroke();
+    g.restore();
+    if(look.props&&look.props.includes('tiara')){
+      // Donut's tiara is still a world-space prop (Rig.propExtra folds its three points), so it is
+      // NOT drawn here -- only the dent it presses into the fur, which has to ride the head bitmap
+      // or it slides off the forehead the moment the head turns.
+      g.save();shape();g.clip();g.globalAlpha=.22;g.fillStyle=shade(fill,lo*1.3);
+      g.beginPath();g.ellipse(front?0:-fw*r*.06,-r*.74,r*.52,r*.13,0,0,Math.PI*2);g.fill();g.restore()}},
+  _paintBeastEye(g,r,look,e,open,st,fw,front,rat){
+    const b=look.body,F=b.face,lo=b.skinShade[0];
+    if(st==='ko'){ // the same unambiguous "this fighter is done" signal the human rig uses
+      g.strokeStyle=shade(look.headFill||look.skin,lo*1.9);g.lineWidth=Math.max(1.6,r*.09);g.lineCap='round';
+      const k=r*.13;
+      g.beginPath();g.moveTo(e.x-k,e.y-k);g.lineTo(e.x+k,e.y+k);g.stroke();
+      g.beginPath();g.moveTo(e.x+k,e.y-k);g.lineTo(e.x-k,e.y+k);g.stroke();
+      return}
+    if(rat){ // a small black bead with one hard specular -- a rat's eye has no visible sclera
+      const rr=r*.115*Math.max(.35,open);
+      g.fillStyle=b.outline;g.beginPath();g.ellipse(e.x,e.y,rr*1.35,rr*1.3,0,0,Math.PI*2);g.fill();
+      g.fillStyle=F.iris;g.beginPath();g.ellipse(e.x,e.y,rr,rr*.96,0,0,Math.PI*2);g.fill();
+      g.fillStyle='rgba(255,255,255,.8)';
+      g.beginPath();g.arc(e.x-rr*.32,e.y-rr*.34,Math.max(.5,rr*.36),0,Math.PI*2);g.fill();
+      return}
+    // cat: a big almond eye, tilted up at the outer corner, with a vertical slit pupil
+    const ew=r*.24,eh=r*.20*Math.max(.20,open),tilt=(front?e.in:-fw)*.20;
+    const almond=()=>{g.beginPath();
+      g.moveTo(e.x-ew,e.y+eh*.12);
+      g.quadraticCurveTo(e.x-ew*.2,e.y-eh*1.25,e.x+ew,e.y-eh*.42);
+      g.quadraticCurveTo(e.x+ew*.2,e.y+eh*1.25,e.x-ew,e.y+eh*.12);
+      g.closePath()};
+    g.save();g.translate(e.x,e.y);g.rotate(tilt);g.translate(-e.x,-e.y);
+    g.fillStyle=b.outline;g.lineWidth=Math.max(.8,r*.05);
+    almond();g.fill();
+    g.fillStyle=shade(F.iris,.42);almond();g.fill();
+    g.save();almond();g.clip();
+    const ig=g.createRadialGradient(e.x,e.y-eh*.3,0,e.x,e.y,ew);
+    ig.addColorStop(0,shade(F.iris,.30));ig.addColorStop(.6,F.iris);ig.addColorStop(1,shade(F.iris,-.45));
+    g.fillStyle=ig;g.fillRect(e.x-ew,e.y-eh*1.4,ew*2,eh*2.8);
+    g.fillStyle='#120e08';                                      // the slit
+    g.beginPath();g.ellipse(e.x+(front?0:fw*ew*.14),e.y,Math.max(.6,ew*.13),eh*1.05,0,0,Math.PI*2);g.fill();
+    g.fillStyle='rgba(255,255,255,.88)';
+    g.beginPath();g.arc(e.x-ew*.30,e.y-eh*.42,Math.max(.5,ew*.16),0,Math.PI*2);g.fill();
+    g.restore();
+    g.strokeStyle=b.outline;g.lineWidth=Math.max(.8,r*.045);almond();g.stroke();
+    if(st==='win'){ // the contented squint
+      g.strokeStyle=shade(look.skin,lo*1.5);g.lineWidth=Math.max(1,r*.05);
+      g.beginPath();g.moveTo(e.x-ew*.9,e.y+eh*.5);
+      g.quadraticCurveTo(e.x,e.y-eh*.5,e.x+ew*.9,e.y+eh*.2);g.stroke()}
+    g.restore()},
+  // The grub: a chitin head capsule, no eyes at all (the Phase 8 ruling), and a pair of mandibles.
+  // Everything else about a larva's front end is plate and seam, so that is what this draws.
+  _paintGrubHead(g,r,look,fw,front,st){
+    const b=look.body,F=b.face,lo=b.skinShade[0],hi=b.skinShade[1];
+    const fill=look.headFill||look.skin,dark=look.segDark||shade(fill,-.3);
+    const shape=()=>{g.beginPath();
+      if(front){g.ellipse(0,0,r*.90,r*.96,0,0,Math.PI*2);return}
+      g.moveTo(-fw*r*.86,-r*.16);
+      g.quadraticCurveTo(-fw*r*.84,-r*.90,fw*r*.10,-r*.92);      // the domed back plate
+      g.quadraticCurveTo(fw*r*.84,-r*.86,fw*r*.94,-r*.22);       // sloping to the face plate
+      g.quadraticCurveTo(fw*r*1.02,r*.14,fw*r*.80,r*.46);        // the flat front of the head
+      g.quadraticCurveTo(fw*r*.24,r*.96,-fw*r*.36,r*.84);
+      g.quadraticCurveTo(-fw*r*.92,r*.56,-fw*r*.86,-r*.16);
+      g.closePath()};
+    // Mandibles are drawn ON TOP of the capsule, not under it. Hiding their roots behind the head's
+    // own fill (the first pass) left only the very tips showing, which at portrait size vanished
+    // entirely -- and anatomically an insect's mandibles are hinged visibly to the front plate.
+    const mandibles=()=>{
+      const open=st==='attack'?1.5:st==='ko'?.4:st==='hit'?1.15:1;
+      for(const s2 of[-1,1]){
+        const dir=front?s2:(s2<0?-fw*.35:fw),sp=front?.86:s2<0?.46:.96;
+        const bx=front?s2*r*.52:fw*r*.62,by=r*(front?.44:.24);
+        g.save();g.translate(bx,by);g.rotate((front?s2*1.5:dir>0?fw*.5:-fw*.2)*.42*open);
+        const mand=k=>{g.beginPath();
+          g.moveTo(-r*.15*k,-r*.12*k);
+          g.quadraticCurveTo(r*.44*k*sp,r*.02*k,r*.52*k*sp,r*.42*k);
+          g.quadraticCurveTo(r*.24*k*sp,r*.14*k,-r*.12*k,r*.16*k);
+          g.closePath()};
+        g.fillStyle=b.outline;mand(1.24);g.fill();
+        const mg=g.createLinearGradient(0,-r*.2,r*.4,r*.4);
+        mg.addColorStop(0,'#d9cfa8');mg.addColorStop(.6,'#a89860');mg.addColorStop(1,'#6b5e34');
+        g.fillStyle=mg;mand(1);g.fill();
+        g.restore()}};
+    g.strokeStyle=b.outline;g.lineWidth=Math.max(1.5,r*.12);shape();g.stroke();
+    const hg=g.createLinearGradient(-r*.8,-r*.9,r*.7,r*.9);
+    hg.addColorStop(0,shade(fill,hi*1.3));hg.addColorStop(.45,fill);hg.addColorStop(1,shade(fill,lo));
+    g.fillStyle=hg;shape();g.fill();
+    g.save();shape();g.clip();
+    // chitin plating: two seams across the capsule plus a hard specular band, which is what makes
+    // an insect head read as shell rather than as a dark ball
+    g.strokeStyle=dark;g.lineWidth=Math.max(1.2,r*.10);g.lineCap='round';
+    for(const t of[-.34,.02]){g.beginPath();
+      if(front){g.moveTo(-r,r*t);g.quadraticCurveTo(0,r*(t+.18),r,r*t)}
+      else{ // plate seams run ACROSS the capsule, curving with its own cross-section
+        const px2=fw*r*(t+.16);
+        g.moveTo(px2-fw*r*.18,-r);g.quadraticCurveTo(px2+fw*r*.20,0,px2-fw*r*.18,r)}
+      g.stroke()}
+    g.globalAlpha=.34;g.fillStyle=shade(fill,Math.min(.95,hi*2.0));
+    g.beginPath();g.ellipse(front?0:-fw*r*.16,-r*.52,r*.50,r*.19,fw*.2,0,Math.PI*2);g.fill();
+    g.globalAlpha=1;
+    // the face plate itself, a darker shield across the front
+    g.fillStyle=dark;g.globalAlpha=.52;
+    g.beginPath();
+    if(front)g.ellipse(0,r*.24,r*.62,r*.44,0,0,Math.PI*2);
+    else g.ellipse(fw*r*.60,r*.16,r*.34,r*.50,fw*.24,0,Math.PI*2);
+    g.fill();g.globalAlpha=1;
+    g.restore();
+    mandibles()},
   _paintEye(g,r,look,e,open,st,fw,front){
     const b=look.body,F=b.face,lo=b.skinShade[0];
     const s=e.s,ew=r*.195*s,eh=r*.145*s;
@@ -4858,7 +5146,7 @@ const BodyStyle={
     const zb=this.zoomBucket(c),px=this.SS*zb;
     const half=r*1.75+3;
     const bw=Math.ceil(half*2*px);
-    const cv=this.cache(this.key(look,'hand:'+Math.round(r*4)+':'+(wrap?'w':'b'),face,zb),bw,bw,g=>{
+    const cv=this.cache(this.key(look,'hand:'+this._r(r,4)+':'+(wrap?'w':'b'),face,zb),bw,bw,g=>{
       g.scale(px,px);g.translate(half,half);
       this._paintHand(g,r,look,wrap)});
     c.save();c.translate(x,y);c.rotate(ang||0);
@@ -4896,7 +5184,7 @@ const BodyStyle={
     const base=col||look.skin;
     const zb=this.zoomBucket(c),px=this.SS*zb,half=r*1.3+3;
     const bw=Math.ceil(half*2*px);
-    const cv=this.cache(this.key(look,'joint:'+Math.round(r*4)+':'+base,face,zb),bw,bw,g=>{
+    const cv=this.cache(this.key(look,'joint:'+this._r(r,4)+':'+base,face,zb),bw,bw,g=>{
       g.scale(px,px);g.translate(half,half);
       const lo=b.skinShade[0],hi=b.skinShade[1];
       const bone=b.cloth.torso==='bone';
@@ -4924,21 +5212,109 @@ const BodyStyle={
   //
   // Not used for 'bone' limbs: a skeleton's lobed joint knobs ARE the art (see _paintBoneLimb), so
   // there is no seam to hide there.
-  seam(c,x,y,r,look,face,col){
+  seam(c,x,y,r,look,face,col,ang){
     const b=look&&look.body;
     if(!b||!(r>.4))return;
     const base=col||look.skin;
     const zb=this.zoomBucket(c),px=this.SS*zb,half=r+2;
     const bw=Math.ceil(half*2*px);
-    const cv=this.cache(this.key(look,'seam:'+Math.round(r*4)+':'+base,face,zb),bw,bw,g=>{
+    const cv=this.cache(this.key(look,'seam:'+this._r(r,4)+':'+base,face,zb),bw,bw,g=>{
       g.scale(px,px);g.translate(half,half);
       const lo=b.skinShade[0],hi=b.skinShade[1];
-      // A shallower gradient than joint()'s: the disc has to read as MORE of the same tube, not as
-      // its own sphere, so the stops sit well inside the tube's own lo/hi range.
-      const gr=g.createLinearGradient(0,-r,0,r);
-      gr.addColorStop(0,shade(base,hi*.75));gr.addColorStop(.45,base);gr.addColorStop(1,shade(base,lo*.6));
-      g.fillStyle=gr;g.beginPath();g.arc(0,0,r,0,Math.PI*2);g.fill()});
-    c.drawImage(cv,x-half,y-half,cv.width/px,cv.height/px)},
+      // Exactly _tube's own stops, at exactly the tube's own width. Anything else -- the first pass
+      // used its own shallower ramp -- reads as a disc laid ON the limb rather than as more of it,
+      // which on a wide joint like a knee or the quad rig's barrel is just a different artefact in
+      // place of the ring. `ang` (applied at blit, so it stays out of the cache key) turns the disc
+      // onto the bone's own axis, which is the frame _tube's gradient is baked in.
+      g.fillStyle=this._tube(g,base,lo,hi,r*2);
+      g.beginPath();g.arc(0,0,r,0,Math.PI*2);g.fill()});
+    c.save();c.translate(x,y);if(ang)c.rotate(ang);
+    c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
+    c.restore()},
+  // ---- quad-rig primitives (Task 8.2) ------------------------------------------------------------
+  // An outlined, gradient-filled ellipse: the quad rig's unit of mass. A quadruped's body is not a
+  // chain of tubes -- it is a haunch, a barrel and a shoulder -- and those three masses are what
+  // separate a cat from a noodle. Cached like everything else; `name` is the only thing that varies
+  // per call site, so one bitmap per mass per look per zoom bucket.
+  blob(c,x,y,rx,ry,ang,look,face,name,col,hiCol){
+    const b=look&&look.body;
+    if(!b||!(rx>.3)||!(ry>.3))return;
+    const base=col||look.skin,lo=b.skinShade[0],hi=b.skinShade[1];
+    const zb=this.zoomBucket(c),px=this.SS*zb;
+    const half=Math.max(rx,ry)+3;
+    const bw=Math.ceil(half*2*px);
+    const cv=this.cache(this.key(look,'blob:'+name+':'+this._r(rx,2)+':'+this._r(ry,2)+':'+base,face,zb),bw,bw,g=>{
+      g.scale(px,px);g.translate(half,half);
+      g.fillStyle=b.outline;
+      g.beginPath();g.ellipse(0,0,rx+1.3,ry+1.3,0,0,Math.PI*2);g.fill();
+      const gr=g.createLinearGradient(-rx*.5,-ry,rx*.6,ry);
+      gr.addColorStop(0,shade(base,hi*1.05));gr.addColorStop(.45,base);gr.addColorStop(1,shade(base,lo));
+      g.fillStyle=gr;g.beginPath();g.ellipse(0,0,rx,ry,0,0,Math.PI*2);g.fill();
+      // the mass's own top-light, which is what stops a plain ellipse reading as a flat disc
+      g.globalAlpha=.34;g.fillStyle=hiCol||shade(base,Math.min(.95,hi*1.7));
+      g.beginPath();g.ellipse(-rx*.16,-ry*.42,rx*.62,ry*.34,0,0,Math.PI*2);g.fill();
+      g.globalAlpha=1});
+    c.save();c.translate(x,y);if(ang)c.rotate(ang);
+    c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
+    c.restore()},
+  // A real paw: a rounded pad with three toes and claws, rotated onto the lower leg's own axis.
+  // The pre-8.2 quad rig ended each leg in a bare ellipse, which is the animal equivalent of the
+  // human rig's "a round line cap is the fist" problem BodyStyle.hand was written to fix.
+  paw(c,x,y,w,look,face,ang,opts){
+    const b=look&&look.body;
+    if(!b)return;
+    opts=opts||{};
+    const zb=this.zoomBucket(c),px=this.SS*zb,half=w*1.5+3;
+    const bw=Math.ceil(half*2*px);
+    const kind=(look.species||'beast')+(opts.slam?':slam':'');
+    const base=opts.col||look.skin;
+    const cv=this.cache(this.key(look,'paw:'+kind+':'+this._r(w,4)+':'+base,face,zb),bw,bw,g=>{
+      g.scale(px,px);g.translate(half,half);
+      this._paintPaw(g,w,look,base,!!opts.slam)});
+    c.save();c.translate(x,y);c.rotate(ang||0);
+    c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
+    c.restore()},
+  // Local axis: +x is DOWN the leg (the paw is drawn rotated onto the shin's own direction), so the
+  // toes point along +y*face once the caller has rotated it. Kept in that frame for the same reason
+  // limbs are: one bitmap stays valid at every angle the leg can reach.
+  _paintPaw(g,w,look,base,slam){
+    const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
+    const grub=look.species==='grub';
+    const L=w*(grub?1.05:1.30),H=w*(grub?.74:.88);
+    const path=()=>{g.beginPath();
+      g.moveTo(-w*.42,-H*.52);
+      g.quadraticCurveTo(L*.52,-H*.72,L*.86,-H*.16);
+      g.quadraticCurveTo(L*1.02,H*.44,L*.44,H*.54);
+      g.lineTo(-w*.34,H*.54);
+      g.quadraticCurveTo(-w*.68,0,-w*.42,-H*.52);
+      g.closePath()};
+    if(!grub){ // claws first, so the pad's own fill covers where each one leaves the toe
+      g.fillStyle=shade('#e8e0cc',-.42);
+      for(const t of[-.34,0,.34]){
+        const cx=L*.80,cy=H*t*.9;
+        g.beginPath();g.moveTo(cx,cy-H*.14);
+        g.quadraticCurveTo(cx+L*.34,cy-H*.06,cx+L*.30,cy+H*.18);
+        g.quadraticCurveTo(cx+L*.16,cy+H*.02,cx,cy+H*.14);g.closePath();g.fill()}}
+    g.strokeStyle=b.outline;g.lineWidth=2;g.lineJoin='round';path();g.stroke();
+    const gr=g.createLinearGradient(0,-H*.6,L*.4,H*.6);
+    gr.addColorStop(0,shade(base,hi));gr.addColorStop(.5,base);gr.addColorStop(1,shade(base,lo));
+    g.fillStyle=gr;path();g.fill();
+    g.save();path();g.clip();
+    if(grub){ // a stubby nub with a horny tip, not a toed foot
+      g.fillStyle=shade(look.headFill||base,-.05);
+      g.beginPath();g.ellipse(L*.66,0,L*.34,H*.52,0,0,Math.PI*2);g.fill()}
+    else{
+      // the pad itself: a big central pad plus three toe pads, in the look's ear-pink when it has
+      // one (a cat's pads and inner ears are the same colour) and a darkened skin otherwise
+      const pad=look.earInner||shade(base,lo*1.5);
+      g.globalAlpha=slam?.95:.72;g.fillStyle=pad;
+      g.beginPath();g.ellipse(L*.34,H*.06,L*.30,H*.34,0,0,Math.PI*2);g.fill();
+      for(const t of[-.32,0,.32]){g.beginPath();
+        g.ellipse(L*.70,H*t*.82,L*.15,H*.20,0,0,Math.PI*2);g.fill()}
+      g.globalAlpha=.30;g.fillStyle=shade(base,lo);
+      g.beginPath();g.ellipse(L*.10,H*.34,L*.50,H*.22,0,0,Math.PI*2);g.fill();
+      g.globalAlpha=1}
+    g.restore()},
   foot(c,x,y,look,face,ang){
     const b=look&&look.body;
     if(!b)return;
@@ -4946,7 +5322,7 @@ const BodyStyle={
     const w=look.limb*1.35,h=look.limb*.82,half=Math.max(w,h)*1.15+3;
     const bw=Math.ceil(half*2*px);
     const bare=!!look.bareFeet,kind=b.cloth.legs==='bone'?'bone':bare?'bare':'boot';
-    const cv=this.cache(this.key(look,'foot:'+kind+':'+Math.round(w*2),face,zb),bw,bw,g=>{
+    const cv=this.cache(this.key(look,'foot:'+kind+':'+this._r(w,2),face,zb),bw,bw,g=>{
       g.scale(px,px);g.translate(half,half);
       this._paintFoot(g,w,h,look,kind)});
     c.save();c.translate(x,y);c.rotate(ang||0);
@@ -5397,6 +5773,11 @@ const Rig={
       ?look.body.cloth.primary:look.skin},
   clothFor(look,part){
     const cl=look.body.cloth,t=cl.torso,l=cl.legs;
+    // Task 8.2: a quadruped's coat is not a garment laid over a limb -- it IS the limb's surface.
+    // Mapping 'fur' through the human table would have put a torn-hem 'ragged' overlay a third of
+    // the way down every cat leg, so the quad rig resolves every bone to bare skin and lets the
+    // tube gradient (plus the species head/body art) carry the coat.
+    if(look.rig==='quad')return 'bare';
     if(part==='upperArm')return t==='bone'?'bone':t==='robe'?'robe':
       (t==='shirt'||t==='plate'||t==='chitin')?'sleeve':t==='fur'?'ragged':'bare';
     if(part==='foreArm')return t==='bone'?'bone':
@@ -5431,8 +5812,8 @@ const Rig={
       BodyStyle.limb(c,sh.x,sh.y,el.x,el.y,armW,look,{bone:'upperArm',cloth:cf('upperArm'),face,lit,w2:armW*.86});
       BodyStyle.limb(c,el.x,el.y,hand.x,hand.y,foreW,look,{bone:'foreArm',cloth:cf('foreArm'),face,lit,w2:foreW*.90});
       if(!boney){
-        BodyStyle.seam(c,sh.x,sh.y,armW*.42,look,face,this.jointCol(look,'upperArm'));
-        BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5-1.4,look,face,jc)}
+        BodyStyle.seam(c,sh.x,sh.y,armW*.50,look,face,this.jointCol(look,'upperArm'),Math.atan2(el.y-sh.y,el.x-sh.x));
+        BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5+1.1,look,face,jc,Math.atan2(hand.y-el.y,hand.x-el.x))}
       BodyStyle.hand(c,hand.x,hand.y,limb*.40,look,face,Math.atan2(hand.y-el.y,hand.x-el.x),wrapped)};
     const leg=(hp,kn,ft)=>{
       const jc=this.jointCol(look,'shin');
@@ -5440,7 +5821,7 @@ const Rig={
       BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,thighW,look,{bone:'thigh',cloth:cf('thigh'),face,lit,w2:thighW*.78});
       BodyStyle.limb(c,kn.x,kn.y,ft.x,ft.y,shinW,look,{bone:'shin',cloth:cf('shin'),face,lit,w2:shinW*.72});
       if(cf('shin')!=='bone')
-        BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.78,shinW)*.5-1.4,look,face,jc);
+        BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.78,shinW)*.5+1.1,look,face,jc,Math.atan2(ft.y-kn.y,ft.x-kn.x));
       BodyStyle.foot(c,ft.x+face*limb*.28,ft.y+limb*.14,look,face,0)};
     leg(j.lHip,j.lKnee,j.lFoot);
     arm(j.lShoulder,j.lElbow,j.lHand);
@@ -5497,15 +5878,15 @@ const Rig={
       BodyStyle.joint(c,el.x,el.y,Math.min(armW*.86,foreW)*.48,look,face,jc);
       BodyStyle.limb(c,sh.x,sh.y,el.x,el.y,armW,look,{bone:'upperArm',cloth:cf('upperArm'),face,lit,w2:armW*.86});
       BodyStyle.limb(c,el.x,el.y,hand.x,hand.y,foreW,look,{bone:'foreArm',cloth:cf('foreArm'),face,lit,w2:foreW*.92});
-      BodyStyle.seam(c,sh.x,sh.y,armW*.42,look,face,this.jointCol(look,'upperArm'));
-      BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5-1.4,look,face,jc);
+      BodyStyle.seam(c,sh.x,sh.y,armW*.50,look,face,this.jointCol(look,'upperArm'),Math.atan2(el.y-sh.y,el.x-sh.x));
+      BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5+1.1,look,face,jc,Math.atan2(hand.y-el.y,hand.x-el.x));
       BodyStyle.hand(c,hand.x,hand.y,limb*.62,look,face,Math.atan2(hand.y-el.y,hand.x-el.x),false)};
     const leg=(hp,kn,ft)=>{
       const jc=this.jointCol(look,'shin');
       BodyStyle.joint(c,kn.x,kn.y,Math.min(thighW*.76,shinW)*.48,look,face,jc);
       BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,thighW,look,{bone:'thigh',cloth:cf('thigh'),face,lit,w2:thighW*.76});
       BodyStyle.limb(c,kn.x,kn.y,ft.x,ft.y,shinW,look,{bone:'shin',cloth:cf('shin'),face,lit,w2:shinW*.78});
-      BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.76,shinW)*.5-1.4,look,face,jc);
+      BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.76,shinW)*.5+1.1,look,face,jc,Math.atan2(ft.y-kn.y,ft.x-kn.x));
       BodyStyle.foot(c,ft.x+face*limb*.30,ft.y+limb*.16,look,face,0)};
     leg(j.lHip,j.lKnee,j.lFoot);
     arm(j.lShoulder,j.lElbow,j.lHand);
@@ -5544,20 +5925,43 @@ const Rig={
           c.stroke()};
         for(const s of[-1,1]){horn(s,7.5,look.body.outline);horn(s,5,'#e8ded0');
           horn(s,1.8,shade('#e8ded0',-.24))}}
-      if(p==='spikedclub'){ // a bigger, spiked take on the human rig's 'club' prop
+      if(p==='spikedclub'){
+        // The tip stays exactly where propExtra puts it (h + (face*len*.3, -len)), but the club is
+        // no longer a uniform round-capped stroke with four slits painted down the middle of it --
+        // at a 16px stroke width the spikes fell INSIDE the shaft and the whole thing read as a
+        // bread roll. It is now a tapered head on a thin grip, with the spikes standing OUT along
+        // the shaft's own normal on both sides, which is the only place a spike reads as a spike.
         const h=j.rHand,len=look.armLen*.6;
-        c.strokeStyle=look.body.outline;c.lineWidth=19;c.lineCap='round';
-        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*len*.3,h.y-len);c.stroke();
-        const sg=c.createLinearGradient(h.x-8,h.y,h.x+10,h.y-len);
-        sg.addColorStop(0,shade(look.secondary,-.32));sg.addColorStop(.4,shade(look.secondary,.14));
-        sg.addColorStop(1,shade(look.secondary,-.26));
-        c.strokeStyle=sg;c.lineWidth=16;
-        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*len*.3,h.y-len);c.stroke();
-        for(let i=0;i<4;i++){const t=.25+i*.2,px=h.x+face*len*.3*t,py=h.y-len*t;
-          c.fillStyle=look.body.outline;
-          c.beginPath();c.moveTo(px,py-1);c.lineTo(px+face*9,py-4);c.lineTo(px,py+6.5);c.closePath();c.fill();
-          c.fillStyle='#c9c2b0';
-          c.beginPath();c.moveTo(px,py);c.lineTo(px+face*7,py-3);c.lineTo(px,py+5);c.closePath();c.fill()}}}
+        const tx=h.x+face*len*.3,ty=h.y-len;
+        const dx=tx-h.x,dy=ty-h.y,L=Math.hypot(dx,dy)||1,ux=dx/L,uy=dy/L,nx=-uy,ny=ux;
+        const at=(t,o)=>({x:h.x+ux*L*t+nx*o,y:h.y+uy*L*t+ny*o});
+        const wAt=t=>t<.22?3.2:4+9*Math.min(1,(t-.22)/.55);
+        c.lineJoin='round';
+        for(const pass of[0,1]){                              // outline pass, then the fill
+          const grow=pass?0:2.2;
+          c.beginPath();
+          for(let i=0;i<=10;i++){const t=i/10,q=at(t,wAt(t)+grow);if(i)c.lineTo(q.x,q.y);else c.moveTo(q.x,q.y)}
+          for(let i=10;i>=0;i--){const t=i/10,q=at(t,-(wAt(t)+grow));c.lineTo(q.x,q.y)}
+          c.closePath();
+          if(pass){const sg=c.createLinearGradient(h.x-12,h.y,h.x+12,ty);
+            sg.addColorStop(0,shade(look.secondary,-.38));sg.addColorStop(.45,shade(look.secondary,.18));
+            sg.addColorStop(1,shade(look.secondary,-.30));c.fillStyle=sg}
+          else c.fillStyle=look.body.outline;
+          c.fill()}
+        for(let i=0;i<4;i++){const t=.42+i*.16,w=wAt(t);
+          for(const sgn of[1,-1]){
+            const root=at(t,sgn*(w-1.4)),fore=at(t+.09,sgn*(w-1.4)),tip=at(t+.045,sgn*(w+8.5));
+            c.fillStyle=look.body.outline;
+            c.beginPath();c.moveTo(root.x-ux*2,root.y-uy*2);c.lineTo(tip.x+nx*sgn*1.6,tip.y+ny*sgn*1.6);
+            c.lineTo(fore.x+ux*2,fore.y+uy*2);c.closePath();c.fill();
+            const kg=c.createLinearGradient(root.x,root.y,tip.x,tip.y);
+            kg.addColorStop(0,'#8d8878');kg.addColorStop(.5,'#c9c2b0');kg.addColorStop(1,'#efe9da');
+            c.fillStyle=kg;
+            c.beginPath();c.moveTo(root.x,root.y);c.lineTo(tip.x,tip.y);c.lineTo(fore.x,fore.y);
+            c.closePath();c.fill()}}
+        c.strokeStyle='#2a1c10';c.lineWidth=3;c.lineCap='butt';   // the grip binding
+        for(const t of[.05,.13])
+          {const a=at(t,4.4),b2=at(t,-4.4);c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b2.x,b2.y);c.stroke()}}}
     c.restore()},
   // Big-brute draw: same shading philosophy as draw() (thick rounded-cap limb strokes with a dark
   // outline under the fill, back-limbs-then-torso-then-front-limbs layering, a waist-tapered torso
@@ -5649,6 +6053,166 @@ const Rig={
         for(let i=0;i<4;i++){const t=.25+i*.2,px=h.x+face*len*.3*t,py=h.y-len*t;
           c.beginPath();c.moveTo(px,py);c.lineTo(px+face*7,py-3);c.lineTo(px,py+5);c.closePath();c.fill()}}}
     c.restore()},
+  // The layered quadruped body (Task 8.2). The load-bearing idea is that a quadruped is not a chain
+  // of tubes: it is three MASSES -- haunch, barrel, shoulder -- strung on the hip->spine->chest
+  // chain, with four legs, a neck and a tail hanging off them. The pre-8.2 rig drew the whole body
+  // as one thick round-capped stroke, which is why the art review kept calling it a noodle.
+  //
+  // Everything here caches the same way the human rig does, for the same reason: hip->spine and
+  // spine->chest are each exactly bodyLen*.5 long, and every leg segment is legLen*.5, so each one
+  // is a fixed-size bitmap that only rotates. The masses are fixed-size ellipses. No call in this
+  // function depends on t01, the frame counter or the camera, so 600 frames add no cache entries.
+  _drawBeast(c,F,look,j,face,poseKey,lit){
+    const scale=F.def.scale||1;
+    const fs=BodyStyle.faceState(poseKey);
+    const bodyW=look.bodyLen*.42,legW=look.legW,grub=look.species==='grub';
+    const slamming=poseKey==='medium';       // the rearing double-front-paw slam (POSES_QUAD.medium)
+    const slamCol=slamming?shade(look.skin,-.18):undefined;
+    const ang=(a,b)=>Math.atan2(b.y-a.y,b.x-a.x);
+    c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
+    // A leg is the same joint/limb/seam/paw sandwich the human rig uses, so the joint-seam contract
+    // (balls under both segments, inside the limb, a seam cap after) holds for all twelve of them.
+    const leg=(hp,kn,pw,w,col,slam)=>{
+      const uw=w,lw=w*.62;
+      BodyStyle.joint(c,kn.x,kn.y,Math.min(uw*.70,lw)*.48,look,face,col||look.skin);
+      BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,uw,look,{bone:'legU',cloth:'bare',face,lit,w2:uw*.70});
+      BodyStyle.limb(c,kn.x,kn.y,pw.x,pw.y,lw,look,{bone:'legL',cloth:'bare',face,lit,w2:lw*.84});
+      BodyStyle.seam(c,kn.x,kn.y,Math.min(uw*.70,lw)*.5+1.1,look,face,col||look.skin,ang(kn,pw));
+      BodyStyle.paw(c,pw.x,pw.y,lw*1.05,look,face,ang(kn,pw),{col,slam})};
+    // --- back legs and haunches, behind everything
+    leg(j.blHip,j.bl1,j.bl2,legW);
+    leg(j.brHip,j.br1,j.br2,legW);
+    // --- tail: two tapering segments plus a tip. tailTint (Mother Rat's bald pink tail) overrides
+    //     the coat colour entirely, which is what separates a tail from a fifth leg at a glance.
+    const tc=look.tailTint||look.skin;
+    BodyStyle.limb(c,j.hip.x,j.hip.y,j.tail1.x,j.tail1.y,legW*.66,look,{bone:'tail1',cloth:'bare',face,lit,w2:legW*.48});
+    BodyStyle.limb(c,j.tail1.x,j.tail1.y,j.tail2.x,j.tail2.y,legW*.48,look,{bone:'tail2',cloth:'bare',face,lit,w2:legW*.26});
+    BodyStyle.seam(c,j.tail1.x,j.tail1.y,legW*.24+1.1,look,face,tc,ang(j.tail1,j.tail2));
+    BodyStyle.blob(c,j.tail2.x,j.tail2.y,legW*.28,legW*.26,0,look,face,'tailtip',tc);
+    if(look.tailTint){ // re-tint the two tail segments: BodyStyle.limb paints in the coat colour
+      c.save();c.globalAlpha=.86;c.lineCap='round';c.strokeStyle=tc;
+      c.lineWidth=legW*.52;c.beginPath();c.moveTo(j.hip.x,j.hip.y);c.lineTo(j.tail1.x,j.tail1.y);
+      c.lineTo(j.tail2.x,j.tail2.y);c.stroke();
+      // Scale BANDS across the tail, not rings around it: a full circle at each step read as a row
+      // of beads threaded on a wire rather than as a scaly tail.
+      c.strokeStyle=shade(tc,-.32);c.lineWidth=Math.max(.9,legW*.08);
+      const seg=(a,b,n)=>{const dx=b.x-a.x,dy=b.y-a.y,L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L;
+        for(let i=1;i<=n;i++){const t=i/(n+1),px=a.x+dx*t,py=a.y+dy*t,hw=legW*(.26-.10*t);
+          c.beginPath();c.moveTo(px-nx*hw,py-ny*hw);c.lineTo(px+nx*hw,py+ny*hw);c.stroke()}};
+      seg(j.hip,j.tail1,4);seg(j.tail1,j.tail2,4);
+      c.restore()}
+    // --- the three body masses. Drawn haunch -> barrel -> shoulder so each one overlaps the last
+    //     from the rear forward, the way a real animal's silhouette stacks toward the viewer.
+    const hipA=ang(j.hip,j.spine),chA=ang(j.spine,j.chest);
+    // The barrel TAPERS from haunch to shoulder (1.00 -> 0.94 -> 0.82 of bodyW). The first pass ran
+    // it at a constant width and it read as a log: an animal's body is widest over the hips and
+    // narrows into the chest, and without that taper the three masses all vanish into one tube.
+    // A grub is the exception -- a larva really is a uniform segmented tube -- so it keeps its own
+    // near-constant profile.
+    const w0=bodyW,w1=bodyW*(grub?1.00:.94),w2=bodyW*(grub?.86:.82);
+    // A larva has neither a haunch nor a shoulder -- it is one uniform segmented tube -- so the two
+    // masses are skipped entirely for the grub rather than sized down: at its proportions they sat
+    // a pixel proud of the barrel and their outlines read as two rings around an otherwise smooth body.
+    if(!grub){
+      BodyStyle.blob(c,j.hip.x-Math.cos(hipA)*bodyW*.10,j.hip.y-Math.sin(hipA)*bodyW*.10,
+        bodyW*.70,bodyW*.62,hipA,look,face,'haunch');}
+    BodyStyle.limb(c,j.hip.x,j.hip.y,j.spine.x,j.spine.y,w0,look,{bone:'barrelA',cloth:'bare',face,lit,w2:w1});
+    BodyStyle.limb(c,j.spine.x,j.spine.y,j.chest.x,j.chest.y,w1,look,{bone:'barrelB',cloth:'bare',face,lit,w2});
+    BodyStyle.seam(c,j.spine.x,j.spine.y,w1*.5+1.1,look,face,null,chA);
+    if(!grub)BodyStyle.blob(c,j.chest.x,j.chest.y,bodyW*.46,bodyW*.44,chA,look,face,'shoulder');
+    if(look.body.cloth.torso==='chitin'){
+      // The larva's banded plates, replacing the 'segments' prop's three flat rings: overlapping
+      // shells along the body axis, each with a lit leading edge and a dark trailing seam.
+      // Each plate is a short arc hugging the body's own CROSS-SECTION (half-width, not full), with
+      // a lit leading lip just ahead of it. The first pass used the full width as the arc's radius,
+      // so every ring stood taller than the body it was meant to wrap and the larva ended up laced
+      // with loops.
+      const dark=look.segDark||shade(look.skin,-.3);
+      c.save();c.lineCap='round';
+      const hwB=bodyW*.42;
+      for(let i=1;i<=7;i++){const t=i/8;
+        const px=j.hip.x+(j.chest.x-j.hip.x)*t,py=j.hip.y+(j.chest.y-j.hip.y)*t;
+        const a=hipA+(chA-hipA)*t,w=hwB*(1-.10*t);
+        c.save();c.translate(px,py);c.rotate(a);
+        c.globalAlpha=.42;c.strokeStyle=dark;c.lineWidth=Math.max(1.4,bodyW*.06);
+        c.beginPath();c.ellipse(0,0,bodyW*.11,w,0,-Math.PI*.62,Math.PI*.62);c.stroke();
+        c.globalAlpha=.26;c.strokeStyle=shade(look.skin,.50);c.lineWidth=Math.max(.9,bodyW*.04);
+        c.beginPath();c.ellipse(bodyW*.07,0,bodyW*.11,w*.90,0,-Math.PI*.56,Math.PI*.56);c.stroke();
+        c.restore()}
+      c.restore()}
+    else{ // a furred belly: a lighter band along the underside of the barrel
+      c.save();c.globalAlpha=.30;c.lineCap='round';
+      c.strokeStyle=shade(look.skin,Math.min(.95,look.body.skinShade[1]*1.6));
+      c.lineWidth=bodyW*.36;
+      c.beginPath();
+      c.moveTo(j.hip.x,j.hip.y+bodyW*.30);c.lineTo(j.spine.x,j.spine.y+bodyW*.32);
+      c.lineTo(j.chest.x,j.chest.y+bodyW*.26);c.stroke();
+      c.restore()}
+    // --- neck and head. TWO segments: chest->neck and then neck->head, because solveQuad puts the
+    //     head a further headR*1.6 beyond the neck joint. Drawing only the first left a bare gap of
+    //     0.6*headR between the neck's end and the head's underside, which is why the first pass
+    //     read as a cat head floating over a log.
+    const nw=bodyW*(grub?.62:.50);
+    BodyStyle.limb(c,j.chest.x,j.chest.y,j.neck.x,j.neck.y,nw,look,{bone:'neck',cloth:'bare',face,lit,w2:nw*.86});
+    BodyStyle.limb(c,j.neck.x,j.neck.y,j.head.x,j.head.y,nw*.86,look,{bone:'nape',cloth:'bare',face,lit,w2:look.headR*.88});
+    BodyStyle.seam(c,j.neck.x,j.neck.y,nw*.43+1.1,look,face,null,ang(j.neck,j.head));
+    BodyStyle.seam(c,j.chest.x,j.chest.y,nw*.50+1.1,look,face,null,ang(j.chest,j.neck));
+    if(!grub){ // the chest ruff: a fur collar where the neck meets the shoulder
+      c.save();c.globalAlpha=.34;c.lineCap='round';
+      c.strokeStyle=shade(look.skin,Math.min(.95,look.body.skinShade[1]*1.8));
+      c.lineWidth=Math.max(1.4,bodyW*.07);
+      const rx=(j.chest.x+j.neck.x)/2,ry=(j.chest.y+j.neck.y)/2;
+      for(let i=-2;i<=2;i++){const a=chA+Math.PI/2+i*.30;
+        c.beginPath();c.moveTo(rx,ry);
+        c.lineTo(rx+Math.cos(a)*nw*.86,ry+Math.sin(a)*nw*.86);c.stroke()}
+      c.restore()}
+    const hx=j.head.x-j.neck.x,hy=j.head.y-j.neck.y;
+    c.save();c.translate(j.head.x,j.head.y);
+    if(hx||hy)c.rotate(Math.atan2(hx,-hy));
+    BodyStyle.head(c,0,0,look.headR,look,face,fs,lit);
+    c.restore();
+    // --- front legs last, so they sit in front of the body. That is also why POSES_QUAD.medium's
+    //     double-front-paw slam needs no draw-order handling: the striking limbs are already the
+    //     frontmost thing drawn. `slamming` only swaps in the darker, pad-forward paw.
+    leg(j.flHip,j.fl1,j.fl2,legW,slamCol,slamming);
+    leg(j.frHip,j.fr1,j.fr2,legW,slamCol,slamming);
+    for(const p of look.props||[]){
+      if(p==='segments')continue;   // now real chitin plating above; kept in props for extent only
+      if(p==='tiara'){ // a small gold crown between the ears (geometry kept in sync with propExtra)
+        const w=look.headR*.7,h=look.headR*.42,cx=j.head.x,cy=j.head.y-look.headR*.9;
+        const crown=()=>{c.beginPath();
+          c.moveTo(cx-w,cy+h);c.lineTo(cx-w,cy);c.lineTo(cx-w*.5,cy+h*.5);
+          c.lineTo(cx,cy-h*.2);c.lineTo(cx+w*.5,cy+h*.5);c.lineTo(cx+w,cy);c.lineTo(cx+w,cy+h);
+          c.closePath()};
+        c.strokeStyle='#4a3606';c.lineWidth=2.6;c.lineJoin='round';crown();c.stroke();
+        const gg=c.createLinearGradient(cx-w,cy-h,cx+w,cy+h);
+        gg.addColorStop(0,'#fff0b0');gg.addColorStop(.45,look.accent||'#f4c542');gg.addColorStop(1,'#a87b12');
+        c.fillStyle=gg;crown();c.fill();
+        c.fillStyle='#e0506a';                                  // the stone in the middle point
+        c.beginPath();c.arc(cx,cy+h*.18,Math.max(1.2,h*.22),0,Math.PI*2);c.fill();
+        c.fillStyle='rgba(255,255,255,.75)';
+        c.beginPath();c.arc(cx-w*.42,cy+h*.30,Math.max(.8,h*.13),0,Math.PI*2);c.fill()}
+      if(p==='whiskers'){ // three per side, tapering, within propExtra's own single folded tip
+        const wx=j.head.x+face*look.headR*.68,wy=j.head.y+look.headR*.12,L=look.headR*1.35;
+        c.lineCap='round';
+        for(const s of[1,-1])for(const dy of[-9,0,9]){
+          c.strokeStyle=s>0?'rgba(255,255,255,.80)':'rgba(40,34,28,.45)';
+          c.lineWidth=s>0?1.3:1.0;
+          c.beginPath();c.moveTo(wx,wy+dy*.35);
+          c.quadraticCurveTo(wx+face*L*.55,wy+dy*.75,wx+face*L*(s>0?1:.82),wy+dy*(s>0?1:.9));
+          c.stroke()}}
+      if(p==='teeth'){ // the boss's incisors (geometry kept in sync with propExtra)
+        const tx=j.head.x+face*look.headR*.85,ty=j.head.y+look.headR*.25;
+        for(const o of[0,-3.4]){
+          c.fillStyle=look.body.outline;
+          c.beginPath();c.moveTo(tx+face*o,ty-1);c.lineTo(tx+face*(o+4.6),ty+6.6);c.lineTo(tx+face*o,ty+7.8);
+          c.closePath();c.fill();
+          const tg=c.createLinearGradient(tx,ty,tx+face*5,ty+7);
+          tg.addColorStop(0,'#fbf0a8');tg.addColorStop(1,look.teeth||'#e8d24a');
+          c.fillStyle=tg;
+          c.beginPath();c.moveTo(tx+face*o,ty);c.lineTo(tx+face*(o+4),ty+6);c.lineTo(tx+face*o,ty+7);
+          c.closePath();c.fill()}}}
+    c.restore()},
   // Quadruped draw: same shading philosophy as the human draw() (thick rounded-cap limb strokes with
   // a dark outline under the fill, back-limbs-then-body-then-front-limbs layering) built around the
   // horizontal body capsule (hip->spine->chest) instead of a torso hexagon. look is passed through
@@ -5658,6 +6222,9 @@ const Rig={
     look=look||lookFor(F.def);
     const scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solveQuad(look,key,t01,face);
+    // Task 8.2: all three quad looks now ship a `.body` block, so this is the live path; everything
+    // below it is the pre-8.2 stroke rig, kept intact as the fallback for a quad look that has none.
+    if(look.body)return this._drawBeast(c,F,look,j,face,key);
     const skinDark=shade(look.skin,-.35);
     // Fix round 2 (controller review, Task 6.5): the medium kick is now a rearing double-front-paw
     // slam (see POSES_QUAD.medium's own comment) — the striking limbs are the FRONT legs, which this
@@ -5767,7 +6334,7 @@ const Rig={
   // since the head bitmap is resolution-dependent. Looks with no `.body` (the big and quad rigs)
   // keep the pre-8.1 bust below, unchanged.
   portrait(look,size){
-    if(look.rig==='quad')return this.portraitQuad(look);
+    if(look.rig==='quad')return this.portraitQuad(look,size);
     const S=size||56;
     look._portraits=look._portraits||{};
     if(look._portraits[S])return look._portraits[S];
@@ -5832,8 +6399,16 @@ const Rig={
   // Quadruped HUD bust: same front-facing head-and-shoulders shape language as the human portrait
   // (a fill wedge for shoulders, a round head on top) but with cat/rat ears, tiara/whiskers/teeth
   // props, and no hair — quads have no LOOKS.hair field.
-  portraitQuad(look){
-    if(look._portrait)return look._portrait;
+  portraitQuad(look,size){
+    const S0=size||56;
+    look._portraits=look._portraits||{};
+    if(look._portraits[S0])return look._portraits[S0];
+    // Task 8.2: a quad look with a `.body` block gets the same treatment the human rig got in 8.1 --
+    // the bust is BodyStyle.head's own front-facing branch, so the HUD portrait, the roster card and
+    // the fight sprite are demonstrably the same animal. Looks with none keep the pre-8.2 bust below.
+    if(look.body){const c2=this._portraitBeast(look,S0);
+      look._portraits[S0]=c2;if(S0===56)look._portrait=c2;return c2}
+    if(look._portrait)return look._portraits[S0]=look._portrait;
     const S=56,cnv=document.createElement('canvas');cnv.width=S;cnv.height=S;
     const c=cnv.getContext('2d'),skinDark=shade(look.skin,-.35);
     const cx=S/2,headR=Math.min(18,look.headR*.72),headY=S*0.46,shW=Math.min(S*0.85,look.bodyLen*.3),shY=S*0.7;
@@ -5889,7 +6464,57 @@ const Rig={
     if(props.includes('teeth')){c.fillStyle=look.teeth||'#e8d24a';c.strokeStyle='#8a7a1a';c.lineWidth=.7;
       for(const s of[-1,1]){c.beginPath();c.moveTo(cx+s*headR*.28,headY+headR*.55);c.lineTo(cx+s*headR*.5,headY+headR*.55);
         c.lineTo(cx+s*headR*.39,headY+headR*.8);c.closePath();c.fill();c.stroke()}}
-    look._portrait=cnv;return cnv}};
+    look._portrait=cnv;look._portraits[S0]=cnv;return cnv},
+  // The quad bust: the species head straight out of BodyStyle at face 0, on a short neck over a
+  // chest wedge in the coat's own colour. Same construction as _portraitBody, with the quad rig's
+  // own proportions -- a smaller head radius relative to the frame, because a cat's or a rat's ears
+  // are part of the head bitmap and need the headroom a human bust spends on hair.
+  _portraitBeast(look,S){
+    const b=look.body,cl=b.cloth;
+    const cnv=document.createElement('canvas');cnv.width=S;cnv.height=S;
+    const c=cnv.getContext('2d');
+    const cx=S/2,headR=S*.205,headY=S*.44,shW=S*.94,shY=S*.74;
+    const coat=look.headFill&&look.species==='grub'?cl.primary:look.skin;
+    const wedge=(inset,drop)=>{c.beginPath();
+      c.moveTo(cx-shW/2+inset,S+4);
+      c.quadraticCurveTo(cx-shW*.34+inset,shY+drop,cx-shW*.18+inset,shY+drop);
+      c.lineTo(cx+shW*.18-inset,shY+drop);
+      c.quadraticCurveTo(cx+shW*.34-inset,shY+drop,cx+shW/2-inset,S+4);
+      c.closePath()};
+    c.fillStyle=b.outline;wedge(0,0);c.fill();
+    const gr=c.createLinearGradient(cx-shW*.4,shY,cx+shW*.4,S);
+    gr.addColorStop(0,shade(coat,.20));gr.addColorStop(.5,coat);gr.addColorStop(1,shade(coat,-.30));
+    c.fillStyle=gr;wedge(2,2);c.fill();
+    const nw=headR*.74;
+    c.fillStyle=b.outline;c.fillRect(cx-nw/2-1.4,headY,nw+2.8,shY-headY+4);
+    c.fillStyle=shade(coat,b.skinShade[0]*.5);c.fillRect(cx-nw/2,headY,nw,shY-headY+4);
+    BodyStyle.head(c,cx,headY,headR,look,0,'idle');
+    // the two props that live on the head and are drawn in world space during a fight
+    const props=look.props||[];
+    if(props.includes('tiara')){
+      const w=headR*.78,h=headR*.46,tcy=headY-headR*1.30;
+      const crown=()=>{c.beginPath();
+        c.moveTo(cx-w,tcy+h);c.lineTo(cx-w,tcy);c.lineTo(cx-w*.5,tcy+h*.5);
+        c.lineTo(cx,tcy-h*.2);c.lineTo(cx+w*.5,tcy+h*.5);c.lineTo(cx+w,tcy);c.lineTo(cx+w,tcy+h);
+        c.closePath()};
+      c.strokeStyle='#4a3606';c.lineWidth=2;c.lineJoin='round';crown();c.stroke();
+      const gg=c.createLinearGradient(cx-w,tcy-h,cx+w,tcy+h);
+      gg.addColorStop(0,'#fff0b0');gg.addColorStop(.45,look.accent||'#f4c542');gg.addColorStop(1,'#a87b12');
+      c.fillStyle=gg;crown();c.fill();
+      c.fillStyle='#e0506a';c.beginPath();c.arc(cx,tcy+h*.18,Math.max(1,h*.22),0,Math.PI*2);c.fill()}
+    if(props.includes('whiskers')){c.lineCap='round';
+      for(const s of[-1,1])for(const dy of[-3,0,3]){
+        c.strokeStyle='rgba(255,255,255,.7)';c.lineWidth=1.1;
+        c.beginPath();c.moveTo(cx+s*headR*.42,headY+headR*.24+dy*.3);
+        c.lineTo(cx+s*headR*1.5,headY+headR*.20+dy);c.stroke()}}
+    if(props.includes('teeth')){
+      const tg=c.createLinearGradient(cx,headY,cx,headY+headR);
+      tg.addColorStop(0,'#fbf0a8');tg.addColorStop(1,look.teeth||'#e8d24a');
+      c.fillStyle=tg;c.strokeStyle='#8a7a1a';c.lineWidth=.7;
+      for(const s of[-1,1]){c.beginPath();
+        c.moveTo(cx+s*headR*.10,headY+headR*.50);c.lineTo(cx+s*headR*.30,headY+headR*.50);
+        c.lineTo(cx+s*headR*.20,headY+headR*.86);c.closePath();c.fill();c.stroke()}}
+    return cnv}};
 for(const id in DEFS)if(LOOKS[id])DEFS[id].look=LOOKS[id];
 
 const Render={ctx:canvas.getContext('2d'),
@@ -13223,8 +13848,14 @@ Test.add('every rig lays its joint balls under both segments, inside the limb, a
         for(const L of ends){
           if(near(t,{x:L.x1,y:L.y1}))narrowest=Math.min(narrowest,L.w/2);
           if(near(t,{x:L.x2,y:L.y2}))narrowest=Math.min(narrowest,L.w2/2)}
-        ok(cap.r<narrowest,id+': the seam cap (r='+cap.r.toFixed(2)+') must sit strictly inside the '+
-          'narrowest segment it closes (half-width '+narrowest.toFixed(2)+'), or it breaks the outline');
+        // The cap must reach the dark outline ring (which _capsule grows 1.3 OUTSIDE the fill) or
+        // it cannot erase it -- that was the first pass's bug, plainly visible on the quad rig's
+        // 52px-wide barrel joint. It must also stop at that ring's own outer edge, or it would make
+        // the silhouette wider than the two segments already drew it.
+        ok(cap.r>=narrowest-.001,id+': the seam cap (r='+cap.r.toFixed(2)+') stops inside the fill '+
+          '(half-width '+narrowest.toFixed(2)+'), so the outline ring it exists to erase survives');
+        ok(cap.r<=narrowest+1.35,id+': the seam cap (r='+cap.r.toFixed(2)+') reaches past the outline '+
+          'the segments already draw (half-width '+narrowest.toFixed(2)+'+1.3) -- it would widen the silhouette');
         const capIdx=trace.indexOf(cap);
         for(const L of ends)ok(trace.indexOf(L)<capIdx,
           id+': the seam cap must be drawn AFTER both segments it closes, not before')}
@@ -13242,6 +13873,52 @@ Test.add('every rig lays its joint balls under both segments, inside the limb, a
     G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
 
 // ---- Task 8.2: the big and quad rigs join the body layer ---------------------------------------
+// Same schema walk as the human-look case above, but over EVERY look in LOOKS rather than a list,
+// so the eleven-look roster is checked as a whole and a new look cannot be added without one. The
+// enumerations are the Phase 8 frozen interface, spelled out again here deliberately: a typo'd
+// token fails silently (BodyStyle's switches fall through to "draw nothing"), which is exactly the
+// failure mode a schema test exists to catch.
+Test.add('every look in LOOKS carries a complete .body block with only schema-legal values',()=>{
+  const TORSO=['shirt','vest','bare','robe','chitin','fur','bone','plate'];
+  const LEGS=['pants','shorts','bare','robe','fur','bone'];
+  const EYES=['human','cat','rat','skull','goblin','none'];
+  const MOUTH=['human','fangs','snout','none'];
+  const HAIR=['crop','long','bald','mohawk','none'];
+  const EARS=['human','pointed','cat','rat','none'];
+  const HORNS=[false,'small','big'];
+  const hex=v=>typeof v==='string'&&/^#[0-9a-fA-F]{6}$/.test(v);
+  const ids=Object.keys(LOOKS);
+  eq(ids.length,11,'the roster is eleven looks; update this test if that changes');
+  for(const id of ids){
+    const look=LOOKS[id];
+    const b=look.body;ok(b,id+'.body must exist -- every rig now draws through BodyStyle');
+    ok(hex(b.outline),id+'.body.outline must be a #rrggbb hex, got '+b.outline);
+    ok(Array.isArray(b.skinShade)&&b.skinShade.length===2,id+'.body.skinShade must be a 2-entry array');
+    ok(b.skinShade[0]<0&&b.skinShade[0]>=-1,id+'.body.skinShade[0] must darken (in [-1,0)), got '+b.skinShade[0]);
+    ok(b.skinShade[1]>0&&b.skinShade[1]<=1,id+'.body.skinShade[1] must lighten (in (0,1]), got '+b.skinShade[1]);
+    const cl=b.cloth;ok(cl,id+'.body.cloth must exist');
+    ok(TORSO.includes(cl.torso),id+'.body.cloth.torso "'+cl.torso+'" is not one of '+TORSO.join('/'));
+    ok(LEGS.includes(cl.legs),id+'.body.cloth.legs "'+cl.legs+'" is not one of '+LEGS.join('/'));
+    ok(hex(cl.primary),id+'.body.cloth.primary must be a #rrggbb hex, got '+cl.primary);
+    ok(hex(cl.secondary),id+'.body.cloth.secondary must be a #rrggbb hex, got '+cl.secondary);
+    const fa=b.face;ok(fa,id+'.body.face must exist');
+    ok(EYES.includes(fa.eyes),id+'.body.face.eyes "'+fa.eyes+'" is not one of '+EYES.join('/'));
+    ok(hex(fa.iris),id+'.body.face.iris must be a #rrggbb hex, got '+fa.iris);
+    eq(typeof fa.brow,'boolean',id+'.body.face.brow must be a boolean');
+    ok(MOUTH.includes(fa.mouth),id+'.body.face.mouth "'+fa.mouth+'" is not one of '+MOUTH.join('/'));
+    ok(HAIR.includes(fa.hair),id+'.body.face.hair "'+fa.hair+'" is not one of '+HAIR.join('/'));
+    ok(EARS.includes(fa.ears),id+'.body.face.ears "'+fa.ears+'" is not one of '+EARS.join('/'));
+    ok(HORNS.includes(fa.horns),id+'.body.face.horns "'+fa.horns+'" is not one of false/small/big');
+    eq(look.id,id,id+'.id must be wired to its own LOOKS key (BodyStyle cache keys read it)')}
+  // The species-specific reads the Phase 8 ruling names, pinned so a palette edit cannot quietly
+  // turn Donut back into a generic head.
+  eq(LOOKS.donut.body.face.eyes,'cat','Donut must wear the cat face');
+  eq(LOOKS.donut.body.face.ears,'cat','Donut must have cat ears');
+  eq(LOOKS.mother_rat.body.face.eyes,'rat','Mother Rat must wear the rat face');
+  eq(LOOKS.mother_rat.body.face.mouth,'snout','Mother Rat must have a snout');
+  eq(LOOKS.grub.body.face.eyes,'none','the grub has no eyes');
+  eq(LOOKS.grull.body.face.mouth,'fangs','Grull must have tusks');
+  for(const id of['mongo','grull'])ok(LOOKS[id].body.face.brow,id+' is a brute: it must carry the heavy brow')});
 // The same "a drawing layer must not move a joint" guarantee the human snapshot carries, for the
 // big rig (Mongo/Grull, POSES_BIG/solveBig) and the quad rig (Donut/Grub/Mother Rat, POSES_QUAD/
 // solveQuad). Captured off commit 1a6d501 -- the end of Task 8.1, i.e. BEFORE any of this task's
@@ -13285,5 +13962,131 @@ Test.add('big/quad extent snapshot (per pose and whole-set) is unchanged by the 
     for(const key of['idle','light1','medium','heavy','s3']){
       const[top,reach]=posesOf(look,key);
       near(top,snap[key][0],id+'/'+key+'.top');near(reach,snap[key][1],id+'/'+key+'.reach')}}});
+// The HUD/roster bust must be the same character as the fight sprite for EVERY rig, not just the
+// human one: that is why the body layer exists at all. All eleven looks now have a .body block, so
+// all eleven go through BodyStyle.head, and each size caches separately (the head bitmap is
+// resolution-dependent, so a 112px roster card cannot be a rescaled 56px HUD bust).
+Test.add('every look\'s portrait is built from BodyStyle.head and cached per size',()=>{
+  for(const id in LOOKS){
+    const look=LOOKS[id];
+    look._portraits=null;look._portrait=null;
+    const a=Rig.portrait(look);
+    eq(a.width,56,id+' default portrait must be 56px');
+    ok(a===Rig.portrait(look),id+' must cache its 56px bust');
+    const b=Rig.portrait(look,112);
+    eq(b.width,112,id+' roster portrait must be 112px');
+    ok(b!==a,id+' must build the 112px bust separately, not rescale the 56px one');
+    ok(Rig.portrait(look,112)===b,id+' must cache its 112px bust')}
+  const real=BodyStyle.head;
+  try{
+    for(const id in LOOKS){
+      let calls=0;
+      BodyStyle.head=function(...a){calls++;return real.apply(this,a)};
+      LOOKS[id]._portraits=null;LOOKS[id]._portrait=null;
+      Rig.portrait(LOOKS[id]);
+      eq(calls,1,id+'\'s portrait must be drawn with BodyStyle.head, so the bust and the fight '+
+        'sprite cannot drift apart')}
+  }finally{BodyStyle.head=real;
+    for(const id in LOOKS){LOOKS[id]._portraits=null;LOOKS[id]._portrait=null}}});
+// The 8.1 perf contract, extended to the rigs this task added (the case above it covers the six
+// human looks and is left exactly as 8.1 wrote it). The quad rig is the one most at risk here: its
+// body is built from limb/blob/seam calls whose sizes are derived from bodyLen and the live joint
+// positions, so a width accidentally computed off a pose-varying quantity -- rather than off the
+// look's own constants -- would allocate a fresh bitmap every frame.
+Test.add('BodyStyle\'s cache stops growing for every rig: 600 drawn frames of one pose add no entries',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  try{
+    BodyStyle.clearCache();
+    const ids=Object.keys(LOOKS).filter(id=>DEFS[id]);
+    ok(ids.length>=11,'every look must have a DEFS entry to be drawn here, got '+ids.length);
+    const fighters=ids.map(id=>mkFight({p1:DEFS[id]}).p1);
+    const cam={x:0,zoom:1};
+    const drawAll=frame=>{
+      for(const F of fighters){
+        F.f=frame%60;
+        c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,frame);c.restore()}};
+    // Warm on ONE frame, not a whole cycle. Rig.poseFor quantizes an idle fighter's t01 to f%60, so
+    // a 60-frame warm-up saturates every t01 a later loop can produce and a key that (wrongly) folds
+    // t01 in would still come out flat. Warming a single frame and then sweeping the cycle is the
+    // version of this check that actually catches a pose-dependent key.
+    drawAll(0);
+    const warm=BodyStyle.cacheCount();
+    ok(warm>0,'the warm-up must actually have cached something, got '+warm);
+    for(let i=0;i<600;i++)drawAll(i);
+    eq(BodyStyle.cacheCount(),warm,'600 further frames of the same pose at the same zoom bucket must '+
+      'add no cache entries (a key folding in t01, a joint length or the frame counter grows here)');
+  }finally{G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+// The Phase 8 ruling's species faces have to reach the real draw, through BodyStyle.head, and not
+// be a helper nobody calls -- the same thing the 8.1 'Rig.draw bakes the head bitmap' case pins for
+// the human rig. Checked three ways: the head bitmap is baked at all, the species branch is the one
+// that painted it, and the six face states are six distinct bitmaps rather than one reused.
+Test.add('the big and quad rigs draw their faces through BodyStyle.head, with the species branch',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  const realBeast=BodyStyle._paintBeastHead,realGrub=BodyStyle._paintGrubHead;
+  try{
+    for(const id of['mongo','grull','donut','grub','mother_rat']){
+      BodyStyle.clearCache();
+      const f=mkFight({p1:DEFS[id]}),F=f.p1;
+      G.fight=f;G.state='FIGHT';F.state='IDLE';F.f=0;
+      c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,{x:0,zoom:1},0);c.restore();
+      const keys=Object.keys(BodyStyle._cache).filter(k=>k.indexOf('|head:')>=0);
+      ok(keys.some(k=>k.indexOf(id+'|head:idle:')>=0),
+        id+' must bake its own head bitmap through BodyStyle.head, got '+keys);
+      // and a fighter in hitstun must wear the hit face, i.e. the mapping reaches every rig
+      BodyStyle.clearCache();
+      F.state='HITSTUN';F.f=2;F.stun=12;
+      c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,{x:0,zoom:1},1);c.restore();
+      ok(Object.keys(BodyStyle._cache).some(k=>k.indexOf(id+'|head:hit:')>=0),
+        'a HITSTUN '+id+' must bake head:hit')}
+    // the species branch, not the human profile, is what paints a quad head
+    for(const id of['donut','mother_rat','grub']){
+      BodyStyle.clearCache();
+      let beast=0,grub=0;
+      BodyStyle._paintBeastHead=function(...a){beast++;return realBeast.apply(this,a)};
+      BodyStyle._paintGrubHead=function(...a){grub++;return realGrub.apply(this,a)};
+      BodyStyle.head(c,0,0,LOOKS[id].headR,LOOKS[id],1,'idle');
+      BodyStyle._paintBeastHead=realBeast;BodyStyle._paintGrubHead=realGrub;
+      ok(beast===1,id+' must paint through the quad species branch, got '+beast+' call(s)');
+      if(id==='grub')ok(grub===1,'the grub must reach its own head painter (mandibles, no eyes)')}
+    // six states, six bitmaps, for every look this task added
+    for(const id of['mongo','grull','donut','grub','mother_rat']){
+      BodyStyle.clearCache();
+      const seen=new Set();
+      for(const st of['idle','hit','ko','block','attack','win']){
+        BodyStyle.head(c,0,0,LOOKS[id].headR,LOOKS[id],1,st);
+        const n=BodyStyle.cacheCount();
+        ok(!seen.has(n),id+'/'+st+' must add its own cache entry (count stuck at '+n+')');
+        seen.add(n)}}
+  }finally{
+    BodyStyle._paintBeastHead=realBeast;BodyStyle._paintGrubHead=realGrub;
+    G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+// Donut's whiskers and tiara and Mother Rat's teeth stay WORLD-SPACE props, because Rig.propExtra
+// folds their geometry into each look's extent and the reach budget was tuned against exactly those
+// points (Donut's whisker tip is her own worst case -- see LOOKS.donut's fix-wave item 9 comment).
+// This pins that they are still drawn, and still drawn from the same anchor propExtra assumes.
+Test.add('the quad rig\'s head props stay world-space and keep propExtra\'s own anchors',()=>{
+  for(const id of['donut','mother_rat']){
+    const look=LOOKS[id];
+    ok(!look.body.face.horns,id+' must not grow a second set of face-module decorations');
+    const j=Rig.solve(look,'idle',0,1);
+    for(const pid of look.props){
+      const pts=Rig.propExtra(pid,look,j,1);
+      if(pid==='segments')continue;
+      ok(pts.length>0,id+"'s "+pid+' must still contribute extent geometry');
+      for(const p of pts)ok(isFinite(p.x)&&isFinite(p.y),id+'/'+pid+' extent point must be finite')}}
+  const j=Rig.solve(LOOKS.donut,'idle',0,1);
+  const w=Rig.propExtra('whiskers',LOOKS.donut,j,1)[0];
+  const r=LOOKS.donut.headR;
+  ok(Math.abs(w.x-(j.head.x+r*.68+r*1.35))<1e-6,
+    'the whisker tip anchor must stay head.x + headR*(0.68+1.35); the drawn whiskers are kept inside it');
+  // and no species muzzle may out-reach the props extent already folds
+  for(const id of['donut','mother_rat','grub']){
+    const look=LOOKS[id];
+    ok(look.rig==='quad',id+' must be a quad look');
+    ok(look.body.face.eyes!=='human',id+' must not fall back to the human face')}});
 
 </script></body></html>
