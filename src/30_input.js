@@ -70,4 +70,26 @@ const Ctrl={
   // seeded chaos monkey: picks a plan, holds block/heavy plans for a while, taps others once
   random:seed=>{const r=RNG(seed);let plan='',left=0;return{next(){
     if(left--<=0){plan=r.pick(['','','light','light','medium','dashBack','block','block','heavy','special']);left=plan==='block'?10+r.int(30):plan==='heavy'?30:1}
-    const it=Ctrl.EMPTY();if(plan==='block')it.block=true;else if(plan==='heavy')it.heavy=true;else if(plan==='special')it.special=1;else if(plan)it[plan]=true;return it}}}};
+    const it=Ctrl.EMPTY();if(plan==='block')it.block=true;else if(plan==='heavy')it.heavy=true;else if(plan==='special')it.special=1;else if(plan)it[plan]=true;return it}}},
+  // Ctrl.competent(seed): a scripted, fully deterministic "skilled human" bot for tests/batch.py's
+  // win-rate table (--bot auto). Unlike Ctrl.random it never rolls dice — `seed` is accepted only for
+  // signature symmetry with the other seeded controllers (Ctrl.random, AI.make); the exact same
+  // (fight, me, foe) state always yields the exact same intent, for any seed, which is what the
+  // batch tool's "Ctrl.competent is deterministic" test checks. Priority order per call:
+  //   1. finish a light chain already open (Fighter.act's own recovery+chain+landed window)
+  //   2. otherwise, if busy, do nothing (can't act)
+  //   3. react to a visible medium/heavy: block once its startup clock has run REACT frames (leaves
+  //      the move's last couple of startup frames as a buffer, mirroring the AI tiers' 'react' field)
+  //   4. bail out of a telegraphed heavy charge while low on hp
+  //   5. fire the strongest special affordable
+  //   6. otherwise chain lights whenever in light range
+  competent:seed=>{const REACT=6,LOW_HP=0.3;return{next(fight,me,foe){
+    const it=Ctrl.EMPTY();
+    if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){it.light=true;return it}
+    if(me.busy())return it;
+    if(foe.state==='ATTACK'&&(foe.moveName==='medium'||foe.moveName==='heavy')&&foe.f>=REACT){it.block=true;return it}
+    if(foe.state==='CHARGE'&&foe.moveName==='heavy'&&me.hp/me.maxHp<LOW_HP){it.dashBack=true;return it}
+    if(me.power>=100){it.special=me.power>=300?3:me.power>=200?2:1;return it}
+    const dist=Math.abs(foe.x-me.x)-me.width,lightRange=me.moveDef('light1').range+20;
+    if(dist<lightRange){it.light=true;return it}
+    return it}}}};

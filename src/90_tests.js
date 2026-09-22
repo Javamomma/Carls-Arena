@@ -395,7 +395,14 @@ Test.add('brute profile exists and prefers heavies',()=>{ok(AI.profiles.brute);o
 Test.add('brute AI lands a heavy on an idle target within 600 frames',()=>{
   let landed=false;
   const f=mkFight({ctrl2:AI.make('brute',13),onEvent:(type,a)=>{if(type==='hit'&&a&&a.side===-1&&a.moveName==='heavy')landed=true}});
-  closeIn(f);run(f,600);
+  // Positioned inside heavy range (not closeIn's light range): Task 3.6's combo follow-through
+  // (see 55_ai.js's comboFollow) now lets a landed light chase into a 3-4 hit chain, which starting
+  // from light range can KO an idle target before repeated light pushback ever widens the gap out to
+  // heavy range — that was always an indirect, timing-fragile way to exercise brute's heavy bias.
+  // Starting already inside [lightRange,heavyRange) tests the thing this test actually cares about
+  // (does brute's heavy priority fire when in range) directly.
+  f.p1.x=f.p2.x-f.p1.width-120;
+  run(f,600);
   ok(landed,'brute AI should land at least one heavy on an idle p1 within 600 frames')});
 Test.add('streak announcer lines fire for p1 combos only, not mob/p2 combos',()=>{
   const f=mkFight({seed:9});G.fight=f;G.state='FIGHT';
@@ -558,3 +565,22 @@ Test.add('shaman s1 override merges to a 6-hit flurry over the base MOVES.s1',()
   const F=new Fighter(DEFS.shaman,-1,Ctrl.idle());
   eq(F.moveDef('s1').hits,6);
   eq(F.moveDef('s1').startup,MOVES.s1.startup,'fields the override omits still fall back to base MOVES.s1')});
+// --- Task 3.6: batch tool ---
+// Ctrl.competent has no rng of its own (see its comment in 30_input.js) — the same (fight,me,foe)
+// state always yields the same intent for any seed. Two independently-built fights with the same
+// seeds on both sides must therefore log bit-identically; this is what tests/batch.py's win-rate
+// table depends on for reproducible seeds.
+Test.add('Ctrl.competent is deterministic per seed',()=>{
+  const mk=()=>mkFight({ctrl1:Ctrl.competent(7),ctrl2:AI.make('t3',9),clock:20});
+  const f1=mk(),f2=mk();closeIn(f1);closeIn(f2);run(f1,900);run(f2,900);
+  eq(JSON.stringify(f1.log),JSON.stringify(f2.log),'same matchup must reproduce the exact same fight log');
+  ok(f1.log.length>0,'the fight actually did something')});
+Test.add('Ctrl.competent blocks a foe\'s medium once its startup clock passes REACT frames',()=>{
+  // Kept at the fighters' default spacing (out of light range) so the bot has no reason to
+  // commit to its own light chain first — this isolates the reactive-block behavior on its own.
+  const f=mkFight({ctrl1:Ctrl.competent(1),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});
+  run(f,7);
+  eq(f.p1.state,'BLOCK','p1 should be guarding by frame 7 of a foe medium (startup 10)')});
+Test.add('Ctrl.competent chains lights once in range and idle',()=>{
+  const f=mkFight({ctrl1:Ctrl.competent(2)});closeIn(f);run(f,20);
+  ok(f.log.some(e=>e.type==='hit'&&e.who===1),'p1 landed at least one light from range')});

@@ -1,12 +1,18 @@
-// AI.TIERS: the five frozen difficulty tiers (t1..t5) — see the Phase 3 plan's frozen interfaces.
-// Numbers are frozen; if a head-to-head result needs adjusting, tune the *behaviours* below, not
-// this table (see the 't1 loses to t5' test).
+// AI.TIERS: the five difficulty tiers (t1..t5) — see the Phase 3 plan's frozen interfaces.
+// `attack` was retuned for Task 3.6's balance pass (see docs/ARENA.md's "AI numbers changed" table):
+// t3 .09->.25, t4 .12->.35, t5 .15->.5, t1/t2 left at their frozen values. Everything else in this
+// table is unchanged from the frozen interfaces. Before this pass, t3-t5 rolled an attack so rarely
+// (once every ~7-30 idle frames even at cd===0) that tests/batch.py's scripted --bot auto opponent —
+// which reacts to every visible medium/heavy and chains every light it lands — beat every tier at a
+// nearly flat 77-100% win rate with no real difficulty curve; see 55_ai.js's `comboFollow` for the
+// paired behavior change (a landed attack now chases its own chain) that makes the higher attack
+// rate actually punishing instead of just spammier.
 const AI_TIERS={
   t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0},
   t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2},
-  t3:{react:8, attack:.09,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5},
-  t4:{react:5, attack:.12,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8},
-  t5:{react:3, attack:.15,block:.85,parry:.6, dash:.08,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1}};
+  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5},
+  t4:{react:5, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8},
+  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.08,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1}};
 const AI={
   TIERS:AI_TIERS,
   // profiles IS the alias table (not a copy of it) so old direct reads like AI.profiles.brute and
@@ -32,12 +38,18 @@ const AI={
     // intent.heavy===false, and that same frame can't also start a DASH — the CHARGE branch never
     // looks at intent.dashBack) and fires the feint's dashBack the next time this fighter isn't busy.
     let baitHold=0,baitDashPending=false;
-    // Punish combo state: punishFollow counts remaining chain-cancel presses after the initial
-    // medium. Checked ahead of busy() (a chain-cancel window is still state==='ATTACK', i.e. busy)
+    // Combo follow-through state (Task 3.6 balance pass): comboFollow counts remaining chain-cancel
+    // presses after ANY of this fighter's own landed moves opens a chain window — a punish medium
+    // (as in Phase 3.1) or, new here, an ordinary spontaneous attack. Deliberately a blind countdown
+    // (no rng draw), the same shape as hHold/baitHold above, so arming it at a new site never shifts
+    // the rng sequence a tier already drew at that site — only the busy-frame timing around it
+    // changes. Checked ahead of busy() (a chain-cancel window is still state==='ATTACK', i.e. busy)
     // but cleared the moment the fighter goes non-busy without ever seeing that window again (the
-    // medium whiffed, or the chain simply ended) so a mid-combo hit/knockdown can't leave this AI
-    // stuck waiting on a chain window that will never come.
-    let punishFollow=0;
+    // move whiffed, or the chain simply ended) so a mid-combo hit/knockdown can't leave this AI stuck
+    // waiting on a chain window that will never come. Without this, a scripted opponent that
+    // blocks/dodges everything except a bare light1 ate the rest of any chain for free once that
+    // first light landed (see tests/batch.py's win-rate gate).
+    let comboFollow=0;
     // Tracks the foe's invulnerability frames across calls (cheap, no rng) so 'punish' can catch the
     // single decision frame the KNOCKDOWN get-up i-frames end on, not just the frames still inv>0.
     let prevFoeInv=0;
@@ -61,10 +73,10 @@ const AI={
       if(hHold>0){hHold--;it.heavy=true;return it}
       // Same blind-countdown shape as hHold, for the bait feint's short 6-frame hold.
       if(baitHold>0){baitHold--;it.heavy=true;if(baitHold===0)baitDashPending=true;return it}
-      if(punishFollow>0){
-        if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){punishFollow--;it.light=true;return it}
+      if(comboFollow>0){
+        if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){comboFollow--;it.light=true;return it}
         if(me.busy())return it; // still mid-move (startup/active, or a recovery that isn't a chain window yet) — keep waiting
-        punishFollow=0} // fully back to IDLE/BLOCK without ever seeing a chain window: the combo is over
+        comboFollow=0} // fully back to IDLE/BLOCK without ever seeing a chain window: the combo is over
       if(me.busy())return it;
       // An established block hold takes priority over firing a pending bait dash.
       if(hold>0){hold--;it.block=true;return it}
@@ -91,8 +103,8 @@ const AI={
         if(r.next()<p.parry){plan='parry';return it}hold=p.react+r.int(10);it.block=true;return it}
       // Punish: the foe is stunned (parried), just cleared its KNOCKDOWN get-up i-frames, or is still
       // locked out from a missed parry (parryLock>0) — capitalize with a medium, then chain a couple
-      // of lights via punishFollow above. Gated on p.punish>0 so dummy never draws this roll.
-      if(p.punish>0&&cd===0&&(foe.state==='STUNNED'||justGotUp||foe.parryLock>0)&&r.next()<p.punish){it.medium=true;cd=p.react;punishFollow=3;return it}
+      // of lights via comboFollow above. Gated on p.punish>0 so dummy never draws this roll.
+      if(p.punish>0&&cd===0&&(foe.state==='STUNNED'||justGotUp||foe.parryLock>0)&&r.next()<p.punish){it.medium=true;cd=p.react;comboFollow=3;return it}
       if(cd===0&&me.power>=100&&r.next()<p.special*STEP){it.special=me.power>=300?3:me.power>=200?2:1;cd=20;return it}
       // Heavy: brute-style profiles favor a slow, telegraphed swing at close-but-not-point-blank
       // range. Held for moveDef('heavy').charge+2 frames total (this frame plus hHold's decrements
@@ -109,6 +121,10 @@ const AI={
       // then cancel and dash back — a feint. Gated on p.bait>0 so dummy/basic (both 0) draw the
       // exact same rng sequence as before this behavior existed.
       if(p.bait>0&&me.state==='IDLE'&&cd===0&&dist>=140&&dist<=220&&r.next()<p.bait){baitHold=5;it.heavy=true;cd=p.react;return it}
-      if(cd===0&&r.next()<p.attack){if(dist<lightRange)it.light=true;else it.medium=true;cd=p.react;return it}
+      // A spontaneous attack that lands also gets to chase the combo (Task 3.6 balance pass), gated
+      // on p.punish>0 (the tiers' "capitalizes on an opening" knob, already monotonic: t1's 0 keeps
+      // it a pushover, t5's 1 always chases) so this new site arms the exact same blind countdown as
+      // the punish branch above, with zero extra rng draws of its own.
+      if(cd===0&&r.next()<p.attack){if(dist<lightRange)it.light=true;else it.medium=true;cd=p.react;if(p.punish>0)comboFollow=3;return it}
       if(dist<lightRange&&r.next()<p.dash){it.dashBack=true;return it}
       return it}}}};
