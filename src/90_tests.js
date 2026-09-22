@@ -152,23 +152,34 @@ Test.add('a parry works again after PARRY_LOCKOUT expires',()=>{
 Test.add('tallest pose stays under the HUD at max zoom',()=>{
   // 1.28 mirrors G's S3 cinematic punch-in zoom (80_game.js) — the highest zoom the camera ever
   // reaches, and therefore the worst case for a raised-arm/leaning pose's topmost joint clearing the
-  // HUD bars (portraits/hp bars end around canvas y=70, the floor-line text around y=96).
+  // HUD bars (portraits/hp bars end around canvas y=70, the floor-line text around y=96). Quad looks
+  // have no fixed lHand/rHand to check (a heavy rear-up can put the head, a front paw, or even the
+  // raised tail tip highest depending on the pose), so for those check every returned bone via
+  // Rig.bonesQuad instead of a fixed human-shaped set.
   const CINEMATIC_ZOOM=1.28,cam={x:0,zoom:CINEMATIC_ZOOM};
   for(const id in LOOKS){const look=LOOKS[id],sc=(DEFS[id]&&DEFS[id].scale)||1;
     for(const key of['heavyCharge','s3'])
       for(const t of[0,0.5,1]){
         const j=Rig.solve(look,key,t,1);
-        const minY=Math.min(j.head.y,j.lHand.y,j.rHand.y)*sc;
+        const minY=(look.rig==='quad'
+          ?Math.min(...Rig.bonesQuad.map(b=>j[b].y))
+          :Math.min(j.head.y,j.lHand.y,j.rHand.y))*sc;
         const screen=Camera.toScreen(cam,0,FLOOR+minY);
         ok(screen.sy>=104,id+'/'+key+'/t'+t+' topmost joint at screen y='+screen.sy.toFixed(1)+', must clear the HUD (>=104)')}}});
 Test.add('every look\'s reach fits inside EDGE_PAD',()=>{
   for(const id in LOOKS){const look=LOOKS[id],sc=(DEFS[id]&&DEFS[id].scale)||1;
-    const reach=(look.shoulderW/2+look.armLen+look.limb)*sc;
+    // Quad reach is body length/2 (hip-to-chest half the body, the far end from the fighter's x
+    // anchor) plus a front leg's full extension, per the Task 3.4 brief's formula — not the human
+    // shoulderW/armLen/limb formula, which quad looks don't have the fields for.
+    const reach=look.rig==='quad'
+      ?(look.bodyLen/2+look.legLen)*sc
+      :(look.shoulderW/2+look.armLen+look.limb)*sc;
     ok(reach<=EDGE_PAD,id+' reach '+reach.toFixed(1)+' must fit inside EDGE_PAD ('+EDGE_PAD+')')}});
 Test.add('every look renders every pose without throwing',()=>{
   for(const id in LOOKS){const look=LOOKS[id];
-    for(const key in POSES){const j=Rig.solve(look,key,0.5,1);
-      for(const b of Rig.bones)ok(j[b]&&isFinite(j[b].x)&&isFinite(j[b].y),id+'/'+key+'/'+b)}}
+    const table=look.rig==='quad'?POSES_QUAD:POSES,bones=look.rig==='quad'?Rig.bonesQuad:Rig.bones;
+    for(const key in table){const j=Rig.solve(look,key,0.5,1);
+      for(const b of bones)ok(j[b]&&isFinite(j[b].x)&&isFinite(j[b].y),id+'/'+key+'/'+b)}}
   // Render.frame on a live fight with each def as p1, via an offscreen G.fight swapped in and
   // restored afterward, must not throw for any def x current pose.
   const savedFight=G.fight,savedState=G.state;
@@ -178,6 +189,23 @@ Test.add('every look renders every pose without throwing',()=>{
       G.fight=f;G.state='FIGHT';
       ok(!threw(()=>Render.frame(f)),'Render.frame must not throw for p1='+id)}
   }finally{G.fight=savedFight;G.state=savedState}});
+Test.add('quad rig solve returns all 15 quad bones with four feet on the floor line',()=>{
+  const j=Rig.solve(LOOKS.donut,'idle',0,1);
+  for(const b of Rig.bonesQuad)ok(j[b]&&isFinite(j[b].x)&&isFinite(j[b].y),b);
+  ok(Math.abs(j.fl2.y)<6,'front-left paw at y≈0');ok(Math.abs(j.fr2.y)<6,'front-right paw at y≈0');
+  ok(Math.abs(j.bl2.y)<6,'back-left paw at y≈0');ok(Math.abs(j.br2.y)<6,'back-right paw at y≈0');
+  ok(j.head.y<j.hip.y,'head above hip')});
+Test.add('every POSES_QUAD key the state machine can reach exists with at least 2 keyframes',()=>{
+  const need=['idle','walk','dash','light1','light2','light3','light4','light5','medium','heavyCharge',
+    'heavy','block','blockstun','hit','knockdown','getup','stunned','s1','s2','s3','win','ko'];
+  for(const k of need)ok(POSES_QUAD[k]&&POSES_QUAD[k].length>=2,'POSES_QUAD.'+k)});
+Test.add('quad light1 at t0.5 moves the leading front paw forward of idle',()=>{
+  const a=Rig.solve(LOOKS.donut,'idle',0,1),b=Rig.solve(LOOKS.donut,'light1',0.5,1);
+  ok(b.fl2.x>a.fl2.x+15,'front-left paw extends forward: idle '+a.fl2.x.toFixed(1)+' vs light1 '+b.fl2.x.toFixed(1))});
+Test.add('Render.frame does not throw with a quad p1 (donut) and a quad p2 (grub)',()=>{
+  G.startFight({p1:'donut',p2:'grub',ctrl1:Ctrl.idle()});
+  ok(!threw(()=>Render.frame(G.fight)),'Render.frame must not throw for donut vs grub');
+  G.toTitle()});
 Test.add('sim files contain no DOM or presentation identifiers',()=>{
   for(const f of [Fight,Fighter])
     ok(!/document|canvas|Audio\.|FX\.|Render\.|Stage\./.test(f.toString()),(f.name||'?')+' must stay presentation-free');

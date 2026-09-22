@@ -35,14 +35,20 @@ const Render={ctx:canvas.getContext('2d'),
       fc.font='11px ui-monospace,monospace';fc.fillStyle='#ccc';fc.textAlign='center';fc.letterSpacing='1px';
       fc.fillText(label,hc.floorCanvas.width/2,12);hc.floorLabel=label}
     c.drawImage(hc.floorCanvas,W/2-hc.floorCanvas.width/2,80)},
-  overlayY(F){const l=lookFor(F.def);return FLOOR-(l.legLen+l.torsoLen+l.headR*2.4)*(F.def.scale||1)-14},
+  // Quad looks have no legLen/torsoLen (see LOOKS.donut/grub/mother_rat in 68_rig.js) — hipH+neckLen
+  // stands in for legLen+torsoLen as "how tall the body's base is off the ground before the head".
+  overlayY(F){const l=lookFor(F.def),h=l.rig==='quad'?(l.hipH+l.neckLen):(l.legLen+l.torsoLen);
+    return FLOOR-(h+l.headR*2.4)*(F.def.scale||1)-14},
   reflection(c,F,cam,frame){c.save();c.beginPath();c.rect(0,FLOOR,STAGE_W,90);c.clip();
     c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.12;Rig.draw(c,F,cam,frame);c.restore()},
   // A grounding contact shadow at the fighter's feet — the mirrored reflection alone reads as a
   // detached ghost. A flattened dark ellipse under the floor art, sized off shoulderW (a stand-in
   // for the character's overall footprint) so bigger/scaled-up looks (the hobgoblin) get a bigger
   // shadow than smaller ones (the goblin) without a dedicated per-look radius.
-  shadow(c,F){const look=lookFor(F.def),scale=F.def.scale||1,w=look.shoulderW*1.6*scale;
+  // Quad looks have no shoulderW; the brief's own "sized off the footprint" rationale still applies,
+  // just off bodyLen (the long axis of a horizontal quadruped body) instead of shoulder width.
+  shadow(c,F){const look=lookFor(F.def),scale=F.def.scale||1,
+      w=(look.rig==='quad'?look.bodyLen*1.15:look.shoulderW*1.6)*scale;
     c.save();c.globalAlpha=.35;c.fillStyle='#000';
     c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore()},
   fighter(c,F,cam,frame){

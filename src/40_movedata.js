@@ -12,9 +12,8 @@ const MOVES={
   s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,chain:null,knockdown:true,unblockable:true,hitstop:14}};
 const CHAMPS={
   carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human'},
-  // rig:'quad' — Donut is a real cat (Task 3.5's RigQuad, a four-legged bone set). Until that lands,
-  // her .look (LOOKS.donut in 68_rig.js) stays a human-rig placeholder so she still renders; Rig.solve
-  // dispatches on look.rig, not def.rig, which is what makes that placeholder work today.
+  // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
+  // and Rig.solve's 'quad' branch in 68_rig.js).
   donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad'},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
     moves:{s1:{hits:5,gap:4,dmg:1.2}}},
@@ -30,8 +29,8 @@ const MOBS={
   // s1 override: a longer 6-hit flurry (base s1 is 3 hits) — the shaman's signature multi-hit special.
   shaman:   {id:'shaman',  name:'SHAMAN',  cls:'caster',hp:240,atk:44,color:'#6a4c93',armor:0,  crit:.1, critMul:1.6,blockProf:0,  scale:.95,rig:'human',
     moves:{s1:{hits:6,gap:4,dmg:1.1}}},
-  // rig:'quad' — Task 3.5's four-legged bone set. Until then LOOKS.grub (68_rig.js) is a human-rig
-  // placeholder, same deal as Donut/Mongo above.
+  // rig:'quad' — Task 3.4's four-legged bone set, same as Donut above (LOOKS.grub, 68_rig.js) but
+  // drawn as a segmented larva with stubby leg nubs instead of a cat.
   grub:     {id:'grub',    name:'GRUB',    cls:'beast', hp:380,atk:40,color:'#8a9a4f',armor:.05,crit:.05,critMul:1.6,blockProf:0,  scale:.8, rig:'quad'}};
 const BOSSES={
   // rig:'big' — Task 3.4's brute bone set. Until then LOOKS.grull (68_rig.js) is a human-rig
@@ -39,8 +38,7 @@ const BOSSES={
   // def with boss:true, a bigger rig, a unique S3, and one signature buff — no boss-only engine).
   grull:{id:'grull',name:'GRULL',cls:'tank',hp:1600,atk:70,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:1.3,rig:'big',
     boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
-  // rig:'quad' — Task 3.5's four-legged bone set. Until then LOOKS.mother_rat (68_rig.js) is a
-  // human-rig placeholder.
+  // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1400,atk:62,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.3,rig:'quad',
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
