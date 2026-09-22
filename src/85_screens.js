@@ -123,8 +123,12 @@ const Screens={
       const xpNeed=Stats.xpToLevel(entry.level+1);
       const pct=atCap?100:Math.max(0,Math.min(100,Math.round(100*entry.xp/xpNeed)));
       info.innerHTML=
+        // Fix-wave item 5: shard count shown as N/5 next to the stars -- after shards became the
+        // only thing crystals actually produce once the roster is full, the roster screen showed
+        // stars/level but never the one number that says how close a champion is to its next star.
         '<div class="name">'+def.name+'<span class="stars">'+
-          '★'.repeat(entry.stars)+'☆'.repeat(5-entry.stars)+'</span></div>'+
+          '★'.repeat(entry.stars)+'☆'.repeat(5-entry.stars)+
+          '</span><span class="shards">'+(entry.shards||0)+'/5</span></div>'+
         '<div class="rankline"><span class="pips">'+Array.from({length:entry.stars},(_,i)=>
           '<span class="rp'+(i<entry.rank?' on':'')+'"></span>').join('')+
           '</span><span class="lvl">LVL '+entry.level+(atCap?' (MAX)':'')+'</span></div>'+

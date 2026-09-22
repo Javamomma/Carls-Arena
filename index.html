@@ -62,6 +62,7 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .card .info{flex:1 1 auto;min-width:0}
 .card .name{font-size:12px;color:#fff;font-weight:bold;letter-spacing:1px}
 .card .stars{color:#f4c542;font-size:11px;margin-left:6px}
+.card .shards{color:#999;font-size:10px;margin-left:6px}
 .card .rankline{display:flex;align-items:center;gap:8px;margin:3px 0}
 .card .pips{display:flex;gap:2px}
 .card .rp{display:inline-block;width:7px;height:7px;border-radius:50%;background:#333;border:1px solid #555}
@@ -252,6 +253,10 @@ const Crystal={
   KINDS:{
     basic:  {cost:{units:0,  gold:500},odds:[[1,.70],[2,.25],[3,.05]]},
     premium:{cost:{units:100          },odds:[[2,.60],[3,.32],[4,.08]]}},
+  // Fix-wave item 5 (ruled): a duplicate pull's shard grant now scales with the rolled tier instead
+  // of a flat 1 -- once the roster is full (4 champions, uniform picking), a flat grant made every
+  // crystal worth identically little regardless of cost/odds (final-review-verdict.md issue 5).
+  SHARDS_PER_TIER:{1:1,2:2,3:3,4:5},
   // Pure weighted draw off an odds table [[tier,prob],...] (probs sum to 1); the single random
   // decision in a crystal open. Kept separate from open() so tests can measure the raw table's
   // distribution directly, without pity or roster/dup effects mixed in.
@@ -301,7 +306,9 @@ const Crystal={
     let result;
     if(roster[champId]){
       const entry=roster[champId];
-      entry.shards=(entry.shards||0)+1;
+      // `stars` here is the rolled (pity-adjusted) tier from this pull, not the owned champion's
+      // display stars below -- that's exactly what SHARDS_PER_TIER is keyed on.
+      entry.shards=(entry.shards||0)+(Crystal.SHARDS_PER_TIER[stars]||1);
       while(entry.shards>=5&&entry.stars<5){entry.shards-=5;entry.stars++}
       result={champId,stars:entry.stars,dup:true,shards:entry.shards}}
     else{
@@ -3512,8 +3519,12 @@ const Screens={
       const xpNeed=Stats.xpToLevel(entry.level+1);
       const pct=atCap?100:Math.max(0,Math.min(100,Math.round(100*entry.xp/xpNeed)));
       info.innerHTML=
+        // Fix-wave item 5: shard count shown as N/5 next to the stars -- after shards became the
+        // only thing crystals actually produce once the roster is full, the roster screen showed
+        // stars/level but never the one number that says how close a champion is to its next star.
         '<div class="name">'+def.name+'<span class="stars">'+
-          '★'.repeat(entry.stars)+'☆'.repeat(5-entry.stars)+'</span></div>'+
+          '★'.repeat(entry.stars)+'☆'.repeat(5-entry.stars)+
+          '</span><span class="shards">'+(entry.shards||0)+'/5</span></div>'+
         '<div class="rankline"><span class="pips">'+Array.from({length:entry.stars},(_,i)=>
           '<span class="rp'+(i<entry.rank?' on':'')+'"></span>').join('')+
           '</span><span class="lvl">LVL '+entry.level+(atCap?' (MAX)':'')+'</span></div>'+
@@ -4560,24 +4571,48 @@ Test.add('Crystal.open pity counter resets on a natural top-tier pull too, not o
       eq(Save.data.pity.basic,0,'a natural top-tier pull must reset pity, not increment it to 4');
       found=true}}
   ok(found,'expected at least one natural 3-star pull within 2000 seeds (basic\'s odds are ~5% for it)')});
-Test.add('Crystal.open on a duplicate adds a shard',()=>{
-  Save.data=Meta.defaults();Save.data.gold=999999;
+// Fix-wave item 5 (ruled): once the roster is full (four champions, uniform picking), every
+// duplicate crystal used to pay out exactly one shard regardless of the rolled tier -- a 100-unit
+// premium crystal and a 500-gold basic became worth identically little the moment the roster filled,
+// and the whole odds/pity apparatus stopped mattering (final-review-verdict.md issue 5). Ruled:
+// shards now scale by the rolled tier via Crystal.SHARDS_PER_TIER (1/2/3/5 shards for a 1/2/3/4-star
+// roll); 5 shards still converts to +1 star, capped at 5-star, with any leftover kept.
+Test.add('Crystal.open on a duplicate adds shards scaled by the rolled tier, not a flat 1 (fix-wave item 5)',()=>{
+  // A low-tier roll grants exactly 1 shard, same as the old flat behavior -- scan a few seeds with
+  // no pity forcing so this exercises a genuinely natural (not pity-forced) low roll.
+  let low=null;
+  for(let s=1;s<200&&!(low&&low.shards===1);s++){
+    Save.data=Meta.defaults();Save.data.gold=999999;Save.data.seed=s;
+    for(const id of Object.keys(CHAMPS))Save.data.roster[id]={stars:2,rank:1,level:1,xp:0,shards:0};
+    low=Crystal.open('basic')}
+  ok(low&&low.shards===1,'expected a 1-star (1-shard) dup pull within 200 seeds');
+  // Pity-forced rolls make the higher tiers deterministic: basic's top tier (3-star) grants 3 shards.
+  Save.data=Meta.defaults();Save.data.gold=999999;Save.data.pity.basic=9;
   for(const id of Object.keys(CHAMPS))Save.data.roster[id]={stars:1,rank:1,level:1,xp:0,shards:0};
-  const r=Crystal.open('basic');
-  ok(r.dup,'every champ is already owned, so this pull must be a duplicate');
-  eq(Save.data.roster[r.champId].shards,1);
-  eq(r.shards,1)});
-Test.add('Crystal.open converts 5 shards into +1 star, capped at 5-star with leftover kept',()=>{
-  Save.data=Meta.defaults();Save.data.gold=999999;
-  for(const id of Object.keys(CHAMPS))Save.data.roster[id]={stars:3,rank:1,level:1,xp:0,shards:4};
-  const r=Crystal.open('basic');
+  const r3=Crystal.open('basic');
+  eq(r3.stars,1,'entry.stars reflects the OWNED star count on a dup, unaffected by the rolled tier');
+  eq(Save.data.roster[r3.champId].shards,3,'a pity-forced 3-star dup pull must grant 3 shards');
+  eq(r3.shards,3);
+  // premium's top tier (4-star) grants 5 shards.
+  Save.data=Meta.defaults();Save.data.units=999999;Save.data.pity.premium=9;
+  for(const id of Object.keys(CHAMPS))Save.data.roster[id]={stars:2,rank:1,level:1,xp:0,shards:0};
+  const r4=Crystal.open('premium');
+  eq(Save.data.roster[r4.champId].stars,3,'0+5 shards converts to exactly +1 star with 0 leftover, proving the grant was exactly 5');
+  eq(Save.data.roster[r4.champId].shards,0)});
+Test.add('Crystal.open converts 5 shards into +1 star, capped at 5-star with leftover kept (fix-wave item 5: shards now scale by rolled tier)',()=>{
+  // Pity forces the top tier (3-star for basic -> 3 shards per Crystal.SHARDS_PER_TIER).
+  Save.data=Meta.defaults();Save.data.gold=999999;Save.data.pity.basic=9;
+  for(const id of Object.keys(CHAMPS))Save.data.roster[id]={stars:3,rank:1,level:1,xp:0,shards:2};
+  const r=Crystal.open('basic'); // 2 existing + 3 gained = 5 -> exactly one star conversion, no leftover
   eq(Save.data.roster[r.champId].stars,4);
   eq(Save.data.roster[r.champId].shards,0);
-  // now at the star cap: shards keep accruing but never convert further
+  // already at the 5-star cap: shards keep accruing (nothing left to convert into) instead of being
+  // discarded once the cap is hit.
+  Save.data.pity.basic=9;
   for(const id of Object.keys(CHAMPS))Save.data.roster[id]={stars:5,rank:1,level:1,xp:0,shards:4};
-  const r2=Crystal.open('basic');
+  const r2=Crystal.open('basic'); // 4 existing + 3 gained = 7, capped at 5-star: nothing converts
   eq(Save.data.roster[r2.champId].stars,5);
-  eq(Save.data.roster[r2.champId].shards,5)});
+  eq(Save.data.roster[r2.champId].shards,7,'leftover shards accrue past 5 once the star cap is hit; never discarded')});
 Test.add('Crystal.open on a new champion adds it to the roster at the pulled stars',()=>{
   // Only carl starts owned, so 3 of the 4 uniformly-picked champs are a fresh pull; try seeds
   // until one lands non-carl (fresh Save.data each try, so an earlier try's pull never biases a
@@ -4997,6 +5032,15 @@ Test.add('Screens.show(\'roster\') renders one .card per roster entry, with exac
   const cards=[...document.querySelectorAll('#roster .card')];
   eq(cards.length,Object.keys(Save.data.roster).length);
   eq(cards.filter(c=>c.classList.contains('active')).length,1);
+  Screens.title()});
+// Fix-wave item 5: after shards became the only thing crystals actually produce once the roster is
+// full, the roster screen still showed stars/level but never the shard count itself -- the one
+// number that says how close a champion is to its next star. Cards now show it as "N/5".
+Test.add('roster cards show the shard count as N/5 next to the stars (fix-wave item 5)',()=>{
+  Save.data=Meta.defaults();Save.data.roster.carl.shards=3;
+  Screens.show('roster');
+  const card=document.querySelector('#roster .card');
+  ok(card.textContent.includes('3/5'),'card must show the shard count: '+card.textContent);
   Screens.title()});
 Test.add('roster card buttons mutate only through Roster.levelUp/rankUp/setActive',()=>{
   Save.data=Meta.defaults();Save.data.iso=10;

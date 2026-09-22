@@ -93,6 +93,10 @@ const Crystal={
   KINDS:{
     basic:  {cost:{units:0,  gold:500},odds:[[1,.70],[2,.25],[3,.05]]},
     premium:{cost:{units:100          },odds:[[2,.60],[3,.32],[4,.08]]}},
+  // Fix-wave item 5 (ruled): a duplicate pull's shard grant now scales with the rolled tier instead
+  // of a flat 1 -- once the roster is full (4 champions, uniform picking), a flat grant made every
+  // crystal worth identically little regardless of cost/odds (final-review-verdict.md issue 5).
+  SHARDS_PER_TIER:{1:1,2:2,3:3,4:5},
   // Pure weighted draw off an odds table [[tier,prob],...] (probs sum to 1); the single random
   // decision in a crystal open. Kept separate from open() so tests can measure the raw table's
   // distribution directly, without pity or roster/dup effects mixed in.
@@ -142,7 +146,9 @@ const Crystal={
     let result;
     if(roster[champId]){
       const entry=roster[champId];
-      entry.shards=(entry.shards||0)+1;
+      // `stars` here is the rolled (pity-adjusted) tier from this pull, not the owned champion's
+      // display stars below -- that's exactly what SHARDS_PER_TIER is keyed on.
+      entry.shards=(entry.shards||0)+(Crystal.SHARDS_PER_TIER[stars]||1);
       while(entry.shards>=5&&entry.stars<5){entry.shards-=5;entry.stars++}
       result={champId,stars:entry.stars,dup:true,shards:entry.shards}}
     else{
