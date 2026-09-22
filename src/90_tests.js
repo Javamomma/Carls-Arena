@@ -561,6 +561,84 @@ Test.add('crit rolls from the fight rng and multiplies damage; noCrit disables',
 Test.add('block proficiency reduces chip',()=>{const f=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});f.p2.def=Object.assign({},CHAMPS.carl,{blockProf:.5});closeIn(f);run(f,15);eq(f.p2.hp,Math.round(1000-5*.5))});
 Test.add('a missed parry locks out re-parry for PARRY_LOCKOUT frames',()=>{const mash=Ctrl.script(Array.from({length:40},(_,i)=>({f:i*7,until:i*7+5,intent:{block:true}})));const f=mkFight({ctrl1:Ctrl.script([L(0,300)]),ctrl2:mash});closeIn(f);run(f,300);const parries=f.log.filter(e=>e.type==='parry').length;ok(parries<=2,'mash parries: '+parries);const hold=mkFight({ctrl1:Ctrl.script([L(0,300)]),ctrl2:Ctrl.hold({block:true})});closeIn(hold);run(hold,300);ok(hold.p2.hp>=f.p2.hp-50,'holding is not much worse than mashing')});
 Test.add('per-champion move overrides merge over MOVES',()=>{const F=new Fighter(DEFS.goblin,-1,Ctrl.idle());eq(F.moveDef('heavy').charge,14);eq(F.moveDef('light1').startup,MOVES.light1.startup);const H=new Fighter(DEFS.hobgoblin,-1,Ctrl.idle());eq(H.moveDef('heavy').hitstop,12)});
+// --- Task 6.2: movement inside moves (dash-in medium, step-in light) and AI approach ---
+Test.add('move table gains movement-inside-moves fields: medium.track, light1.stepIn, others untouched',()=>{
+  eq(MOVES.medium.track,300);eq(MOVES.light1.stepIn,110);
+  eq(MOVES.light1.dash,18,'light1 keeps its normal dash for when it starts already in range');
+  for(const k of['light2','light3','light4','light5'])ok(typeof MOVES[k].dash==='number'&&MOVES[k].track===undefined&&MOVES[k].stepIn===undefined,k+' must be untouched')});
+Test.add('Fight.step writes fighter.foeDist symmetrically before act() runs, matching the hurtbox-edge gap',()=>{
+  const f=mkFight();f.p1.x=STAGE_W/2-100;f.p2.x=STAGE_W/2+100;
+  f.step();
+  const expect=Math.abs(f.p2.x-f.p1.x)-(f.p1.width/2+f.p2.width/2);
+  eq(f.p1.foeDist,expect);eq(f.p2.foeDist,expect)});
+Test.add('a step-in light closes distance and lands when the foe starts beyond light range',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-150-48; // foeDist ~150px: beyond light1.range(70), within stepIn's max reach (110+70=180)
+  run(f,12);
+  ok(f.log.some(e=>e.type==='hit'&&e.who===1),'the step-in light should land within 12 frames')});
+Test.add('light1 already in range keeps its normal dash and startup (stepIn does not trigger)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});
+  closeIn(f); // well inside light1.range
+  f.step();
+  eq(f.p1.effStartup,MOVES.light1.startup,'no stepIn extension when already in range');
+  eq(f.p1.dashRate,MOVES.light1.dash/MOVES.light1.startup,'falls back to the plain dash/startup rate')});
+Test.add('a medium dash-in tracks the foe from spawn distance, stops at light range, never overshoots',()=>{
+  // Isolated from Fight.step/detect/resolve on purpose: once the dash-in closes the gap the same
+  // tick the hitbox goes active (see the 'ender push' test's own comment on that overlap), so a real
+  // Fight would ALSO land the hit and push the (stationary Ctrl.idle) defender back that same frame --
+  // contaminating a gap measurement taken via f.p1.x/f.p2.x with MOVES.medium.push. Driving the
+  // Fighter directly isolates the movement math from that knockback.
+  const F=mkFighter();const foeX=F.x+320+48; // ~320px hurtbox-edge gap: the playtest note's spawn distance
+  F.foeDist=320;F.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
+  ok(F.state==='ATTACK'&&F.moveName==='medium');
+  const eff=F.effStartup;
+  ok(eff>MOVES.medium.startup,'a 320px gap needs more than the base 10-frame startup to close: eff='+eff);
+  for(let i=0;i<eff;i++){
+    F.tick();
+    ok(F.x<=foeX-F.width,'attacker must never cross past the foe (both fighters share width 48)')}
+  const gap=foeX-F.x-F.width;
+  ok(Math.abs(gap-MOVES.light1.range)<2,'foeDist should be ~light range once the dash-in ends, got '+gap)});
+Test.add('a medium dash-in from spawn distance actually lands (end to end, through a real Fight)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-320-48; // ~320px: the playtest note's spawn gap
+  run(f,80);
+  ok(f.log.some(e=>e.type==='hit'&&e.who===1),'the tracked medium should land within 80 frames from spawn distance')});
+Test.add('a medium started already within light range does not dash forward at all',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-60-48; // foeDist=60, already inside light1.range(70)
+  const x0=f.p1.x;
+  f.step();
+  eq(f.p1.effStartup,MOVES.medium.startup,'no dash needed, base startup unchanged');
+  for(let i=0;i<MOVES.medium.startup;i++){
+    f.step();
+    ok(f.p1.x<=f.p2.x-(f.p1.width/2+f.p2.width/2),'attacker must never cross into the foe\'s hurtbox')}
+  eq(f.p1.x,x0,'no forward dash when the medium starts already in range')});
+Test.add('AI approach field is present on every tier (dummy 0, t1..t5 shrinking) and aliases inherit it',()=>{
+  eq(AI.profiles.dummy.approach,0);
+  eq(AI.TIERS.t1.approach,90);eq(AI.TIERS.t2.approach,70);eq(AI.TIERS.t3.approach,50);eq(AI.TIERS.t4.approach,40);eq(AI.TIERS.t5.approach,30);
+  eq(AI.resolveProfile('basic').approach,AI.TIERS.t2.approach);eq(AI.resolveProfile('brawl').approach,AI.TIERS.t3.approach);
+  eq(AI.resolveProfile('brute').approach,AI.TIERS.t3.approach)});
+Test.add('t1 AI approaches (presses medium) within 90 frames when stuck beyond light range at neutral',()=>{
+  const f=mkFight({ctrl2:AI.make('t1',7)});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-200-48; // neutral: idle p1, well beyond light range, stationary
+  let fired=false;
+  for(let i=0;i<90&&!fired;i++){f.step();if(f.p2.state==='ATTACK'&&f.p2.moveName==='medium')fired=true}
+  ok(fired,'t1 must press medium within 90 frames at neutral distance')});
+Test.add('AI vs random bot stays deterministic with the new approach field wired in (self-comparison, not a fixed snapshot)',()=>{
+  const a=mkFight({ctrl1:Ctrl.random(3),ctrl2:AI.make('basic',9)}),b=mkFight({ctrl1:Ctrl.random(3),ctrl2:AI.make('basic',9)});run(a,900);run(b,900);
+  eq(a.p1.hp,b.p1.hp);eq(a.p2.hp,b.p2.hp);eq(a.log.length,b.log.length)});
+Test.add('the dummy AI profile (approach:0) never approaches or attacks, even parked out of light range',()=>{
+  const f=mkFight({ctrl2:AI.make('dummy',3)});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-200-48;
+  run(f,600);
+  eq(f.log.filter(e=>e.type==='hit'&&e.who===-1).length,0);
+  eq(f.p2.x,STAGE_W/2+200,'the dummy must never move on its own')});
+Test.add('Ctrl.tutorialDummy never approaches: it only ever holds or throws its scripted medium, never light/dashBack/block/special',()=>{
+  const c=Ctrl.tutorialDummy();
+  const me={busy:()=>false,state:'IDLE',moveName:null};
+  for(let i=0;i<600;i++){
+    const it=c.next(null,me,me);
+    ok(!it.light&&!it.dashBack&&!it.block&&!it.special,'the tutorial dummy is a controller, not an AI profile -- unaffected by AI approach')}});
 Test.add('medium as a combo ender pushes the defender out of light range',()=>{
   // Chain 3 lights (light1/2/3 all have a non-null .chain) then, from light3's recovery, cancel
   // into a medium (script: light only through frame 23, medium from frame 24 on — the frame light3

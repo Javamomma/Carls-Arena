@@ -14,19 +14,22 @@
 // distance with a medium and occasionally mix in a heavy (30_input.js) — re-checked the tier gate
 // afterward and the curve held (monotone non-increasing, t1 100% >=80%, t5 23.3% <=30%) without
 // retuning any AI_TIERS field; see docs/ARENA.md's fix-wave batch tables for the exact numbers.
+// approach (Task 6.2): frames between approach presses at neutral -- see decideApproach's own
+// comment below for the full mechanism. t1's 90 down to t5's 30 mirrors every other field's curve
+// (higher tier = shorter interval = closes distance faster).
 const AI_TIERS={
-  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0},
-  t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2},
-  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5},
-  t4:{react:5, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8},
-  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.08,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1}};
+  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0, approach:90},
+  t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70},
+  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5,approach:50},
+  t4:{react:5, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8,approach:40},
+  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.08,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1, approach:30}};
 const AI={
   TIERS:AI_TIERS,
   // profiles IS the alias table (not a copy of it) so old direct reads like AI.profiles.brute and
   // AI.profiles.brawl keep resolving to the right objects. basic->t2 and brawl->t3 reuse the exact
   // tier objects (not clones) so AI.resolveProfile('basic')===AI.TIERS.t2.
   profiles:{
-    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0},
+    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0,approach:0},
     basic:AI_TIERS.t2,
     brawl:AI_TIERS.t3,
     // brute keeps its Task 2.8 identity (a heavy-happy brawler) as a t3 clone with a higher heavy
@@ -57,7 +60,10 @@ const AI={
     // (heavy-charge hold countdown), baitHold/baitDashPending (bait feint state), comboFollow (combo
     // follow-through countdown — Task 3.6 balance pass, chases either a punish medium or a landed
     // spontaneous attack; see decidePunish/decideAttack).
-    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboFollow:0};
+    // farFrames/approachCd (Task 6.2): decideApproach's own state -- see its comment below. Kept
+    // separate from the shared cd/react cooldown every other behaviour reuses, so a guaranteed
+    // approach press never blocks (or gets blocked by) an unrelated reactive block/attack/heavy roll.
+    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboFollow:0,farFrames:0,approachCd:0};
 
     // Heavy: charge-hold continuation (phase:'hold') has to run before the busy() gate in next()
     // below — once startMove('heavy') has put `me` into CHARGE, Fighter.busy() reports true (it only
@@ -167,6 +173,25 @@ const AI={
         st.cd=p.react;if(p.punish>0)st.comboFollow=3;return true}
       return false}
 
+    // Approach (Task 6.2 -- playtest note: "the dummy never approaches", the goblin's own 320px spawn
+    // gap left every light whiffing): a guaranteed, non-random distance-closer, last in the waterfall
+    // so it only ever fires when nothing else (heavy/bait/punish/block/special/the spontaneous attack
+    // roll above) already claimed the frame. Blind on purpose -- closing distance shouldn't hinge on
+    // a probability roll the way a real attack does, and gating the whole function on p.approach>0
+    // before it ever touches farFrames/approachCd makes it a total no-op for the tutorial dummy
+    // (approach 0): no rng draw (there was never going to be one), no state touched that anything else
+    // reads, so Ctrl.tutorialDummy and every dummy-profile test stay bit-identical to before this
+    // task. For everyone else: dist>lightRange has to hold for more than 60 CONSECUTIVE frames (a
+    // debounce against a foe that's merely drifting in and out of range) before the first press, then
+    // its own approachCd (set to p.approach, t1's 90 down to t5's 30) paces the repeats -- "at neutral
+    // distance" in the ruling means from a stand-still, which is exactly what farFrames measures.
+    function decideApproach(it,dist,lightRange){
+      if(p.approach<=0)return false;
+      if(dist<=lightRange){st.farFrames=0;return false}
+      st.farFrames++;
+      if(st.farFrames>60&&st.approachCd<=0){it.medium=true;st.approachCd=p.approach;st.farFrames=0;return true}
+      return false}
+
     return{next(fight,me,foe){
       const it=Ctrl.EMPTY();
       // justGotUp: the single frame the foe's real KNOCKDOWN get-up i-frames end (Fighter.wasKnockedDown
@@ -186,6 +211,7 @@ const AI={
       // character overrides (none currently touch .range, but moveDef merges them if one ever does).
       const lightRange=me.moveDef('light1').range+20,heavyRange=me.moveDef('heavy').range+10;
       if(st.cd>0)st.cd--;
+      if(st.approachCd>0)st.approachCd--;
       if(decideBlock(it,foe,'plan'))return it;
       if(decideIntercept(it,foe))return it;
       if(decideBlock(it,foe,'react'))return it;
@@ -202,4 +228,5 @@ const AI={
       if(decideBait(it,me,dist,'trigger'))return it;
       if(decideAttack(it,dist,lightRange,'attack'))return it;
       if(decideAttack(it,dist,lightRange,'dash'))return it;
+      if(decideApproach(it,dist,lightRange))return it;
       return it}}}};

@@ -1131,16 +1131,24 @@ const Ctrl={
 
 // All frame counts at 60 Hz. dash = px the attacker advances during startup. push = px the defender is shoved on hit.
 const MOVES={
-  light1:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light2',dash:18,hitstop:3},
+  light1:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light2',dash:18,stepIn:110,hitstop:3},
   light2:{startup:5,active:3,recovery:8, dmg:1,   range:70, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light3',dash:18,hitstop:3},
   light3:{startup:5,active:3,recovery:9, dmg:1.05,range:75, hitstun:14,blockstun:9, push:18,powHit:7, powTaken:4,chain:'light4',dash:18,hitstop:3},
   light4:{startup:6,active:3,recovery:10,dmg:1.1, range:75, hitstun:15,blockstun:10,push:20,powHit:8, powTaken:4,chain:'light5',dash:20,hitstop:3},
   light5:{startup:7,active:4,recovery:16,dmg:1.4, range:80, hitstun:20,blockstun:12,push:60,powHit:10,powTaken:5,chain:null,dash:10,knockdown:true,hitstop:5},
-  medium:{startup:10,active:4,recovery:14,dmg:1.6,range:120,hitstun:18,blockstun:11,push:24,powHit:12,powTaken:6,chain:'light1',dash:140,hitstop:5},
+  medium:{startup:10,active:4,recovery:14,dmg:1.6,range:120,hitstun:18,blockstun:11,push:24,powHit:12,powTaken:6,chain:'light1',track:300,hitstop:5},
   heavy: {charge:22,startup:8,active:5,recovery:26,dmg:2.6,range:130,hitstun:26,blockstun:14,push:70,powHit:18,powTaken:9,chain:null,knockdown:true,hitstop:9},
   s1:{startup:8, active:4,recovery:22,dmg:1.5,hits:3,gap:6,range:130,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:100,chain:null,knockdown:true,hitstop:6},
   s2:{startup:10,active:4,recovery:28,dmg:1.6,hits:5,gap:6,range:150,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:200,chain:null,knockdown:true,hitstop:8},
   s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,chain:null,knockdown:true,unblockable:true,hitstop:14}};
+// Task 6.2 (movement inside moves): per-frame rates Fighter.setupDash uses for medium's track and
+// light1's stepIn. DASH_TRACK_SPEED preserves medium's old flat dash(140)/startup(10) rate exactly
+// (140/10=14) so an already-in-range medium (dashLeft 0, see setupDash) and a far one that only needs
+// a few frames both move at the same speed a player already learned. DASH_STEPIN_SPEED is chosen so
+// stepIn(110)/DASH_STEPIN_SPEED always equals light1's own unchanged 5-frame startup (110/22=5) --
+// a step-in light never needs to run longer than the swing already does; it either closes the gap
+// within its own 5 frames or it doesn't connect, same as a real whiffed jab.
+const DASH_TRACK_SPEED=14,DASH_STEPIN_SPEED=22;
 const CHAMPS={
   carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human'},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
@@ -1453,6 +1461,15 @@ class Fighter{
     // (47_buffs.js) for why; defaults false for every fighter, set/cleared only by G.startTutorial/
     // Tutorial.tick on the tutorial's own dummy p2.
     this.parryBonus=0;this._secondWindSpent=false;this.guardActive=false;
+    // foeDist (Task 6.2): the live hurtbox-edge gap to the opponent, written by Fight.step just
+    // before act() runs each frame -- null until the first real step() (a bare `new Fighter()` in a
+    // unit test, or a manual startMove() call before any step()), which setupDash below treats as
+    // "no distance info" and resolves to the old fixed-dash behavior rather than ever guessing.
+    // dashLeft/dashRate/effStartup are the per-instance dash plan setupDash computes once, at
+    // startMove time, from the move's track/stepIn/dash fields and this snapshot -- see setupDash's
+    // own comment for the three shapes and why only the track (medium) shape can ever push
+    // effStartup past the move's own m.startup.
+    this.foeDist=null;this.dashLeft=0;this.dashRate=0;this.effStartup=0;
     this.buffs=[]; // resolved BUFFS objects (Buffs.apply sets this once; Fight never re-resolves ids per frame)
     // wasKnockedDown (Task 3.6 refactor): set true the instant this fighter enters KNOCKDOWN
     // (setState below), stays true through the knockdown timer and the post-getup invulnerable
@@ -1483,11 +1500,37 @@ class Fighter{
     if(!d){d=Object.assign({},MOVES[name],this.def.moves&&this.def.moves[name]);c.set(name,d)}
     return d}
   startMove(name){this.move=this.moveDef(name);this.moveName=name;this.hits=new Set();this.landed=false;
-    if(this.move.cost)this.power-=this.move.cost;this.setState(this.move.charge?'CHARGE':'ATTACK')}
+    if(this.move.cost)this.power-=this.move.cost;this.setupDash();this.setState(this.move.charge?'CHARGE':'ATTACK')}
+  // Movement inside moves (Task 6.2): computes dashLeft/dashRate/effStartup once, from the move's own
+  // track/stepIn/dash fields and the this.foeDist snapshot Fight.step wrote before this frame's act()
+  // (or null, see the constructor's own comment). Three shapes, checked in this order:
+  //  - m.track (medium): a range-tracking dash-in -- up to m.track px at DASH_TRACK_SPEED px/frame,
+  //    stopping the instant the gap closes to moveDef('light1').range so the move's own (longer)
+  //    reach lands without ever overshooting into the foe (separate() would fight it every frame if
+  //    it did). This is the only shape whose travel can outlast the move's own m.startup, since a far
+  //    foe can need more frames than the swing's base startup to close -- effStartup grows to fit.
+  //  - m.stepIn (light1 only, and only when foeDist is known and beyond light range at the moment the
+  //    move starts): a shorter lunge, up to m.stepIn px at DASH_STEPIN_SPEED px/frame. stepIn/
+  //    DASH_STEPIN_SPEED always equals light1's own m.startup (110/22=5), so effStartup never needs
+  //    to grow for this shape -- it either closes the gap inside its own swing or it whiffs.
+  //  - m.dash (every other move, and light1 when it's already within range): the original mechanic,
+  //    bit-for-bit unchanged -- m.dash px smoothly divided over the move's own m.startup frames.
+  // No move data at all (e.g. heavy, the specials) leaves dashLeft 0 and effStartup at m.startup.
+  setupDash(){
+    const m=this.move,lightRange=this.moveDef('light1').range;
+    if(m.track){
+      const need=this.foeDist==null?0:Math.max(0,this.foeDist-lightRange);
+      this.dashLeft=Math.min(need,m.track);this.dashRate=DASH_TRACK_SPEED;
+      this.effStartup=Math.max(m.startup,this.dashLeft>0?Math.ceil(this.dashLeft/DASH_TRACK_SPEED):0)}
+    else if(m.stepIn&&this.foeDist!=null&&this.foeDist>lightRange){
+      this.dashLeft=Math.min(this.foeDist-lightRange,m.stepIn);this.dashRate=DASH_STEPIN_SPEED;
+      this.effStartup=m.startup} // stepIn/DASH_STEPIN_SPEED===m.startup by construction; never grows
+    else if(m.dash){this.dashLeft=m.dash;this.dashRate=m.dash/m.startup;this.effStartup=m.startup}
+    else{this.dashLeft=0;this.dashRate=0;this.effStartup=m.startup}}
   activeSpan(){const m=this.move,n=m.hits||1;return n*m.active+(n-1)*(m.gap||0)}
-  phase(){const m=this.move;if(!m||this.state!=='ATTACK')return null;const su=m.startup,act=this.activeSpan();
+  phase(){const m=this.move;if(!m||this.state!=='ATTACK')return null;const su=this.effStartup,act=this.activeSpan();
     return this.f<su?'startup':this.f<su+act?'active':this.f<su+act+m.recovery?'recovery':'done'}
-  hitIndex(){const m=this.move,k=this.f-m.startup,span=m.active+(m.gap||0);if(k<0)return-1;const i=Math.floor(k/span);return(k%span)<m.active&&i<(m.hits||1)?i:-1}
+  hitIndex(){const m=this.move,k=this.f-this.effStartup,span=m.active+(m.gap||0);if(k<0)return-1;const i=Math.floor(k/span);return(k%span)<m.active&&i<(m.hits||1)?i:-1}
   hitbox(){if(this.phase()!=='active')return null;const a=this.front,b=this.front+this.face*this.move.range;return{x0:Math.min(a,b),x1:Math.max(a,b)}}
   hurtbox(){return{x0:this.x-this.width/2,x1:this.x+this.width/2}}
   // Consume one frame of intent. Called before tick().
@@ -1531,7 +1574,15 @@ class Fighter{
     if(this._kdCounter>0)this._kdCounter--;
     switch(this.state){
       case'CHARGE':if(this.f>=this.move.charge)this.setState('ATTACK');break;
-      case'ATTACK':{const m=this.move;if(m.dash&&this.f<=m.startup)this.x+=this.face*m.dash/m.startup;
+      // Dash-in movement (Task 6.2): consumes this.dashLeft (set once by setupDash) at up to
+      // this.dashRate px/frame, through this.effStartup -- same '<=' boundary the old flat-dash check
+      // used (this.f<=m.startup), so a move's last dash increment still lands on the same frame its
+      // hitbox first goes active (see 'medium as a combo ender' test's own comment on this overlap).
+      // min() caps the final increment to whatever's left so the total travelled is always exactly
+      // dashLeft's original value -- never overshoots past the foe, whatever DASH_TRACK_SPEED/
+      // DASH_STEPIN_SPEED divides unevenly.
+      case'ATTACK':{const m=this.move;
+        if(this.dashLeft>0&&this.f<=this.effStartup){const step=Math.min(this.dashRate,this.dashLeft);this.x+=this.face*step;this.dashLeft-=step}
         if(this.phase()==='done'){this.move=null;this.moveName=null;this.landed=false;this.setState('IDLE')}break}
       case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
       case'HITSTUN':case'BLOCKSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
@@ -1555,19 +1606,22 @@ class Fighter{
 // distance with a medium and occasionally mix in a heavy (30_input.js) — re-checked the tier gate
 // afterward and the curve held (monotone non-increasing, t1 100% >=80%, t5 23.3% <=30%) without
 // retuning any AI_TIERS field; see docs/ARENA.md's fix-wave batch tables for the exact numbers.
+// approach (Task 6.2): frames between approach presses at neutral -- see decideApproach's own
+// comment below for the full mechanism. t1's 90 down to t5's 30 mirrors every other field's curve
+// (higher tier = shorter interval = closes distance faster).
 const AI_TIERS={
-  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0},
-  t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2},
-  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5},
-  t4:{react:5, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8},
-  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.08,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1}};
+  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0, approach:90},
+  t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70},
+  t3:{react:8, attack:.25,block:.65,parry:.3, dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.5,approach:50},
+  t4:{react:5, attack:.35,block:.75,parry:.45,dash:.06,special:1,  heavy:.3, intercept:.5, bait:.25,punish:.8,approach:40},
+  t5:{react:2, attack:.65,block:.85,parry:.6, dash:.08,special:1,  heavy:.35,intercept:.7, bait:.4, punish:1, approach:30}};
 const AI={
   TIERS:AI_TIERS,
   // profiles IS the alias table (not a copy of it) so old direct reads like AI.profiles.brute and
   // AI.profiles.brawl keep resolving to the right objects. basic->t2 and brawl->t3 reuse the exact
   // tier objects (not clones) so AI.resolveProfile('basic')===AI.TIERS.t2.
   profiles:{
-    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0},
+    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0,approach:0},
     basic:AI_TIERS.t2,
     brawl:AI_TIERS.t3,
     // brute keeps its Task 2.8 identity (a heavy-happy brawler) as a t3 clone with a higher heavy
@@ -1598,7 +1652,10 @@ const AI={
     // (heavy-charge hold countdown), baitHold/baitDashPending (bait feint state), comboFollow (combo
     // follow-through countdown — Task 3.6 balance pass, chases either a punish medium or a landed
     // spontaneous attack; see decidePunish/decideAttack).
-    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboFollow:0};
+    // farFrames/approachCd (Task 6.2): decideApproach's own state -- see its comment below. Kept
+    // separate from the shared cd/react cooldown every other behaviour reuses, so a guaranteed
+    // approach press never blocks (or gets blocked by) an unrelated reactive block/attack/heavy roll.
+    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboFollow:0,farFrames:0,approachCd:0};
 
     // Heavy: charge-hold continuation (phase:'hold') has to run before the busy() gate in next()
     // below — once startMove('heavy') has put `me` into CHARGE, Fighter.busy() reports true (it only
@@ -1708,6 +1765,25 @@ const AI={
         st.cd=p.react;if(p.punish>0)st.comboFollow=3;return true}
       return false}
 
+    // Approach (Task 6.2 -- playtest note: "the dummy never approaches", the goblin's own 320px spawn
+    // gap left every light whiffing): a guaranteed, non-random distance-closer, last in the waterfall
+    // so it only ever fires when nothing else (heavy/bait/punish/block/special/the spontaneous attack
+    // roll above) already claimed the frame. Blind on purpose -- closing distance shouldn't hinge on
+    // a probability roll the way a real attack does, and gating the whole function on p.approach>0
+    // before it ever touches farFrames/approachCd makes it a total no-op for the tutorial dummy
+    // (approach 0): no rng draw (there was never going to be one), no state touched that anything else
+    // reads, so Ctrl.tutorialDummy and every dummy-profile test stay bit-identical to before this
+    // task. For everyone else: dist>lightRange has to hold for more than 60 CONSECUTIVE frames (a
+    // debounce against a foe that's merely drifting in and out of range) before the first press, then
+    // its own approachCd (set to p.approach, t1's 90 down to t5's 30) paces the repeats -- "at neutral
+    // distance" in the ruling means from a stand-still, which is exactly what farFrames measures.
+    function decideApproach(it,dist,lightRange){
+      if(p.approach<=0)return false;
+      if(dist<=lightRange){st.farFrames=0;return false}
+      st.farFrames++;
+      if(st.farFrames>60&&st.approachCd<=0){it.medium=true;st.approachCd=p.approach;st.farFrames=0;return true}
+      return false}
+
     return{next(fight,me,foe){
       const it=Ctrl.EMPTY();
       // justGotUp: the single frame the foe's real KNOCKDOWN get-up i-frames end (Fighter.wasKnockedDown
@@ -1727,6 +1803,7 @@ const AI={
       // character overrides (none currently touch .range, but moveDef merges them if one ever does).
       const lightRange=me.moveDef('light1').range+20,heavyRange=me.moveDef('heavy').range+10;
       if(st.cd>0)st.cd--;
+      if(st.approachCd>0)st.approachCd--;
       if(decideBlock(it,foe,'plan'))return it;
       if(decideIntercept(it,foe))return it;
       if(decideBlock(it,foe,'react'))return it;
@@ -1743,6 +1820,7 @@ const AI={
       if(decideBait(it,me,dist,'trigger'))return it;
       if(decideAttack(it,dist,lightRange,'attack'))return it;
       if(decideAttack(it,dist,lightRange,'dash'))return it;
+      if(decideApproach(it,dist,lightRange))return it;
       return it}}}};
 
 class Fight{
@@ -1766,6 +1844,13 @@ class Fight{
     this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.12-(dist-120)/380*0.12,1,1.12)}}
   step(){if(this.over)return;if(this.cinematic>0)return;if(this.hitstop>0){this.hitstop--;return}
     this.frame++;this.clock-=STEP;
+    // Task 6.2: fighter.foeDist is the live hurtbox-edge gap, written before either side's
+    // controller/act() runs this frame so Fighter.startMove (called from act(), below) always sees
+    // this frame's real distance when a move's track/stepIn fields need it. Symmetric (same value on
+    // both sides) and matches AI.make's own long-standing `dist` formula (Math.abs(dx)-width) exactly,
+    // since every fighter shares width 48 -- sim-derived only (no wall clock, no rng), so it stays
+    // fully deterministic.
+    this.p1.foeDist=this.p2.foeDist=Math.abs(this.p2.x-this.p1.x)-(this.p1.width/2+this.p2.width/2);
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);
     this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();
     this.buffFrame(this.p1,this.p2);this.buffFrame(this.p2,this.p1);
@@ -5557,6 +5642,84 @@ Test.add('crit rolls from the fight rng and multiplies damage; noCrit disables',
 Test.add('block proficiency reduces chip',()=>{const f=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});f.p2.def=Object.assign({},CHAMPS.carl,{blockProf:.5});closeIn(f);run(f,15);eq(f.p2.hp,Math.round(1000-5*.5))});
 Test.add('a missed parry locks out re-parry for PARRY_LOCKOUT frames',()=>{const mash=Ctrl.script(Array.from({length:40},(_,i)=>({f:i*7,until:i*7+5,intent:{block:true}})));const f=mkFight({ctrl1:Ctrl.script([L(0,300)]),ctrl2:mash});closeIn(f);run(f,300);const parries=f.log.filter(e=>e.type==='parry').length;ok(parries<=2,'mash parries: '+parries);const hold=mkFight({ctrl1:Ctrl.script([L(0,300)]),ctrl2:Ctrl.hold({block:true})});closeIn(hold);run(hold,300);ok(hold.p2.hp>=f.p2.hp-50,'holding is not much worse than mashing')});
 Test.add('per-champion move overrides merge over MOVES',()=>{const F=new Fighter(DEFS.goblin,-1,Ctrl.idle());eq(F.moveDef('heavy').charge,14);eq(F.moveDef('light1').startup,MOVES.light1.startup);const H=new Fighter(DEFS.hobgoblin,-1,Ctrl.idle());eq(H.moveDef('heavy').hitstop,12)});
+// --- Task 6.2: movement inside moves (dash-in medium, step-in light) and AI approach ---
+Test.add('move table gains movement-inside-moves fields: medium.track, light1.stepIn, others untouched',()=>{
+  eq(MOVES.medium.track,300);eq(MOVES.light1.stepIn,110);
+  eq(MOVES.light1.dash,18,'light1 keeps its normal dash for when it starts already in range');
+  for(const k of['light2','light3','light4','light5'])ok(typeof MOVES[k].dash==='number'&&MOVES[k].track===undefined&&MOVES[k].stepIn===undefined,k+' must be untouched')});
+Test.add('Fight.step writes fighter.foeDist symmetrically before act() runs, matching the hurtbox-edge gap',()=>{
+  const f=mkFight();f.p1.x=STAGE_W/2-100;f.p2.x=STAGE_W/2+100;
+  f.step();
+  const expect=Math.abs(f.p2.x-f.p1.x)-(f.p1.width/2+f.p2.width/2);
+  eq(f.p1.foeDist,expect);eq(f.p2.foeDist,expect)});
+Test.add('a step-in light closes distance and lands when the foe starts beyond light range',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-150-48; // foeDist ~150px: beyond light1.range(70), within stepIn's max reach (110+70=180)
+  run(f,12);
+  ok(f.log.some(e=>e.type==='hit'&&e.who===1),'the step-in light should land within 12 frames')});
+Test.add('light1 already in range keeps its normal dash and startup (stepIn does not trigger)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});
+  closeIn(f); // well inside light1.range
+  f.step();
+  eq(f.p1.effStartup,MOVES.light1.startup,'no stepIn extension when already in range');
+  eq(f.p1.dashRate,MOVES.light1.dash/MOVES.light1.startup,'falls back to the plain dash/startup rate')});
+Test.add('a medium dash-in tracks the foe from spawn distance, stops at light range, never overshoots',()=>{
+  // Isolated from Fight.step/detect/resolve on purpose: once the dash-in closes the gap the same
+  // tick the hitbox goes active (see the 'ender push' test's own comment on that overlap), so a real
+  // Fight would ALSO land the hit and push the (stationary Ctrl.idle) defender back that same frame --
+  // contaminating a gap measurement taken via f.p1.x/f.p2.x with MOVES.medium.push. Driving the
+  // Fighter directly isolates the movement math from that knockback.
+  const F=mkFighter();const foeX=F.x+320+48; // ~320px hurtbox-edge gap: the playtest note's spawn distance
+  F.foeDist=320;F.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
+  ok(F.state==='ATTACK'&&F.moveName==='medium');
+  const eff=F.effStartup;
+  ok(eff>MOVES.medium.startup,'a 320px gap needs more than the base 10-frame startup to close: eff='+eff);
+  for(let i=0;i<eff;i++){
+    F.tick();
+    ok(F.x<=foeX-F.width,'attacker must never cross past the foe (both fighters share width 48)')}
+  const gap=foeX-F.x-F.width;
+  ok(Math.abs(gap-MOVES.light1.range)<2,'foeDist should be ~light range once the dash-in ends, got '+gap)});
+Test.add('a medium dash-in from spawn distance actually lands (end to end, through a real Fight)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-320-48; // ~320px: the playtest note's spawn gap
+  run(f,80);
+  ok(f.log.some(e=>e.type==='hit'&&e.who===1),'the tracked medium should land within 80 frames from spawn distance')});
+Test.add('a medium started already within light range does not dash forward at all',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{medium:true}}])});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-60-48; // foeDist=60, already inside light1.range(70)
+  const x0=f.p1.x;
+  f.step();
+  eq(f.p1.effStartup,MOVES.medium.startup,'no dash needed, base startup unchanged');
+  for(let i=0;i<MOVES.medium.startup;i++){
+    f.step();
+    ok(f.p1.x<=f.p2.x-(f.p1.width/2+f.p2.width/2),'attacker must never cross into the foe\'s hurtbox')}
+  eq(f.p1.x,x0,'no forward dash when the medium starts already in range')});
+Test.add('AI approach field is present on every tier (dummy 0, t1..t5 shrinking) and aliases inherit it',()=>{
+  eq(AI.profiles.dummy.approach,0);
+  eq(AI.TIERS.t1.approach,90);eq(AI.TIERS.t2.approach,70);eq(AI.TIERS.t3.approach,50);eq(AI.TIERS.t4.approach,40);eq(AI.TIERS.t5.approach,30);
+  eq(AI.resolveProfile('basic').approach,AI.TIERS.t2.approach);eq(AI.resolveProfile('brawl').approach,AI.TIERS.t3.approach);
+  eq(AI.resolveProfile('brute').approach,AI.TIERS.t3.approach)});
+Test.add('t1 AI approaches (presses medium) within 90 frames when stuck beyond light range at neutral',()=>{
+  const f=mkFight({ctrl2:AI.make('t1',7)});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-200-48; // neutral: idle p1, well beyond light range, stationary
+  let fired=false;
+  for(let i=0;i<90&&!fired;i++){f.step();if(f.p2.state==='ATTACK'&&f.p2.moveName==='medium')fired=true}
+  ok(fired,'t1 must press medium within 90 frames at neutral distance')});
+Test.add('AI vs random bot stays deterministic with the new approach field wired in (self-comparison, not a fixed snapshot)',()=>{
+  const a=mkFight({ctrl1:Ctrl.random(3),ctrl2:AI.make('basic',9)}),b=mkFight({ctrl1:Ctrl.random(3),ctrl2:AI.make('basic',9)});run(a,900);run(b,900);
+  eq(a.p1.hp,b.p1.hp);eq(a.p2.hp,b.p2.hp);eq(a.log.length,b.log.length)});
+Test.add('the dummy AI profile (approach:0) never approaches or attacks, even parked out of light range',()=>{
+  const f=mkFight({ctrl2:AI.make('dummy',3)});
+  f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-200-48;
+  run(f,600);
+  eq(f.log.filter(e=>e.type==='hit'&&e.who===-1).length,0);
+  eq(f.p2.x,STAGE_W/2+200,'the dummy must never move on its own')});
+Test.add('Ctrl.tutorialDummy never approaches: it only ever holds or throws its scripted medium, never light/dashBack/block/special',()=>{
+  const c=Ctrl.tutorialDummy();
+  const me={busy:()=>false,state:'IDLE',moveName:null};
+  for(let i=0;i<600;i++){
+    const it=c.next(null,me,me);
+    ok(!it.light&&!it.dashBack&&!it.block&&!it.special,'the tutorial dummy is a controller, not an AI profile -- unaffected by AI approach')}});
 Test.add('medium as a combo ender pushes the defender out of light range',()=>{
   // Chain 3 lights (light1/2/3 all have a non-null .chain) then, from light3's recovery, cancel
   // into a medium (script: light only through frame 23, medium from frame 24 on — the frame light3

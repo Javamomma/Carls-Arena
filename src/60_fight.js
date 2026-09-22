@@ -19,6 +19,13 @@ class Fight{
     this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.12-(dist-120)/380*0.12,1,1.12)}}
   step(){if(this.over)return;if(this.cinematic>0)return;if(this.hitstop>0){this.hitstop--;return}
     this.frame++;this.clock-=STEP;
+    // Task 6.2: fighter.foeDist is the live hurtbox-edge gap, written before either side's
+    // controller/act() runs this frame so Fighter.startMove (called from act(), below) always sees
+    // this frame's real distance when a move's track/stepIn fields need it. Symmetric (same value on
+    // both sides) and matches AI.make's own long-standing `dist` formula (Math.abs(dx)-width) exactly,
+    // since every fighter shares width 48 -- sim-derived only (no wall clock, no rng), so it stays
+    // fully deterministic.
+    this.p1.foeDist=this.p2.foeDist=Math.abs(this.p2.x-this.p1.x)-(this.p1.width/2+this.p2.width/2);
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);
     this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();
     this.buffFrame(this.p1,this.p2);this.buffFrame(this.p2,this.p1);
