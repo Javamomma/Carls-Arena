@@ -121,13 +121,21 @@ const Crystal={
     const rng=Crystal.rng(Save.data.seed++);
     let stars=Crystal.rollTier(k.odds,rng);
     if(!Save.data.pity)Save.data.pity={};
+    // Fix-wave item 4 (plan defect, ruled): the frozen interface line said "the kind's top-1 tier"
+    // but Task 4.2's own checklist said "the 10th open is >=3-star even after nine 1-star" -- those
+    // two readings disagreed and no ruling resolved it before implementation (basic's top-1 is
+    // 2-star, which the raw odds table already hits ~30% of the time on its own, making the
+    // guarantee nearly meaningless). Ruled here: pity guarantees the kind's TOP tier outright, not
+    // one below it — basic's 10th open is always exactly 3-star, premium's always exactly 4-star.
+    const topTier=k.odds[k.odds.length-1][0];
     const pity=(Save.data.pity[kind]||0)+1;
-    // "the kind's second-highest tier" (Phase 4 ruling): one below the top of that kind's odds
-    // table — basic's top is 3-star so its pity floor is 2-star, premium's top is 4-star so 3-star.
-    const pityFloor=k.odds[k.odds.length-1][0]-1;
     if(pity>=10){
-      if(stars<pityFloor)stars=pityFloor;
+      if(stars<topTier)stars=topTier;
       Save.data.pity[kind]=0}
+    // Ruled alongside item 4: a NATURAL top-tier roll (the raw table landing on the top tier on its
+    // own, independent of the forced 10th) also resets the counter, same as a forced one — a lucky
+    // pull's luck isn't wasted against a counter that only ever reset on a forced pity trigger.
+    else if(stars>=topTier)Save.data.pity[kind]=0;
     else Save.data.pity[kind]=pity;
     const champId=rng.pick(Object.keys(CHAMPS));
     const roster=Save.data.roster;
