@@ -48,14 +48,14 @@
 
 ## Phase overview and budgets
 
-| Phase | Deliverable | Sessions | Total tokens (est.) | Detail level in this doc |
-|---|---|---|---|---|
-| 0 | Repo, build, harness, title-to-fight state machine | 1 | 0.3M | Full tasks |
-| 1 | Core fight loop: input, moves, block/parry/dash, specials, timer, KO, basic AI, unit tests | 2-3 | 1.2M | Full tasks |
-| 2 | Feel and champions: camera, procedural sprites, hitstop/shake/particles, sfx, crit/armor, 4 champions, S3 cinematic | 3-4 | 1.5-2M | Task list + interfaces + exit tests |
-| 3 | AI tiers, node buffs, encounters, 8 champions, batch win-rate tool | 3 | 1-1.5M | Task list + interfaces + exit tests |
-| 4 | Meta: roster, crystals, quest map, rewards, arena streak | 5-6 | 2-3M | Task list + interfaces + exit tests |
-| 5 | Broadcast layer, tutorial, settings, perf, rubric, Pages deploy | 3-4 | 1-1.5M | Task list + exit tests |
+| Phase | Deliverable | Sessions | Total tokens (est.) | Detail level in this doc | Status |
+|---|---|---|---|---|---|
+| 0 | Repo, build, harness, title-to-fight state machine | 1 | 0.3M | Full tasks | Done |
+| 1 | Core fight loop: input, moves, block/parry/dash, specials, timer, KO, basic AI, unit tests | 2-3 | 1.2M | Full tasks | Done |
+| 2 | Feel and champions: camera, procedural sprites, hitstop/shake/particles, sfx, crit/armor, 4 champions, S3 cinematic | 3-4 | 1.5-2M | Task list + interfaces + exit tests | Done (2026-09-21; see `docs/ARENA.md` "Phase 2 exit") |
+| 3 | AI tiers, node buffs, encounters, 8 champions, batch win-rate tool | 3 | 1-1.5M | Task list + interfaces + exit tests | Not started |
+| 4 | Meta: roster, crystals, quest map, rewards, arena streak | 5-6 | 2-3M | Task list + interfaces + exit tests | Not started |
+| 5 | Broadcast layer, tutorial, settings, perf, rubric, Pages deploy | 3-4 | 1-1.5M | Task list + exit tests | Not started |
 
 Phases 2-5 get their own bite-sized plan file (same format as Phase 1) at the start of that phase, written against the interfaces frozen here. Do not start a later phase until the earlier phase's exit criteria pass.
 
@@ -1017,9 +1017,11 @@ Exit: 40+ unit tests; soak matrix 4 champs x 3 AIs x 2 seeds at 300 s clean; a r
 
 # Phase 3: AI tiers and encounters (plan file first)
 
-Interfaces: `AI.profiles` becomes five tiers `t1..t5` plus named bosses; `Encounter = {enemy, tier, buffs:[], hpMul, atkMul}`; `BUFFS = {regen, armorUp, powerGain, unblockableSpecials, degen, thorns}` as `Fight` hooks (`onFrame`, `onHit`, `onBlock`); `G.startFight({encounter})`. New tool `tests/batch.py --n 50 --p1 carl --bot random --ai t3` prints a win-rate table.
+Interfaces: `AI.profiles` becomes five tiers `t1..t5` plus named bosses. The encounter model is not new in Phase 3 — it already shipped in Phase 2 (`src/45_encounter.js`: `ENCOUNTERS = {id: {floor, name, enemy, tier, hpMul, atkMul}}`, `Encounter.resolve(id|obj)`, `G.startFight({encounter})`, the `FLOOR n • NAME` HUD line, and the Goblin Scavenger / Hobgoblin Brute mobs riding the human rig via `MOBS` in `src/40_movedata.js`). Phase 3 extends that same shape rather than redefining it: adds `buffs:[]` to `Encounter`'s fields and `BUFFS = {regen, armorUp, powerGain, unblockableSpecials, degen, thorns}` as `Fight` hooks (`onFrame`, `onHit`, `onBlock`), plus more mobs/bosses through the existing `MOBS`/`ENCOUNTERS` tables. New tool `tests/batch.py --n 50 --p1 carl --bot random --ai t3` prints a win-rate table.
 
-Tasks: 3.1 tiers with intercept (medium into a dash-in) and bait (heavy feint then dash back); 3.2 monotone difficulty test (t5 beats t1's win rate by ≥40 points over 50 sims); 3.3 buffs framework + tests; 3.4 encounters + boss variants; 3.5 champions Mordecai, Imani, Li Jun, Zev; 3.6 batch tool.
+Rig debt from Phase 2: `LOOKS.donut` is currently a placeholder that reuses the humanoid rig's bone layout/FK (see the comment on `LOOKS.donut` in `src/68_rig.js`); Princess Donut is a cat and needs a genuine non-humanoid quadruped rig (its own bone set and `Rig.solve`-equivalent FK, not a recolor). Mongo (deferred out of Phase 2 by the Phase 2 plan's ruling 4, alongside Donut, for the same reason) needs a distinct "big humanoid" rig when he's added as a champion — oversized proportions and a different silhouette from Carl/Katia/the mob rigs, not just a `LOOKS` entry with bigger numbers plugged into the existing human `Rig.solve`.
+
+Tasks: 3.1 tiers with intercept (medium into a dash-in) and bait (heavy feint then dash back); 3.2 monotone difficulty test (t5 beats t1's win rate by ≥40 points over 50 sims); 3.3 buffs framework + tests; 3.4 more encounters + boss variants on top of the existing `ENCOUNTERS`/`MOBS` tables; 3.5 champions Mordecai, Imani, Li Jun, Zev; 3.6 Donut's real quadruped-cat rig (replacing the Phase 1/2 human-rig placeholder) and Mongo's champion add with his own big-humanoid rig; 3.7 batch tool.
 
 Exit: batch table checked in `docs/ARENA.md`; token estimate 1-1.5M.
 
