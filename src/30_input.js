@@ -1,49 +1,86 @@
-// Touch layout (landscape): left third = defense (hold: block, swipe left: dash back);
-// right two thirds = offense (tap: light, swipe right: medium, hold >=180ms: heavy until released).
-// Task 5.6 (leftHanded): when Save.data.settings.leftHanded is true the WHOLE gesture layout mirrors
-// horizontally, to match the already-mirrored on-screen buttons (00_head.html's body.left-handed
-// CSS, applied by G.applySettings) -- defense becomes the RIGHT third (a mirror of DEF_ZONE, which
-// itself always stays a left-edge-relative constant: W/3), offense the left two-thirds, and swipe
-// direction mirrors with it (zoneFor/swipeDx below are the only two things gated on the setting;
-// every zone/gesture check downstream just uses their result, unchanged from the normal-handed math).
-const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SWIPE:40,HOLD_MS:180,POWER_HOLD_MS:400,
-  _powerT0:0,_powerShown:false,
-  // 'def' iff x is within DEF_ZONE of the defense edge -- the left edge normally, the right edge
-  // when leftHanded (so a pointerdown at x=W-20 lands 'def' exactly like x=20 does normally).
-  zoneFor(x){return(Save.data.settings.leftHanded?x>W-this.DEF_ZONE:x<this.DEF_ZONE)?'def':'off'},
-  // Raw pointer dx, sign-flipped when leftHanded so "swipe away from the defense edge, toward the
-  // opposite edge" still maps to the same action it does normally: dashBack away from the (now
-  // right-side) defense zone, medium away from the (now left-side) offense zone.
-  swipeDx(dx){return Save.data.settings.leftHanded?-dx:dx},
+// Task 6.3: the whole canvas is one gesture surface -- no more left/right zones. Exactly one canvas
+// pointer is tracked at a time (this._ptr): the first pointer down; any later pointer is ignored
+// entirely (never even recorded) until the first lifts, per docs/design/mcoc-comparison-notes.md §2.
+// Gesture -> intent (all frozen, Input.GESTURE below):
+//   tap (down->up < TAP_MS, drift < TAP_DRIFT)                -> 'light', pushed on release
+//   hold in place (>= BLOCK_HOLD_MS, drift < TAP_DRIFT)        -> held.block, until release
+//   swipe right (>= SWIPE_PX within SWIPE_MS, dx>|dy|)         -> 'medium', pushed the frame it fires
+//   ...then still held HEAVY_HOLD_MS after that                -> held.heavy, until release
+//   swipe left  (>= SWIPE_PX within SWIPE_MS, dx>|dy|)         -> 'dashBack', pushed the frame it fires
+//   ...then still held DASH_BACK.frames SIM FRAMES after that  -> held.block, until release (counted
+//     by tick(), called once per sim frame from Ctrl.player -- see its own comment below)
+// Drift beyond TAP_DRIFT before a swipe threshold is reached just cancels the tap/hold outright (no
+// light, no block) -- neither path fires. A hold that has already engaged block is never cancelled by
+// further movement ("a hold that already engaged block stays block"): the drift check that would
+// disqualify a fresh tap/hold is naturally moot once blockOn/dashDir is already set, since reaching
+// SWIPE_PX(44) always implies drift already exceeded TAP_DRIFT(24) first.
+// Left-handed (Save.data.settings.leftHanded) is now a button-PLACEMENT setting only (00_head.html's
+// body.left-handed CSS, applied by G.applySettings) -- gestures read identically either way; the old
+// zoneFor/swipeDx mirroring is gone along with the zones themselves.
+const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
+  GESTURE:{TAP_MS:140,TAP_DRIFT:24,SWIPE_PX:44,SWIPE_MS:260,HEAVY_HOLD_MS:200,BLOCK_HOLD_MS:140},
+  // Injectable wall clock (default performance.now) so tests can drive gesture timing deterministically
+  // by overriding Input.now instead of racing real time.
+  now:()=>performance.now(),
+  POWER_HOLD_MS:400,_powerT0:0,_powerShown:false,
+  // Appends to the last-8 gesture log (Input.pointerLog) tests and the tutorial read to see what a
+  // player's thumb actually did: 'tap','hold','swipeR','swipeRHold','swipeL','swipeLHold'.
+  _log(type){this.pointerLog.push({type,frame:(typeof G!=='undefined'&&G.frameNow)||0});
+    if(this.pointerLog.length>8)this.pointerLog.shift()},
   init(canvas){
     const pos=e=>{const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}};
     canvas.addEventListener('pointerdown',e=>{Audio.init();const p=pos(e);
-      // Pause glyph hit-test: a tap there toggles pause and must not also register as a light.
+      // Pause glyph hit-test: a tap there toggles pause and must not also register as a gesture.
       if(G.state==='FIGHT'&&G.hitPause(p.x,p.y)){G.togglePause();return}
       if(G.state==='TITLE')return G.startFight();if(G.state!=='FIGHT')return;
-      const zone=this.zoneFor(p.x);
-      for(const rec of this._ptrs.values())if(rec.zone===zone)return; // one active pointer per zone
-      this._ptrs.set(e.pointerId,{x0:p.x,t0:performance.now(),zone,moved:false,holdFired:false});
-      if(zone==='def')this.held.block=true});
-    canvas.addEventListener('pointermove',e=>{const P=this._ptrs.get(e.pointerId);if(!P||P.moved)return;const dx=this.swipeDx(pos(e).x-P.x0);
-      if(Math.abs(dx)>=this.SWIPE){P.moved=true;if(P.zone==='def')this.held.block=false;else this.held.heavy=false;this.q.push(dx>0?'medium':'dashBack')}});
-    const up=e=>{const P=this._ptrs.get(e.pointerId);if(!P)return;this._ptrs.delete(e.pointerId);
-      if(P.zone==='def')this.held.block=false;
-      else{if(!P.moved&&!P.holdFired)this.q.push('light');this.held.heavy=false}};
-    canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
+      if(this._ptr)return; // one canvas pointer at a time -- later pointers are ignored until this lifts
+      this._ptr={id:e.pointerId,x0:p.x,y0:p.y,t0:this.now(),drifted:false,dashDir:null,blockOn:false,heavyOn:false,dashFrames:0,actAt:0}});
+    canvas.addEventListener('pointermove',e=>{const P=this._ptr;if(!P||P.id!==e.pointerId)return;
+      const p=pos(e),dx=p.x-P.x0,dy=p.y-P.y0;
+      if(Math.hypot(dx,dy)>=this.GESTURE.TAP_DRIFT)P.drifted=true;
+      // Swipe fires once, the frame its threshold is crossed -- a hold that already engaged block
+      // (P.blockOn) never re-evaluates as a swipe, and neither does a pointer that already swiped.
+      if(!P.dashDir&&!P.blockOn&&this.now()-P.t0<=this.GESTURE.SWIPE_MS&&
+         Math.abs(dx)>=this.GESTURE.SWIPE_PX&&Math.abs(dx)>Math.abs(dy)){
+        if(dx>0){P.dashDir='R';P.actAt=this.now();this.q.push('medium');this._log('swipeR')}
+        else{P.dashDir='L';P.dashFrames=0;this.q.push('dashBack');this._log('swipeL')}}});
+    const up=e=>{const P=this._ptr;if(!P||P.id!==e.pointerId)return;this._ptr=null;
+      if(P.blockOn){this.held.block=false;return} // hold-block or dash-back-hold-block, either way
+      if(P.dashDir==='R'){this.held.heavy=false;return} // clears whether or not heavy ever engaged
+      if(P.dashDir==='L')return; // dashBack already fired on the swipe; nothing more on release
+      if(!P.drifted&&this.now()-P.t0<this.GESTURE.TAP_MS){this.q.push('light');this._log('tap')}};
+    const cancel=e=>{const P=this._ptr;if(!P||P.id!==e.pointerId)return;this._ptr=null;
+      if(P.blockOn)this.held.block=false;if(P.dashDir==='R')this.held.heavy=false};
+    canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',cancel);
+    // Defensive cleanup: a lost blur (alt-tab, an OS gesture stealing the pointer) never fires
+    // pointerup/pointercancel -- without this a thumb lifted off-window could leave block/heavy
+    // stuck on forever. Never fires a tap; it only clears whatever was already engaged.
+    addEventListener('blur',()=>{this._ptr=null;this.held.block=false;this.held.heavy=false;
+      this._powerT0=0;this._powerShown=false});
     this.bindButtons();
     addEventListener('keydown',e=>{if(e.repeat)return;const k=e.key.toLowerCase();
       if(e.code==='Space'&&G.state==='TITLE'){e.preventDefault();return G.startFight()}
       if(k==='p')return G.togglePause();
       if(G.state!=='FIGHT')return;
-      if(k==='j')this.q.push('light');if(k==='k')this.q.push('medium');if(k==='a')this.q.push('dashBack');
-      if(k==='l')this.held.heavy=true;if(k==='s')this.held.block=true;if(k==='1'||k==='2'||k==='3')this.q.push('special'+k)});
-    addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k==='s')this.held.block=false;if(k==='l')this.held.heavy=false})},
-  // On-screen buttons: BLOCK is a hold (mirrors the field def-zone hold); PUNCH/KICK fire on press.
+      if(k==='j')this.q.push('light');
+      if(k==='k'){this.q.push('medium');
+        // Shift+K: a keyboard alias for swipe-right-then-hold -- dashes in with a medium AND arms
+        // the follow-up heavy immediately (no hold delay; the keyboard has no timing to emulate).
+        if(e.shiftKey){this.held.heavy=true;this._kHeavyDown=true}}
+      if(k==='a'||k==='d')this.q.push('dashBack');
+      if(k==='l')this.held.heavy=true;if(k==='s')this.held.block=true;
+      if(k==='1'||k==='2'||k==='3')this.q.push('special'+k)});
+    addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k==='s')this.held.block=false;
+      if(k==='l')this.held.heavy=false;
+      if(k==='k'&&this._kHeavyDown){this.held.heavy=false;this._kHeavyDown=false}})},
+  // On-screen buttons: BLOCK is a hold (mirrors the canvas hold gesture); PUNCH/KICK fire on press.
   // POWER taps 'powerAuto' (drain() resolves it to the highest affordable special); held past
   // POWER_HOLD_MS it shows the S1-S3 picker instead, and releasing over a chip fires that special.
   // Release point is read with elementFromPoint (not e.target) because touch pointers implicitly
-  // capture to their pointerdown target, so e.target would still be #btnPower on release.
+  // capture to their pointerdown target, so e.target would still be #btnPower on release. POWER is
+  // always shown; BLOCK/PUNCH/KICK are optional (Save.data.settings.showButtons or G.forceButtons,
+  // see 00_head.html's .atkbtn/body.show-atk and G.applySettings) but keep these same handlers
+  // whether or not they're currently visible.
   bindButtons(){
     const id=x=>document.getElementById(x);
     const block=id('btnBlock');
@@ -53,7 +90,7 @@ const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SW
     id('btnPunch').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('light')});
     id('btnKick').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('medium')});
     const power=id('btnPower'),picker=id('powerPicker');
-    power.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this._powerT0=performance.now();this._powerShown=false});
+    power.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this._powerT0=this.now();this._powerShown=false});
     const powerEnd=e=>{e.stopPropagation();
       if(this._powerShown){
         const el=document.elementFromPoint(e.clientX,e.clientY),m=el&&el.id&&el.id.match(/^pk([123])$/);
@@ -62,10 +99,21 @@ const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SW
       else if(this._powerT0)this.q.push('powerAuto');
       this._powerT0=0;this._powerShown=false};
     power.addEventListener('pointerup',powerEnd);power.addEventListener('pointercancel',powerEnd)},
-  // Called once per sim frame by Ctrl.player: promotes a long press in the offense zone to a heavy
-  // hold, and a long press on POWER to the S1-S3 picker (both use the same wall-clock pattern).
-  tick(){for(const P of this._ptrs.values())if(!P.moved&&P.zone==='off'&&!P.holdFired&&performance.now()-P.t0>=this.HOLD_MS){P.holdFired=true;this.held.heavy=true}
-    if(this._powerT0&&!this._powerShown&&performance.now()-this._powerT0>=this.POWER_HOLD_MS){this._powerShown=true;document.getElementById('powerPicker').classList.add('show')}},
+  // Called once per sim frame by Ctrl.player: promotes the active canvas pointer's hold to block (in
+  // place) or to heavy/dash-back-block (after a swipe), and a long press on POWER to the S1-S3
+  // picker. DASH_BACK.frames (40_movedata.js) is counted here as SIM FRAMES elapsed since a dashBack
+  // fired, not wall time -- one increment per tick() call while that pointer is still down, matching
+  // the real DASH state's own duration exactly.
+  tick(){const P=this._ptr;
+    if(P){
+      if(!P.dashDir&&!P.blockOn&&!P.drifted&&this.now()-P.t0>=this.GESTURE.BLOCK_HOLD_MS){
+        P.blockOn=true;this.held.block=true;this._log('hold')}
+      if(P.dashDir==='R'&&!P.heavyOn&&this.now()-P.actAt>=this.GESTURE.HEAVY_HOLD_MS){
+        P.heavyOn=true;this.held.heavy=true;this._log('swipeRHold')}
+      if(P.dashDir==='L'&&!P.blockOn){
+        P.dashFrames++;
+        if(P.dashFrames>=DASH_BACK.frames){P.blockOn=true;this.held.block=true;this._log('swipeLHold')}}}
+    if(this._powerT0&&!this._powerShown&&this.now()-this._powerT0>=this.POWER_HOLD_MS){this._powerShown=true;document.getElementById('powerPicker').classList.add('show')}},
   drain(){const it={light:false,medium:false,heavy:this.held.heavy,block:this.held.block,dashBack:false,special:0};
     for(const a of this.q){
       if(a==='powerAuto'){const p=G.fight?G.fight.p1.power:0;let n=0;for(let k=3;k>=1;k--)if(p>=100*k){n=k;break}it.special=n}

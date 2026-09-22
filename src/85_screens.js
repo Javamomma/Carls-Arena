@@ -99,6 +99,13 @@ const Screens={
     {key:'reduceMotion',label:'REDUCE MOTION'},
     {key:'haptics',label:'HAPTICS'},
     {key:'leftHanded',label:'LEFT-HANDED CONTROLS'},
+    // Task 6.3: BLOCK/PUNCH/KICK are optional now that the whole canvas is a gesture surface --
+    // this toggle (off by default) is the only way to bring them back outside the tutorial's forced
+    // early lessons (G.forceButtons). The generic onclick handler below already calls
+    // G.applySettings() after flipping any row's key, which is what actually shows/hides them
+    // (body.show-atk, 00_head.html) and re-runs the toast gap math (G.positionToast) -- no extra
+    // wiring needed here.
+    {key:'showButtons',label:'SHOW ATTACK BUTTONS'},
     {key:'useAtlas',label:'USE SPRITE ATLAS'},
     {key:'sfx',label:'SOUND EFFECTS'},
     {key:'announcer',label:'ANNOUNCER TEXT'}],

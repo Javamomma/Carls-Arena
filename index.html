@@ -18,6 +18,14 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .settingsrow button{width:auto;min-width:150px;min-height:44px;font-size:11px;padding:8px 14px;background:transparent;color:#999;border:1px solid #444}
 #btns{display:none}#btns.show{display:block}
 .cbtn{position:absolute;width:76px;height:76px;border-radius:50%;border:3px solid #f4c542;background:rgba(26,31,51,.8);color:#f4c542;font:inherit;font-size:26px;display:flex;align-items:center;justify-content:center;line-height:1}
+/* Task 6.3: BLOCK/PUNCH/KICK are optional now (POWER is the only button always shown) -- gestures on
+   the whole canvas drive light/medium/heavy/dashBack/block, see 30_input.js. Hidden by default
+   (Save.data.settings.showButtons, default false) and shown via body.show-atk (G.applySettings; also
+   forced on by G.forceButtons during the tutorial's early lessons, Task 6.4). #btns itself still just
+   collapses to POWER's own fixed bottom-right position when these three are hidden -- no extra layout
+   needed since POWER's offset never depended on the other three being present. */
+.atkbtn{display:none}
+body.show-atk .atkbtn{display:flex}
 .cbtn::after{content:attr(data-label);position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:4px;font-size:10px;letter-spacing:1px;color:#f4c542;white-space:nowrap}
 .cbtn.ready{background:#f4c542;color:#111;box-shadow:0 0 16px 4px rgba(244,197,66,.65)}
 /* Fix-wave item 6 (final review, Minor): the tutorial POWER-step stall hint -- G.syncTutorialPrompt
@@ -202,9 +210,9 @@ body.left-handed #powerPicker{right:auto;left:14px}
 #tutorialPrompt.flash{background:#8cf4c5}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
-<button id="btnBlock" class="cbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
-<button id="btnPunch" class="cbtn" data-label="PUNCH"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><rect x="7" y="9" width="12" height="10" rx="3"/><circle cx="9.5" cy="7" r="2.3"/><circle cx="13" cy="6" r="2.3"/><circle cx="16.5" cy="7" r="2.3"/><rect x="4" y="11" width="5" height="6" rx="2.4"/></svg></button>
-<button id="btnKick" class="cbtn" data-label="KICK"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M9 2h5v10.5l5.2 2.3c1 .45 1.8 1.4 1.8 2.6V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4.2C4 11.3 6.2 9.4 9 9.4z"/></svg></button>
+<button id="btnBlock" class="cbtn atkbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
+<button id="btnPunch" class="cbtn atkbtn" data-label="PUNCH"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><rect x="7" y="9" width="12" height="10" rx="3"/><circle cx="9.5" cy="7" r="2.3"/><circle cx="13" cy="6" r="2.3"/><circle cx="16.5" cy="7" r="2.3"/><rect x="4" y="11" width="5" height="6" rx="2.4"/></svg></button>
+<button id="btnKick" class="cbtn atkbtn" data-label="KICK"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M9 2h5v10.5l5.2 2.3c1 .45 1.8 1.4 1.8 2.6V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4.2C4 11.3 6.2 9.4 9 9.4z"/></svg></button>
 <button id="btnPower" class="cbtn" data-label="POWER"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M13 1 3 14h6.5L8.5 23 21 9h-7z"/></svg></button>
 <div id="powerPicker"><button id="pk1">S1</button><button id="pk2">S2</button><button id="pk3">S3</button></div>
 </div>
@@ -335,7 +343,10 @@ const Meta={
       // key of some shape) -- see migrate()'s own v2 branch below for the explicit per-key backfill
       // this one DOES need (unlike leaderboard/pity, `settings` already existed as `{}` before this
       // task, so the generic "fill anything TOP-LEVEL missing" loop below would never touch it).
-      settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true},
+      // Task 6.3: showButtons (BLOCK/PUNCH/KICK on-screen, default off now that the whole canvas is
+      // a gesture surface -- POWER stays shown regardless) backfills for free through migrate()'s
+      // existing per-key settings loop below, same story as every other key in this object.
+      settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true,showButtons:false},
       // Task 5.3: a plain top-level boolean, same free-ride-through-migrate() story as leaderboard/
       // pity above -- a pre-5.3 v2 save picks it up for free via migrate()'s generic "fill anything
       // top-level missing" loop below, no dedicated migrate branch needed. false until G.onFightEnd
@@ -949,52 +960,89 @@ const Lines={
     "Defeat! Somewhere, a producer sighs and reaches for the replay button.",
     "The dungeon closes the door. Softly. Permanently, for now."]};
 
-// Touch layout (landscape): left third = defense (hold: block, swipe left: dash back);
-// right two thirds = offense (tap: light, swipe right: medium, hold >=180ms: heavy until released).
-// Task 5.6 (leftHanded): when Save.data.settings.leftHanded is true the WHOLE gesture layout mirrors
-// horizontally, to match the already-mirrored on-screen buttons (00_head.html's body.left-handed
-// CSS, applied by G.applySettings) -- defense becomes the RIGHT third (a mirror of DEF_ZONE, which
-// itself always stays a left-edge-relative constant: W/3), offense the left two-thirds, and swipe
-// direction mirrors with it (zoneFor/swipeDx below are the only two things gated on the setting;
-// every zone/gesture check downstream just uses their result, unchanged from the normal-handed math).
-const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SWIPE:40,HOLD_MS:180,POWER_HOLD_MS:400,
-  _powerT0:0,_powerShown:false,
-  // 'def' iff x is within DEF_ZONE of the defense edge -- the left edge normally, the right edge
-  // when leftHanded (so a pointerdown at x=W-20 lands 'def' exactly like x=20 does normally).
-  zoneFor(x){return(Save.data.settings.leftHanded?x>W-this.DEF_ZONE:x<this.DEF_ZONE)?'def':'off'},
-  // Raw pointer dx, sign-flipped when leftHanded so "swipe away from the defense edge, toward the
-  // opposite edge" still maps to the same action it does normally: dashBack away from the (now
-  // right-side) defense zone, medium away from the (now left-side) offense zone.
-  swipeDx(dx){return Save.data.settings.leftHanded?-dx:dx},
+// Task 6.3: the whole canvas is one gesture surface -- no more left/right zones. Exactly one canvas
+// pointer is tracked at a time (this._ptr): the first pointer down; any later pointer is ignored
+// entirely (never even recorded) until the first lifts, per docs/design/mcoc-comparison-notes.md §2.
+// Gesture -> intent (all frozen, Input.GESTURE below):
+//   tap (down->up < TAP_MS, drift < TAP_DRIFT)                -> 'light', pushed on release
+//   hold in place (>= BLOCK_HOLD_MS, drift < TAP_DRIFT)        -> held.block, until release
+//   swipe right (>= SWIPE_PX within SWIPE_MS, dx>|dy|)         -> 'medium', pushed the frame it fires
+//   ...then still held HEAVY_HOLD_MS after that                -> held.heavy, until release
+//   swipe left  (>= SWIPE_PX within SWIPE_MS, dx>|dy|)         -> 'dashBack', pushed the frame it fires
+//   ...then still held DASH_BACK.frames SIM FRAMES after that  -> held.block, until release (counted
+//     by tick(), called once per sim frame from Ctrl.player -- see its own comment below)
+// Drift beyond TAP_DRIFT before a swipe threshold is reached just cancels the tap/hold outright (no
+// light, no block) -- neither path fires. A hold that has already engaged block is never cancelled by
+// further movement ("a hold that already engaged block stays block"): the drift check that would
+// disqualify a fresh tap/hold is naturally moot once blockOn/dashDir is already set, since reaching
+// SWIPE_PX(44) always implies drift already exceeded TAP_DRIFT(24) first.
+// Left-handed (Save.data.settings.leftHanded) is now a button-PLACEMENT setting only (00_head.html's
+// body.left-handed CSS, applied by G.applySettings) -- gestures read identically either way; the old
+// zoneFor/swipeDx mirroring is gone along with the zones themselves.
+const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
+  GESTURE:{TAP_MS:140,TAP_DRIFT:24,SWIPE_PX:44,SWIPE_MS:260,HEAVY_HOLD_MS:200,BLOCK_HOLD_MS:140},
+  // Injectable wall clock (default performance.now) so tests can drive gesture timing deterministically
+  // by overriding Input.now instead of racing real time.
+  now:()=>performance.now(),
+  POWER_HOLD_MS:400,_powerT0:0,_powerShown:false,
+  // Appends to the last-8 gesture log (Input.pointerLog) tests and the tutorial read to see what a
+  // player's thumb actually did: 'tap','hold','swipeR','swipeRHold','swipeL','swipeLHold'.
+  _log(type){this.pointerLog.push({type,frame:(typeof G!=='undefined'&&G.frameNow)||0});
+    if(this.pointerLog.length>8)this.pointerLog.shift()},
   init(canvas){
     const pos=e=>{const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}};
     canvas.addEventListener('pointerdown',e=>{Audio.init();const p=pos(e);
-      // Pause glyph hit-test: a tap there toggles pause and must not also register as a light.
+      // Pause glyph hit-test: a tap there toggles pause and must not also register as a gesture.
       if(G.state==='FIGHT'&&G.hitPause(p.x,p.y)){G.togglePause();return}
       if(G.state==='TITLE')return G.startFight();if(G.state!=='FIGHT')return;
-      const zone=this.zoneFor(p.x);
-      for(const rec of this._ptrs.values())if(rec.zone===zone)return; // one active pointer per zone
-      this._ptrs.set(e.pointerId,{x0:p.x,t0:performance.now(),zone,moved:false,holdFired:false});
-      if(zone==='def')this.held.block=true});
-    canvas.addEventListener('pointermove',e=>{const P=this._ptrs.get(e.pointerId);if(!P||P.moved)return;const dx=this.swipeDx(pos(e).x-P.x0);
-      if(Math.abs(dx)>=this.SWIPE){P.moved=true;if(P.zone==='def')this.held.block=false;else this.held.heavy=false;this.q.push(dx>0?'medium':'dashBack')}});
-    const up=e=>{const P=this._ptrs.get(e.pointerId);if(!P)return;this._ptrs.delete(e.pointerId);
-      if(P.zone==='def')this.held.block=false;
-      else{if(!P.moved&&!P.holdFired)this.q.push('light');this.held.heavy=false}};
-    canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
+      if(this._ptr)return; // one canvas pointer at a time -- later pointers are ignored until this lifts
+      this._ptr={id:e.pointerId,x0:p.x,y0:p.y,t0:this.now(),drifted:false,dashDir:null,blockOn:false,heavyOn:false,dashFrames:0,actAt:0}});
+    canvas.addEventListener('pointermove',e=>{const P=this._ptr;if(!P||P.id!==e.pointerId)return;
+      const p=pos(e),dx=p.x-P.x0,dy=p.y-P.y0;
+      if(Math.hypot(dx,dy)>=this.GESTURE.TAP_DRIFT)P.drifted=true;
+      // Swipe fires once, the frame its threshold is crossed -- a hold that already engaged block
+      // (P.blockOn) never re-evaluates as a swipe, and neither does a pointer that already swiped.
+      if(!P.dashDir&&!P.blockOn&&this.now()-P.t0<=this.GESTURE.SWIPE_MS&&
+         Math.abs(dx)>=this.GESTURE.SWIPE_PX&&Math.abs(dx)>Math.abs(dy)){
+        if(dx>0){P.dashDir='R';P.actAt=this.now();this.q.push('medium');this._log('swipeR')}
+        else{P.dashDir='L';P.dashFrames=0;this.q.push('dashBack');this._log('swipeL')}}});
+    const up=e=>{const P=this._ptr;if(!P||P.id!==e.pointerId)return;this._ptr=null;
+      if(P.blockOn){this.held.block=false;return} // hold-block or dash-back-hold-block, either way
+      if(P.dashDir==='R'){this.held.heavy=false;return} // clears whether or not heavy ever engaged
+      if(P.dashDir==='L')return; // dashBack already fired on the swipe; nothing more on release
+      if(!P.drifted&&this.now()-P.t0<this.GESTURE.TAP_MS){this.q.push('light');this._log('tap')}};
+    const cancel=e=>{const P=this._ptr;if(!P||P.id!==e.pointerId)return;this._ptr=null;
+      if(P.blockOn)this.held.block=false;if(P.dashDir==='R')this.held.heavy=false};
+    canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',cancel);
+    // Defensive cleanup: a lost blur (alt-tab, an OS gesture stealing the pointer) never fires
+    // pointerup/pointercancel -- without this a thumb lifted off-window could leave block/heavy
+    // stuck on forever. Never fires a tap; it only clears whatever was already engaged.
+    addEventListener('blur',()=>{this._ptr=null;this.held.block=false;this.held.heavy=false;
+      this._powerT0=0;this._powerShown=false});
     this.bindButtons();
     addEventListener('keydown',e=>{if(e.repeat)return;const k=e.key.toLowerCase();
       if(e.code==='Space'&&G.state==='TITLE'){e.preventDefault();return G.startFight()}
       if(k==='p')return G.togglePause();
       if(G.state!=='FIGHT')return;
-      if(k==='j')this.q.push('light');if(k==='k')this.q.push('medium');if(k==='a')this.q.push('dashBack');
-      if(k==='l')this.held.heavy=true;if(k==='s')this.held.block=true;if(k==='1'||k==='2'||k==='3')this.q.push('special'+k)});
-    addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k==='s')this.held.block=false;if(k==='l')this.held.heavy=false})},
-  // On-screen buttons: BLOCK is a hold (mirrors the field def-zone hold); PUNCH/KICK fire on press.
+      if(k==='j')this.q.push('light');
+      if(k==='k'){this.q.push('medium');
+        // Shift+K: a keyboard alias for swipe-right-then-hold -- dashes in with a medium AND arms
+        // the follow-up heavy immediately (no hold delay; the keyboard has no timing to emulate).
+        if(e.shiftKey){this.held.heavy=true;this._kHeavyDown=true}}
+      if(k==='a'||k==='d')this.q.push('dashBack');
+      if(k==='l')this.held.heavy=true;if(k==='s')this.held.block=true;
+      if(k==='1'||k==='2'||k==='3')this.q.push('special'+k)});
+    addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k==='s')this.held.block=false;
+      if(k==='l')this.held.heavy=false;
+      if(k==='k'&&this._kHeavyDown){this.held.heavy=false;this._kHeavyDown=false}})},
+  // On-screen buttons: BLOCK is a hold (mirrors the canvas hold gesture); PUNCH/KICK fire on press.
   // POWER taps 'powerAuto' (drain() resolves it to the highest affordable special); held past
   // POWER_HOLD_MS it shows the S1-S3 picker instead, and releasing over a chip fires that special.
   // Release point is read with elementFromPoint (not e.target) because touch pointers implicitly
-  // capture to their pointerdown target, so e.target would still be #btnPower on release.
+  // capture to their pointerdown target, so e.target would still be #btnPower on release. POWER is
+  // always shown; BLOCK/PUNCH/KICK are optional (Save.data.settings.showButtons or G.forceButtons,
+  // see 00_head.html's .atkbtn/body.show-atk and G.applySettings) but keep these same handlers
+  // whether or not they're currently visible.
   bindButtons(){
     const id=x=>document.getElementById(x);
     const block=id('btnBlock');
@@ -1004,7 +1052,7 @@ const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SW
     id('btnPunch').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('light')});
     id('btnKick').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('medium')});
     const power=id('btnPower'),picker=id('powerPicker');
-    power.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this._powerT0=performance.now();this._powerShown=false});
+    power.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this._powerT0=this.now();this._powerShown=false});
     const powerEnd=e=>{e.stopPropagation();
       if(this._powerShown){
         const el=document.elementFromPoint(e.clientX,e.clientY),m=el&&el.id&&el.id.match(/^pk([123])$/);
@@ -1013,10 +1061,21 @@ const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SW
       else if(this._powerT0)this.q.push('powerAuto');
       this._powerT0=0;this._powerShown=false};
     power.addEventListener('pointerup',powerEnd);power.addEventListener('pointercancel',powerEnd)},
-  // Called once per sim frame by Ctrl.player: promotes a long press in the offense zone to a heavy
-  // hold, and a long press on POWER to the S1-S3 picker (both use the same wall-clock pattern).
-  tick(){for(const P of this._ptrs.values())if(!P.moved&&P.zone==='off'&&!P.holdFired&&performance.now()-P.t0>=this.HOLD_MS){P.holdFired=true;this.held.heavy=true}
-    if(this._powerT0&&!this._powerShown&&performance.now()-this._powerT0>=this.POWER_HOLD_MS){this._powerShown=true;document.getElementById('powerPicker').classList.add('show')}},
+  // Called once per sim frame by Ctrl.player: promotes the active canvas pointer's hold to block (in
+  // place) or to heavy/dash-back-block (after a swipe), and a long press on POWER to the S1-S3
+  // picker. DASH_BACK.frames (40_movedata.js) is counted here as SIM FRAMES elapsed since a dashBack
+  // fired, not wall time -- one increment per tick() call while that pointer is still down, matching
+  // the real DASH state's own duration exactly.
+  tick(){const P=this._ptr;
+    if(P){
+      if(!P.dashDir&&!P.blockOn&&!P.drifted&&this.now()-P.t0>=this.GESTURE.BLOCK_HOLD_MS){
+        P.blockOn=true;this.held.block=true;this._log('hold')}
+      if(P.dashDir==='R'&&!P.heavyOn&&this.now()-P.actAt>=this.GESTURE.HEAVY_HOLD_MS){
+        P.heavyOn=true;this.held.heavy=true;this._log('swipeRHold')}
+      if(P.dashDir==='L'&&!P.blockOn){
+        P.dashFrames++;
+        if(P.dashFrames>=DASH_BACK.frames){P.blockOn=true;this.held.block=true;this._log('swipeLHold')}}}
+    if(this._powerT0&&!this._powerShown&&this.now()-this._powerT0>=this.POWER_HOLD_MS){this._powerShown=true;document.getElementById('powerPicker').classList.add('show')}},
   drain(){const it={light:false,medium:false,heavy:this.held.heavy,block:this.held.block,dashBack:false,special:0};
     for(const a of this.q){
       if(a==='powerAuto'){const p=G.fight?G.fight.p1.power:0;let n=0;for(let k=3;k>=1;k--)if(p>=100*k){n=k;break}it.special=n}
@@ -3910,6 +3969,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // works even with the settings toggle off, matching Atlas.load's own "OR" semantics.
   atlasQuery:/(?:^|[?&])atlas=1(?:&|$)/.test(location.search),
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
+  // Task 6.3: forces BLOCK/PUNCH/KICK on regardless of Save.data.settings.showButtons -- read by
+  // G.applySettings (which ORs it with the setting to toggle body.show-atk) alongside the setting.
+  // Always false here; Task 6.4's tutorial spar mode sets it true for its first two lessons (so the
+  // "TAP PUNCH"/"SWIPE RIGHT / KICK" prompts can point at real buttons) and false again after, then
+  // calls G.applySettings() itself to re-sync the DOM -- nothing else in this task ever sets it.
+  forceButtons:false,
   cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
   zoomCap:1.12,cineZoomCap:1.28, // per-fight caps on Camera.update's target zoom; recomputed in startFight from
   // Rig.extent(p1) / Rig.extent(p2) so a tall rig's topmost joint (any pose, any prop) never gets
@@ -3934,6 +3999,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // The toast is centered in that gap, capped at 88% of its width, so it can never reach either
   // button's label regardless of content.
   TOAST_BOTTOM_GAP:32,BLOCK_RIGHT:22+76,PUNCH_LEFT:W-(198+76),
+  // Task 6.3: BLOCK/PUNCH/KICK are optional now -- when they're hidden, positionToast below can't use
+  // BLOCK_RIGHT/PUNCH_LEFT (those buttons collapse to a zero rect same as pre-fight), so it falls back
+  // to POWER_LEFT (POWER's own left edge, right:22/width:76, the one button still always on screen)
+  // and EDGE_MARGIN (a flat canvas-edge inset on the side that lost its button entirely, same 22px
+  // offset BLOCK/POWER already use on their own side).
+  POWER_LEFT:W-(22+76),EDGE_MARGIN:22,
   // Task 5.4 (leftHanded): BLOCK_RIGHT/PUNCH_LEFT above are canvas-local x's for the NORMAL layout's
   // gap (BLOCK's right edge .. PUNCH's left edge) -- see their own original comment for why this is
   // computed off fixed numbers instead of the buttons' own getBoundingClientRect (they collapse to
@@ -3945,7 +4016,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // are ever retuned.
   positionToast(){const r=canvas.getBoundingClientRect(),el=document.getElementById('toast'),sx=r.width/W;
     const lh=document.body.classList.contains('left-handed');
-    const gapLc=lh?(W-this.PUNCH_LEFT):this.BLOCK_RIGHT,gapRc=lh?(W-this.BLOCK_RIGHT):this.PUNCH_LEFT;
+    // Task 6.3: swap in the button-hidden fallbacks (POWER_LEFT/EDGE_MARGIN) whenever the attack
+    // buttons aren't shown (body.show-atk, set by G.applySettings from showButtons||forceButtons) --
+    // same mirror-by-W-minus-x trick the leftHanded gapLc/gapRc below already used, just applied to
+    // whichever pair (BLOCK_RIGHT/PUNCH_LEFT or EDGE_MARGIN/POWER_LEFT) is actually on screen.
+    const showAtk=document.body.classList.contains('show-atk');
+    const leftEdge=showAtk?this.BLOCK_RIGHT:this.EDGE_MARGIN,rightEdge=showAtk?this.PUNCH_LEFT:this.POWER_LEFT;
+    const gapLc=lh?(W-rightEdge):leftEdge,gapRc=lh?(W-leftEdge):rightEdge;
     const gapL=r.left+gapLc*sx,gapR=r.left+gapRc*sx;
     el.style.left=((gapL+gapR)/2)+'px';
     el.style.bottom=(innerHeight-r.bottom+this.TOAST_BOTTOM_GAP/H*r.height)+'px';
@@ -4000,6 +4077,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // above) so the POWER-stall pulse's CSS (00_head.html) can go static instead of animated without
     // every future animated element having to read Save.data.settings itself.
     document.body.classList.toggle('reduce-motion',!!Save.data.settings.reduceMotion);
+    // Task 6.3: BLOCK/PUNCH/KICK (.atkbtn, 00_head.html) show only when the player opted in via
+    // SETTINGS or the tutorial is forcing them on for its early lessons (G.forceButtons, Task 6.4) --
+    // POWER (not an .atkbtn) is unaffected and always shows during a fight.
+    document.body.classList.toggle('show-atk',!!(Save.data.settings.showButtons||this.forceButtons));
     this.positionToast()},
   // Pure function of (viewport w/h, is-a-touch-device) — no window/navigator read of its own — so
   // tests can drive every truth-table cell directly, per the frozen interface. Portrait AND a touch
@@ -4756,6 +4837,13 @@ const Screens={
     {key:'reduceMotion',label:'REDUCE MOTION'},
     {key:'haptics',label:'HAPTICS'},
     {key:'leftHanded',label:'LEFT-HANDED CONTROLS'},
+    // Task 6.3: BLOCK/PUNCH/KICK are optional now that the whole canvas is a gesture surface --
+    // this toggle (off by default) is the only way to bring them back outside the tutorial's forced
+    // early lessons (G.forceButtons). The generic onclick handler below already calls
+    // G.applySettings() after flipping any row's key, which is what actually shows/hides them
+    // (body.show-atk, 00_head.html) and re-runs the toast gap math (G.positionToast) -- no extra
+    // wiring needed here.
+    {key:'showButtons',label:'SHOW ATTACK BUTTONS'},
     {key:'useAtlas',label:'USE SPRITE ATLAS'},
     {key:'sfx',label:'SOUND EFFECTS'},
     {key:'announcer',label:'ANNOUNCER TEXT'}],
@@ -5250,17 +5338,115 @@ Test.add('Input.drain folds the action queue into one intent and clears it',()=>
   Input.q.push('light','special2','dashBack');Input.held.block=true;const it=Input.drain();
   eq(it.light,true);eq(it.special,2);eq(it.dashBack,true);eq(it.block,true);eq(Input.q.length,0);Input.held.block=false;
   const it2=Input.drain();eq(it2.light,false);eq(it2.special,0);eq(it2.block,false)});
-function withFight(fn){const prev=G.state;G.state='FIGHT';Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptrs.clear();
-  try{fn()}finally{Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptrs.clear();G.state=prev}}
-function tap(id,x){const r=canvas.getBoundingClientRect(),cx=r.left+x*r.width/W,cy=r.top+r.height/2;return{cx,cy,
-  down(){canvas.dispatchEvent(new PointerEvent('pointerdown',{pointerId:id,clientX:cx,clientY:cy,bubbles:true}))},
-  up(){canvas.dispatchEvent(new PointerEvent('pointerup',{pointerId:id,clientX:cx,clientY:cy,bubbles:true}))}}}
-Test.add('two-thumb touch: second thumb releasing does not clear the first thumb block',()=>{
+function withFight(fn){const prev=G.state;G.state='FIGHT';Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptr=null;
+  try{fn()}finally{Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptr=null;G.state=prev}}
+// Task 6.3: synthetic PointerEvents on the canvas, at a canvas-local (x,y) (defaulting to the
+// vertical center, same row every gesture test but tap uses); .move(x,y) sends a new absolute
+// canvas-local position (not a delta), mirroring how Phase 1's own zone tests drove pointermove.
+function tap(id,x,y){const r=canvas.getBoundingClientRect();
+  const at=(px,py)=>({clientX:r.left+px*r.width/W,clientY:r.top+(py===undefined?r.height/2:py*r.height/H)});
+  const c0=at(x,y);
+  return{
+    down(){canvas.dispatchEvent(new PointerEvent('pointerdown',Object.assign({pointerId:id,bubbles:true},c0)))},
+    move(mx,my){canvas.dispatchEvent(new PointerEvent('pointermove',Object.assign({pointerId:id,bubbles:true},at(mx,my))))},
+    up(){canvas.dispatchEvent(new PointerEvent('pointerup',Object.assign({pointerId:id,bubbles:true},c0)))},
+    cancel(){canvas.dispatchEvent(new PointerEvent('pointercancel',Object.assign({pointerId:id,bubbles:true},c0)))}}}
+// Stubs Input.now with a manually-advanced clock (starting at 0) so gesture timing (TAP_MS,
+// BLOCK_HOLD_MS, SWIPE_MS, HEAVY_HOLD_MS) can be driven deterministically instead of racing real
+// wall time -- fn receives `adv(ms)` to move the clock forward. Always restores Input.now after.
+function withInputClock(fn){const prev=Input.now;let t=0;Input.now=()=>t;
+  try{fn(ms=>{t+=ms})}finally{Input.now=prev}}
+Test.add('gesture: tap fires light on release only, never on pointerdown',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();
+    eq(Input.q.length,0,'no light on pointerdown');
+    adv(50);p.up();
+    eq(Input.q.filter(a=>a==='light').length,1,'exactly one light queued on release')}))});
+Test.add('gesture: holding in place >=BLOCK_HOLD_MS engages block; releasing clears it (no light)',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();adv(200);Input.tick();
+    ok(Input.held.block,'block engaged after a 200ms hold');
+    ok(Input.pointerLog.some(e=>e.type==='hold'),'hold logged to pointerLog');
+    p.up();
+    eq(Input.held.block,false,'block cleared on release');
+    eq(Input.q.includes('light'),false,'a hold must never also fire a light on release')}))});
+Test.add('gesture: swipe right >=SWIPE_PX within SWIPE_MS queues medium exactly once',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,300,240);
+    p.down();adv(100);p.move(360,240); // 60px right in 100ms
+    eq(Input.q.filter(a=>a==='medium').length,1,'medium queued once on the frame the threshold crosses');
+    p.move(420,240); // further movement of the same swipe must not re-queue it
+    eq(Input.q.filter(a=>a==='medium').length,1,'still exactly once');
+    p.up()}))});
+Test.add('gesture: swipe right held HEAVY_HOLD_MS after firing engages heavy; release clears it',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,300,240);
+    p.down();adv(50);p.move(360,240); // swipe fires at t=50
+    adv(250);Input.tick(); // 250ms after the swipe fired
+    ok(Input.held.heavy,'heavy engaged after a 250ms hold past the swipe');
+    ok(Input.pointerLog.some(e=>e.type==='swipeRHold'));
+    p.up();
+    eq(Input.held.heavy,false,'heavy cleared on release')}))});
+Test.add('gesture: swipe left queues dashBack',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();adv(50);p.move(340,240); // 60px left
+    ok(Input.q.includes('dashBack'));
+    ok(Input.pointerLog.some(e=>e.type==='swipeL'));
+    p.up()}))});
+Test.add('gesture: swipe left held past DASH_BACK.frames sim ticks engages block; release clears it',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();adv(50);p.move(340,240);
+    for(let i=0;i<DASH_BACK.frames-1;i++){Input.tick();eq(Input.held.block,false,'not yet at tick '+i)}
+    Input.tick();
+    ok(Input.held.block,'block engaged once DASH_BACK.frames sim ticks have elapsed since the dash fired');
+    ok(Input.pointerLog.some(e=>e.type==='swipeLHold'));
+    p.up();
+    eq(Input.held.block,false,'release clears it')}))});
+Test.add('gesture: a second canvas pointer while one is down is ignored until the first lifts',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const first=tap(1,300,240),second=tap(2,600,240);
+    first.down();
+    second.down();second.move(500,240);second.up();
+    eq(Input.q.length,0,'the ignored second pointer must not queue anything');
+    adv(200);Input.tick();
+    ok(Input.held.block,'the first pointer must still engage its own hold normally');
+    first.up();
+    eq(Input.held.block,false)}))});
+Test.add('gesture: drift beyond TAP_DRIFT cancels the tap (no light) without qualifying as a swipe',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();adv(50);p.move(400,400); // 160px vertical drift -- fails swipe's dx>|dy| test too
+    adv(50);p.up();
+    eq(Input.q.includes('light'),false,'a drifted tap must not fire light');
+    eq(Input.q.includes('medium'),false,'nor should vertical drift ever queue a swipe');
+    eq(Input.q.includes('dashBack'),false)}))});
+Test.add('gesture: PointerEvent pointercancel clears block/heavy without firing a tap',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();adv(200);Input.tick();ok(Input.held.block,'sanity: block engaged before the cancel');
+    p.cancel();
+    eq(Input.held.block,false,'pointercancel must clear an engaged block');
+    eq(Input.q.includes('light'),false,'pointercancel must never fire a light')}))});
+Test.add('keyboard: J light, K medium, L/S hold heavy/block, A and D both dashBack, Shift+K dash-in heavy',()=>{
   withFight(()=>{
-    const left=tap(1,Input.DEF_ZONE/2),right=tap(2,Input.DEF_ZONE+50);
-    left.down();ok(Input.held.block,'left thumb holds block');
-    right.down();right.up();
-    eq(Input.held.block,true,'block must stay held: left thumb never lifted')})});
+    const down=(k,shift)=>dispatchEvent(new KeyboardEvent('keydown',{key:k,shiftKey:!!shift}));
+    const up=(k,shift)=>dispatchEvent(new KeyboardEvent('keyup',{key:k,shiftKey:!!shift}));
+    down('j');ok(Input.q.includes('light'));Input.q.length=0;
+    down('k');ok(Input.q.includes('medium'));Input.q.length=0;
+    down('l');ok(Input.held.heavy);up('l');eq(Input.held.heavy,false);
+    down('a');ok(Input.q.includes('dashBack'));Input.q.length=0;
+    down('d');ok(Input.q.includes('dashBack'),'D is also a dashBack alias');Input.q.length=0;
+    down('s');ok(Input.held.block);up('s');eq(Input.held.block,false);
+    down('k',true);
+    ok(Input.q.includes('medium'),'Shift+K still queues the dash-in medium');
+    ok(Input.held.heavy,'Shift+K also arms the follow-up heavy immediately');
+    up('k',true);
+    eq(Input.held.heavy,false,'releasing K clears the Shift+K heavy hold');
+    Input.q.length=0})});
 Test.add('keyboard actions do not queue while paused',()=>{
   const prev=G.state;G.state='PAUSED';Input.q.length=0;
   try{dispatchEvent(new KeyboardEvent('keydown',{key:'j'}));eq(Input.q.length,0,'light must not queue while paused')}
@@ -5271,13 +5457,6 @@ Test.add('Fight never calls Audio directly; G.onEvent dispatches sound per event
   const orig=Audio.recipes.light1;let called=false;Audio.recipes.light1=()=>{called=true};
   try{G.onEvent('hit',{moveName:'light1',combo:1})}finally{Audio.recipes.light1=orig}
   ok(called,'G.onEvent must dispatch hit to Audio.recipes[moveName]')});
-Test.add('two-thumb touch: right thumb lifting clears heavy even after a second thumb touches',()=>{
-  withFight(()=>{
-    const right=tap(1,Input.DEF_ZONE+50),left=tap(2,Input.DEF_ZONE/2);
-    right.down();const rec=Input._ptrs.get(1);rec.holdFired=true;Input.held.heavy=true; // simulate the 180ms hold firing
-    left.down();ok(Input.held.block,'left thumb also holds block');
-    right.up();
-    eq(Input.held.heavy,false,'heavy must clear: right thumb (its owner) lifted')})});
 Test.add('stage builds offscreen layers with parallax factors',()=>{const s=Stage.build('depths');ok(s.layers.length>=4,'>=4 layers');for(const L of s.layers){ok(L.canvas&&L.canvas.width>0);ok(L.parallax>=0&&L.parallax<=1)}ok(s.torches.length>=2)});
 Test.add('camera target sits at the fighters midpoint and zooms in when close',()=>{const f=mkFight();run(f,1);const mid=(f.p1.x+f.p2.x)/2;ok(Math.abs(f.camTarget.x-mid)<1);const far=f.camTarget.zoom;closeIn(f);run(f,1);ok(f.camTarget.zoom>far,'zoom increases when close');ok(f.camTarget.zoom<=1.35&&far>=1)});
 Test.add('camera lerps toward target and clamps to stage edges',()=>{const cam={x:0,zoom:1};const f=mkFight();run(f,1);Camera.update(cam,f);ok(cam.x>0&&cam.x<f.camTarget.x,'moved toward target');for(let i=0;i<200;i++)Camera.update(cam,f);ok(Math.abs(cam.x-f.camTarget.x)<0.5);cam.x=-999;f.camTarget.x=-999;Camera.update(cam,f);ok(cam.x>=W/2/cam.zoom-1,'clamped left')});
@@ -5861,6 +6040,9 @@ Test.add('toast never overlaps the BLOCK/PUNCH button labels',()=>{
   // PUNCH label. Drives a worst-case (long, guaranteed-to-wrap) line through the real Audio.say ->
   // G.fitToastText path and checks the actual laid-out DOM rects, in canvas-local units (via the
   // same canvas.getBoundingClientRect() scale G.positionToast itself uses), against BLOCK/PUNCH.
+  // Task 6.3: BLOCK/PUNCH are optional and hidden by default now -- force them on so this test still
+  // exercises their real on-screen rects instead of the hidden buttons' zero-size ones.
+  Save.data.settings.showButtons=true;G.applySettings();
   G.startFight();
   G.say('x'.repeat(120));
   const cr=canvas.getBoundingClientRect(),sx=W/cr.width,sy=H/cr.height;
@@ -5876,6 +6058,7 @@ Test.add('toast never overlaps the BLOCK/PUNCH button labels',()=>{
   const punch=withLabel(toCanvas(document.getElementById('btnPunch').getBoundingClientRect()));
   ok(!intersects(t,block),'toast rect '+JSON.stringify(t)+' must not intersect BLOCK+label '+JSON.stringify(block));
   ok(!intersects(t,punch),'toast rect '+JSON.stringify(t)+' must not intersect PUNCH+label '+JSON.stringify(punch));
+  Save.data.settings.showButtons=false;G.applySettings();
   G.toTitle()});
 
 // --- Task 3.2: buffs framework ---
@@ -7475,7 +7658,8 @@ Test.add('title screen: CAMPAIGN is the primary button, others secondary, SOUND 
 Test.add('Meta.defaults().settings has the frozen Phase 5 shape',()=>{
   const s=Meta.defaults().settings;
   eq(s.reduceMotion,false);eq(s.haptics,true);eq(s.leftHanded,false);
-  eq(s.useAtlas,false);eq(s.sfx,true);eq(s.announcer,true)});
+  eq(s.useAtlas,false);eq(s.sfx,true);eq(s.announcer,true);
+  eq(s.showButtons,false,'Task 6.3: attack buttons default off now that gestures cover the whole canvas')});
 Test.add('Meta.migrate (v2) backfills a missing settings key without discarding an already-present one',()=>{
   const d=Meta.migrate({v:2,settings:{sfx:false}});
   eq(d.settings.sfx,false,'an existing key must survive migration');
@@ -7519,8 +7703,13 @@ Test.add('G.applySettings toggles the left-handed body class from Save.data.sett
   ok(!document.body.classList.contains('left-handed'))});
 Test.add('leftHanded mirrors the on-screen button layout: #btnBlock ends up right of #btnPunch/#btnKick/#btnPower',()=>{
   Save.data=Meta.defaults();
-  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()}); // shows #btns (collapses to a
-  // zero rect while hidden pre-fight -- see G.positionToast's own comment)
+  // Task 6.3: attack buttons are optional and hidden by default -- force them on (otherwise
+  // BLOCK/PUNCH/KICK all collapse to a zero rect and every comparison below would be vacuous).
+  Save.data.settings.showButtons=true;
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()}); // applySettings() (called by
+  // startFight's own caller path via G.applySettings inside init(), and again explicitly below) is
+  // what actually shows #btns' .atkbtn children -- see G.applySettings' own comment.
+  G.applySettings();
   document.body.classList.remove('left-handed');
   const block=document.getElementById('btnBlock'),punch=document.getElementById('btnPunch'),
         kick=document.getElementById('btnKick'),power=document.getElementById('btnPower');
@@ -7530,36 +7719,41 @@ Test.add('leftHanded mirrors the on-screen button layout: #btnBlock ends up righ
   ok(block.getBoundingClientRect().left>kick.getBoundingClientRect().left,'left-handed: BLOCK right of KICK');
   ok(block.getBoundingClientRect().left>power.getBoundingClientRect().left,'left-handed: BLOCK right of POWER');
   document.body.classList.remove('left-handed');
+  Save.data.settings.showButtons=false;G.applySettings();
   G.toTitle()});
-// Task 5.6: leftHanded also mirrors the CANVAS gesture zones (Input.zoneFor/swipeDx, 30_input.js),
-// not just the on-screen button layout above -- defense moves from the left third to the right
-// third, offense from the right two-thirds to the left two-thirds, and swipe direction mirrors with
-// them so "swipe away from the defense zone" still reads as dashBack and "swipe away from the
-// offense zone" still reads as medium, whichever side each zone is currently on.
-Test.add('leftHanded mirrors the canvas defense/offense zones: x=W-20 holds block, x=20 queues light',()=>{
+// Task 6.3: leftHanded is now a button-PLACEMENT setting only -- the old per-zone canvas mirroring
+// (Input.zoneFor/swipeDx, Task 5.6) is gone along with the zones themselves. These two tests replace
+// that pair: gestures must read identically regardless of leftHanded, and BLOCK/PUNCH/KICK stay
+// hidden by default with only POWER shown, adapting the toast gap either way.
+Test.add('leftHanded no longer mirrors canvas gestures: swipe right still queues medium, swipe left still queues dashBack',()=>{
   Save.data=Meta.defaults();Save.data.settings.leftHanded=true;
-  withFight(()=>{
-    const def=tap(1,W-20);def.down();
-    eq(Input.held.block,true,'a pointerdown at x=W-20 must hold block when leftHanded');
-    def.up();
-    eq(Input.held.block,false,'releasing the def-zone pointer must clear block');
-    const off=tap(2,20);off.down();off.up();
-    ok(Input.q.includes('light'),'a tap (no swipe) at x=20 must queue light when leftHanded')});
+  withFight(()=>withInputClock(adv=>{
+    const right=tap(1,300,240);
+    right.down();adv(50);right.move(360,240);
+    ok(Input.q.includes('medium'),'swipe right must still queue medium when leftHanded is true');
+    ok(!Input.q.includes('dashBack'));
+    right.up();Input.q.length=0;
+    const left=tap(2,300,240);
+    left.down();adv(50);left.move(240,240);
+    ok(Input.q.includes('dashBack'),'swipe left must still queue dashBack when leftHanded is true');
+    left.up()}));
   Save.data.settings.leftHanded=false});
-Test.add('leftHanded mirrors swipe direction: a swipe further right in the (now right-side) defense zone still queues dashBack, and further left in the (now left-side) offense zone still queues medium',()=>{
-  Save.data=Meta.defaults();Save.data.settings.leftHanded=true;
-  withFight(()=>{
-    const r=canvas.getBoundingClientRect();
-    const move=(id,x)=>canvas.dispatchEvent(new PointerEvent('pointermove',
-      {pointerId:id,clientX:r.left+x*r.width/W,clientY:r.top+r.height/2,bubbles:true}));
-    const def=tap(1,W-20);def.down();move(1,W-20+Input.SWIPE+5);
-    ok(Input.q.includes('dashBack'),'swiping further right inside the mirrored defense zone must queue dashBack');
-    ok(!Input.held.block,'the swipe must clear the hold-block it started with, like normal mode');
-    def.up();Input.q.length=0;
-    const off=tap(2,20);off.down();move(2,20-Input.SWIPE-5);
-    ok(Input.q.includes('medium'),'swiping further left inside the mirrored offense zone must queue medium');
-    off.up()});
-  Save.data.settings.leftHanded=false});
+Test.add('attack buttons are hidden by default; only POWER shows, and the toast gap widens to fill the space',()=>{
+  Save.data=Meta.defaults();G.applySettings();
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  const block=document.getElementById('btnBlock'),punch=document.getElementById('btnPunch'),
+        kick=document.getElementById('btnKick'),power=document.getElementById('btnPower');
+  eq(getComputedStyle(block).display,'none','BLOCK hidden by default');
+  eq(getComputedStyle(punch).display,'none','PUNCH hidden by default');
+  eq(getComputedStyle(kick).display,'none','KICK hidden by default');
+  ok(getComputedStyle(power).display!=='none','POWER always shown, even with the others hidden');
+  const gapHidden=parseFloat(document.getElementById('toast').style.maxWidth);
+  Save.data.settings.showButtons=true;G.applySettings();
+  ok(getComputedStyle(block).display!=='none','BLOCK shows once the setting is on');
+  const gapShown=parseFloat(document.getElementById('toast').style.maxWidth);
+  ok(gapShown<gapHidden,'the toast gap must shrink back down once BLOCK/PUNCH reclaim the space: hidden='+gapHidden+' shown='+gapShown);
+  Save.data.settings.showButtons=false;G.applySettings();
+  G.toTitle()});
 Test.add('reduceMotion zeroes camera shake and screen flash but leaves popups untouched',()=>{
   Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
   FX.reset();

@@ -147,17 +147,115 @@ Test.add('Input.drain folds the action queue into one intent and clears it',()=>
   Input.q.push('light','special2','dashBack');Input.held.block=true;const it=Input.drain();
   eq(it.light,true);eq(it.special,2);eq(it.dashBack,true);eq(it.block,true);eq(Input.q.length,0);Input.held.block=false;
   const it2=Input.drain();eq(it2.light,false);eq(it2.special,0);eq(it2.block,false)});
-function withFight(fn){const prev=G.state;G.state='FIGHT';Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptrs.clear();
-  try{fn()}finally{Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptrs.clear();G.state=prev}}
-function tap(id,x){const r=canvas.getBoundingClientRect(),cx=r.left+x*r.width/W,cy=r.top+r.height/2;return{cx,cy,
-  down(){canvas.dispatchEvent(new PointerEvent('pointerdown',{pointerId:id,clientX:cx,clientY:cy,bubbles:true}))},
-  up(){canvas.dispatchEvent(new PointerEvent('pointerup',{pointerId:id,clientX:cx,clientY:cy,bubbles:true}))}}}
-Test.add('two-thumb touch: second thumb releasing does not clear the first thumb block',()=>{
+function withFight(fn){const prev=G.state;G.state='FIGHT';Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptr=null;
+  try{fn()}finally{Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptr=null;G.state=prev}}
+// Task 6.3: synthetic PointerEvents on the canvas, at a canvas-local (x,y) (defaulting to the
+// vertical center, same row every gesture test but tap uses); .move(x,y) sends a new absolute
+// canvas-local position (not a delta), mirroring how Phase 1's own zone tests drove pointermove.
+function tap(id,x,y){const r=canvas.getBoundingClientRect();
+  const at=(px,py)=>({clientX:r.left+px*r.width/W,clientY:r.top+(py===undefined?r.height/2:py*r.height/H)});
+  const c0=at(x,y);
+  return{
+    down(){canvas.dispatchEvent(new PointerEvent('pointerdown',Object.assign({pointerId:id,bubbles:true},c0)))},
+    move(mx,my){canvas.dispatchEvent(new PointerEvent('pointermove',Object.assign({pointerId:id,bubbles:true},at(mx,my))))},
+    up(){canvas.dispatchEvent(new PointerEvent('pointerup',Object.assign({pointerId:id,bubbles:true},c0)))},
+    cancel(){canvas.dispatchEvent(new PointerEvent('pointercancel',Object.assign({pointerId:id,bubbles:true},c0)))}}}
+// Stubs Input.now with a manually-advanced clock (starting at 0) so gesture timing (TAP_MS,
+// BLOCK_HOLD_MS, SWIPE_MS, HEAVY_HOLD_MS) can be driven deterministically instead of racing real
+// wall time -- fn receives `adv(ms)` to move the clock forward. Always restores Input.now after.
+function withInputClock(fn){const prev=Input.now;let t=0;Input.now=()=>t;
+  try{fn(ms=>{t+=ms})}finally{Input.now=prev}}
+Test.add('gesture: tap fires light on release only, never on pointerdown',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();
+    eq(Input.q.length,0,'no light on pointerdown');
+    adv(50);p.up();
+    eq(Input.q.filter(a=>a==='light').length,1,'exactly one light queued on release')}))});
+Test.add('gesture: holding in place >=BLOCK_HOLD_MS engages block; releasing clears it (no light)',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();adv(200);Input.tick();
+    ok(Input.held.block,'block engaged after a 200ms hold');
+    ok(Input.pointerLog.some(e=>e.type==='hold'),'hold logged to pointerLog');
+    p.up();
+    eq(Input.held.block,false,'block cleared on release');
+    eq(Input.q.includes('light'),false,'a hold must never also fire a light on release')}))});
+Test.add('gesture: swipe right >=SWIPE_PX within SWIPE_MS queues medium exactly once',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,300,240);
+    p.down();adv(100);p.move(360,240); // 60px right in 100ms
+    eq(Input.q.filter(a=>a==='medium').length,1,'medium queued once on the frame the threshold crosses');
+    p.move(420,240); // further movement of the same swipe must not re-queue it
+    eq(Input.q.filter(a=>a==='medium').length,1,'still exactly once');
+    p.up()}))});
+Test.add('gesture: swipe right held HEAVY_HOLD_MS after firing engages heavy; release clears it',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,300,240);
+    p.down();adv(50);p.move(360,240); // swipe fires at t=50
+    adv(250);Input.tick(); // 250ms after the swipe fired
+    ok(Input.held.heavy,'heavy engaged after a 250ms hold past the swipe');
+    ok(Input.pointerLog.some(e=>e.type==='swipeRHold'));
+    p.up();
+    eq(Input.held.heavy,false,'heavy cleared on release')}))});
+Test.add('gesture: swipe left queues dashBack',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();adv(50);p.move(340,240); // 60px left
+    ok(Input.q.includes('dashBack'));
+    ok(Input.pointerLog.some(e=>e.type==='swipeL'));
+    p.up()}))});
+Test.add('gesture: swipe left held past DASH_BACK.frames sim ticks engages block; release clears it',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();adv(50);p.move(340,240);
+    for(let i=0;i<DASH_BACK.frames-1;i++){Input.tick();eq(Input.held.block,false,'not yet at tick '+i)}
+    Input.tick();
+    ok(Input.held.block,'block engaged once DASH_BACK.frames sim ticks have elapsed since the dash fired');
+    ok(Input.pointerLog.some(e=>e.type==='swipeLHold'));
+    p.up();
+    eq(Input.held.block,false,'release clears it')}))});
+Test.add('gesture: a second canvas pointer while one is down is ignored until the first lifts',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const first=tap(1,300,240),second=tap(2,600,240);
+    first.down();
+    second.down();second.move(500,240);second.up();
+    eq(Input.q.length,0,'the ignored second pointer must not queue anything');
+    adv(200);Input.tick();
+    ok(Input.held.block,'the first pointer must still engage its own hold normally');
+    first.up();
+    eq(Input.held.block,false)}))});
+Test.add('gesture: drift beyond TAP_DRIFT cancels the tap (no light) without qualifying as a swipe',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();adv(50);p.move(400,400); // 160px vertical drift -- fails swipe's dx>|dy| test too
+    adv(50);p.up();
+    eq(Input.q.includes('light'),false,'a drifted tap must not fire light');
+    eq(Input.q.includes('medium'),false,'nor should vertical drift ever queue a swipe');
+    eq(Input.q.includes('dashBack'),false)}))});
+Test.add('gesture: PointerEvent pointercancel clears block/heavy without firing a tap',()=>{
+  withFight(()=>withInputClock(adv=>{
+    const p=tap(1,400,240);
+    p.down();adv(200);Input.tick();ok(Input.held.block,'sanity: block engaged before the cancel');
+    p.cancel();
+    eq(Input.held.block,false,'pointercancel must clear an engaged block');
+    eq(Input.q.includes('light'),false,'pointercancel must never fire a light')}))});
+Test.add('keyboard: J light, K medium, L/S hold heavy/block, A and D both dashBack, Shift+K dash-in heavy',()=>{
   withFight(()=>{
-    const left=tap(1,Input.DEF_ZONE/2),right=tap(2,Input.DEF_ZONE+50);
-    left.down();ok(Input.held.block,'left thumb holds block');
-    right.down();right.up();
-    eq(Input.held.block,true,'block must stay held: left thumb never lifted')})});
+    const down=(k,shift)=>dispatchEvent(new KeyboardEvent('keydown',{key:k,shiftKey:!!shift}));
+    const up=(k,shift)=>dispatchEvent(new KeyboardEvent('keyup',{key:k,shiftKey:!!shift}));
+    down('j');ok(Input.q.includes('light'));Input.q.length=0;
+    down('k');ok(Input.q.includes('medium'));Input.q.length=0;
+    down('l');ok(Input.held.heavy);up('l');eq(Input.held.heavy,false);
+    down('a');ok(Input.q.includes('dashBack'));Input.q.length=0;
+    down('d');ok(Input.q.includes('dashBack'),'D is also a dashBack alias');Input.q.length=0;
+    down('s');ok(Input.held.block);up('s');eq(Input.held.block,false);
+    down('k',true);
+    ok(Input.q.includes('medium'),'Shift+K still queues the dash-in medium');
+    ok(Input.held.heavy,'Shift+K also arms the follow-up heavy immediately');
+    up('k',true);
+    eq(Input.held.heavy,false,'releasing K clears the Shift+K heavy hold');
+    Input.q.length=0})});
 Test.add('keyboard actions do not queue while paused',()=>{
   const prev=G.state;G.state='PAUSED';Input.q.length=0;
   try{dispatchEvent(new KeyboardEvent('keydown',{key:'j'}));eq(Input.q.length,0,'light must not queue while paused')}
@@ -168,13 +266,6 @@ Test.add('Fight never calls Audio directly; G.onEvent dispatches sound per event
   const orig=Audio.recipes.light1;let called=false;Audio.recipes.light1=()=>{called=true};
   try{G.onEvent('hit',{moveName:'light1',combo:1})}finally{Audio.recipes.light1=orig}
   ok(called,'G.onEvent must dispatch hit to Audio.recipes[moveName]')});
-Test.add('two-thumb touch: right thumb lifting clears heavy even after a second thumb touches',()=>{
-  withFight(()=>{
-    const right=tap(1,Input.DEF_ZONE+50),left=tap(2,Input.DEF_ZONE/2);
-    right.down();const rec=Input._ptrs.get(1);rec.holdFired=true;Input.held.heavy=true; // simulate the 180ms hold firing
-    left.down();ok(Input.held.block,'left thumb also holds block');
-    right.up();
-    eq(Input.held.heavy,false,'heavy must clear: right thumb (its owner) lifted')})});
 Test.add('stage builds offscreen layers with parallax factors',()=>{const s=Stage.build('depths');ok(s.layers.length>=4,'>=4 layers');for(const L of s.layers){ok(L.canvas&&L.canvas.width>0);ok(L.parallax>=0&&L.parallax<=1)}ok(s.torches.length>=2)});
 Test.add('camera target sits at the fighters midpoint and zooms in when close',()=>{const f=mkFight();run(f,1);const mid=(f.p1.x+f.p2.x)/2;ok(Math.abs(f.camTarget.x-mid)<1);const far=f.camTarget.zoom;closeIn(f);run(f,1);ok(f.camTarget.zoom>far,'zoom increases when close');ok(f.camTarget.zoom<=1.35&&far>=1)});
 Test.add('camera lerps toward target and clamps to stage edges',()=>{const cam={x:0,zoom:1};const f=mkFight();run(f,1);Camera.update(cam,f);ok(cam.x>0&&cam.x<f.camTarget.x,'moved toward target');for(let i=0;i<200;i++)Camera.update(cam,f);ok(Math.abs(cam.x-f.camTarget.x)<0.5);cam.x=-999;f.camTarget.x=-999;Camera.update(cam,f);ok(cam.x>=W/2/cam.zoom-1,'clamped left')});
@@ -758,6 +849,9 @@ Test.add('toast never overlaps the BLOCK/PUNCH button labels',()=>{
   // PUNCH label. Drives a worst-case (long, guaranteed-to-wrap) line through the real Audio.say ->
   // G.fitToastText path and checks the actual laid-out DOM rects, in canvas-local units (via the
   // same canvas.getBoundingClientRect() scale G.positionToast itself uses), against BLOCK/PUNCH.
+  // Task 6.3: BLOCK/PUNCH are optional and hidden by default now -- force them on so this test still
+  // exercises their real on-screen rects instead of the hidden buttons' zero-size ones.
+  Save.data.settings.showButtons=true;G.applySettings();
   G.startFight();
   G.say('x'.repeat(120));
   const cr=canvas.getBoundingClientRect(),sx=W/cr.width,sy=H/cr.height;
@@ -773,6 +867,7 @@ Test.add('toast never overlaps the BLOCK/PUNCH button labels',()=>{
   const punch=withLabel(toCanvas(document.getElementById('btnPunch').getBoundingClientRect()));
   ok(!intersects(t,block),'toast rect '+JSON.stringify(t)+' must not intersect BLOCK+label '+JSON.stringify(block));
   ok(!intersects(t,punch),'toast rect '+JSON.stringify(t)+' must not intersect PUNCH+label '+JSON.stringify(punch));
+  Save.data.settings.showButtons=false;G.applySettings();
   G.toTitle()});
 
 // --- Task 3.2: buffs framework ---
@@ -2372,7 +2467,8 @@ Test.add('title screen: CAMPAIGN is the primary button, others secondary, SOUND 
 Test.add('Meta.defaults().settings has the frozen Phase 5 shape',()=>{
   const s=Meta.defaults().settings;
   eq(s.reduceMotion,false);eq(s.haptics,true);eq(s.leftHanded,false);
-  eq(s.useAtlas,false);eq(s.sfx,true);eq(s.announcer,true)});
+  eq(s.useAtlas,false);eq(s.sfx,true);eq(s.announcer,true);
+  eq(s.showButtons,false,'Task 6.3: attack buttons default off now that gestures cover the whole canvas')});
 Test.add('Meta.migrate (v2) backfills a missing settings key without discarding an already-present one',()=>{
   const d=Meta.migrate({v:2,settings:{sfx:false}});
   eq(d.settings.sfx,false,'an existing key must survive migration');
@@ -2416,8 +2512,13 @@ Test.add('G.applySettings toggles the left-handed body class from Save.data.sett
   ok(!document.body.classList.contains('left-handed'))});
 Test.add('leftHanded mirrors the on-screen button layout: #btnBlock ends up right of #btnPunch/#btnKick/#btnPower',()=>{
   Save.data=Meta.defaults();
-  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()}); // shows #btns (collapses to a
-  // zero rect while hidden pre-fight -- see G.positionToast's own comment)
+  // Task 6.3: attack buttons are optional and hidden by default -- force them on (otherwise
+  // BLOCK/PUNCH/KICK all collapse to a zero rect and every comparison below would be vacuous).
+  Save.data.settings.showButtons=true;
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()}); // applySettings() (called by
+  // startFight's own caller path via G.applySettings inside init(), and again explicitly below) is
+  // what actually shows #btns' .atkbtn children -- see G.applySettings' own comment.
+  G.applySettings();
   document.body.classList.remove('left-handed');
   const block=document.getElementById('btnBlock'),punch=document.getElementById('btnPunch'),
         kick=document.getElementById('btnKick'),power=document.getElementById('btnPower');
@@ -2427,36 +2528,41 @@ Test.add('leftHanded mirrors the on-screen button layout: #btnBlock ends up righ
   ok(block.getBoundingClientRect().left>kick.getBoundingClientRect().left,'left-handed: BLOCK right of KICK');
   ok(block.getBoundingClientRect().left>power.getBoundingClientRect().left,'left-handed: BLOCK right of POWER');
   document.body.classList.remove('left-handed');
+  Save.data.settings.showButtons=false;G.applySettings();
   G.toTitle()});
-// Task 5.6: leftHanded also mirrors the CANVAS gesture zones (Input.zoneFor/swipeDx, 30_input.js),
-// not just the on-screen button layout above -- defense moves from the left third to the right
-// third, offense from the right two-thirds to the left two-thirds, and swipe direction mirrors with
-// them so "swipe away from the defense zone" still reads as dashBack and "swipe away from the
-// offense zone" still reads as medium, whichever side each zone is currently on.
-Test.add('leftHanded mirrors the canvas defense/offense zones: x=W-20 holds block, x=20 queues light',()=>{
+// Task 6.3: leftHanded is now a button-PLACEMENT setting only -- the old per-zone canvas mirroring
+// (Input.zoneFor/swipeDx, Task 5.6) is gone along with the zones themselves. These two tests replace
+// that pair: gestures must read identically regardless of leftHanded, and BLOCK/PUNCH/KICK stay
+// hidden by default with only POWER shown, adapting the toast gap either way.
+Test.add('leftHanded no longer mirrors canvas gestures: swipe right still queues medium, swipe left still queues dashBack',()=>{
   Save.data=Meta.defaults();Save.data.settings.leftHanded=true;
-  withFight(()=>{
-    const def=tap(1,W-20);def.down();
-    eq(Input.held.block,true,'a pointerdown at x=W-20 must hold block when leftHanded');
-    def.up();
-    eq(Input.held.block,false,'releasing the def-zone pointer must clear block');
-    const off=tap(2,20);off.down();off.up();
-    ok(Input.q.includes('light'),'a tap (no swipe) at x=20 must queue light when leftHanded')});
+  withFight(()=>withInputClock(adv=>{
+    const right=tap(1,300,240);
+    right.down();adv(50);right.move(360,240);
+    ok(Input.q.includes('medium'),'swipe right must still queue medium when leftHanded is true');
+    ok(!Input.q.includes('dashBack'));
+    right.up();Input.q.length=0;
+    const left=tap(2,300,240);
+    left.down();adv(50);left.move(240,240);
+    ok(Input.q.includes('dashBack'),'swipe left must still queue dashBack when leftHanded is true');
+    left.up()}));
   Save.data.settings.leftHanded=false});
-Test.add('leftHanded mirrors swipe direction: a swipe further right in the (now right-side) defense zone still queues dashBack, and further left in the (now left-side) offense zone still queues medium',()=>{
-  Save.data=Meta.defaults();Save.data.settings.leftHanded=true;
-  withFight(()=>{
-    const r=canvas.getBoundingClientRect();
-    const move=(id,x)=>canvas.dispatchEvent(new PointerEvent('pointermove',
-      {pointerId:id,clientX:r.left+x*r.width/W,clientY:r.top+r.height/2,bubbles:true}));
-    const def=tap(1,W-20);def.down();move(1,W-20+Input.SWIPE+5);
-    ok(Input.q.includes('dashBack'),'swiping further right inside the mirrored defense zone must queue dashBack');
-    ok(!Input.held.block,'the swipe must clear the hold-block it started with, like normal mode');
-    def.up();Input.q.length=0;
-    const off=tap(2,20);off.down();move(2,20-Input.SWIPE-5);
-    ok(Input.q.includes('medium'),'swiping further left inside the mirrored offense zone must queue medium');
-    off.up()});
-  Save.data.settings.leftHanded=false});
+Test.add('attack buttons are hidden by default; only POWER shows, and the toast gap widens to fill the space',()=>{
+  Save.data=Meta.defaults();G.applySettings();
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  const block=document.getElementById('btnBlock'),punch=document.getElementById('btnPunch'),
+        kick=document.getElementById('btnKick'),power=document.getElementById('btnPower');
+  eq(getComputedStyle(block).display,'none','BLOCK hidden by default');
+  eq(getComputedStyle(punch).display,'none','PUNCH hidden by default');
+  eq(getComputedStyle(kick).display,'none','KICK hidden by default');
+  ok(getComputedStyle(power).display!=='none','POWER always shown, even with the others hidden');
+  const gapHidden=parseFloat(document.getElementById('toast').style.maxWidth);
+  Save.data.settings.showButtons=true;G.applySettings();
+  ok(getComputedStyle(block).display!=='none','BLOCK shows once the setting is on');
+  const gapShown=parseFloat(document.getElementById('toast').style.maxWidth);
+  ok(gapShown<gapHidden,'the toast gap must shrink back down once BLOCK/PUNCH reclaim the space: hidden='+gapHidden+' shown='+gapShown);
+  Save.data.settings.showButtons=false;G.applySettings();
+  G.toTitle()});
 Test.add('reduceMotion zeroes camera shake and screen flash but leaves popups untouched',()=>{
   Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
   FX.reset();

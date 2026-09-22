@@ -39,8 +39,9 @@ After the tutorial, the title screen offers CAMPAIGN, ARENA, ROSTER, KIOSK, EXHI
   wins) and bank gold, or lose and the streak resets. BEST tracks your all-time high streak; the
   local leaderboard ranks your best runs by peak viewers.
 - **SETTINGS** toggles reduce motion, haptics (a short vibration when you're hit, on supported
-  devices), left-handed controls (mirrors both the on-screen buttons and the touch gesture zones —
-  see below), the optional sprite atlas, sound effects, and announcer text.
+  devices), left-handed controls (mirrors the on-screen button placement — see below), show attack
+  buttons (BLOCK/PUNCH/KICK, off by default), the optional sprite atlas, sound effects, and announcer
+  text.
 
 Every fight tracks **viewers** — a live score built from hits, parries, and specials (style
 multipliers for a parry, a 5-hit combo, or landing an S3) that decays while you're being hit. The
@@ -48,23 +49,27 @@ result screen shows your PEAK VIEWERS for that fight.
 
 ### Controls
 
-**Touch** (landscape phone or tablet): the whole canvas is one big control surface, split into two
-gesture zones, plus four on-screen buttons.
+**Touch** (landscape phone or tablet): one thumb, anywhere on the canvas — the whole screen is a
+single gesture surface. Only one finger is read at a time; a second finger touching the canvas is
+ignored until the first lifts.
 
-- **Defense zone** — the left third of the screen (the right third if LEFT-HANDED CONTROLS is on):
-  hold to **BLOCK**, release right before a hit lands to **PARRY** it; swipe away from the offense
-  zone to **DASH BACK** (with a moment of invulnerability).
-- **Offense zone** — the rest of the screen: tap for a **light** hit, swipe away from the defense
-  zone for a **medium**, or hold for ≥180 ms for a charging **heavy** (released on lift).
-- **BLOCK** (bottom-left, or bottom-right when left-handed) mirrors the defense zone as a button —
-  hold to block.
-- **PUNCH** / **KICK** (bottom-right) fire a light / medium on press.
-- **POWER** (bottom-right) taps to fire your strongest affordable special; hold it to open a
-  picker for S1/S2/S3 specifically, then release over the one you want.
+- **Tap** — a quick down-and-up (under 140 ms, moving less than 24 px) fires a **light** hit on
+  release.
+- **Hold in place** (≥140 ms, no drift) — **BLOCK**; release right before a hit lands to **PARRY** it.
+- **Swipe right** (≥44 px within 260 ms) — dashes in with a **medium**; keep holding for another
+  200 ms after the swipe and it charges into a **heavy**, released on lift.
+- **Swipe left** — **DASH BACK** (with a moment of invulnerability); keep holding through the dash
+  and it rolls straight into **BLOCK** once the dash ends.
+- **POWER** (bottom-right, always on screen) taps to fire your strongest affordable special; hold it
+  to open a picker for S1/S2/S3 specifically, then release over the one you want.
 
-**Keyboard** (desktop browsers, for testing or just preference): `J` light, `K` medium, `A` dash
-back, `L` (hold) heavy, `S` (hold) block, `1`/`2`/`3` fire that special, `Space` starts a fight from
-the title screen, `P` pauses.
+BLOCK/PUNCH/KICK on-screen buttons are optional — off by default (SETTINGS' SHOW ATTACK BUTTONS
+toggle brings them back), and shown automatically during the tutorial's early lessons. LEFT-HANDED
+CONTROLS only mirrors where those buttons sit; gestures read the same regardless of that setting.
+
+**Keyboard** (desktop browsers, for testing or just preference): `J` light, `K` medium (`Shift`+`K`
+dashes in and charges straight into a heavy), `L` (hold) heavy, `A`/`D` dash back, `S` (hold) block,
+`1`/`2`/`3` fire that special, `Space` starts a fight from the title screen, `P` pauses.
 
 ## Development
 

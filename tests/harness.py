@@ -408,11 +408,15 @@ def main():
                      help="Task 5.6: sets an 844x390 CSS-px landscape viewport (iPhone SE/8-class "
                           "phone rotated), starts a real fight, and asserts: the canvas is letterboxed "
                           "(its displayed box preserves the game's 854:480 aspect ratio and fits "
-                          "inside the viewport on both axes), every .cbtn on-screen button (BLOCK/ "
-                          "PUNCH/KICK/POWER) has a real >=44 CSS-px rect fully inside the viewport, "
-                          "and the page never grows a horizontal scrollbar "
-                          "(document.documentElement.scrollWidth<=viewport width); prints a JSON "
-                          "summary and exits 1 on any check failure or page/console error")
+                          "inside the viewport on both axes), every VISIBLE .cbtn on-screen button has "
+                          "a real >=44 CSS-px rect fully inside the viewport, and the page never grows "
+                          "a horizontal scrollbar (document.documentElement.scrollWidth<=viewport "
+                          "width). Task 6.3: BLOCK/PUNCH/KICK are optional (off by default, POWER "
+                          "always shown) -- checked once as-is (only POWER visible) and again with "
+                          "Save.data.settings.showButtons forced on (all four visible), so both states "
+                          "get real coverage; a button that's display:none in a given pass is skipped "
+                          "rather than failed. Prints a JSON summary and exits 1 on any check failure "
+                          "or page/console error")
     a = ap.parse_args()
     if a.floor is not None and a.node is None:
         ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2
@@ -596,40 +600,70 @@ def main():
             pg.wait_for_function('typeof G!=="undefined"')
             pg.evaluate('localStorage.clear();Save.load()')
             pg.evaluate("G.startFight({seed:1,p1:'carl',p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()})")
-            r = pg.evaluate("""(()=>{
-              const cr=canvas.getBoundingClientRect();
-              const btnIds=['btnBlock','btnPunch','btnKick','btnPower'];
-              const btns=btnIds.map(id=>{
-                const el=document.getElementById(id),rc=el.getBoundingClientRect();
-                return{id,left:rc.left,top:rc.top,width:rc.width,height:rc.height,
-                  right:rc.right,bottom:rc.bottom};});
-              return{canvas:{left:cr.left,top:cr.top,width:cr.width,height:cr.height},
-                btns,
-                scrollWidth:document.documentElement.scrollWidth,
-                innerWidth:innerWidth,innerHeight:innerHeight};
-            })()""")
+
+            def capture():
+                return pg.evaluate("""(()=>{
+                  const cr=canvas.getBoundingClientRect();
+                  const btnIds=['btnBlock','btnPunch','btnKick','btnPower'];
+                  const btns=btnIds.map(id=>{
+                    const el=document.getElementById(id),rc=el.getBoundingClientRect();
+                    return{id,left:rc.left,top:rc.top,width:rc.width,height:rc.height,
+                      right:rc.right,bottom:rc.bottom,display:getComputedStyle(el).display};});
+                  return{canvas:{left:cr.left,top:cr.top,width:cr.width,height:cr.height},
+                    btns,
+                    scrollWidth:document.documentElement.scrollWidth,
+                    innerWidth:innerWidth,innerHeight:innerHeight};
+                })()""")
+
+            # Task 6.3: BLOCK/PUNCH/KICK are optional (Save.data.settings.showButtons, off by
+            # default; POWER is never optional) -- two passes, hidden (the default a fresh save
+            # loads with) and shown, so both real on-screen states get checked instead of just
+            # whichever one happens to be the default this run.
+            r_hidden = capture()
+            pg.evaluate("Save.data.settings.showButtons=true;G.applySettings()")
+            r_shown = capture()
+            pg.evaluate("Save.data.settings.showButtons=false;G.applySettings()")
             b.close()
-        vw, vh = r['innerWidth'], r['innerHeight']
-        cv = r['canvas']
-        # Letterboxed: the displayed canvas box must preserve the game's own 854:480 aspect ratio
-        # (within float rounding) and fit entirely inside the viewport on both axes -- that's what
-        # "letterboxed" means here (bars on whichever axis has slack), not any particular bar size.
-        aspect_game = 854 / 480
-        aspect_shown = cv['width'] / cv['height'] if cv['height'] else 0
-        aspect_ok = abs(aspect_shown - aspect_game) < 0.01
-        fits_ok = cv['width'] <= vw + 0.5 and cv['height'] <= vh + 0.5
-        btn_checks = []
-        for bt in r['btns']:
-            ok_size = bt['width'] >= 44 and bt['height'] >= 44
-            ok_inside = bt['left'] >= 0 and bt['top'] >= 0 and bt['right'] <= vw + 0.5 and bt['bottom'] <= vh + 0.5
-            btn_checks.append({'id': bt['id'], 'width': bt['width'], 'height': bt['height'],
-                                'size_ok': ok_size, 'inside_ok': ok_inside})
-        no_hscroll = r['scrollWidth'] <= vw + 1  # +1: sub-pixel layout rounding
-        bad_btns = [c['id'] for c in btn_checks if not (c['size_ok'] and c['inside_ok'])]
-        out = {'errors': errs, 'canvas': cv, 'aspect_ok': aspect_ok, 'fits_ok': fits_ok,
-               'buttons': btn_checks, 'no_hscroll': no_hscroll, 'viewport': {'w': vw, 'h': vh}}
+
+        def check_pass(r):
+            vw, vh = r['innerWidth'], r['innerHeight']
+            cv = r['canvas']
+            # Letterboxed: the displayed canvas box must preserve the game's own 854:480 aspect ratio
+            # (within float rounding) and fit entirely inside the viewport on both axes -- that's what
+            # "letterboxed" means here (bars on whichever axis has slack), not any particular bar size.
+            aspect_game = 854 / 480
+            aspect_shown = cv['width'] / cv['height'] if cv['height'] else 0
+            aspect_ok = abs(aspect_shown - aspect_game) < 0.01
+            fits_ok = cv['width'] <= vw + 0.5 and cv['height'] <= vh + 0.5
+            btn_checks = []
+            for bt in r['btns']:
+                visible = bt['display'] != 'none'
+                # A button that's legitimately hidden this pass (display:none, Task 6.3) is skipped,
+                # not failed -- only a VISIBLE button has to clear the real touch-target/fit bars.
+                ok_size = (not visible) or (bt['width'] >= 44 and bt['height'] >= 44)
+                ok_inside = (not visible) or (bt['left'] >= 0 and bt['top'] >= 0 and bt['right'] <= vw + 0.5 and bt['bottom'] <= vh + 0.5)
+                btn_checks.append({'id': bt['id'], 'visible': visible, 'width': bt['width'], 'height': bt['height'],
+                                    'size_ok': ok_size, 'inside_ok': ok_inside})
+            no_hscroll = r['scrollWidth'] <= vw + 1  # +1: sub-pixel layout rounding
+            bad_btns = [c['id'] for c in btn_checks if not (c['size_ok'] and c['inside_ok'])]
+            return {'canvas': cv, 'aspect_ok': aspect_ok, 'fits_ok': fits_ok, 'buttons': btn_checks,
+                    'no_hscroll': no_hscroll, 'viewport': {'w': vw, 'h': vh}, 'bad_btns': bad_btns}
+
+        hidden_out = check_pass(r_hidden)
+        shown_out = check_pass(r_shown)
+        # The wiring itself, not just sizing: POWER visible and BLOCK/PUNCH/KICK hidden in the
+        # default pass; all four visible once showButtons is on.
+        power_hidden = next(c for c in hidden_out['buttons'] if c['id'] == 'btnPower')
+        atk_hidden = [c for c in hidden_out['buttons'] if c['id'] != 'btnPower']
+        wiring_ok = power_hidden['visible'] and not any(c['visible'] for c in atk_hidden) and \
+            all(c['visible'] for c in shown_out['buttons'])
+        out = {'errors': errs, 'attackButtonsHidden': hidden_out, 'attackButtonsShown': shown_out,
+               'wiring_ok': wiring_ok}
         print(json.dumps(out, indent=1))
-        sys.exit(1 if errs or not aspect_ok or not fits_ok or bad_btns or not no_hscroll else 0)
+        bad = (errs or not hidden_out['aspect_ok'] or not hidden_out['fits_ok'] or hidden_out['bad_btns']
+               or not hidden_out['no_hscroll'] or not shown_out['aspect_ok'] or not shown_out['fits_ok']
+               or shown_out['bad_btns'] or not shown_out['no_hscroll'] or not wiring_ok)
+        sys.exit(1 if bad else 0)
     errors, console = [], []
     with sync_playwright() as p:
         b = p.chromium.launch()

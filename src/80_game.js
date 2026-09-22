@@ -84,6 +84,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // works even with the settings toggle off, matching Atlas.load's own "OR" semantics.
   atlasQuery:/(?:^|[?&])atlas=1(?:&|$)/.test(location.search),
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
+  // Task 6.3: forces BLOCK/PUNCH/KICK on regardless of Save.data.settings.showButtons -- read by
+  // G.applySettings (which ORs it with the setting to toggle body.show-atk) alongside the setting.
+  // Always false here; Task 6.4's tutorial spar mode sets it true for its first two lessons (so the
+  // "TAP PUNCH"/"SWIPE RIGHT / KICK" prompts can point at real buttons) and false again after, then
+  // calls G.applySettings() itself to re-sync the DOM -- nothing else in this task ever sets it.
+  forceButtons:false,
   cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
   zoomCap:1.12,cineZoomCap:1.28, // per-fight caps on Camera.update's target zoom; recomputed in startFight from
   // Rig.extent(p1) / Rig.extent(p2) so a tall rig's topmost joint (any pose, any prop) never gets
@@ -108,6 +114,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // The toast is centered in that gap, capped at 88% of its width, so it can never reach either
   // button's label regardless of content.
   TOAST_BOTTOM_GAP:32,BLOCK_RIGHT:22+76,PUNCH_LEFT:W-(198+76),
+  // Task 6.3: BLOCK/PUNCH/KICK are optional now -- when they're hidden, positionToast below can't use
+  // BLOCK_RIGHT/PUNCH_LEFT (those buttons collapse to a zero rect same as pre-fight), so it falls back
+  // to POWER_LEFT (POWER's own left edge, right:22/width:76, the one button still always on screen)
+  // and EDGE_MARGIN (a flat canvas-edge inset on the side that lost its button entirely, same 22px
+  // offset BLOCK/POWER already use on their own side).
+  POWER_LEFT:W-(22+76),EDGE_MARGIN:22,
   // Task 5.4 (leftHanded): BLOCK_RIGHT/PUNCH_LEFT above are canvas-local x's for the NORMAL layout's
   // gap (BLOCK's right edge .. PUNCH's left edge) -- see their own original comment for why this is
   // computed off fixed numbers instead of the buttons' own getBoundingClientRect (they collapse to
@@ -119,7 +131,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // are ever retuned.
   positionToast(){const r=canvas.getBoundingClientRect(),el=document.getElementById('toast'),sx=r.width/W;
     const lh=document.body.classList.contains('left-handed');
-    const gapLc=lh?(W-this.PUNCH_LEFT):this.BLOCK_RIGHT,gapRc=lh?(W-this.BLOCK_RIGHT):this.PUNCH_LEFT;
+    // Task 6.3: swap in the button-hidden fallbacks (POWER_LEFT/EDGE_MARGIN) whenever the attack
+    // buttons aren't shown (body.show-atk, set by G.applySettings from showButtons||forceButtons) --
+    // same mirror-by-W-minus-x trick the leftHanded gapLc/gapRc below already used, just applied to
+    // whichever pair (BLOCK_RIGHT/PUNCH_LEFT or EDGE_MARGIN/POWER_LEFT) is actually on screen.
+    const showAtk=document.body.classList.contains('show-atk');
+    const leftEdge=showAtk?this.BLOCK_RIGHT:this.EDGE_MARGIN,rightEdge=showAtk?this.PUNCH_LEFT:this.POWER_LEFT;
+    const gapLc=lh?(W-rightEdge):leftEdge,gapRc=lh?(W-leftEdge):rightEdge;
     const gapL=r.left+gapLc*sx,gapR=r.left+gapRc*sx;
     el.style.left=((gapL+gapR)/2)+'px';
     el.style.bottom=(innerHeight-r.bottom+this.TOAST_BOTTOM_GAP/H*r.height)+'px';
@@ -174,6 +192,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // above) so the POWER-stall pulse's CSS (00_head.html) can go static instead of animated without
     // every future animated element having to read Save.data.settings itself.
     document.body.classList.toggle('reduce-motion',!!Save.data.settings.reduceMotion);
+    // Task 6.3: BLOCK/PUNCH/KICK (.atkbtn, 00_head.html) show only when the player opted in via
+    // SETTINGS or the tutorial is forcing them on for its early lessons (G.forceButtons, Task 6.4) --
+    // POWER (not an .atkbtn) is unaffected and always shows during a fight.
+    document.body.classList.toggle('show-atk',!!(Save.data.settings.showButtons||this.forceButtons));
     this.positionToast()},
   // Pure function of (viewport w/h, is-a-touch-device) — no window/navigator read of its own — so
   // tests can drive every truth-table cell directly, per the frozen interface. Portrait AND a touch

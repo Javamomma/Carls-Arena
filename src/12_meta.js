@@ -27,7 +27,10 @@ const Meta={
       // key of some shape) -- see migrate()'s own v2 branch below for the explicit per-key backfill
       // this one DOES need (unlike leaderboard/pity, `settings` already existed as `{}` before this
       // task, so the generic "fill anything TOP-LEVEL missing" loop below would never touch it).
-      settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true},
+      // Task 6.3: showButtons (BLOCK/PUNCH/KICK on-screen, default off now that the whole canvas is
+      // a gesture surface -- POWER stays shown regardless) backfills for free through migrate()'s
+      // existing per-key settings loop below, same story as every other key in this object.
+      settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true,showButtons:false},
       // Task 5.3: a plain top-level boolean, same free-ride-through-migrate() story as leaderboard/
       // pity above -- a pre-5.3 v2 save picks it up for free via migrate()'s generic "fill anything
       // top-level missing" loop below, no dedicated migrate branch needed. false until G.onFightEnd
