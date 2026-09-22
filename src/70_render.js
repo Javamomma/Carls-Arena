@@ -365,11 +365,14 @@ const Render={ctx:canvas.getContext('2d'),
     this.hudCache(); // built once, before any HUD draw so it's ready whether or not f/hud runs this call
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
     Camera.apply(c,cam);
-    // Shake offsets the already-applied camera transform: translate by (screen px)/zoom so the
-    // jitter reads as `FX.shake` screen pixels regardless of zoom level. Direction is seeded off
-    // the fight frame (never Math.random) so --sim screenshots stay reproducible.
-    if(FX.shake>0.05){const rng=RNG((fr*211+1)>>>0),ang=rng.next()*Math.PI*2;
-      c.translate(Math.cos(ang)*FX.shake/cam.zoom,Math.sin(ang)*FX.shake/cam.zoom)}
+    // Task 7.4: shake offsets the already-applied camera transform: translate by (screen px)/zoom
+    // so the kick reads as `FX.shake` screen pixels regardless of zoom level. FX.shake is now a
+    // directional {x,y} vector (the attacker's own facing kicks x, see 72_fx.js's push()/update())
+    // rather than a randomly-seeded omnidirectional jitter angle, so this reads straight off it --
+    // still fully deterministic (no RNG/Math.random at all now), so --sim screenshots stay
+    // reproducible frame for frame.
+    if(Math.abs(FX.shake.x)>0.05||Math.abs(FX.shake.y)>0.05)
+      c.translate(FX.shake.x/cam.zoom,FX.shake.y/cam.zoom);
     Stage.draw(c,cam,fr,Stage.build('depths'));
     if(f){
       this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);

@@ -3,7 +3,19 @@
 // every sim tick via FX.pushAll) and never touches Fight/Fighter state. Spread uses its own seeded
 // RNG, keyed off the current fight frame and particle index, never Math.random, so --sim
 // screenshots reproduce identically frame for frame.
-const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
+const FX={list:[],
+  // Task 7.4: FX.shake is now a decaying {x,y} vector (was a bare scalar) -- x kicks in the
+  // attacker's own facing (ev.dir), y is a fixed small upward kick, both decaying together so the
+  // camera "punches" in the hit's own direction and eases back, rather than the old omnidirectional
+  // per-frame jitter (see push()'s 'shake' case and update()/70_render.js's own comments below).
+  shake:{x:0,y:0},
+  // Task 7.4: FX.punch is the camera's own additive zoom term -- Camera.update (65_stage.js)
+  // composes cam.zoom = min(base*(1+FX.punch), capNow), the frozen interface. Envelope shape is
+  // "jump to target, hold PUNCH_HOLD frames, then ease (decay) back to 0" -- see push()'s 'punch'
+  // case and update() below. PUNCH_HOLD/PUNCH_EASE are exposed as named constants (not just inlined
+  // numbers) so a test can assert the envelope's own shape without hardcoding a magic frame count.
+  punch:0,punchTarget:0,punchHold:0,PUNCH_HOLD:6,PUNCH_EASE:.82,
+  flash:0,card:null,shieldDown:null,
   // Task 7.1: label + color per timed effect id, read only here (presentation) -- Effects.apply
   // (48_effects.js, sim-side) pushes a bare {kind:'effectPopup',x,y,id,stacks} descriptor with no
   // color/text choice of its own, same "sim pushes plain data, FX turns it into a styled particle"
@@ -19,7 +31,8 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
     // afterimage streak itself is its own fx kind, pushed separately by Fight.resolve (see 'afterimage'
     // below), since Effects.apply has no notion of a facing-direction streak.
     dexterity:{text:'DEXTERITY',col:'#4fc3f7'}},
-  reset(){this.list.length=0;this.shake=0;this.flash=0;this.card=null;this.shieldDown=null},
+  reset(){this.list.length=0;this.shake={x:0,y:0};this.punch=0;this.punchTarget=0;this.punchHold=0;
+    this.flash=0;this.card=null;this.shieldDown=null},
   _seed(i){const fr=(G.fight&&G.fight.frame)||0;return((fr*97+i*131+1)>>>0)||1},
   push(ev){
     switch(ev.kind){
@@ -43,6 +56,23 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
         for(let i=0;i<6;i++){const rng=RNG(this._seed(i+90));
           const spd=1.6+rng.next()*2.2,rise=.25+rng.next()*.85;
           this.list.push({kind:'dustArc',x:ev.x,y:ev.y,vx:(ev.face||1)*spd,vy:-rise,life:0,max:22,col:'#8a7358'})}
+        break;
+      // Task 7.4 (frozen interface, exact values): per-class impact fx, pushed by Fight.resolve
+      // ALONGSIDE (never instead of) the existing spark/dustArc hit fx above, keyed off the
+      // ATTACKER's own def.impact ('blunt'|'blade'|'energy', 40_movedata.js) -- a static-position
+      // expanding ring/arc rather than a moving particle burst, so it needs no vx/vy physics in
+      // update() (p.life++ there already runs unconditionally for every kind). carl/mongo/
+      // hobgoblin/grub/grull/mother_rat are blunt (a dust ring); katia/goblin/skeleton are blade
+      // (an arc slash); donut/shaman are energy (a caster ring) -- see draw()'s own per-kind
+      // rendering below.
+      case'impactBlunt':
+        this.list.push({kind:'impactBlunt',x:ev.x,y:ev.y,life:0,max:16});
+        break;
+      case'impactBlade':
+        this.list.push({kind:'impactBlade',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:14});
+        break;
+      case'impactEnergy':
+        this.list.push({kind:'impactEnergy',x:ev.x,y:ev.y,life:0,max:20});
         break;
       // Task 7.1: turns a bare {id,stacks} effect descriptor into the same rendered 'popup' particle
       // kind hit/parry/thorns damage already uses (draw()'s 'popup' case below needs no change) --
@@ -92,9 +122,28 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
       // motion-heavy FX) while leaving every other kind — sparks, dust, damage popups, the S3 card —
       // untouched, per the frozen interface ("shake/flash amounts 0, popups stay"). Checked here, at
       // the single place both ever accumulate, rather than at each of Fight.resolve's several push
-      // call sites.
+      // call sites. Task 7.4 extends the same gate to FX.punch (also a camera-motion fx, see its own
+      // case below) and upgrades shake from a scalar to a directional {x,y} vector: ev.dir (the
+      // attacker's own facing, always ±1, defaulted to 1 for any older/hand-built push that omits
+      // it) kicks x; y is a fixed small upward component so a shake always reads as a real hit-punch,
+      // not just a sideways nudge. Magnitude is clamped to 24 total (was: the old scalar's own cap)
+      // so a burst of same-frame hits (a multi-hit special) can't runaway the camera.
       case'shake':
-        if(!Save.data.settings.reduceMotion)this.shake=Math.min(24,this.shake+(ev.amt||0));
+        if(!Save.data.settings.reduceMotion){
+          const dir=ev.dir||1,amt=ev.amt||0;
+          this.shake.x+=dir*amt;this.shake.y+=-amt*.4;
+          const mag=Math.hypot(this.shake.x,this.shake.y);
+          if(mag>24){const s=24/mag;this.shake.x*=s;this.shake.y*=s}}
+        break;
+      // Task 7.4 (frozen interface): the camera's own additive zoom term -- pushed by Fight.resolve
+      // on every intercept (fx.pct, currently always .05) alongside its own INTERCEPT! popup.
+      // Envelope: jump straight to the pushed pct (never below it -- a re-push while one is already
+      // easing re-holds at the higher of the two, same "louder wins" rule popups/flash already
+      // follow elsewhere in this file), hold for PUNCH_HOLD frames, then ease() decays it back to 0.
+      // Gated by reduceMotion, same as shake/flash -- it's a camera-motion fx too.
+      case'punch':
+        if(!Save.data.settings.reduceMotion){
+          this.punchTarget=Math.max(this.punch,ev.pct||0);this.punch=this.punchTarget;this.punchHold=this.PUNCH_HOLD}
         break;
       case'flash':
         if(!Save.data.settings.reduceMotion)this.flash=Math.max(this.flash,ev.frames||0);
@@ -112,7 +161,15 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
       // settles back toward the floor, not a straight line) -- see the push() case above.
       if(p.kind==='spark'||p.kind==='dust'||p.kind==='dustArc'){p.x+=p.vx;p.y+=p.vy;p.vy+=0.15}
       if(p.life>=p.max)this.list.splice(i,1)}
-    this.shake*=.85;if(this.shake<.05)this.shake=0;
+    // Task 7.4: shake decays as a vector now (both components together), snapping fully to {0,0}
+    // once its magnitude is negligible -- same "decay then snap to exact 0" shape the old scalar had.
+    this.shake.x*=.85;this.shake.y*=.85;
+    if(Math.hypot(this.shake.x,this.shake.y)<.05){this.shake.x=0;this.shake.y=0}
+    // Task 7.4: punch's own hold-then-ease envelope -- holds flat at its pushed target for
+    // punchHold frames (armed by push()'s 'punch' case), then eases (multiplicative decay, same
+    // shape as shake) back to exactly 0.
+    if(this.punchHold>0){this.punch=this.punchTarget;this.punchHold--}
+    else{this.punch*=this.PUNCH_EASE;if(this.punch<.001)this.punch=0}
     if(this.flash>0)this.flash--;
     // Card runs on its own clock (advanced only here, from the wall-clock/screenshot render loop),
     // independent of fight.cinematic (G.tick decrements that once per sim tick); both count down
@@ -127,6 +184,19 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
       // soft puff than a hard-edged spark), just its own grey-brown color and a touch more opaque so
       // a low sweep of 6 still reads clearly against the floor art next to a landed light's gold spark.
       else if(p.kind==='dustArc'){c.globalAlpha=Math.max(0,(1-p.life/p.max)*.6);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,2.6+p.life*.13,0,Math.PI*2);c.fill()}
+      // Task 7.4: per-class impact fx -- a static-position expanding ring/arc (no vx/vy physics,
+      // see update()'s own comment) layered on top of the existing spark/dustArc burst at the same
+      // impact point, so a landed hit reads as its own champion class on top of the generic hit fx.
+      else if(p.kind==='impactBlunt'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
+        c.strokeStyle='#cbb89a';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,6+t*22,0,Math.PI*2);c.stroke()}
+      else if(p.kind==='impactBlade'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
+        c.strokeStyle='#e8f0ff';c.lineWidth=4;c.beginPath();
+        c.arc(p.x,p.y,14+t*10,-0.7*p.face,0.7*p.face,p.face<0);c.stroke()}
+      else if(p.kind==='impactEnergy'){const t=p.life/p.max;
+        c.globalAlpha=Math.max(0,(1-t)*.85);c.strokeStyle='#b388ff';c.lineWidth=3;
+        c.beginPath();c.arc(p.x,p.y,8+t*18,0,Math.PI*2);c.stroke();
+        c.globalAlpha=Math.max(0,(1-t)*.4);c.fillStyle='#b388ff';
+        c.beginPath();c.arc(p.x,p.y,4+t*6,0,Math.PI*2);c.fill()}
       // Task 7.3: a fading blue band trailing behind the dodge's own facing, a minimal placeholder
       // for the dexterity read -- see push()'s own comment on why this stays plain.
       else if(p.kind==='afterimage'){const t=p.life/p.max;c.globalAlpha=Math.max(0,(1-t)*.5);

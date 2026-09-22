@@ -202,12 +202,23 @@ class Fight{
     // attacker is facing, into the defender.
     if(att.moveName==='medium')this.fx.push({kind:'dustArc',x:def.x,y:FLOOR,face:att.face});
     else this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:crit?'#ff5a4a':'#ffd86b'});
+    // Task 7.4 (frozen interface, exact ruling): a per-class impact fx (dust ring/arc slash/caster
+    // ring, keyed off the ATTACKER's own def.impact -- 40_movedata.js) layered on top of (never
+    // instead of) the spark/dustArc burst just pushed above, same "data-only, never touches hitstop/
+    // shake" discipline the kick-fx swap comment above already spells out. att.def.impact is only
+    // ever 'blunt'|'blade'|'energy' today (every CHAMPS/MOBS/BOSSES entry carries one), so the
+    // ({...}[x]) lookup below is never undefined in practice; the guard is just cheap insurance for
+    // a future def that forgets to set one.
+    const impactKind={blunt:'impactBlunt',blade:'impactBlade',energy:'impactEnergy'}[att.def.impact];
+    if(impactKind)this.fx.push({kind:impactKind,x:def.x,y:FLOOR-80,face:att.face});
     // Task 6.4: BUFFS.tutorialGuard (47_buffs.js) sets ref.capped=true the instant it actually
     // clamped this hit's dmg -- forwarded onto the popup fx as `muted`, which FX/Render draw grey
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
     // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
     this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
-    this.fx.push({kind:'shake',amt:m.hitstop});
+    // Task 7.4: dir carries the attacker's own facing (att.face) so FX's own directional shake
+    // vector (72_fx.js) always kicks the camera the same way the exchange was actually facing.
+    this.fx.push({kind:'shake',amt:m.hitstop,dir:att.face});
     // Task 7.3 (frozen interface, exact ruling): the intercept's own read/reward gets its own punch-
     // in fx term (Task 7.4 composes fx.pct into the camera zoom) and its own INTERCEPT! callout, on
     // top of (never instead of) the plain damage popup/spark just pushed above -- and its own event,

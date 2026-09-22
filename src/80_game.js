@@ -133,6 +133,12 @@ const Tutorial={
       // guardActive true throughout) instead of dying in the same beat SHIELD DOWN fires.
       if(this.state.step>=this.steps.length&&fight.p2)this._pendingShieldDown=true}}};
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
+  // Task 7.4: dilate is the number of remaining SIM ticks an armed intercept's own time-dilation
+  // window still owes (0 when idle); _dilateN is the every-other-real-tick counter tick() steps
+  // through while dilate>0 (mirrors _tickN's own role for the KO slow-mo branch just above). Armed
+  // to 6 by G.onEvent's own 'intercept' branch below, and only ever armed while !this.sim (frozen
+  // ruling: a no-op under --sim/headless/batch, see that branch's own comment).
+  dilate:0,_dilateN:0,
   // Fix-wave item 5 (final review, Minor): the page's own ?atlas=1 URL override, computed once here
   // (location.search doesn't change without a navigation) -- the exact same regex Atlas.load's own
   // `enabled` check already uses (68_rig.js) to decide whether to fetch at all. Rig.draw's atlas
@@ -528,6 +534,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // off -- gating inside the recipe's own body would still call whatever function Audio.recipes.X
   // currently points to (the stub), defeating that kind of test.
   playRecipe(fn){if(Save.data.settings.sfx&&fn)fn()},
+  // Task 7.4 (frozen ruling): restores per-node hit-audio pitch -- Task 7.2 collapsed light1..light5
+  // into the single moveName 'light', which left Audio.recipes.light2..light5 unreachable via the
+  // old Audio.recipes[a.moveName] lookup (always resolved to the single 'light' entry, or 'lights'
+  // for anything with no matching key). n is a fighter's own chainNode (1..5); clamped/defaulted so
+  // a falsy/out-of-range node (0, undefined, or past 5) still returns a real recipe rather than
+  // undefined. Shared by both the ordinary chain-hit case (n=fighter.chainNode) and the multi-hit-
+  // special sub-thud (forced n=1, replacing the old bare Audio.recipes.light1 reference) in onEvent
+  // below, so both stay on the exact same lookup path.
+  nodeRecipe(n){return Audio.recipes['light'+Math.max(1,Math.min(n||1,5))]},
   onEvent(t,a,b,val){
     if(this.fight)Broadcast.onEvent(t,a,b,val,this.fight);
     // Task 5.3: Tutorial gets the exact same every-event feed Broadcast does, gated to tutorial mode
@@ -540,8 +555,14 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(t==='hit'){const mv=MOVES[a.moveName];
       // Multi-hit specials (s1/s2/s3) already got their one full recipe burst from checkSpecial on
       // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
-      // not the whole recipe again (that would replay a 3-14 tone burst per sub-hit, overlapping).
-      this.playRecipe(mv&&mv.hits>1?Audio.recipes.light1:(Audio.recipes[a.moveName]||Audio.recipes.lights));
+      // not the whole recipe again (that would replay a 3-14 tone burst per sub-hit, overlapping) --
+      // routed through nodeRecipe(1) rather than a bare Audio.recipes.light1 reference, so it stays
+      // on the same lookup path a plain chain hit's own per-node pitch (just below) uses.
+      // Task 7.4: a plain chain hit (moveName 'light') restores per-node pitch, reading the
+      // ATTACKER's own live chainNode (1..5) -- see nodeRecipe's own comment above for why this was
+      // unreachable since Task 7.2 collapsed light1..light5 into the single moveName 'light'.
+      // Every other single-hit move (medium/heavy/s1-s3-as-a-whole) keeps its own unchanged recipe.
+      this.playRecipe(mv&&mv.hits>1?this.nodeRecipe(1):(a.moveName==='light'?this.nodeRecipe(a.chainNode):(Audio.recipes[a.moveName]||Audio.recipes.lights)));
       // Streak lines are in the player's own voice ("Carl's fan club just doubled in size"), so they
       // only fire for p1's combos, not a mob/AI p2's.
       if(this.fight&&a===this.fight.p1&&(a.combo===3||a.combo===5||a.combo===10))Audio.announce('streak'+a.combo,this.fight.presRng);
@@ -553,7 +574,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     else if(t==='block')this.playRecipe(Audio.recipes.block);
     else if(t==='parry'){this.playRecipe(Audio.recipes.parry);Audio.announce('parry',this.fight.presRng)}
     else if(t==='miss'){if(b&&b.state==='DASH')this.playRecipe(Audio.recipes.dash)}
-    else if(t==='ko'){this.playRecipe(Audio.recipes.ko);Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}},
+    else if(t==='ko'){this.playRecipe(Audio.recipes.ko);Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}
+    // Task 7.4 (frozen ruling): arm 6 sim ticks of time dilation the instant the intercept lands --
+    // see G.tick's own dilate branch (above tick()) for how those 6 ticks actually get stretched
+    // over double the real ticks. Never armed under G.sim (headless/batch/screenshot mode): a batch
+    // replay's own win-rate table must stay bit-identical to a pre-Task-7.4 run regardless of how
+    // many intercepts land.
+    else if(t==='intercept'){if(!this.sim)this.dilate=6}},
   // Arena sugar: draws the next Arena.start() encounter for the current streak and starts it with
   // mode:'arena' (never gated by Quest.start/energy -- Phase 4 ruling 4, "arena costs no energy").
   startArena(o={}){return this.startFight(Object.assign({},o,{encounter:Arena.start(),mode:'arena'}))},
@@ -864,6 +891,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // once-every-4th-call KO slow-mo throttle above doesn't also run Broadcast's windows 4x too
       // fast relative to the fight frames they're meant to track.
       if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--;Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}}
+      // Task 7.4 (frozen ruling): an intercept's own time dilation -- exactly 6 SIM ticks, stretched
+      // over double the real G.tick() calls (stepped only every other one, same "step every Nth
+      // call" shape the KO slow-mo branch above uses, just every-2nd instead of every-4th) so the
+      // read/reward moment plays out as a beat of slow motion. this.dilate is armed to 6 the instant
+      // Fight's own 'intercept' event reaches G.onEvent (below); the `&&!this.sim` guard here is
+      // belt-and-suspenders on top of onEvent only ever arming it while !this.sim in the first place
+      // (frozen ruling: "in --sim/headless mode it is a no-op", so a batch/headless replay's own
+      // win-rate table stays bit-identical to a pre-Task-7.4 run no matter how many intercepts land).
+      else if(this.dilate>0&&!this.sim){if(++this._dilateN%2===0){f.step();this.dilate--;Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}}
       else{f.step();Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}
       this.frameNow=f.frame;
       this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);

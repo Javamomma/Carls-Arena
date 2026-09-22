@@ -1430,17 +1430,21 @@ const DASH_TRACK_SPEED=14,DASH_STEPIN_SPEED=22;
 // is 'self'|'foe', default 'foe' (Fight.resolve's own ruling) -- Carl's fury (an attacker-side buff)
 // is the one champion whose signature targets itself; every mob/boss below has no sigEffect at all
 // (undefined), so the in-combo heavy ender is a plain hit for them, no bonus effect.
+// Task 7.4 (frozen ruling): def.impact ('blunt'|'blade'|'energy') -- read on the ATTACKER by
+// Fight.resolve's landed-hit branch (60_fight.js) to push a per-class impact fx (FX.push's
+// 'impactBlunt'/'impactBlade'/'impactEnergy' cases, 72_fx.js) alongside the existing spark/dustArc
+// hit fx. Exact per-id values are the controller's own ruling, verbatim.
 const CHAMPS={
-  carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
+  carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blunt',
     sigEffect:{id:'fury',stacks:1,target:'self'}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
   // and Rig.solve's 'quad' branch in 68_rig.js).
-  donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',
+  donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',impact:'energy',
     sigEffect:{id:'weakness',stacks:1}},
-  katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
+  katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blade',
     moves:{s1:{hits:5,gap:4,dmg:1.2}},sigEffect:{id:'bleed',stacks:1}},
   // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
-  mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',
+  mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',impact:'blunt',
     sigEffect:{id:'armorBreak',stacks:1}}};
 // Task 6.1, ruling 3 (playtest note: "Hobgoblin Brute is impossible to defeat" at floor 1 door 3,
 // level 1): goblin/skeleton hp raised and atk lowered exactly to the plan's given numbers (360/30,
@@ -1459,17 +1463,17 @@ const CHAMPS={
 // fair," not a 40-70% bot win rate; the batch table below is recorded as information, not a gate, for
 // this one encounter. See docs/ARENA.md's Task 6.1 entry, "Fix round 0" section, for the full context.
 const MOBS={
-  goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:360,atk:30,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',
+  goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:360,atk:30,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',impact:'blade',
     moves:{heavy:{charge:14,dmg:2.0}}},
-  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:736,atk:52,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human', // Phase 2 fix round 2: 1.2->1.1, see LOOKS.hobgoblin
+  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:736,atk:52,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human',impact:'blunt', // Phase 2 fix round 2: 1.2->1.1, see LOOKS.hobgoblin
     moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}},
-  skeleton: {id:'skeleton',name:'SKELETON',cls:'rogue', hp:320,atk:28,color:'#d8d0c0',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.95,rig:'human'},
+  skeleton: {id:'skeleton',name:'SKELETON',cls:'rogue', hp:320,atk:28,color:'#d8d0c0',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.95,rig:'human',impact:'blade'},
   // s1 override: a longer 6-hit flurry (base s1 is 3 hits) — the shaman's signature multi-hit special.
-  shaman:   {id:'shaman',  name:'SHAMAN',  cls:'caster',hp:345,atk:36,color:'#6a4c93',armor:0,  crit:.1, critMul:1.6,blockProf:0,  scale:.95,rig:'human',
+  shaman:   {id:'shaman',  name:'SHAMAN',  cls:'caster',hp:345,atk:36,color:'#6a4c93',armor:0,  crit:.1, critMul:1.6,blockProf:0,  scale:.95,rig:'human',impact:'energy',
     moves:{s1:{hits:6,gap:4,dmg:1.1}}},
   // rig:'quad' — Task 3.4's four-legged bone set, same as Donut above (LOOKS.grub, 68_rig.js) but
   // drawn as a segmented larva with stubby leg nubs instead of a cat.
-  grub:     {id:'grub',    name:'GRUB',    cls:'beast', hp:380,atk:40,color:'#8a9a4f',armor:.05,crit:.05,critMul:1.6,blockProf:0,  scale:.8, rig:'quad'}};
+  grub:     {id:'grub',    name:'GRUB',    cls:'beast', hp:380,atk:40,color:'#8a9a4f',armor:.05,crit:.05,critMul:1.6,blockProf:0,  scale:.8, rig:'quad',impact:'blunt'}};
 const BOSSES={
   // rig:'big' — Task 3.5's brute bone set (see LOOKS.grull, 68_rig.js). scale is .94, trimmed down
   // from the Task 3.4-era placeholder's 1.3 during Task 3.5 (a real --sim screenshot showed his head/
@@ -1500,7 +1504,7 @@ const BOSSES={
   // competent's own sustained DPS roughly doubled (see 55_ai.js's own tier-gate retune comment for the
   // measured before/after) — the t4 AI_TIERS retune alone still left this boss at 40% (n=30), over the
   // 10-35% band; the atk bump alone (hp untouched) brings it back to 26.7% (n=30).
-  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:50,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
+  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:50,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',impact:'blunt',
     boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
@@ -1522,7 +1526,7 @@ const BOSSES={
   // roughly doubled once CHAIN.enders.light stopped forcing a knockdown pause every 5 lights) — the t5
   // AI_TIERS retune alone still left this boss at 53.3% (n=30), well over the 10-35% band; hp left
   // untouched, atk-only brings it back to 23.3% (n=30).
-  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:46,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',
+  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:46,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',impact:'blunt',
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
@@ -2649,12 +2653,23 @@ class Fight{
     // attacker is facing, into the defender.
     if(att.moveName==='medium')this.fx.push({kind:'dustArc',x:def.x,y:FLOOR,face:att.face});
     else this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:crit?'#ff5a4a':'#ffd86b'});
+    // Task 7.4 (frozen interface, exact ruling): a per-class impact fx (dust ring/arc slash/caster
+    // ring, keyed off the ATTACKER's own def.impact -- 40_movedata.js) layered on top of (never
+    // instead of) the spark/dustArc burst just pushed above, same "data-only, never touches hitstop/
+    // shake" discipline the kick-fx swap comment above already spells out. att.def.impact is only
+    // ever 'blunt'|'blade'|'energy' today (every CHAMPS/MOBS/BOSSES entry carries one), so the
+    // ({...}[x]) lookup below is never undefined in practice; the guard is just cheap insurance for
+    // a future def that forgets to set one.
+    const impactKind={blunt:'impactBlunt',blade:'impactBlade',energy:'impactEnergy'}[att.def.impact];
+    if(impactKind)this.fx.push({kind:impactKind,x:def.x,y:FLOOR-80,face:att.face});
     // Task 6.4: BUFFS.tutorialGuard (47_buffs.js) sets ref.capped=true the instant it actually
     // clamped this hit's dmg -- forwarded onto the popup fx as `muted`, which FX/Render draw grey
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
     // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
     this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
-    this.fx.push({kind:'shake',amt:m.hitstop});
+    // Task 7.4: dir carries the attacker's own facing (att.face) so FX's own directional shake
+    // vector (72_fx.js) always kicks the camera the same way the exchange was actually facing.
+    this.fx.push({kind:'shake',amt:m.hitstop,dir:att.face});
     // Task 7.3 (frozen interface, exact ruling): the intercept's own read/reward gets its own punch-
     // in fx term (Task 7.4 composes fx.pct into the camera zoom) and its own INTERCEPT! callout, on
     // top of (never instead of) the plain damage popup/spark just pushed above -- and its own event,
@@ -2830,8 +2845,16 @@ const Camera={
   // pose and prop it can strike, never gets zoomed in past where it clears HUD_LINE. Fight/camTarget
   // stay scale-of-the-fighters-agnostic; this is purely a presentation-side clamp, passed in rather
   // than read off a global here so Camera itself stays a pure function of its arguments.
+  // Task 7.4 (frozen ruling, exact formula): cam.zoom = min(base*(1+punch), capNow) -- base is the
+  // plain camTarget/override zoom (t.zoom) exactly as before this task, `punch` is FX.punch (the
+  // presentation-side camera-motion term Fight.resolve's own intercept fx arms, see 72_fx.js), and
+  // capNow is the same per-frame zoom cap this function already clamped the plain base target to.
+  // Composed BEFORE the .12 lerp below (not applied to cam.zoom directly), so the punch-in still
+  // eases in/out smoothly through the same glide every other camera move here already uses, instead
+  // of snapping.
   update(cam,f,override,zoomCap){const t=override||f.camTarget;
-    const z=zoomCap!==undefined?Math.min(t.zoom,zoomCap):t.zoom;
+    const punched=t.zoom*(1+FX.punch);
+    const z=zoomCap!==undefined?Math.min(punched,zoomCap):punched;
     cam.x+=(t.x-cam.x)*.12;cam.zoom+=(z-cam.zoom)*.12;
     const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
   apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,this.anchorY);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},
@@ -4636,11 +4659,14 @@ const Render={ctx:canvas.getContext('2d'),
     this.hudCache(); // built once, before any HUD draw so it's ready whether or not f/hud runs this call
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
     Camera.apply(c,cam);
-    // Shake offsets the already-applied camera transform: translate by (screen px)/zoom so the
-    // jitter reads as `FX.shake` screen pixels regardless of zoom level. Direction is seeded off
-    // the fight frame (never Math.random) so --sim screenshots stay reproducible.
-    if(FX.shake>0.05){const rng=RNG((fr*211+1)>>>0),ang=rng.next()*Math.PI*2;
-      c.translate(Math.cos(ang)*FX.shake/cam.zoom,Math.sin(ang)*FX.shake/cam.zoom)}
+    // Task 7.4: shake offsets the already-applied camera transform: translate by (screen px)/zoom
+    // so the kick reads as `FX.shake` screen pixels regardless of zoom level. FX.shake is now a
+    // directional {x,y} vector (the attacker's own facing kicks x, see 72_fx.js's push()/update())
+    // rather than a randomly-seeded omnidirectional jitter angle, so this reads straight off it --
+    // still fully deterministic (no RNG/Math.random at all now), so --sim screenshots stay
+    // reproducible frame for frame.
+    if(Math.abs(FX.shake.x)>0.05||Math.abs(FX.shake.y)>0.05)
+      c.translate(FX.shake.x/cam.zoom,FX.shake.y/cam.zoom);
     Stage.draw(c,cam,fr,Stage.build('depths'));
     if(f){
       this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
@@ -4663,7 +4689,19 @@ const Render={ctx:canvas.getContext('2d'),
 // every sim tick via FX.pushAll) and never touches Fight/Fighter state. Spread uses its own seeded
 // RNG, keyed off the current fight frame and particle index, never Math.random, so --sim
 // screenshots reproduce identically frame for frame.
-const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
+const FX={list:[],
+  // Task 7.4: FX.shake is now a decaying {x,y} vector (was a bare scalar) -- x kicks in the
+  // attacker's own facing (ev.dir), y is a fixed small upward kick, both decaying together so the
+  // camera "punches" in the hit's own direction and eases back, rather than the old omnidirectional
+  // per-frame jitter (see push()'s 'shake' case and update()/70_render.js's own comments below).
+  shake:{x:0,y:0},
+  // Task 7.4: FX.punch is the camera's own additive zoom term -- Camera.update (65_stage.js)
+  // composes cam.zoom = min(base*(1+FX.punch), capNow), the frozen interface. Envelope shape is
+  // "jump to target, hold PUNCH_HOLD frames, then ease (decay) back to 0" -- see push()'s 'punch'
+  // case and update() below. PUNCH_HOLD/PUNCH_EASE are exposed as named constants (not just inlined
+  // numbers) so a test can assert the envelope's own shape without hardcoding a magic frame count.
+  punch:0,punchTarget:0,punchHold:0,PUNCH_HOLD:6,PUNCH_EASE:.82,
+  flash:0,card:null,shieldDown:null,
   // Task 7.1: label + color per timed effect id, read only here (presentation) -- Effects.apply
   // (48_effects.js, sim-side) pushes a bare {kind:'effectPopup',x,y,id,stacks} descriptor with no
   // color/text choice of its own, same "sim pushes plain data, FX turns it into a styled particle"
@@ -4679,7 +4717,8 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
     // afterimage streak itself is its own fx kind, pushed separately by Fight.resolve (see 'afterimage'
     // below), since Effects.apply has no notion of a facing-direction streak.
     dexterity:{text:'DEXTERITY',col:'#4fc3f7'}},
-  reset(){this.list.length=0;this.shake=0;this.flash=0;this.card=null;this.shieldDown=null},
+  reset(){this.list.length=0;this.shake={x:0,y:0};this.punch=0;this.punchTarget=0;this.punchHold=0;
+    this.flash=0;this.card=null;this.shieldDown=null},
   _seed(i){const fr=(G.fight&&G.fight.frame)||0;return((fr*97+i*131+1)>>>0)||1},
   push(ev){
     switch(ev.kind){
@@ -4703,6 +4742,23 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
         for(let i=0;i<6;i++){const rng=RNG(this._seed(i+90));
           const spd=1.6+rng.next()*2.2,rise=.25+rng.next()*.85;
           this.list.push({kind:'dustArc',x:ev.x,y:ev.y,vx:(ev.face||1)*spd,vy:-rise,life:0,max:22,col:'#8a7358'})}
+        break;
+      // Task 7.4 (frozen interface, exact values): per-class impact fx, pushed by Fight.resolve
+      // ALONGSIDE (never instead of) the existing spark/dustArc hit fx above, keyed off the
+      // ATTACKER's own def.impact ('blunt'|'blade'|'energy', 40_movedata.js) -- a static-position
+      // expanding ring/arc rather than a moving particle burst, so it needs no vx/vy physics in
+      // update() (p.life++ there already runs unconditionally for every kind). carl/mongo/
+      // hobgoblin/grub/grull/mother_rat are blunt (a dust ring); katia/goblin/skeleton are blade
+      // (an arc slash); donut/shaman are energy (a caster ring) -- see draw()'s own per-kind
+      // rendering below.
+      case'impactBlunt':
+        this.list.push({kind:'impactBlunt',x:ev.x,y:ev.y,life:0,max:16});
+        break;
+      case'impactBlade':
+        this.list.push({kind:'impactBlade',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:14});
+        break;
+      case'impactEnergy':
+        this.list.push({kind:'impactEnergy',x:ev.x,y:ev.y,life:0,max:20});
         break;
       // Task 7.1: turns a bare {id,stacks} effect descriptor into the same rendered 'popup' particle
       // kind hit/parry/thorns damage already uses (draw()'s 'popup' case below needs no change) --
@@ -4752,9 +4808,28 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
       // motion-heavy FX) while leaving every other kind — sparks, dust, damage popups, the S3 card —
       // untouched, per the frozen interface ("shake/flash amounts 0, popups stay"). Checked here, at
       // the single place both ever accumulate, rather than at each of Fight.resolve's several push
-      // call sites.
+      // call sites. Task 7.4 extends the same gate to FX.punch (also a camera-motion fx, see its own
+      // case below) and upgrades shake from a scalar to a directional {x,y} vector: ev.dir (the
+      // attacker's own facing, always ±1, defaulted to 1 for any older/hand-built push that omits
+      // it) kicks x; y is a fixed small upward component so a shake always reads as a real hit-punch,
+      // not just a sideways nudge. Magnitude is clamped to 24 total (was: the old scalar's own cap)
+      // so a burst of same-frame hits (a multi-hit special) can't runaway the camera.
       case'shake':
-        if(!Save.data.settings.reduceMotion)this.shake=Math.min(24,this.shake+(ev.amt||0));
+        if(!Save.data.settings.reduceMotion){
+          const dir=ev.dir||1,amt=ev.amt||0;
+          this.shake.x+=dir*amt;this.shake.y+=-amt*.4;
+          const mag=Math.hypot(this.shake.x,this.shake.y);
+          if(mag>24){const s=24/mag;this.shake.x*=s;this.shake.y*=s}}
+        break;
+      // Task 7.4 (frozen interface): the camera's own additive zoom term -- pushed by Fight.resolve
+      // on every intercept (fx.pct, currently always .05) alongside its own INTERCEPT! popup.
+      // Envelope: jump straight to the pushed pct (never below it -- a re-push while one is already
+      // easing re-holds at the higher of the two, same "louder wins" rule popups/flash already
+      // follow elsewhere in this file), hold for PUNCH_HOLD frames, then ease() decays it back to 0.
+      // Gated by reduceMotion, same as shake/flash -- it's a camera-motion fx too.
+      case'punch':
+        if(!Save.data.settings.reduceMotion){
+          this.punchTarget=Math.max(this.punch,ev.pct||0);this.punch=this.punchTarget;this.punchHold=this.PUNCH_HOLD}
         break;
       case'flash':
         if(!Save.data.settings.reduceMotion)this.flash=Math.max(this.flash,ev.frames||0);
@@ -4772,7 +4847,15 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
       // settles back toward the floor, not a straight line) -- see the push() case above.
       if(p.kind==='spark'||p.kind==='dust'||p.kind==='dustArc'){p.x+=p.vx;p.y+=p.vy;p.vy+=0.15}
       if(p.life>=p.max)this.list.splice(i,1)}
-    this.shake*=.85;if(this.shake<.05)this.shake=0;
+    // Task 7.4: shake decays as a vector now (both components together), snapping fully to {0,0}
+    // once its magnitude is negligible -- same "decay then snap to exact 0" shape the old scalar had.
+    this.shake.x*=.85;this.shake.y*=.85;
+    if(Math.hypot(this.shake.x,this.shake.y)<.05){this.shake.x=0;this.shake.y=0}
+    // Task 7.4: punch's own hold-then-ease envelope -- holds flat at its pushed target for
+    // punchHold frames (armed by push()'s 'punch' case), then eases (multiplicative decay, same
+    // shape as shake) back to exactly 0.
+    if(this.punchHold>0){this.punch=this.punchTarget;this.punchHold--}
+    else{this.punch*=this.PUNCH_EASE;if(this.punch<.001)this.punch=0}
     if(this.flash>0)this.flash--;
     // Card runs on its own clock (advanced only here, from the wall-clock/screenshot render loop),
     // independent of fight.cinematic (G.tick decrements that once per sim tick); both count down
@@ -4787,6 +4870,19 @@ const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
       // soft puff than a hard-edged spark), just its own grey-brown color and a touch more opaque so
       // a low sweep of 6 still reads clearly against the floor art next to a landed light's gold spark.
       else if(p.kind==='dustArc'){c.globalAlpha=Math.max(0,(1-p.life/p.max)*.6);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,2.6+p.life*.13,0,Math.PI*2);c.fill()}
+      // Task 7.4: per-class impact fx -- a static-position expanding ring/arc (no vx/vy physics,
+      // see update()'s own comment) layered on top of the existing spark/dustArc burst at the same
+      // impact point, so a landed hit reads as its own champion class on top of the generic hit fx.
+      else if(p.kind==='impactBlunt'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
+        c.strokeStyle='#cbb89a';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,6+t*22,0,Math.PI*2);c.stroke()}
+      else if(p.kind==='impactBlade'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
+        c.strokeStyle='#e8f0ff';c.lineWidth=4;c.beginPath();
+        c.arc(p.x,p.y,14+t*10,-0.7*p.face,0.7*p.face,p.face<0);c.stroke()}
+      else if(p.kind==='impactEnergy'){const t=p.life/p.max;
+        c.globalAlpha=Math.max(0,(1-t)*.85);c.strokeStyle='#b388ff';c.lineWidth=3;
+        c.beginPath();c.arc(p.x,p.y,8+t*18,0,Math.PI*2);c.stroke();
+        c.globalAlpha=Math.max(0,(1-t)*.4);c.fillStyle='#b388ff';
+        c.beginPath();c.arc(p.x,p.y,4+t*6,0,Math.PI*2);c.fill()}
       // Task 7.3: a fading blue band trailing behind the dodge's own facing, a minimal placeholder
       // for the dexterity read -- see push()'s own comment on why this stays plain.
       else if(p.kind==='afterimage'){const t=p.life/p.max;c.globalAlpha=Math.max(0,(1-t)*.5);
@@ -4974,6 +5070,12 @@ const Tutorial={
       // guardActive true throughout) instead of dying in the same beat SHIELD DOWN fires.
       if(this.state.step>=this.steps.length&&fight.p2)this._pendingShieldDown=true}}};
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
+  // Task 7.4: dilate is the number of remaining SIM ticks an armed intercept's own time-dilation
+  // window still owes (0 when idle); _dilateN is the every-other-real-tick counter tick() steps
+  // through while dilate>0 (mirrors _tickN's own role for the KO slow-mo branch just above). Armed
+  // to 6 by G.onEvent's own 'intercept' branch below, and only ever armed while !this.sim (frozen
+  // ruling: a no-op under --sim/headless/batch, see that branch's own comment).
+  dilate:0,_dilateN:0,
   // Fix-wave item 5 (final review, Minor): the page's own ?atlas=1 URL override, computed once here
   // (location.search doesn't change without a navigation) -- the exact same regex Atlas.load's own
   // `enabled` check already uses (68_rig.js) to decide whether to fetch at all. Rig.draw's atlas
@@ -5369,6 +5471,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // off -- gating inside the recipe's own body would still call whatever function Audio.recipes.X
   // currently points to (the stub), defeating that kind of test.
   playRecipe(fn){if(Save.data.settings.sfx&&fn)fn()},
+  // Task 7.4 (frozen ruling): restores per-node hit-audio pitch -- Task 7.2 collapsed light1..light5
+  // into the single moveName 'light', which left Audio.recipes.light2..light5 unreachable via the
+  // old Audio.recipes[a.moveName] lookup (always resolved to the single 'light' entry, or 'lights'
+  // for anything with no matching key). n is a fighter's own chainNode (1..5); clamped/defaulted so
+  // a falsy/out-of-range node (0, undefined, or past 5) still returns a real recipe rather than
+  // undefined. Shared by both the ordinary chain-hit case (n=fighter.chainNode) and the multi-hit-
+  // special sub-thud (forced n=1, replacing the old bare Audio.recipes.light1 reference) in onEvent
+  // below, so both stay on the exact same lookup path.
+  nodeRecipe(n){return Audio.recipes['light'+Math.max(1,Math.min(n||1,5))]},
   onEvent(t,a,b,val){
     if(this.fight)Broadcast.onEvent(t,a,b,val,this.fight);
     // Task 5.3: Tutorial gets the exact same every-event feed Broadcast does, gated to tutorial mode
@@ -5381,8 +5492,14 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(t==='hit'){const mv=MOVES[a.moveName];
       // Multi-hit specials (s1/s2/s3) already got their one full recipe burst from checkSpecial on
       // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
-      // not the whole recipe again (that would replay a 3-14 tone burst per sub-hit, overlapping).
-      this.playRecipe(mv&&mv.hits>1?Audio.recipes.light1:(Audio.recipes[a.moveName]||Audio.recipes.lights));
+      // not the whole recipe again (that would replay a 3-14 tone burst per sub-hit, overlapping) --
+      // routed through nodeRecipe(1) rather than a bare Audio.recipes.light1 reference, so it stays
+      // on the same lookup path a plain chain hit's own per-node pitch (just below) uses.
+      // Task 7.4: a plain chain hit (moveName 'light') restores per-node pitch, reading the
+      // ATTACKER's own live chainNode (1..5) -- see nodeRecipe's own comment above for why this was
+      // unreachable since Task 7.2 collapsed light1..light5 into the single moveName 'light'.
+      // Every other single-hit move (medium/heavy/s1-s3-as-a-whole) keeps its own unchanged recipe.
+      this.playRecipe(mv&&mv.hits>1?this.nodeRecipe(1):(a.moveName==='light'?this.nodeRecipe(a.chainNode):(Audio.recipes[a.moveName]||Audio.recipes.lights)));
       // Streak lines are in the player's own voice ("Carl's fan club just doubled in size"), so they
       // only fire for p1's combos, not a mob/AI p2's.
       if(this.fight&&a===this.fight.p1&&(a.combo===3||a.combo===5||a.combo===10))Audio.announce('streak'+a.combo,this.fight.presRng);
@@ -5394,7 +5511,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     else if(t==='block')this.playRecipe(Audio.recipes.block);
     else if(t==='parry'){this.playRecipe(Audio.recipes.parry);Audio.announce('parry',this.fight.presRng)}
     else if(t==='miss'){if(b&&b.state==='DASH')this.playRecipe(Audio.recipes.dash)}
-    else if(t==='ko'){this.playRecipe(Audio.recipes.ko);Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}},
+    else if(t==='ko'){this.playRecipe(Audio.recipes.ko);Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}
+    // Task 7.4 (frozen ruling): arm 6 sim ticks of time dilation the instant the intercept lands --
+    // see G.tick's own dilate branch (above tick()) for how those 6 ticks actually get stretched
+    // over double the real ticks. Never armed under G.sim (headless/batch/screenshot mode): a batch
+    // replay's own win-rate table must stay bit-identical to a pre-Task-7.4 run regardless of how
+    // many intercepts land.
+    else if(t==='intercept'){if(!this.sim)this.dilate=6}},
   // Arena sugar: draws the next Arena.start() encounter for the current streak and starts it with
   // mode:'arena' (never gated by Quest.start/energy -- Phase 4 ruling 4, "arena costs no energy").
   startArena(o={}){return this.startFight(Object.assign({},o,{encounter:Arena.start(),mode:'arena'}))},
@@ -5705,6 +5828,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // once-every-4th-call KO slow-mo throttle above doesn't also run Broadcast's windows 4x too
       // fast relative to the fight frames they're meant to track.
       if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--;Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}}
+      // Task 7.4 (frozen ruling): an intercept's own time dilation -- exactly 6 SIM ticks, stretched
+      // over double the real G.tick() calls (stepped only every other one, same "step every Nth
+      // call" shape the KO slow-mo branch above uses, just every-2nd instead of every-4th) so the
+      // read/reward moment plays out as a beat of slow motion. this.dilate is armed to 6 the instant
+      // Fight's own 'intercept' event reaches G.onEvent (below); the `&&!this.sim` guard here is
+      // belt-and-suspenders on top of onEvent only ever arming it while !this.sim in the first place
+      // (frozen ruling: "in --sim/headless mode it is a no-op", so a batch/headless replay's own
+      // win-rate table stays bit-identical to a pre-Task-7.4 run no matter how many intercepts land).
+      else if(this.dilate>0&&!this.sim){if(++this._dilateN%2===0){f.step();this.dilate--;Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}}
       else{f.step();Broadcast.tick(f);if(this.mode==='tutorial')Tutorial.tick(f)}
       this.frameNow=f.frame;
       this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
@@ -7219,7 +7351,12 @@ Test.add('KO plays 90 frames of slow-mo before the result overlay',()=>{
   for(let i=0;i<360;i++)G.tick();
   eq(G.state,'RESULT');ok(document.getElementById('result').classList.contains('show'),'result overlay shown');
   G.toTitle();G.sim=false});
-Test.add('FX updates and expires particles deterministically',()=>{FX.reset();FX.push({kind:'spark',x:0,y:0,n:6,col:'#fff'});eq(FX.list.length,6);for(let i=0;i<120;i++)FX.update();eq(FX.list.length,0);FX.push({kind:'shake',amt:8});FX.update();ok(FX.shake>0&&FX.shake<8)});
+Test.add('FX updates and expires particles deterministically',()=>{FX.reset();FX.push({kind:'spark',x:0,y:0,n:6,col:'#fff'});eq(FX.list.length,6);for(let i=0;i<120;i++)FX.update();eq(FX.list.length,0);
+  // Task 7.4: FX.shake is now a decaying {x,y} vector (was a bare scalar) -- amt still bounds the
+  // kick's own magnitude the same way the old scalar cap did.
+  FX.push({kind:'shake',amt:8,dir:1});FX.update();
+  ok(FX.shake.x>0&&FX.shake.x<8,'shake.x must have decayed from its initial kick but stay positive: '+FX.shake.x);
+  ok(isFinite(FX.shake.y),'shake.y must be a real number');FX.reset()});
 Test.add('on-screen buttons map to intents',()=>{Input.q.length=0;const btn=id=>document.getElementById(id);ok(btn('btnBlock')&&btn('btnPunch')&&btn('btnKick')&&btn('btnPower'));btn('btnPunch').dispatchEvent(new PointerEvent('pointerdown',{pointerId:7,bubbles:true}));btn('btnKick').dispatchEvent(new PointerEvent('pointerdown',{pointerId:8,bubbles:true}));ok(Input.q.includes('light')&&Input.q.includes('medium'));btn('btnBlock').dispatchEvent(new PointerEvent('pointerdown',{pointerId:9,bubbles:true}));eq(Input.held.block,true);btn('btnBlock').dispatchEvent(new PointerEvent('pointerup',{pointerId:9,bubbles:true}));eq(Input.held.block,false);Input.q.length=0});
 Test.add('POWER tap fires the highest affordable special',()=>{const f=mkFight();G.fight=f;f.p1.power=250;Input.q.push('powerAuto');eq(Input.drain().special,2);f.p1.power=50;Input.q.push('powerAuto');eq(Input.drain().special,0);G.fight=null});
 Test.add('encounter resolves floor, name and enemy def',()=>{const e=Encounter.resolve('f1_goblin');eq(e.floor,1);eq(e.name,'THE DEPTHS');eq(e.enemy.id,'goblin');const o=Encounter.resolve({floor:3,name:'X',enemy:'hobgoblin',tier:'brawl'});eq(o.enemy.hp,DEFS.hobgoblin.hp)});
@@ -9310,19 +9447,25 @@ Test.add('attack buttons are hidden by default; only POWER shows, and the toast 
   ok(gapShown<gapHidden,'the toast gap must shrink back down once BLOCK/PUNCH reclaim the space: hidden='+gapHidden+' shown='+gapShown);
   Save.data.settings.showButtons=false;G.applySettings();
   G.toTitle()});
-Test.add('reduceMotion zeroes camera shake and screen flash but leaves popups untouched',()=>{
+Test.add('reduceMotion zeroes camera shake, punch-in and screen flash but leaves popups untouched',()=>{
   Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
   FX.reset();
-  FX.push({kind:'shake',amt:10});FX.push({kind:'flash',frames:6});
+  FX.push({kind:'shake',amt:10,dir:1});FX.push({kind:'flash',frames:6});FX.push({kind:'punch',pct:.05});
   FX.push({kind:'popup',x:0,y:0,text:'5',col:'#fff'});
-  eq(FX.shake,0,'shake must stay 0 under reduceMotion');
+  // Task 7.4: FX.shake is now a {x,y} vector; FX.punch is the camera's own additive zoom term --
+  // both are camera-motion fx, same reduceMotion gate shake/flash already had (Task 5.4's frozen
+  // "shake/flash amounts 0, popups stay" interface, extended to the two new motion fx this task adds).
+  eq(FX.shake.x,0,'shake.x must stay 0 under reduceMotion');eq(FX.shake.y,0,'shake.y must stay 0 under reduceMotion');
   eq(FX.flash,0,'flash must stay 0 under reduceMotion');
+  eq(FX.punch,0,'punch must stay 0 under reduceMotion');
   eq(FX.list.length,1,'a popup must still be queued under reduceMotion');
   Save.data.settings.reduceMotion=false;
   FX.reset();
-  FX.push({kind:'shake',amt:10});FX.push({kind:'flash',frames:6});
-  ok(FX.shake>0,'shake must accumulate normally once reduceMotion is off');
-  ok(FX.flash>0,'flash must accumulate normally once reduceMotion is off')});
+  FX.push({kind:'shake',amt:10,dir:1});FX.push({kind:'flash',frames:6});FX.push({kind:'punch',pct:.05});
+  ok(FX.shake.x>0,'shake must accumulate normally once reduceMotion is off');
+  ok(FX.flash>0,'flash must accumulate normally once reduceMotion is off');
+  ok(FX.punch>0,'punch must accumulate normally once reduceMotion is off');
+  FX.reset()});
 Test.add('settings.sfx===false makes G.playRecipe (every Audio.recipes.* call site) a no-op, even against a stubbed recipe',()=>{
   Save.data=Meta.defaults();Save.data.settings.sfx=false;
   let called=false;const stub=()=>{called=true};
@@ -10326,5 +10469,157 @@ Test.add('an already-in-range medium keeps its old flat startup and speed (bit-i
   f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-60-48; // foeDist=60, already inside light.range(70)
   f.step();
   eq(f.p1.effStartup,MOVES.medium.startup,'no dash needed, base startup unchanged from before this task')});
+
+// --- Task 7.4: hit-feel pass (directional shake, camera punch-in, per-class impact fx, intercept
+// time dilation, per-node hit audio) -----------------------------------------------------------
+Test.add('a landed hit queues shake fx carrying the attacker\'s own facing as dir',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
+  const sh=f.fx.find(e=>e.kind==='shake');
+  ok(sh,'a landed hit must still queue a shake fx: '+f.fx.map(e=>e.kind).join());
+  eq(sh.dir,f.p1.face,"shake fx dir must equal the attacker's (p1's) own facing")});
+Test.add('FX.shake is a decaying {x,y} vector whose x sign follows dir, and reduceMotion aside, y is always populated',()=>{
+  FX.reset();FX.push({kind:'shake',amt:8,dir:1});
+  ok(FX.shake.x>0,'dir:1 must kick the shake vector to a positive x, got '+FX.shake.x);
+  FX.reset();FX.push({kind:'shake',amt:8,dir:-1});
+  ok(FX.shake.x<0,'dir:-1 must kick the shake vector to a negative x, got '+FX.shake.x);
+  ok(FX.shake.y!==0,'a real kick must also carry a nonzero y component, got '+FX.shake.y);
+  for(let i=0;i<200;i++)FX.update();
+  eq(FX.shake.x,0,'shake.x must fully decay to exactly 0');eq(FX.shake.y,0,'shake.y must fully decay to exactly 0');
+  FX.reset()});
+Test.add('camera punch-in composes as min(base*(1+FX.punch), capNow): it actually raises zoom, and never past the cap',()=>{
+  FX.reset();
+  // Same base target (1.0) and a generous cap (1.2) both runs below, so the only variable between
+  // the two cams is FX.punch itself -- if Camera.update ignored FX.punch entirely, both would settle
+  // at the exact same zoom, which the "camB must end up strictly above camA" assertion below rules out.
+  const f={camTarget:{x:0,zoom:1.0}};
+  const camA={x:0,zoom:1},camB={x:0,zoom:1};
+  FX.punch=0;for(let i=0;i<200;i++)Camera.update(camA,f,null,1.2);
+  FX.punch=.1;for(let i=0;i<200;i++){Camera.update(camB,f,null,1.2);ok(camB.zoom<=1.2+1e-9,'cam.zoom must never exceed capNow, got '+camB.zoom)}
+  ok(camB.zoom>camA.zoom,'a nonzero FX.punch must raise cam.zoom above the plain base-target zoom: base='+camA.zoom+' punched='+camB.zoom);
+  ok(Math.abs(camB.zoom-1.1)<0.01,'camB must settle at base*(1+punch)=1.1 (well under the 1.2 cap), got '+camB.zoom);
+  // Now push punch past what the cap allows: base 1.0 * (1+.5) = 1.5, capped at 1.2.
+  FX.punch=.5;const camC={x:0,zoom:1};
+  for(let i=0;i<200;i++){Camera.update(camC,f,null,1.2);ok(camC.zoom<=1.2+1e-9,'cam.zoom must never exceed capNow even when punch alone would exceed it, got '+camC.zoom)}
+  ok(Math.abs(camC.zoom-1.2)<0.01,'camC must settle at the cap (1.2), not at the uncapped base*(1+punch)=1.5, got '+camC.zoom);
+  FX.punch=0;FX.reset()});
+Test.add('FX.punch envelope: jumps to the pushed target, holds, then eases back to exactly 0',()=>{
+  FX.reset();
+  FX.push({kind:'punch',pct:.05});
+  eq(FX.punch,.05,'punch must jump to the pushed target immediately');
+  for(let i=0;i<FX.PUNCH_HOLD;i++)FX.update();
+  eq(FX.punch,.05,'punch must hold at target for PUNCH_HOLD frames');
+  FX.update();
+  ok(FX.punch<.05&&FX.punch>0,'punch must start easing down once the hold window ends, got '+FX.punch);
+  for(let i=0;i<200;i++)FX.update();
+  eq(FX.punch,0,'punch must fully settle to exactly 0 well before 200 frames');
+  FX.reset()});
+Test.add('a second punch push while one is already easing re-holds at the higher of the two targets',()=>{
+  FX.reset();
+  FX.push({kind:'punch',pct:.03});
+  for(let i=0;i<FX.PUNCH_HOLD+3;i++)FX.update(); // now easing down below .03
+  ok(FX.punch<.03,'sanity: must already be easing below the first target');
+  FX.push({kind:'punch',pct:.05});
+  eq(FX.punch,.05,'a re-push while easing must jump straight to the new (higher) target, not add to the old one');
+  FX.reset()});
+// Task 7.4 (frozen interface, exact values): per-class impact fx keyed off the ATTACKER's own
+// champion/mob def.impact ('blunt'|'blade'|'energy') -- pushed alongside (never instead of) the
+// existing spark/dustArc hit fx, so neither Task 6.5's kick-fx-swap nor the plain spark case above
+// regresses. carl/mongo/hobgoblin/grub/grull/mother_rat are blunt; katia/goblin/skeleton are blade;
+// donut/shaman are energy, per the controller's own ruling table (40_movedata.js).
+Test.add('def.impact: per-champion/mob/boss impact class matches the frozen ruling',()=>{
+  const want={carl:'blunt',donut:'energy',katia:'blade',mongo:'blunt',
+    goblin:'blade',skeleton:'blade',shaman:'energy',hobgoblin:'blunt',grub:'blunt',
+    grull:'blunt',mother_rat:'blunt'};
+  for(const id in want)eq(DEFS[id].impact,want[id],id+'.impact')});
+Test.add('a landed hit queues a per-class impact fx keyed off the attacker\'s own def.impact',()=>{
+  const bluntF=mkFight({p1:CHAMPS.carl,ctrl1:Ctrl.script([L(0)])});closeIn(bluntF);run(bluntF,5);
+  ok(bluntF.fx.some(e=>e.kind==='impactBlunt'),'carl (blunt) must push impactBlunt: '+bluntF.fx.map(e=>e.kind).join());
+  const bladeF=mkFight({p1:CHAMPS.katia,ctrl1:Ctrl.script([L(0)])});closeIn(bladeF);run(bladeF,5);
+  ok(bladeF.fx.some(e=>e.kind==='impactBlade'),'katia (blade) must push impactBlade: '+bladeF.fx.map(e=>e.kind).join());
+  const energyF=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([L(0)])});closeIn(energyF);run(energyF,5);
+  ok(energyF.fx.some(e=>e.kind==='impactEnergy'),'donut (energy) must push impactEnergy: '+energyF.fx.map(e=>e.kind).join())});
+Test.add('impactBlunt/impactBlade/impactEnergy fx push and expire deterministically',()=>{
+  for(const kind of['impactBlunt','impactBlade','impactEnergy']){
+    FX.reset();FX.push({kind,x:0,y:0,face:1});
+    ok(FX.list.some(p=>p.kind===kind),kind+' must push a particle');
+    for(let i=0;i<60;i++)FX.update();
+    eq(FX.list.length,0,kind+' must expire within 60 frames')}
+  FX.reset()});
+// Task 7.4 (frozen ruling): per-node hit audio, restored via fighter.chainNode -- Task 7.2 collapsed
+// light1..light5 into the single moveName 'light', which left Audio.recipes.light2..light5
+// unreachable via the old Audio.recipes[a.moveName] lookup. G.nodeRecipe(n) is the shared lookup
+// path both the chain-hit case (node 1..5) and the multi-hit-special sub-thud (forced to node 1,
+// replacing the old bare Audio.recipes.light1 reference) now go through.
+Test.add('G.nodeRecipe keys off the chain node: node 5 selects a different recipe than node 1',()=>{
+  eq(G.nodeRecipe(1),Audio.recipes.light1);
+  eq(G.nodeRecipe(5),Audio.recipes.light5);
+  ok(G.nodeRecipe(1)!==G.nodeRecipe(5),'node 1 and node 5 must select different recipes');
+  eq(G.nodeRecipe(0),Audio.recipes.light1,'an out-of-range/falsy node must fall back to node 1');
+  eq(G.nodeRecipe(9),Audio.recipes.light5,'a node past 5 must clamp to node 5')});
+Test.add('a full 5-node light chain plays a different recipe on node 5 than on node 1, via G.onEvent',()=>{
+  const f=mkFight({ctrl1:chainSeq(['light','light','light','light','light']),onEvent:(t,a,b,v)=>G.onEvent(t,a,b,v)});
+  closeIn(f);G.fight=f;G.state='FIGHT';
+  const seen=[];
+  const origs={};for(const k of['light1','light2','light3','light4','light5'])origs[k]=Audio.recipes[k];
+  for(const k of['light1','light2','light3','light4','light5'])Audio.recipes[k]=(kk=>()=>seen.push(kk))(k);
+  try{for(let i=0;i<200&&f.log.filter(e=>e.type==='hit').length<5;i++)f.step()}
+  finally{for(const k in origs)Audio.recipes[k]=origs[k];G.fight=null;G.state='TITLE'}
+  ok(seen.includes('light1'),'node 1 must have played light1: '+seen.join());
+  ok(seen.includes('light5'),'node 5 must have played light5: '+seen.join())});
+Test.add('a multi-hit special\'s sub-thud still always plays the node-1 recipe, via G.nodeRecipe(1)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),onEvent:(t,a,b,v)=>G.onEvent(t,a,b,v)});
+  closeIn(f);f.p1.power=200;
+  G.fight=f;G.state='FIGHT';G._tickN=0;
+  const origS2=Audio.recipes.s2,origL1=Audio.recipes.light1;let s2n=0,l1n=0;
+  Audio.recipes.s2=()=>{s2n++};Audio.recipes.light1=()=>{l1n++};
+  try{for(let i=0;i<90;i++)G.tick()}
+  finally{Audio.recipes.s2=origS2;Audio.recipes.light1=origL1;G.fight=null;G.state='TITLE'}
+  eq(s2n,1,'s2 recipe fires once, on the moveName transition (unchanged behavior)');
+  eq(l1n,5,'one node-1 thud per landed sub-hit (unchanged behavior, now routed through G.nodeRecipe(1))')});
+// Task 7.4 (frozen ruling): intercept time dilation -- 6 sim ticks, stretched over double the real
+// G.tick() calls (stepped only every other one), armed the instant Fight's own 'intercept' event
+// reaches G.onEvent. Never armed under G.sim (headless/batch/screenshot mode) so a replay always
+// steps 1:1 and stays bit-identical to a pre-Task-7.4 run.
+Test.add('an intercept arms 6 sim ticks of time dilation: G.tick steps the sim every other real tick while armed',()=>{
+  const f=mkFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  G.fight=f;G.state='FIGHT';G.sim=false;G.dilate=0;G._dilateN=0;
+  G.onEvent('intercept',f.p1,null,1);
+  eq(G.dilate,6,'an intercept event must arm exactly 6 sim ticks of dilation');
+  const startFrame=f.frame;
+  for(let i=0;i<12;i++)G.tick();
+  eq(f.frame-startFrame,6,'12 real G.tick() calls at half rate must advance the sim by exactly 6 frames');
+  eq(G.dilate,0,'dilation must be fully consumed after its own 6 sim ticks');
+  G.fight=null;G.state='TITLE';G.sim=false});
+Test.add('time dilation is a no-op under G.sim (headless/batch/--sim mode): an intercept never dilates, sim always steps 1:1',()=>{
+  const f=mkFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  G.fight=f;G.state='FIGHT';G.sim=true;G.dilate=0;G._dilateN=0;
+  G.onEvent('intercept',f.p1,null,1);
+  eq(G.dilate,0,'an intercept must never arm dilation while G.sim is true');
+  const startFrame=f.frame;
+  for(let i=0;i<12;i++)G.tick();
+  eq(f.frame-startFrame,12,'every tick must step the sim under G.sim, even right after an intercept');
+  G.fight=null;G.state='TITLE';G.sim=false});
+Test.add('a real (non-sim) intercept lands still steps through G.tick end to end without throwing, dilate then drains to 0',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}]),
+    onEvent:(t,a,b,v)=>G.onEvent(t,a,b,v)});
+  closeIn(f);
+  G.fight=f;G.state='FIGHT';G.sim=false;G.dilate=0;G._dilateN=0;G._tickN=0;
+  ok(!threw(()=>{for(let i=0;i<60;i++)G.tick()}),'a real intercept exchange driven through G.tick must never throw');
+  ok(f.log.some(e=>e.type==='intercept'),'sanity: the scripted exchange must have actually produced an intercept');
+  eq(G.dilate,0,'dilate must have fully drained back to 0 well within 60 real ticks');
+  G.fight=null;G.state='TITLE';G.sim=false});
+// Task 7.4 (frozen ruling): --sim/batch determinism -- this whole task is presentation-only, so a
+// fight driven purely through Fight.step() (never through G.tick/FX, exactly what tests/batch.py's
+// own win-rate sweeps and the harness's --sim soak both do) must be bit-identical to the pre-Task-7.4
+// log/hp/rng-draw-count for the exact same seed/scripts, regardless of how many intercepts/chain
+// hits/impacts happen along the way.
+Test.add('a fight driven only through Fight.step (no G/FX involvement) is unaffected by this task\'s presentation-only changes',()=>{
+  const mkScript=()=>chainSeq(['light','light','light','light','light']);
+  const a=mkFight({ctrl1:mkScript(),ctrl2:AI.make('basic',3),noCrit:false,seed:11});
+  run(a,600);
+  const b=mkFight({ctrl1:mkScript(),ctrl2:AI.make('basic',3),noCrit:false,seed:11});
+  run(b,600);
+  eq(b.p1.hp,a.p1.hp);eq(b.p2.hp,a.p2.hp);eq(b.log.length,a.log.length);
+  eq(JSON.stringify(b.log),JSON.stringify(a.log),'two runs of the exact same script/seed must log bit-identically')});
 
 </script></body></html>

@@ -130,8 +130,16 @@ const Camera={
   // pose and prop it can strike, never gets zoomed in past where it clears HUD_LINE. Fight/camTarget
   // stay scale-of-the-fighters-agnostic; this is purely a presentation-side clamp, passed in rather
   // than read off a global here so Camera itself stays a pure function of its arguments.
+  // Task 7.4 (frozen ruling, exact formula): cam.zoom = min(base*(1+punch), capNow) -- base is the
+  // plain camTarget/override zoom (t.zoom) exactly as before this task, `punch` is FX.punch (the
+  // presentation-side camera-motion term Fight.resolve's own intercept fx arms, see 72_fx.js), and
+  // capNow is the same per-frame zoom cap this function already clamped the plain base target to.
+  // Composed BEFORE the .12 lerp below (not applied to cam.zoom directly), so the punch-in still
+  // eases in/out smoothly through the same glide every other camera move here already uses, instead
+  // of snapping.
   update(cam,f,override,zoomCap){const t=override||f.camTarget;
-    const z=zoomCap!==undefined?Math.min(t.zoom,zoomCap):t.zoom;
+    const punched=t.zoom*(1+FX.punch);
+    const z=zoomCap!==undefined?Math.min(punched,zoomCap):punched;
     cam.x+=(t.x-cam.x)*.12;cam.zoom+=(z-cam.zoom)*.12;
     const half=W/2/cam.zoom;cam.x=clamp(cam.x,half,STAGE_W-half)},
   apply(c,cam){c.setTransform(1,0,0,1,0,0);c.translate(W/2,this.anchorY);c.scale(cam.zoom,cam.zoom);c.translate(-cam.x,-FLOOR)},

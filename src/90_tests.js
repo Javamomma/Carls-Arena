@@ -896,7 +896,12 @@ Test.add('KO plays 90 frames of slow-mo before the result overlay',()=>{
   for(let i=0;i<360;i++)G.tick();
   eq(G.state,'RESULT');ok(document.getElementById('result').classList.contains('show'),'result overlay shown');
   G.toTitle();G.sim=false});
-Test.add('FX updates and expires particles deterministically',()=>{FX.reset();FX.push({kind:'spark',x:0,y:0,n:6,col:'#fff'});eq(FX.list.length,6);for(let i=0;i<120;i++)FX.update();eq(FX.list.length,0);FX.push({kind:'shake',amt:8});FX.update();ok(FX.shake>0&&FX.shake<8)});
+Test.add('FX updates and expires particles deterministically',()=>{FX.reset();FX.push({kind:'spark',x:0,y:0,n:6,col:'#fff'});eq(FX.list.length,6);for(let i=0;i<120;i++)FX.update();eq(FX.list.length,0);
+  // Task 7.4: FX.shake is now a decaying {x,y} vector (was a bare scalar) -- amt still bounds the
+  // kick's own magnitude the same way the old scalar cap did.
+  FX.push({kind:'shake',amt:8,dir:1});FX.update();
+  ok(FX.shake.x>0&&FX.shake.x<8,'shake.x must have decayed from its initial kick but stay positive: '+FX.shake.x);
+  ok(isFinite(FX.shake.y),'shake.y must be a real number');FX.reset()});
 Test.add('on-screen buttons map to intents',()=>{Input.q.length=0;const btn=id=>document.getElementById(id);ok(btn('btnBlock')&&btn('btnPunch')&&btn('btnKick')&&btn('btnPower'));btn('btnPunch').dispatchEvent(new PointerEvent('pointerdown',{pointerId:7,bubbles:true}));btn('btnKick').dispatchEvent(new PointerEvent('pointerdown',{pointerId:8,bubbles:true}));ok(Input.q.includes('light')&&Input.q.includes('medium'));btn('btnBlock').dispatchEvent(new PointerEvent('pointerdown',{pointerId:9,bubbles:true}));eq(Input.held.block,true);btn('btnBlock').dispatchEvent(new PointerEvent('pointerup',{pointerId:9,bubbles:true}));eq(Input.held.block,false);Input.q.length=0});
 Test.add('POWER tap fires the highest affordable special',()=>{const f=mkFight();G.fight=f;f.p1.power=250;Input.q.push('powerAuto');eq(Input.drain().special,2);f.p1.power=50;Input.q.push('powerAuto');eq(Input.drain().special,0);G.fight=null});
 Test.add('encounter resolves floor, name and enemy def',()=>{const e=Encounter.resolve('f1_goblin');eq(e.floor,1);eq(e.name,'THE DEPTHS');eq(e.enemy.id,'goblin');const o=Encounter.resolve({floor:3,name:'X',enemy:'hobgoblin',tier:'brawl'});eq(o.enemy.hp,DEFS.hobgoblin.hp)});
@@ -2987,19 +2992,25 @@ Test.add('attack buttons are hidden by default; only POWER shows, and the toast 
   ok(gapShown<gapHidden,'the toast gap must shrink back down once BLOCK/PUNCH reclaim the space: hidden='+gapHidden+' shown='+gapShown);
   Save.data.settings.showButtons=false;G.applySettings();
   G.toTitle()});
-Test.add('reduceMotion zeroes camera shake and screen flash but leaves popups untouched',()=>{
+Test.add('reduceMotion zeroes camera shake, punch-in and screen flash but leaves popups untouched',()=>{
   Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
   FX.reset();
-  FX.push({kind:'shake',amt:10});FX.push({kind:'flash',frames:6});
+  FX.push({kind:'shake',amt:10,dir:1});FX.push({kind:'flash',frames:6});FX.push({kind:'punch',pct:.05});
   FX.push({kind:'popup',x:0,y:0,text:'5',col:'#fff'});
-  eq(FX.shake,0,'shake must stay 0 under reduceMotion');
+  // Task 7.4: FX.shake is now a {x,y} vector; FX.punch is the camera's own additive zoom term --
+  // both are camera-motion fx, same reduceMotion gate shake/flash already had (Task 5.4's frozen
+  // "shake/flash amounts 0, popups stay" interface, extended to the two new motion fx this task adds).
+  eq(FX.shake.x,0,'shake.x must stay 0 under reduceMotion');eq(FX.shake.y,0,'shake.y must stay 0 under reduceMotion');
   eq(FX.flash,0,'flash must stay 0 under reduceMotion');
+  eq(FX.punch,0,'punch must stay 0 under reduceMotion');
   eq(FX.list.length,1,'a popup must still be queued under reduceMotion');
   Save.data.settings.reduceMotion=false;
   FX.reset();
-  FX.push({kind:'shake',amt:10});FX.push({kind:'flash',frames:6});
-  ok(FX.shake>0,'shake must accumulate normally once reduceMotion is off');
-  ok(FX.flash>0,'flash must accumulate normally once reduceMotion is off')});
+  FX.push({kind:'shake',amt:10,dir:1});FX.push({kind:'flash',frames:6});FX.push({kind:'punch',pct:.05});
+  ok(FX.shake.x>0,'shake must accumulate normally once reduceMotion is off');
+  ok(FX.flash>0,'flash must accumulate normally once reduceMotion is off');
+  ok(FX.punch>0,'punch must accumulate normally once reduceMotion is off');
+  FX.reset()});
 Test.add('settings.sfx===false makes G.playRecipe (every Audio.recipes.* call site) a no-op, even against a stubbed recipe',()=>{
   Save.data=Meta.defaults();Save.data.settings.sfx=false;
   let called=false;const stub=()=>{called=true};
@@ -4003,3 +4014,155 @@ Test.add('an already-in-range medium keeps its old flat startup and speed (bit-i
   f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-60-48; // foeDist=60, already inside light.range(70)
   f.step();
   eq(f.p1.effStartup,MOVES.medium.startup,'no dash needed, base startup unchanged from before this task')});
+
+// --- Task 7.4: hit-feel pass (directional shake, camera punch-in, per-class impact fx, intercept
+// time dilation, per-node hit audio) -----------------------------------------------------------
+Test.add('a landed hit queues shake fx carrying the attacker\'s own facing as dir',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
+  const sh=f.fx.find(e=>e.kind==='shake');
+  ok(sh,'a landed hit must still queue a shake fx: '+f.fx.map(e=>e.kind).join());
+  eq(sh.dir,f.p1.face,"shake fx dir must equal the attacker's (p1's) own facing")});
+Test.add('FX.shake is a decaying {x,y} vector whose x sign follows dir, and reduceMotion aside, y is always populated',()=>{
+  FX.reset();FX.push({kind:'shake',amt:8,dir:1});
+  ok(FX.shake.x>0,'dir:1 must kick the shake vector to a positive x, got '+FX.shake.x);
+  FX.reset();FX.push({kind:'shake',amt:8,dir:-1});
+  ok(FX.shake.x<0,'dir:-1 must kick the shake vector to a negative x, got '+FX.shake.x);
+  ok(FX.shake.y!==0,'a real kick must also carry a nonzero y component, got '+FX.shake.y);
+  for(let i=0;i<200;i++)FX.update();
+  eq(FX.shake.x,0,'shake.x must fully decay to exactly 0');eq(FX.shake.y,0,'shake.y must fully decay to exactly 0');
+  FX.reset()});
+Test.add('camera punch-in composes as min(base*(1+FX.punch), capNow): it actually raises zoom, and never past the cap',()=>{
+  FX.reset();
+  // Same base target (1.0) and a generous cap (1.2) both runs below, so the only variable between
+  // the two cams is FX.punch itself -- if Camera.update ignored FX.punch entirely, both would settle
+  // at the exact same zoom, which the "camB must end up strictly above camA" assertion below rules out.
+  const f={camTarget:{x:0,zoom:1.0}};
+  const camA={x:0,zoom:1},camB={x:0,zoom:1};
+  FX.punch=0;for(let i=0;i<200;i++)Camera.update(camA,f,null,1.2);
+  FX.punch=.1;for(let i=0;i<200;i++){Camera.update(camB,f,null,1.2);ok(camB.zoom<=1.2+1e-9,'cam.zoom must never exceed capNow, got '+camB.zoom)}
+  ok(camB.zoom>camA.zoom,'a nonzero FX.punch must raise cam.zoom above the plain base-target zoom: base='+camA.zoom+' punched='+camB.zoom);
+  ok(Math.abs(camB.zoom-1.1)<0.01,'camB must settle at base*(1+punch)=1.1 (well under the 1.2 cap), got '+camB.zoom);
+  // Now push punch past what the cap allows: base 1.0 * (1+.5) = 1.5, capped at 1.2.
+  FX.punch=.5;const camC={x:0,zoom:1};
+  for(let i=0;i<200;i++){Camera.update(camC,f,null,1.2);ok(camC.zoom<=1.2+1e-9,'cam.zoom must never exceed capNow even when punch alone would exceed it, got '+camC.zoom)}
+  ok(Math.abs(camC.zoom-1.2)<0.01,'camC must settle at the cap (1.2), not at the uncapped base*(1+punch)=1.5, got '+camC.zoom);
+  FX.punch=0;FX.reset()});
+Test.add('FX.punch envelope: jumps to the pushed target, holds, then eases back to exactly 0',()=>{
+  FX.reset();
+  FX.push({kind:'punch',pct:.05});
+  eq(FX.punch,.05,'punch must jump to the pushed target immediately');
+  for(let i=0;i<FX.PUNCH_HOLD;i++)FX.update();
+  eq(FX.punch,.05,'punch must hold at target for PUNCH_HOLD frames');
+  FX.update();
+  ok(FX.punch<.05&&FX.punch>0,'punch must start easing down once the hold window ends, got '+FX.punch);
+  for(let i=0;i<200;i++)FX.update();
+  eq(FX.punch,0,'punch must fully settle to exactly 0 well before 200 frames');
+  FX.reset()});
+Test.add('a second punch push while one is already easing re-holds at the higher of the two targets',()=>{
+  FX.reset();
+  FX.push({kind:'punch',pct:.03});
+  for(let i=0;i<FX.PUNCH_HOLD+3;i++)FX.update(); // now easing down below .03
+  ok(FX.punch<.03,'sanity: must already be easing below the first target');
+  FX.push({kind:'punch',pct:.05});
+  eq(FX.punch,.05,'a re-push while easing must jump straight to the new (higher) target, not add to the old one');
+  FX.reset()});
+// Task 7.4 (frozen interface, exact values): per-class impact fx keyed off the ATTACKER's own
+// champion/mob def.impact ('blunt'|'blade'|'energy') -- pushed alongside (never instead of) the
+// existing spark/dustArc hit fx, so neither Task 6.5's kick-fx-swap nor the plain spark case above
+// regresses. carl/mongo/hobgoblin/grub/grull/mother_rat are blunt; katia/goblin/skeleton are blade;
+// donut/shaman are energy, per the controller's own ruling table (40_movedata.js).
+Test.add('def.impact: per-champion/mob/boss impact class matches the frozen ruling',()=>{
+  const want={carl:'blunt',donut:'energy',katia:'blade',mongo:'blunt',
+    goblin:'blade',skeleton:'blade',shaman:'energy',hobgoblin:'blunt',grub:'blunt',
+    grull:'blunt',mother_rat:'blunt'};
+  for(const id in want)eq(DEFS[id].impact,want[id],id+'.impact')});
+Test.add('a landed hit queues a per-class impact fx keyed off the attacker\'s own def.impact',()=>{
+  const bluntF=mkFight({p1:CHAMPS.carl,ctrl1:Ctrl.script([L(0)])});closeIn(bluntF);run(bluntF,5);
+  ok(bluntF.fx.some(e=>e.kind==='impactBlunt'),'carl (blunt) must push impactBlunt: '+bluntF.fx.map(e=>e.kind).join());
+  const bladeF=mkFight({p1:CHAMPS.katia,ctrl1:Ctrl.script([L(0)])});closeIn(bladeF);run(bladeF,5);
+  ok(bladeF.fx.some(e=>e.kind==='impactBlade'),'katia (blade) must push impactBlade: '+bladeF.fx.map(e=>e.kind).join());
+  const energyF=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([L(0)])});closeIn(energyF);run(energyF,5);
+  ok(energyF.fx.some(e=>e.kind==='impactEnergy'),'donut (energy) must push impactEnergy: '+energyF.fx.map(e=>e.kind).join())});
+Test.add('impactBlunt/impactBlade/impactEnergy fx push and expire deterministically',()=>{
+  for(const kind of['impactBlunt','impactBlade','impactEnergy']){
+    FX.reset();FX.push({kind,x:0,y:0,face:1});
+    ok(FX.list.some(p=>p.kind===kind),kind+' must push a particle');
+    for(let i=0;i<60;i++)FX.update();
+    eq(FX.list.length,0,kind+' must expire within 60 frames')}
+  FX.reset()});
+// Task 7.4 (frozen ruling): per-node hit audio, restored via fighter.chainNode -- Task 7.2 collapsed
+// light1..light5 into the single moveName 'light', which left Audio.recipes.light2..light5
+// unreachable via the old Audio.recipes[a.moveName] lookup. G.nodeRecipe(n) is the shared lookup
+// path both the chain-hit case (node 1..5) and the multi-hit-special sub-thud (forced to node 1,
+// replacing the old bare Audio.recipes.light1 reference) now go through.
+Test.add('G.nodeRecipe keys off the chain node: node 5 selects a different recipe than node 1',()=>{
+  eq(G.nodeRecipe(1),Audio.recipes.light1);
+  eq(G.nodeRecipe(5),Audio.recipes.light5);
+  ok(G.nodeRecipe(1)!==G.nodeRecipe(5),'node 1 and node 5 must select different recipes');
+  eq(G.nodeRecipe(0),Audio.recipes.light1,'an out-of-range/falsy node must fall back to node 1');
+  eq(G.nodeRecipe(9),Audio.recipes.light5,'a node past 5 must clamp to node 5')});
+Test.add('a full 5-node light chain plays a different recipe on node 5 than on node 1, via G.onEvent',()=>{
+  const f=mkFight({ctrl1:chainSeq(['light','light','light','light','light']),onEvent:(t,a,b,v)=>G.onEvent(t,a,b,v)});
+  closeIn(f);G.fight=f;G.state='FIGHT';
+  const seen=[];
+  const origs={};for(const k of['light1','light2','light3','light4','light5'])origs[k]=Audio.recipes[k];
+  for(const k of['light1','light2','light3','light4','light5'])Audio.recipes[k]=(kk=>()=>seen.push(kk))(k);
+  try{for(let i=0;i<200&&f.log.filter(e=>e.type==='hit').length<5;i++)f.step()}
+  finally{for(const k in origs)Audio.recipes[k]=origs[k];G.fight=null;G.state='TITLE'}
+  ok(seen.includes('light1'),'node 1 must have played light1: '+seen.join());
+  ok(seen.includes('light5'),'node 5 must have played light5: '+seen.join())});
+Test.add('a multi-hit special\'s sub-thud still always plays the node-1 recipe, via G.nodeRecipe(1)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),onEvent:(t,a,b,v)=>G.onEvent(t,a,b,v)});
+  closeIn(f);f.p1.power=200;
+  G.fight=f;G.state='FIGHT';G._tickN=0;
+  const origS2=Audio.recipes.s2,origL1=Audio.recipes.light1;let s2n=0,l1n=0;
+  Audio.recipes.s2=()=>{s2n++};Audio.recipes.light1=()=>{l1n++};
+  try{for(let i=0;i<90;i++)G.tick()}
+  finally{Audio.recipes.s2=origS2;Audio.recipes.light1=origL1;G.fight=null;G.state='TITLE'}
+  eq(s2n,1,'s2 recipe fires once, on the moveName transition (unchanged behavior)');
+  eq(l1n,5,'one node-1 thud per landed sub-hit (unchanged behavior, now routed through G.nodeRecipe(1))')});
+// Task 7.4 (frozen ruling): intercept time dilation -- 6 sim ticks, stretched over double the real
+// G.tick() calls (stepped only every other one), armed the instant Fight's own 'intercept' event
+// reaches G.onEvent. Never armed under G.sim (headless/batch/screenshot mode) so a replay always
+// steps 1:1 and stays bit-identical to a pre-Task-7.4 run.
+Test.add('an intercept arms 6 sim ticks of time dilation: G.tick steps the sim every other real tick while armed',()=>{
+  const f=mkFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  G.fight=f;G.state='FIGHT';G.sim=false;G.dilate=0;G._dilateN=0;
+  G.onEvent('intercept',f.p1,null,1);
+  eq(G.dilate,6,'an intercept event must arm exactly 6 sim ticks of dilation');
+  const startFrame=f.frame;
+  for(let i=0;i<12;i++)G.tick();
+  eq(f.frame-startFrame,6,'12 real G.tick() calls at half rate must advance the sim by exactly 6 frames');
+  eq(G.dilate,0,'dilation must be fully consumed after its own 6 sim ticks');
+  G.fight=null;G.state='TITLE';G.sim=false});
+Test.add('time dilation is a no-op under G.sim (headless/batch/--sim mode): an intercept never dilates, sim always steps 1:1',()=>{
+  const f=mkFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  G.fight=f;G.state='FIGHT';G.sim=true;G.dilate=0;G._dilateN=0;
+  G.onEvent('intercept',f.p1,null,1);
+  eq(G.dilate,0,'an intercept must never arm dilation while G.sim is true');
+  const startFrame=f.frame;
+  for(let i=0;i<12;i++)G.tick();
+  eq(f.frame-startFrame,12,'every tick must step the sim under G.sim, even right after an intercept');
+  G.fight=null;G.state='TITLE';G.sim=false});
+Test.add('a real (non-sim) intercept lands still steps through G.tick end to end without throwing, dilate then drains to 0',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}]),
+    onEvent:(t,a,b,v)=>G.onEvent(t,a,b,v)});
+  closeIn(f);
+  G.fight=f;G.state='FIGHT';G.sim=false;G.dilate=0;G._dilateN=0;G._tickN=0;
+  ok(!threw(()=>{for(let i=0;i<60;i++)G.tick()}),'a real intercept exchange driven through G.tick must never throw');
+  ok(f.log.some(e=>e.type==='intercept'),'sanity: the scripted exchange must have actually produced an intercept');
+  eq(G.dilate,0,'dilate must have fully drained back to 0 well within 60 real ticks');
+  G.fight=null;G.state='TITLE';G.sim=false});
+// Task 7.4 (frozen ruling): --sim/batch determinism -- this whole task is presentation-only, so a
+// fight driven purely through Fight.step() (never through G.tick/FX, exactly what tests/batch.py's
+// own win-rate sweeps and the harness's --sim soak both do) must be bit-identical to the pre-Task-7.4
+// log/hp/rng-draw-count for the exact same seed/scripts, regardless of how many intercepts/chain
+// hits/impacts happen along the way.
+Test.add('a fight driven only through Fight.step (no G/FX involvement) is unaffected by this task\'s presentation-only changes',()=>{
+  const mkScript=()=>chainSeq(['light','light','light','light','light']);
+  const a=mkFight({ctrl1:mkScript(),ctrl2:AI.make('basic',3),noCrit:false,seed:11});
+  run(a,600);
+  const b=mkFight({ctrl1:mkScript(),ctrl2:AI.make('basic',3),noCrit:false,seed:11});
+  run(b,600);
+  eq(b.p1.hp,a.p1.hp);eq(b.p2.hp,a.p2.hp);eq(b.log.length,a.log.length);
+  eq(JSON.stringify(b.log),JSON.stringify(a.log),'two runs of the exact same script/seed must log bit-identically')});

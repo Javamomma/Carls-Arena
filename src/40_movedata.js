@@ -53,17 +53,21 @@ const DASH_TRACK_SPEED=14,DASH_STEPIN_SPEED=22;
 // is 'self'|'foe', default 'foe' (Fight.resolve's own ruling) -- Carl's fury (an attacker-side buff)
 // is the one champion whose signature targets itself; every mob/boss below has no sigEffect at all
 // (undefined), so the in-combo heavy ender is a plain hit for them, no bonus effect.
+// Task 7.4 (frozen ruling): def.impact ('blunt'|'blade'|'energy') -- read on the ATTACKER by
+// Fight.resolve's landed-hit branch (60_fight.js) to push a per-class impact fx (FX.push's
+// 'impactBlunt'/'impactBlade'/'impactEnergy' cases, 72_fx.js) alongside the existing spark/dustArc
+// hit fx. Exact per-id values are the controller's own ruling, verbatim.
 const CHAMPS={
-  carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
+  carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blunt',
     sigEffect:{id:'fury',stacks:1,target:'self'}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
   // and Rig.solve's 'quad' branch in 68_rig.js).
-  donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',
+  donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',impact:'energy',
     sigEffect:{id:'weakness',stacks:1}},
-  katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
+  katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blade',
     moves:{s1:{hits:5,gap:4,dmg:1.2}},sigEffect:{id:'bleed',stacks:1}},
   // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
-  mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',
+  mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',impact:'blunt',
     sigEffect:{id:'armorBreak',stacks:1}}};
 // Task 6.1, ruling 3 (playtest note: "Hobgoblin Brute is impossible to defeat" at floor 1 door 3,
 // level 1): goblin/skeleton hp raised and atk lowered exactly to the plan's given numbers (360/30,
@@ -82,17 +86,17 @@ const CHAMPS={
 // fair," not a 40-70% bot win rate; the batch table below is recorded as information, not a gate, for
 // this one encounter. See docs/ARENA.md's Task 6.1 entry, "Fix round 0" section, for the full context.
 const MOBS={
-  goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:360,atk:30,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',
+  goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:360,atk:30,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',impact:'blade',
     moves:{heavy:{charge:14,dmg:2.0}}},
-  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:736,atk:52,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human', // Phase 2 fix round 2: 1.2->1.1, see LOOKS.hobgoblin
+  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:736,atk:52,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.1,rig:'human',impact:'blunt', // Phase 2 fix round 2: 1.2->1.1, see LOOKS.hobgoblin
     moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}},
-  skeleton: {id:'skeleton',name:'SKELETON',cls:'rogue', hp:320,atk:28,color:'#d8d0c0',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.95,rig:'human'},
+  skeleton: {id:'skeleton',name:'SKELETON',cls:'rogue', hp:320,atk:28,color:'#d8d0c0',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.95,rig:'human',impact:'blade'},
   // s1 override: a longer 6-hit flurry (base s1 is 3 hits) — the shaman's signature multi-hit special.
-  shaman:   {id:'shaman',  name:'SHAMAN',  cls:'caster',hp:345,atk:36,color:'#6a4c93',armor:0,  crit:.1, critMul:1.6,blockProf:0,  scale:.95,rig:'human',
+  shaman:   {id:'shaman',  name:'SHAMAN',  cls:'caster',hp:345,atk:36,color:'#6a4c93',armor:0,  crit:.1, critMul:1.6,blockProf:0,  scale:.95,rig:'human',impact:'energy',
     moves:{s1:{hits:6,gap:4,dmg:1.1}}},
   // rig:'quad' — Task 3.4's four-legged bone set, same as Donut above (LOOKS.grub, 68_rig.js) but
   // drawn as a segmented larva with stubby leg nubs instead of a cat.
-  grub:     {id:'grub',    name:'GRUB',    cls:'beast', hp:380,atk:40,color:'#8a9a4f',armor:.05,crit:.05,critMul:1.6,blockProf:0,  scale:.8, rig:'quad'}};
+  grub:     {id:'grub',    name:'GRUB',    cls:'beast', hp:380,atk:40,color:'#8a9a4f',armor:.05,crit:.05,critMul:1.6,blockProf:0,  scale:.8, rig:'quad',impact:'blunt'}};
 const BOSSES={
   // rig:'big' — Task 3.5's brute bone set (see LOOKS.grull, 68_rig.js). scale is .94, trimmed down
   // from the Task 3.4-era placeholder's 1.3 during Task 3.5 (a real --sim screenshot showed his head/
@@ -123,7 +127,7 @@ const BOSSES={
   // competent's own sustained DPS roughly doubled (see 55_ai.js's own tier-gate retune comment for the
   // measured before/after) — the t4 AI_TIERS retune alone still left this boss at 40% (n=30), over the
   // 10-35% band; the atk bump alone (hp untouched) brings it back to 26.7% (n=30).
-  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:50,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
+  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:50,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',impact:'blunt',
     boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
@@ -145,7 +149,7 @@ const BOSSES={
   // roughly doubled once CHAIN.enders.light stopped forcing a knockdown pause every 5 lights) — the t5
   // AI_TIERS retune alone still left this boss at 53.3% (n=30), well over the 10-35% band; hp left
   // untouched, atk-only brings it back to 23.3% (n=30).
-  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:46,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',
+  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:46,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',impact:'blunt',
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
