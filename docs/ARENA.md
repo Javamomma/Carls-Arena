@@ -4,6 +4,28 @@ Rubric table lands in Phase 5 (same format as Carls-Dash docs/PARITY.md: criteri
 
 ## Progress log
 
+- 2026-09-22 — Final-review fix wave for Phase 4 (items 1-10, one commit each except 10's minors,
+  which were grouped). Two exploits, both invisible to the test suite for the same reason: (1) energy
+  never regenerated against the wall clock (`e.ts` never anchored to a real `Energy.now()`), so node
+  fights were effectively unlimited; (2) arena FIGHT AGAIN replayed the stale, already-resolved
+  encounter while still crediting the new streak, an unlimited streak/gold farm off one button. Both
+  fixed (`Energy.spend`/`Energy.tick` anchor `ts`; FIGHT AGAIN routes through `G.startArena()` for
+  arena mode). The campaign map, the primary screen after CAMPAIGN, was clipping BOSS/DOOR 1 at
+  854x480 despite being signed off as "reviewed, coherent" in the Task 4.6 close-out — fixed (`.node`
+  min-height 44→40px, tighter spacing) with a new regression test. `--e2e`'s own energy assertion
+  could never fail (`debugEnergy(999)` ran before every measurement); a real un-topped-up run now
+  asserts the actual delta, verified live by temporarily reverting the energy fix and watching it
+  catch the regression. Refused map clicks were invisible (no `disabled`, `#toast` painted under every
+  overlay); nodes now disable and a new `#mapMsg` line shows why. Two plan-level rulings resolved
+  (pity guarantees the kind's TOP tier, not top-1; duplicate shards scale by rolled tier instead of a
+  flat 1) — see "Phase 4 plan defects (fixed)" below. Node gold raised 100·n+40·k → 160·n+60·k
+  (balance). Three Phase 5 seams landed now while cheap: `FLOORS[i].id` + `Quest.floorDef(n)`,
+  `Meta.SHOP_ITEMS` + `Meta.buy`, `Rewards.mult`. Six minors in one commit (44px `.panel` buttons,
+  locked-boss icon specificity, `Screens._reveal` cleared on entry, map/crystal currency strips,
+  `Meta.migrate` repointing a stale `active`, title-screen button hierarchy). `--e2e --seed {1,2,3}`
+  and `--e2e --seed 1 --loops 20` all re-run and exit 0 clean; `--sim`/`--matrix`/`--perf` all green
+  before every commit. See "Final-review fix wave" below for the full breakdown. Unit tests: 218
+  passing.
 - 2026-09-22 — Task 4.6: Phase 4 close-out. `tests/harness.py --e2e` (crystals → roster → quest →
   rewards → level-up → arena, headless) exits 0 for seeds 1, 2, 3 and for `--e2e --seed 1 --loops 20`
   (a 20-cycle menu+fight soak), all with zero page/console errors and zero assertion errors. Boss
@@ -582,6 +604,11 @@ Fix wave re-review: 9/10 addressed + most of 10; residual: Grull palette claim u
 | Screens shots reviewed | title/map/roster/roster-4/crystal/shop/arena all viewed, coherent | `docs/shots/p4-*.png` |
 | Roster layout: no dead space at 1-2 champions | `.cards` centers vertically; 4 champions still fit with no scroll | `docs/shots/p4-roster.png`, `p4-roster-4.png` |
 
+This table records the Task 4.6 close-out snapshot, before the whole-branch final review. The "Screens
+shots reviewed... coherent" row above is precisely what the final review found wrong (the map was
+clipping BOSS/DOOR 1 in that same screenshot) — see "Final-review fix wave" below for the corrected
+numbers (218 unit tests, `--e2e` re-run, `--perf` 0.0775) and what was actually fixed.
+
 Full detail on Tasks 4.1-4.5 is in `.superpowers/sdd/2026-09-22-phase4-meta/progress.md` and each
 task's own report; this section covers Task 4.6's close-out work only (the earlier tasks landed
 without a docs/ARENA.md update, so Phase 4 gets one consolidated entry here rather than five).
@@ -683,6 +710,103 @@ regenerated at 1 champion (`--reset-save --screen roster`); new `docs/shots/p4-r
 4 champions (`--reset-save --pre "Save.data.roster.katia=...;Save.data.roster.donut=...;
 Save.data.roster.mongo=...;Save.put()" --screen roster`). Both reviewed: readable at 854x480, no
 overlap with the BACK button, action buttons still real 44px+ touch targets.
+
+## Final-review fix wave (2026-09-22, `a589242..3593181`)
+
+The whole-branch final review (`.superpowers/sdd/2026-09-22-phase4-meta/final-review-verdict.md`,
+opus) found two live exploits, a clipped primary screen, two plan-level rulings still open, and a
+harness gap that let one of the exploits ship undetected; a scoped Task 4.6 re-review
+(`review-4.6-verdict.md`) approved the `--e2e`/`--loops`/`--perf`/roster-layout work separately and
+found nothing further. Ten items, one commit each (10's minors grouped): the fix wave's own report is
+`.superpowers/sdd/2026-09-22-phase4-meta/task-fixwave-p4-report.md`.
+
+**Two shipped exploits, both invisible to the test suite for the same reason (the unit tests inject
+`Energy.now`/set `ts` explicitly, and `--e2e` topped energy to 999 before measuring it):**
+1. **Energy never regenerated against the wall clock.** `e.ts` defaulted to 0 and was only ever
+   advanced by `regen*360000`, never anchored to a real `Energy.now()` — so `now-ts` was always ~57
+   real years and every `tick()` refilled to max instantly. `Energy.spend` now anchors `e.ts` the
+   instant it spends from full; `Energy.tick` re-anchors `e.ts` whenever `e.n` is already at/over max.
+2. **Arena FIGHT AGAIN replayed the stale, already-resolved encounter** while still crediting the new
+   streak — a win at streak 0 re-fought the identical goblin forever, unlimited streak/gold farming,
+   one button, no energy. FIGHT AGAIN now routes through `G.startArena()` for arena mode, drawing a
+   fresh `Arena.start()` off the current streak; quest mode is unchanged.
+
+**The campaign map clipped BOSS and DOOR 1** at 854x480 (six rows at the old 44px min-height + 6px
+gaps overflowed the 272px path box) — the primary screen after CAMPAIGN, on every floor, signed off
+as "shots reviewed, coherent" in the Task 4.6 close-out without anyone having scrolled past what the
+screenshot actually cropped. `.node` min-height 44px→40px, `.path` gap 6px→4px, tightened
+energy-row/BACK spacing; a new unit test asserts `#mapPath.scrollHeight<=clientHeight` with a full
+floor rendered, so this can't silently regress again.
+
+**`--e2e`'s own energy assertion could never fail**: `G.debugEnergy(999)` ran on every attempt, right
+before capturing `energyBefore` — comparing 998 against 999 is not a test. One un-topped-up node run
+(floor 1's node 0, on a fresh reset where energy is genuinely untouched) now asserts the real delta is
+exactly -1 and, with `Energy.now()` pushed 5 simulated minutes forward, still not regenerated.
+Verified live by temporarily reverting the energy-anchor fix: `--e2e` then failed with "energy
+regenerated within 5 minutes" and "energy did not decrease", where it silently passed before.
+
+**Refusals were invisible**: map buttons were never `disabled` (a locked door looked and clicked like
+an open one), and the refusal message went to `#toast`, which sat *before* every overlay in the DOM —
+the map's own opaque background painted over it. Map nodes are now `disabled` when not `'open'`; a new
+`#mapMsg` line inside the map panel shows "LOCKED" or "NOT ENOUGH ENERGY — next in m:ss", bypassing
+`G.say`'s frame-throttle (which was separately broken while browsing, since `G.frameNow` never
+advances outside a fight); `#toast` moved to after every overlay in the DOM.
+
+**Two rulings on genuine plan-level ambiguity (below), one balance change (node gold 100·n+40·k →
+160·n+60·k — floor 1 only paid out ~1200 gold against a ~10000-gold single star), and three Phase 5
+seams landed now while cheap**: `FLOORS[i].id` + `Quest.floorDef(n)` (floor lookup by field, not
+array index, so a tutorial floor 0 doesn't need three call sites renumbered); `Meta.SHOP_ITEMS` +
+`Meta.buy(itemId)` (the kiosk renders from a table instead of three hand-copied blocks); `Rewards.mult`
+(a `{gold,iso,xp}` multiplier applied once inside `forNode`, for a future ratings system). Six minors
+bundled into one commit: `.panel button` 44px touch targets, a locked-boss specificity fix (was
+showing the crown, not the lock), `Screens._reveal` cleared on crystal-screen entry (was replaying the
+previous pull's text), a currency strip on the map/crystal screens, `Meta.migrate` repointing a stale
+`Save.data.active` to an owned champion (was silently dropping xp grants), and a title-screen hierarchy
+pass (CAMPAIGN primary/glowing, the rest secondary, SOUND into its own small settings row).
+
+### Phase 4 plan defects (fixed)
+
+Two places where the Phase 4 plan itself — not just the implementation — was internally
+inconsistent or left an exploitable gap, both resolved by an explicit ruling rather than a guess:
+
+1. **Pity floor (Task 4.2).** The frozen interface line said pity guarantees "≥ the kind's top-1
+   tier"; Task 4.2's own checklist said "the 10th open is ≥3-star even after nine 1-star". These
+   disagree for basic (top-1 is 2-star, which the raw odds table already hits ~30% of the time on its
+   own — nowhere near a guarantee). **Ruled:** pity guarantees the kind's TOP tier outright (basic's
+   10th open is always exactly 3-star, premium's always exactly 4-star), and a natural top-tier roll
+   also resets the counter, not just a forced one. Interface line corrected.
+2. **Shard economy (ruling 2).** The plan specified a duplicate pull as "+1 star shard" with no
+   mention of scaling by rolled tier. Combined with a 4-champion roster that fills in a handful of
+   opens, a flat +1 made every crystal — 500-gold basic or 100-unit premium — worth identically little
+   once the roster was full, and the whole odds/pity apparatus stopped mattering. **Ruled:** shards
+   scale by the rolled tier (`Crystal.SHARDS_PER_TIER` = 1/2/3/5 for 1/2/3/4-star); 5 shards still
+   converts to +1 star, capped at 5-star, leftover kept.
+
+### `--e2e` summaries (fix-wave re-run, seeds 1-3)
+
+Same shape as the Task 4.6 table below, re-run after the full fix wave (new gold formula, real energy
+regen, the arena fix, shard scaling all live). All three seeds: exit 0, 0 page errors, 0 summary
+errors.
+
+| seed | exit | crystals (champId/stars/dup) | nodes 1/0-1/4 | boss (attempts) | level-up | arena (wins/streak/best) | gold/iso/units after |
+|---|---|---|---|---|---|---|---|
+| 1 | 0 | katia★1 (new), carl★1 (dup, 1 shard) | 5/5 won, 1 attempt each | won @1 | carl → LVL 3 | 3/3, streak 3, best 3 | 2420 / 100 / 50 |
+| 2 | 0 | carl★1 (dup, 1 shard), katia★1 (new) | 5/5 won, 1 attempt each | **lost all 5** | carl → LVL 3 | 3/3, streak 3, best 3 | 1960 / 80 / 0 |
+| 3 | 0 | katia★1 (new), donut★1 (new) | 5/5 won, 1 attempt each | won @1 | carl → LVL 3 | 3/3, streak 3, best 3 | 2420 / 100 / 50 |
+
+Gold is higher across the board than the pre-fix-wave table (the item 8 balance change, 100·n+40·k →
+160·n+60·k) and energy now genuinely sits at 998/1000 after 6 real node spends + a boss attempt or two
+(`energy: 998` in every seed's raw summary) rather than the old inert-regen table which never showed
+anything but the same debug-topped value. Seed 2's boss loss-out is the same in-band variance as
+before (`f1_grull` 13.3% at n=30 against `Ctrl.competent`, unaffected by this fix wave — no combat/stat
+code changed), not a regression.
+
+`--e2e --seed 1 --loops 20`: exit 0, 0 page errors, 0 summary errors. Post-loop state: carl LVL 5,
+arena streak/best 5, currencies 8480 gold / 340 iso / 150 units — all via real
+`Rewards.grant`/`Arena.record` calls, no debug shortcuts beyond the energy top-up between attempts.
+
+`--perf 600`: `ms_per_frame` 0.0775, still far under the 6 ms gate (unaffected by this fix wave —
+no per-frame render/sim path touched).
 
 ## Phase 4 execution rulings (2026-09-22, from the SDD ledger)
 
