@@ -74,9 +74,16 @@ class Fight{
     // Crit rolls once per landed hit, after the class bonus and before armor.
     const crit=!this.noCrit&&this.rng.next()<att.def.crit;
     const critMul=crit?(att.def.critMul||CRIT_MUL_DEFAULT):1;
-    // ref carries dmg plus the two power deltas so armorUp/powerGain can adjust them before either
-    // is applied; defender-side hooks run first, then attacker-side, both against the same ref.
-    const ref={dmg:Math.round(att.def.atk*m.dmg*cls*critMul*(1-def.def.armor)),powHit:m.powHit,powTaken:m.powTaken};
+    // ref carries dmg, the two power deltas, and the move itself so armorUp/powerGain can adjust
+    // them before either is applied; defender-side hooks run first, then attacker-side, both against
+    // the same ref. Fix-wave item 6: ref.move (not att.move) is what powerGain reads — on a true
+    // mutual trade, Fight.step resolves both sides' detect() results in the same tick (c1 then c2),
+    // and resolve(c1) nulls def.move (a few lines below, def.move=null) where that same fighter is
+    // c2's ATTACKER, so by the time resolve(c2) runs, att.move for that call has already gone null
+    // and powerGain's old `att.move` read silently no-op'd. ref is a fresh object built fresh for
+    // THIS resolve() call, never touched by the other side's resolve, so ref.move is always the
+    // move that actually landed this call.
+    const ref={dmg:Math.round(att.def.atk*m.dmg*cls*critMul*(1-def.def.armor)),powHit:m.powHit,powTaken:m.powTaken,move:m};
     this.buffHook('onHit',def,att,def,ref);this.buffHook('onHit',att,att,def,ref);
     const dmg=ref.dmg;
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;

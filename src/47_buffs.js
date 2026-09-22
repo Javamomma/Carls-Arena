@@ -17,11 +17,14 @@ const BUFFS={
     // Incoming damage x.7 when the holder is the one defending this exchange.
     onHit(fight,att,def,ref,holder){if(holder===def)ref.dmg=Math.round(ref.dmg*0.7)}},
   powerGain:{id:'powerGain',
-    // The holder's own power delta (from landing a hit, or from being hit) x1.5. att.move is still
-    // the live move object at the point Fight.resolve calls buff hooks (def.move isn't touched yet),
-    // so it carries both powHit and powTaken regardless of which side the holder is on.
+    // The holder's own power delta (from landing a hit, or from being hit) x1.5. Fix-wave item 6:
+    // reads ref.move (Fight.resolve sets it fresh from its own local `m` every call), not att.move —
+    // on a true mutual trade (both sides' hits detected before either resolves) resolve(c1) nulls
+    // def.move where that same fighter is c2's attacker, so att.move for THAT call had already gone
+    // null by the time it ran; ref is never touched by the other side's resolve call, so ref.move
+    // always carries both powHit/powTaken for exactly the move this call is resolving.
     onHit(fight,att,def,ref,holder){
-      const m=att.move;if(!m)return;
+      const m=ref.move;if(!m)return;
       if(holder===att)ref.powHit=Math.round(m.powHit*1.5);
       else if(holder===def)ref.powTaken=Math.round(m.powTaken*1.5)}},
   // Flag-only: no hook of its own. Fight.detect reads `att.buffs` directly (alongside `m.cost`) to

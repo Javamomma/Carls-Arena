@@ -529,6 +529,17 @@ Test.add('powerGain scales the holder power delta by 1.5x, on its own hits and o
   const b=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(b);Buffs.apply(b,b.p2,['powerGain']);
   run(b,5);
   eq(b.p2.power,Math.round(MOVES.light1.powTaken*1.5),'defender with the buff gains 1.5x powTaken')});
+// Fix-wave item 6: on a true mutual trade (both sides' hits detected before either resolves —
+// Fight.step's c1/c2), resolve(c1) nulls def.move where that same fighter is c2's attacker, so the
+// old `att.move` read inside powerGain's onHit was already null by the time resolve(c2) ran and
+// silently no-op'd — even though p1 (the holder here) is c2's DEFENDER, receiving a real powTaken.
+Test.add('powerGain scales power gained on a true mutual trade (both lights land the same tick)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([L(0)])});closeIn(f);
+  Buffs.apply(f,f.p1,['powerGain']);
+  run(f,6);
+  eq(f.log.filter(e=>e.type==='hit').length,2,'both lights must land the same tick for a true mutual trade');
+  eq(f.p1.power,Math.round(MOVES.light1.powHit*1.5)+Math.round(MOVES.light1.powTaken*1.5),
+    'p1 (holder) must get 1.5x on both the hit it landed (attacker in c1) and the hit it took (defender in c2)')});
 Test.add('unblockableSpecials makes a blocked special land as a hit',()=>{
   const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:1}}]),ctrl2:Ctrl.hold({block:true})});
   closeIn(f);f.p1.power=100;Buffs.apply(f,f.p1,['unblockableSpecials']);
