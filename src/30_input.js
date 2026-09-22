@@ -1,18 +1,31 @@
 // Touch layout (landscape): left third = defense (hold: block, swipe left: dash back);
 // right two thirds = offense (tap: light, swipe right: medium, hold >=180ms: heavy until released).
+// Task 5.6 (leftHanded): when Save.data.settings.leftHanded is true the WHOLE gesture layout mirrors
+// horizontally, to match the already-mirrored on-screen buttons (00_head.html's body.left-handed
+// CSS, applied by G.applySettings) -- defense becomes the RIGHT third (a mirror of DEF_ZONE, which
+// itself always stays a left-edge-relative constant: W/3), offense the left two-thirds, and swipe
+// direction mirrors with it (zoneFor/swipeDx below are the only two things gated on the setting;
+// every zone/gesture check downstream just uses their result, unchanged from the normal-handed math).
 const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SWIPE:40,HOLD_MS:180,POWER_HOLD_MS:400,
   _powerT0:0,_powerShown:false,
+  // 'def' iff x is within DEF_ZONE of the defense edge -- the left edge normally, the right edge
+  // when leftHanded (so a pointerdown at x=W-20 lands 'def' exactly like x=20 does normally).
+  zoneFor(x){return(Save.data.settings.leftHanded?x>W-this.DEF_ZONE:x<this.DEF_ZONE)?'def':'off'},
+  // Raw pointer dx, sign-flipped when leftHanded so "swipe away from the defense edge, toward the
+  // opposite edge" still maps to the same action it does normally: dashBack away from the (now
+  // right-side) defense zone, medium away from the (now left-side) offense zone.
+  swipeDx(dx){return Save.data.settings.leftHanded?-dx:dx},
   init(canvas){
     const pos=e=>{const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}};
     canvas.addEventListener('pointerdown',e=>{Audio.init();const p=pos(e);
       // Pause glyph hit-test: a tap there toggles pause and must not also register as a light.
       if(G.state==='FIGHT'&&G.hitPause(p.x,p.y)){G.togglePause();return}
       if(G.state==='TITLE')return G.startFight();if(G.state!=='FIGHT')return;
-      const zone=p.x<this.DEF_ZONE?'def':'off';
+      const zone=this.zoneFor(p.x);
       for(const rec of this._ptrs.values())if(rec.zone===zone)return; // one active pointer per zone
       this._ptrs.set(e.pointerId,{x0:p.x,t0:performance.now(),zone,moved:false,holdFired:false});
       if(zone==='def')this.held.block=true});
-    canvas.addEventListener('pointermove',e=>{const P=this._ptrs.get(e.pointerId);if(!P||P.moved)return;const dx=pos(e).x-P.x0;
+    canvas.addEventListener('pointermove',e=>{const P=this._ptrs.get(e.pointerId);if(!P||P.moved)return;const dx=this.swipeDx(pos(e).x-P.x0);
       if(Math.abs(dx)>=this.SWIPE){P.moved=true;if(P.zone==='def')this.held.block=false;else this.held.heavy=false;this.q.push(dx>0?'medium':'dashBack')}});
     const up=e=>{const P=this._ptrs.get(e.pointerId);if(!P)return;this._ptrs.delete(e.pointerId);
       if(P.zone==='def')this.held.block=false;

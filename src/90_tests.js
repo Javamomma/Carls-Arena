@@ -2108,6 +2108,35 @@ Test.add('leftHanded mirrors the on-screen button layout: #btnBlock ends up righ
   ok(block.getBoundingClientRect().left>power.getBoundingClientRect().left,'left-handed: BLOCK right of POWER');
   document.body.classList.remove('left-handed');
   G.toTitle()});
+// Task 5.6: leftHanded also mirrors the CANVAS gesture zones (Input.zoneFor/swipeDx, 30_input.js),
+// not just the on-screen button layout above -- defense moves from the left third to the right
+// third, offense from the right two-thirds to the left two-thirds, and swipe direction mirrors with
+// them so "swipe away from the defense zone" still reads as dashBack and "swipe away from the
+// offense zone" still reads as medium, whichever side each zone is currently on.
+Test.add('leftHanded mirrors the canvas defense/offense zones: x=W-20 holds block, x=20 queues light',()=>{
+  Save.data=Meta.defaults();Save.data.settings.leftHanded=true;
+  withFight(()=>{
+    const def=tap(1,W-20);def.down();
+    eq(Input.held.block,true,'a pointerdown at x=W-20 must hold block when leftHanded');
+    def.up();
+    eq(Input.held.block,false,'releasing the def-zone pointer must clear block');
+    const off=tap(2,20);off.down();off.up();
+    ok(Input.q.includes('light'),'a tap (no swipe) at x=20 must queue light when leftHanded')});
+  Save.data.settings.leftHanded=false});
+Test.add('leftHanded mirrors swipe direction: a swipe further right in the (now right-side) defense zone still queues dashBack, and further left in the (now left-side) offense zone still queues medium',()=>{
+  Save.data=Meta.defaults();Save.data.settings.leftHanded=true;
+  withFight(()=>{
+    const r=canvas.getBoundingClientRect();
+    const move=(id,x)=>canvas.dispatchEvent(new PointerEvent('pointermove',
+      {pointerId:id,clientX:r.left+x*r.width/W,clientY:r.top+r.height/2,bubbles:true}));
+    const def=tap(1,W-20);def.down();move(1,W-20+Input.SWIPE+5);
+    ok(Input.q.includes('dashBack'),'swiping further right inside the mirrored defense zone must queue dashBack');
+    ok(!Input.held.block,'the swipe must clear the hold-block it started with, like normal mode');
+    def.up();Input.q.length=0;
+    const off=tap(2,20);off.down();move(2,20-Input.SWIPE-5);
+    ok(Input.q.includes('medium'),'swiping further left inside the mirrored offense zone must queue medium');
+    off.up()});
+  Save.data.settings.leftHanded=false});
 Test.add('reduceMotion zeroes camera shake and screen flash but leaves popups untouched',()=>{
   Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
   FX.reset();

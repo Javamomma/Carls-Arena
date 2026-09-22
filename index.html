@@ -920,19 +920,32 @@ const Lines={
 
 // Touch layout (landscape): left third = defense (hold: block, swipe left: dash back);
 // right two thirds = offense (tap: light, swipe right: medium, hold >=180ms: heavy until released).
+// Task 5.6 (leftHanded): when Save.data.settings.leftHanded is true the WHOLE gesture layout mirrors
+// horizontally, to match the already-mirrored on-screen buttons (00_head.html's body.left-handed
+// CSS, applied by G.applySettings) -- defense becomes the RIGHT third (a mirror of DEF_ZONE, which
+// itself always stays a left-edge-relative constant: W/3), offense the left two-thirds, and swipe
+// direction mirrors with it (zoneFor/swipeDx below are the only two things gated on the setting;
+// every zone/gesture check downstream just uses their result, unchanged from the normal-handed math).
 const Input={q:[],held:{block:false,heavy:false},_ptrs:new Map(),DEF_ZONE:W/3,SWIPE:40,HOLD_MS:180,POWER_HOLD_MS:400,
   _powerT0:0,_powerShown:false,
+  // 'def' iff x is within DEF_ZONE of the defense edge -- the left edge normally, the right edge
+  // when leftHanded (so a pointerdown at x=W-20 lands 'def' exactly like x=20 does normally).
+  zoneFor(x){return(Save.data.settings.leftHanded?x>W-this.DEF_ZONE:x<this.DEF_ZONE)?'def':'off'},
+  // Raw pointer dx, sign-flipped when leftHanded so "swipe away from the defense edge, toward the
+  // opposite edge" still maps to the same action it does normally: dashBack away from the (now
+  // right-side) defense zone, medium away from the (now left-side) offense zone.
+  swipeDx(dx){return Save.data.settings.leftHanded?-dx:dx},
   init(canvas){
     const pos=e=>{const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}};
     canvas.addEventListener('pointerdown',e=>{Audio.init();const p=pos(e);
       // Pause glyph hit-test: a tap there toggles pause and must not also register as a light.
       if(G.state==='FIGHT'&&G.hitPause(p.x,p.y)){G.togglePause();return}
       if(G.state==='TITLE')return G.startFight();if(G.state!=='FIGHT')return;
-      const zone=p.x<this.DEF_ZONE?'def':'off';
+      const zone=this.zoneFor(p.x);
       for(const rec of this._ptrs.values())if(rec.zone===zone)return; // one active pointer per zone
       this._ptrs.set(e.pointerId,{x0:p.x,t0:performance.now(),zone,moved:false,holdFired:false});
       if(zone==='def')this.held.block=true});
-    canvas.addEventListener('pointermove',e=>{const P=this._ptrs.get(e.pointerId);if(!P||P.moved)return;const dx=pos(e).x-P.x0;
+    canvas.addEventListener('pointermove',e=>{const P=this._ptrs.get(e.pointerId);if(!P||P.moved)return;const dx=this.swipeDx(pos(e).x-P.x0);
       if(Math.abs(dx)>=this.SWIPE){P.moved=true;if(P.zone==='def')this.held.block=false;else this.held.heavy=false;this.q.push(dx>0?'medium':'dashBack')}});
     const up=e=>{const P=this._ptrs.get(e.pointerId);if(!P)return;this._ptrs.delete(e.pointerId);
       if(P.zone==='def')this.held.block=false;
@@ -6820,6 +6833,35 @@ Test.add('leftHanded mirrors the on-screen button layout: #btnBlock ends up righ
   ok(block.getBoundingClientRect().left>power.getBoundingClientRect().left,'left-handed: BLOCK right of POWER');
   document.body.classList.remove('left-handed');
   G.toTitle()});
+// Task 5.6: leftHanded also mirrors the CANVAS gesture zones (Input.zoneFor/swipeDx, 30_input.js),
+// not just the on-screen button layout above -- defense moves from the left third to the right
+// third, offense from the right two-thirds to the left two-thirds, and swipe direction mirrors with
+// them so "swipe away from the defense zone" still reads as dashBack and "swipe away from the
+// offense zone" still reads as medium, whichever side each zone is currently on.
+Test.add('leftHanded mirrors the canvas defense/offense zones: x=W-20 holds block, x=20 queues light',()=>{
+  Save.data=Meta.defaults();Save.data.settings.leftHanded=true;
+  withFight(()=>{
+    const def=tap(1,W-20);def.down();
+    eq(Input.held.block,true,'a pointerdown at x=W-20 must hold block when leftHanded');
+    def.up();
+    eq(Input.held.block,false,'releasing the def-zone pointer must clear block');
+    const off=tap(2,20);off.down();off.up();
+    ok(Input.q.includes('light'),'a tap (no swipe) at x=20 must queue light when leftHanded')});
+  Save.data.settings.leftHanded=false});
+Test.add('leftHanded mirrors swipe direction: a swipe further right in the (now right-side) defense zone still queues dashBack, and further left in the (now left-side) offense zone still queues medium',()=>{
+  Save.data=Meta.defaults();Save.data.settings.leftHanded=true;
+  withFight(()=>{
+    const r=canvas.getBoundingClientRect();
+    const move=(id,x)=>canvas.dispatchEvent(new PointerEvent('pointermove',
+      {pointerId:id,clientX:r.left+x*r.width/W,clientY:r.top+r.height/2,bubbles:true}));
+    const def=tap(1,W-20);def.down();move(1,W-20+Input.SWIPE+5);
+    ok(Input.q.includes('dashBack'),'swiping further right inside the mirrored defense zone must queue dashBack');
+    ok(!Input.held.block,'the swipe must clear the hold-block it started with, like normal mode');
+    def.up();Input.q.length=0;
+    const off=tap(2,20);off.down();move(2,20-Input.SWIPE-5);
+    ok(Input.q.includes('medium'),'swiping further left inside the mirrored offense zone must queue medium');
+    off.up()});
+  Save.data.settings.leftHanded=false});
 Test.add('reduceMotion zeroes camera shake and screen flash but leaves popups untouched',()=>{
   Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
   FX.reset();
