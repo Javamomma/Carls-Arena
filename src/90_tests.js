@@ -170,14 +170,17 @@ Test.add('every look\'s reach fits inside EDGE_PAD',()=>{
   for(const id in LOOKS){const look=LOOKS[id],sc=(DEFS[id]&&DEFS[id].scale)||1;
     // Quad reach is body length/2 (hip-to-chest half the body, the far end from the fighter's x
     // anchor) plus a front leg's full extension, per the Task 3.4 brief's formula — not the human
-    // shoulderW/armLen/limb formula, which quad looks don't have the fields for.
+    // shoulderW/armLen/limb formula, which quad looks don't have the fields for. 'big' looks (Task
+    // 3.5) reuse the human bone names (shoulderW/armLen/limb), so they fall through to that same
+    // formula rather than needing a third branch.
     const reach=look.rig==='quad'
       ?(look.bodyLen/2+look.legLen)*sc
       :(look.shoulderW/2+look.armLen+look.limb)*sc;
     ok(reach<=EDGE_PAD,id+' reach '+reach.toFixed(1)+' must fit inside EDGE_PAD ('+EDGE_PAD+')')}});
 Test.add('every look renders every pose without throwing',()=>{
   for(const id in LOOKS){const look=LOOKS[id];
-    const table=look.rig==='quad'?POSES_QUAD:POSES,bones=look.rig==='quad'?Rig.bonesQuad:Rig.bones;
+    const table=look.rig==='quad'?POSES_QUAD:look.rig==='big'?POSES_BIG:POSES;
+    const bones=look.rig==='quad'?Rig.bonesQuad:Rig.bones;
     for(const key in table){const j=Rig.solve(look,key,0.5,1);
       for(const b of bones)ok(j[b]&&isFinite(j[b].x)&&isFinite(j[b].y),id+'/'+key+'/'+b)}}
   // Render.frame on a live fight with each def as p1, via an offscreen G.fight swapped in and
@@ -205,6 +208,34 @@ Test.add('quad light1 at t0.5 moves the leading front paw forward of idle',()=>{
 Test.add('Render.frame does not throw with a quad p1 (donut) and a quad p2 (grub)',()=>{
   G.startFight({p1:'donut',p2:'grub',ctrl1:Ctrl.idle()});
   ok(!threw(()=>Render.frame(G.fight)),'Render.frame must not throw for donut vs grub');
+  G.toTitle()});
+
+// --- Task 3.5: big rig (Mongo, Grull) ---
+Test.add('big rig idle height at scale 1 is at least 1.25x a human idle height',()=>{
+  // "Height" is the same "max joint y extent from Rig.solve" measure used by the HUD zoom-cap test
+  // below: the topmost (most negative-y) joint returned by Rig.solve, floor at y=0. Both looks are
+  // solved at t=0 with face=1 and no def.scale applied (scale 1), matching the brief's "at scale 1"
+  // wording — the def's actual scale (1.25/1.3) is a separate, already-covered concern (EDGE_PAD reach
+  // and the zoom-cap test just below both apply it).
+  const height=look=>{const j=Rig.solve(look,'idle',0,1);return -Math.min(...Object.values(j).map(p=>p.y))};
+  const carlH=height(LOOKS.carl);
+  for(const id of['mongo','grull']){
+    ok(LOOKS[id].rig==='big',id+' must use rig:"big"');
+    const h=height(LOOKS[id]);
+    ok(h>=1.25*carlH,id+' idle height '+h.toFixed(1)+' must be >= 1.25x carl\'s '+carlH.toFixed(1)+' ('+(1.25*carlH).toFixed(1)+')')}});
+Test.add('every POSES_BIG key the state machine can reach exists with at least 2 keyframes',()=>{
+  const need=['idle','walk','dash','light1','light2','light3','light4','light5','medium','heavyCharge',
+    'heavy','block','blockstun','hit','knockdown','getup','stunned','s1','s2','s3','win','ko'];
+  for(const k of need)ok(POSES_BIG[k]&&POSES_BIG[k].length>=2,'POSES_BIG.'+k)});
+Test.add('big rig solve returns all 16 human-named bones with feet on the floor line',()=>{
+  for(const id of['mongo','grull']){
+    const j=Rig.solve(LOOKS[id],'idle',0,1);
+    for(const b of Rig.bones)ok(j[b]&&isFinite(j[b].x)&&isFinite(j[b].y),id+'/'+b);
+    ok(Math.abs(j.lFoot.y)<6,id+' left foot at y≈0');ok(Math.abs(j.rFoot.y)<6,id+' right foot at y≈0');
+    ok(j.head.y<j.hip.y,id+' head above hip')}});
+Test.add('Render.frame does not throw with a big p1 (mongo) and a big p2 (grull)',()=>{
+  G.startFight({p1:'mongo',p2:'grull',ctrl1:Ctrl.idle()});
+  ok(!threw(()=>Render.frame(G.fight)),'Render.frame must not throw for mongo vs grull');
   G.toTitle()});
 Test.add('sim files contain no DOM or presentation identifiers',()=>{
   for(const f of [Fight,Fighter])

@@ -262,8 +262,7 @@ const CHAMPS={
   donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad'},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
     moves:{s1:{hits:5,gap:4,dmg:1.2}}},
-  // rig:'big' — Mongo is Task 3.4's brute bone set (RigBig). Until then LOOKS.mongo (68_rig.js) is a
-  // human-rig placeholder, same deal as Donut above.
+  // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
   mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big'}};
 const MOBS={
   goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:300,atk:38,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',
@@ -278,10 +277,20 @@ const MOBS={
   // drawn as a segmented larva with stubby leg nubs instead of a cat.
   grub:     {id:'grub',    name:'GRUB',    cls:'beast', hp:380,atk:40,color:'#8a9a4f',armor:.05,crit:.05,critMul:1.6,blockProf:0,  scale:.8, rig:'quad'}};
 const BOSSES={
-  // rig:'big' — Task 3.4's brute bone set. Until then LOOKS.grull (68_rig.js) is a human-rig
-  // placeholder. s3 override + buffs are his boss-signature mechanics per Phase 3 ruling #4 (a mob
-  // def with boss:true, a bigger rig, a unique S3, and one signature buff — no boss-only engine).
-  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1600,atk:70,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:1.3,rig:'big',
+  // rig:'big' — Task 3.5's brute bone set (see LOOKS.grull, 68_rig.js). scale reduced from the
+  // Task 3.4-era placeholder's 1.3 to .94 per the Task 3.5 brief's own allowance ("if Grull at boss
+  // scale cannot fit under the HUD at the cap, reduce his scale... and document it"): LOOKS.grull's
+  // proportions alone (a big-rig look is already >=1.25x a human's idle height, per the "big rig idle
+  // height" test) clear the 1.28-zoom HUD test and EDGE_PAD at 1.3 scale with room to spare, so that
+  // specific test never forced a reduction on its own — but at both 1.3 and an intermediate 1.1, his
+  // head/horns went off the TOP of the canvas once the fight camera zoomed in past debugPose's default
+  // 1.0 during a real --sim run (see docs/shots/p3-floor1-boss.png), which no unit test catches but the
+  // brief's own shot review does ("Grull must read as a horned club-wielding brute" — not if his head
+  // isn't on screen). At scale:.94 the look's own proportions alone (no extra def-level multiplier
+  // stacked on top) are enough to read as clearly bigger than Carl while actually fitting the frame.
+  // s3 override + buffs are his boss-signature mechanics per Phase 3 ruling #4 (a mob def with
+  // boss:true, a bigger rig, a unique S3, and one signature buff — no boss-only engine).
+  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1600,atk:70,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
     boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1400,atk:62,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.3,rig:'quad',
@@ -1068,6 +1077,106 @@ POSES_QUAD.ko=[
             flU:D(76),flL:D(-20),frU:D(70),frL:D(-16),blU:D(-70),blL:D(18),brU:D(-64),brL:D(14)},off:{x:-14,y:44}}];
 preparePoses(POSES_QUAD);
 
+// ---- big-brute pose table: same 22 keys and the SAME bone names as the human POSES table (torso,
+// head, lShoulder/rShoulder, lElbow/rElbow, lHip/rHip, lKnee/rKnee) — Task 3.5's frozen interface has
+// 'big' reuse the human skeleton, not a new bone set, so jab()/flurry() (already generic over those
+// field names) are reused as-is below. What makes 'big' its own rig kind is proportions (Rig.solveBig's
+// look.hunch, added to every torso angle here, plus LOOKS.mongo/grull's own numbers: wider shoulders,
+// a longer barrel torso, arms longer than legs, a short thick neck via a small headR) and its own
+// pose data — every key here is authored heavier/wider than its POSES counterpart, not copied.
+// heavyCharge and s3 are the two keys the "tallest pose stays under the HUD at max zoom" test checks
+// (90_tests.js) against the def's *actual* scale (1.25 mongo / 1.3 grull); both are authored as a deep
+// forward crouch (torso pose angle 62-76deg, stacking with look.hunch) so the topmost joint stays low
+// even though 'idle' (near-upright) stands well over 1.25x a human's height at scale 1 — see that
+// test's own comment and the "big rig idle height" test. 'heavy' (the actual two-hand overhead smash,
+// unconstrained by that test) is where the arms genuinely go overhead.
+const POSES_BIG={};
+POSES_BIG.idle=[
+  {t:0,ang:{torso:D(4), lShoulder:D(8), rShoulder:D(12),lElbow:D(60),rElbow:D(70),
+            lHip:D(-10),rHip:D(10),lKnee:D(8),rKnee:D(-8)},off:{x:0,y:0}},
+  {t:1,ang:{torso:D(1), lShoulder:D(4), rShoulder:D(16),lElbow:D(64),rElbow:D(64),
+            lHip:D(-12),rHip:D(12),lKnee:D(10),rKnee:D(-10)},off:{x:0,y:0}}];
+POSES_BIG.walk=[ // a heavy plod, not a human trot: bigger hip/knee swing, slower-reading torso roll
+  {t:0, ang:{torso:D(5), lHip:D(-24),rHip:D(24), lKnee:D(22),rKnee:D(-12), lShoulder:D(16),rShoulder:D(-16)},off:{x:0,y:0}},
+  {t:.5,ang:{torso:D(-5),lHip:D(24), rHip:D(-24),lKnee:D(-12),rKnee:D(22), lShoulder:D(-16),rShoulder:D(16)},off:{x:0,y:0}},
+  {t:1, ang:{torso:D(5), lHip:D(-24),rHip:D(24), lKnee:D(22),rKnee:D(-12), lShoulder:D(16),rShoulder:D(-16)},off:{x:0,y:0}}];
+POSES_BIG.dash=[
+  {t:0,ang:{torso:D(-8), lHip:D(-14),rHip:D(24),lKnee:D(24),rKnee:D(-12),lShoulder:D(24),rShoulder:D(-24)},off:{x:0,y:-2}},
+  {t:1,ang:{torso:D(-12),lHip:D(-22),rHip:D(32),lKnee:D(30),rKnee:D(-8), lShoulder:D(30),rShoulder:D(-30)},off:{x:-10,y:0}}];
+// Lights read as hooks, not jabs: jab() is reused (it's generic over the same bone-name fields) but
+// with a wide elbow bend held through the swing and a much bigger torsoPeak than POSES.light* ever
+// uses, so the silhouette sweeps around instead of extending straight out.
+POSES_BIG.light1=jab('r',{startSh:-10,startEl:36,peakSh:66,peakEl:22,peakOffX:12,torsoPeak:16});
+POSES_BIG.light2=jab('l',{startSh:-10,startEl:36,peakSh:72,peakEl:22,peakOffX:14,torsoPeak:18});
+POSES_BIG.light3=jab('r',{startSh:-10,startEl:38,peakSh:78,peakEl:20,peakOffX:16,torsoPeak:20});
+POSES_BIG.light4=jab('l',{startSh:-10,startEl:38,peakSh:84,peakEl:20,peakOffX:18,torsoPeak:22});
+POSES_BIG.light5=jab('r',{startSh:-12,startEl:42,peakSh:94,peakEl:12,peakOffX:24,torsoPeak:28});
+// Medium: a driving shoulder charge — big forward off.x, guard held tight (not a reaching arm like
+// the human lunge), torso rolling hard into the hit.
+POSES_BIG.medium=[
+  {t:0, ang:{torso:D(8), rShoulder:D(6), rElbow:D(50),lShoulder:D(10),lElbow:D(50),rHip:D(-10),lHip:D(10),rKnee:D(18),lKnee:D(-8)},off:{x:-8,y:0}},
+  {t:.5,ang:{torso:D(46),rShoulder:D(24),rElbow:D(40),lShoulder:D(20),lElbow:D(40),rHip:D(30), lHip:D(-40),rKnee:D(-30),lKnee:D(10)},off:{x:38,y:4}},
+  {t:1, ang:{torso:D(20),rShoulder:D(14),rElbow:D(46),lShoulder:D(14),lElbow:D(46),rHip:D(12), lHip:D(-14)},off:{x:14,y:0}}];
+// Heavy charge: the gather — a deep forward crouch (torsoA stacks with look.hunch to well past 60deg),
+// NOT the raised-overhead windup the human rig uses. Kept low so it clears the HUD test at boss scale;
+// the raise happens in 'heavy' below instead.
+POSES_BIG.heavyCharge=[
+  {t:0,ang:{torso:D(64),head:D(-8), lShoulder:D(26),rShoulder:D(26),lElbow:D(55),rElbow:D(55),lHip:D(10),rHip:D(-10),lKnee:D(22),rKnee:D(-22)},off:{x:-4,y:6}},
+  {t:1,ang:{torso:D(76),head:D(-10),lShoulder:D(34),rShoulder:D(34),lElbow:D(62),rElbow:D(62),lHip:D(16),rHip:D(-16),lKnee:D(28),rKnee:D(-28)},off:{x:-8,y:10}}];
+// Heavy release: coiled crouch -> both fists thrown overhead (torso arches back, shoulders to 150deg)
+// -> smashed down through impact into a forward-driving crouch. The genuine "two-hand overhead smash".
+POSES_BIG.heavy=[
+  {t:0,  ang:{torso:D(58), lShoulder:D(20), rShoulder:D(20), lElbow:D(50),rElbow:D(50),lHip:D(14), rHip:D(-14)},off:{x:-6,y:8}},
+  {t:.45,ang:{torso:D(-28),lShoulder:D(150),rShoulder:D(150),lElbow:D(-8),rElbow:D(-8),lHip:D(-22),rHip:D(22),lKnee:D(-10),rKnee:D(10)},off:{x:6,y:-6}},
+  {t:1,  ang:{torso:D(30), lShoulder:D(60), rShoulder:D(60), lElbow:D(28),rElbow:D(28),lHip:D(14), rHip:D(-12)},off:{x:22,y:12}}];
+POSES_BIG.block=[ // a forearm wall: both arms raised and crossed in front, wide stance underneath
+  {t:0,ang:{torso:D(6),lShoulder:D(62),rShoulder:D(72),lElbow:D(66),rElbow:D(62),lHip:D(8),rHip:D(-8)},off:{x:2,y:2}},
+  {t:1,ang:{torso:D(6),lShoulder:D(68),rShoulder:D(78),lElbow:D(70),rElbow:D(66),lHip:D(8),rHip:D(-8)},off:{x:2,y:2}}];
+POSES_BIG.blockstun=[
+  {t:0,ang:{torso:D(-10),lShoulder:D(62),rShoulder:D(72),lElbow:D(66),rElbow:D(62)},off:{x:-6,y:0}},
+  {t:1,ang:{torso:D(6),  lShoulder:D(62),rShoulder:D(72),lElbow:D(66),rElbow:D(62)},off:{x:0,y:0}}];
+POSES_BIG.hit=[
+  {t:0,ang:{torso:D(-20),head:D(-18),lShoulder:D(24),rShoulder:D(-36),lElbow:D(30),rElbow:D(14),lHip:D(-6),rHip:D(6)},off:{x:-12,y:0}},
+  {t:1,ang:{torso:D(-4), head:D(-2), lShoulder:D(12),rShoulder:D(-14),lElbow:D(20),rElbow:D(18)},off:{x:-3,y:0}}];
+POSES_BIG.knockdown=[
+  {t:0,ang:{torso:D(-96), head:D(6),lShoulder:D(14),rShoulder:D(-10),lElbow:D(12),rElbow:D(12),lHip:D(-26),rHip:D(-30),lKnee:D(40),rKnee:D(44)},off:{x:-10,y:24}},
+  {t:1,ang:{torso:D(-116),head:D(2),lShoulder:D(8), rShoulder:D(-6), lElbow:D(8), rElbow:D(8), lHip:D(-34),rHip:D(-40),lKnee:D(48),rKnee:D(54)},off:{x:-14,y:28}}];
+POSES_BIG.getup=[
+  {t:0,ang:{torso:D(-58),lHip:D(-30),rHip:D(-34),lKnee:D(30),rKnee:D(34)},off:{x:-8,y:20}},
+  {t:1,ang:{torso:D(0),  lHip:D(0),  rHip:D(0),  lKnee:D(0), rKnee:D(0)}, off:{x:0,y:0}}];
+POSES_BIG.stunned=[
+  {t:0,ang:{torso:D(4), head:D(12), lShoulder:D(6),rShoulder:D(-4), lElbow:D(32),rElbow:D(28)},off:{x:0,y:0}},
+  {t:1,ang:{torso:D(-8),head:D(-8), lShoulder:D(2),rShoulder:D(-8), lElbow:D(36),rElbow:D(32)},off:{x:0,y:0}}];
+// s1/s2: overhand forearm smashes (upright, unlike s3) — not tested by the HUD zoom-cap check, so
+// free to swing more upright than heavyCharge/s3.
+POSES_BIG.s1=flurry(
+  {t:0,  ang:{torso:D(2), rShoulder:D(-16),rElbow:D(34),lShoulder:D(18),lElbow:D(24)},off:{x:-4,y:0}},
+  {t:.3, ang:{torso:D(18),rShoulder:D(96), rElbow:D(2)},off:{x:12,y:0}},
+  {t:.6, ang:{torso:D(10),lShoulder:D(-96),lElbow:D(2)},off:{x:18,y:0}},
+  {t:1,  ang:{torso:D(30),rShoulder:D(112),rElbow:D(-8),lShoulder:D(-18),lElbow:D(20)},off:{x:30,y:0}});
+POSES_BIG.s2=flurry(
+  {t:0,  ang:{torso:D(2), rShoulder:D(-18),rElbow:D(36),lShoulder:D(20),lElbow:D(26)},off:{x:-6,y:0}},
+  {t:.25,ang:{torso:D(20),rShoulder:D(100),rElbow:D(2)},off:{x:14,y:0}},
+  {t:.5, ang:{torso:D(8), lShoulder:D(-100),lElbow:D(2)},off:{x:20,y:0}},
+  {t:.75,ang:{torso:D(22),rShoulder:D(108),rElbow:D(-6)},off:{x:26,y:0}},
+  {t:1,  ang:{torso:D(34),lShoulder:D(-114),lElbow:D(-12),rShoulder:D(22),rElbow:D(22)},off:{x:38,y:0}});
+// s3: the ground-pound flurry. Torso stays bent well forward (62-74deg pose angle, stacking with
+// look.hunch) through every keyframe — thematically a crouched pound into the floor, and the reason
+// this reads well under the HUD zoom-cap test (see the table-level comment above).
+POSES_BIG.s3=flurry(
+  {t:0,  ang:{torso:D(68),rShoulder:D(-14),rElbow:D(40),lShoulder:D(24),lElbow:D(30)},off:{x:-8,y:6}},
+  {t:.2, ang:{torso:D(70),rShoulder:D(92), rElbow:D(4)},off:{x:14,y:8}},
+  {t:.45,ang:{torso:D(62),lShoulder:D(-92),lElbow:D(4)},off:{x:22,y:6}},
+  {t:.7, ang:{torso:D(70),rShoulder:D(100),rElbow:D(-4)},off:{x:30,y:8}},
+  {t:1,  ang:{torso:D(74),rShoulder:D(112),rElbow:D(-14),lShoulder:D(-28),lElbow:D(-8),lHip:D(16),rHip:D(-16)},off:{x:42,y:10}});
+POSES_BIG.win=[
+  {t:0,ang:{torso:D(-6),lShoulder:D(-140),rShoulder:D(140),lElbow:D(14),rElbow:D(-14)},off:{x:0,y:-4}},
+  {t:1,ang:{torso:D(-2),lShoulder:D(-150),rShoulder:D(150),lElbow:D(10), rElbow:D(-10)},off:{x:0,y:-6}}];
+POSES_BIG.ko=[
+  {t:0,ang:{torso:D(-100),head:D(10),lHip:D(-28),rHip:D(-32),lKnee:D(42),rKnee:D(46),lShoulder:D(18),rShoulder:D(-28)},off:{x:-10,y:24}},
+  {t:1,ang:{torso:D(-118),head:D(6), lHip:D(-36),rHip:D(-42),lKnee:D(50),rKnee:D(54),lShoulder:D(10),rShoulder:D(-18)},off:{x:-14,y:28}}];
+preparePoses(POSES_BIG);
+
 // ---- looks: palette + proportions + props, per character id ----
 // Scaled up from Phase 2's original proportions (legLen most of all — the old legLen:limb ratio was
 // close to 1:1, reading as stubby blobs rather than legs) so a standing Carl is ~190 world px tall
@@ -1113,13 +1222,34 @@ const LOOKS={
     hipH:65,legLen:65,bodyLen:144,neckLen:46,headR:26,tailLen:120,
     frontW:20,backW:24,legW:18,
     props:['tiara','whiskers']},
-  // PLACEHOLDER (Task 3.4 gives Mongo his own RigBig brute rig): a scaled-down copy of the
-  // hobgoblin's proportions (def.scale is already 1.25 — full hobgoblin proportions on top of that
-  // push the tallest pose's topmost joint above the HUD at max zoom, see the "tallest pose stays
-  // under the HUD" test) with Mongo's own palette and rig:'human' set explicitly.
-  mongo:{skin:'#7a6a52',hair:null,primary:'#3a2f1f',secondary:'#8a6d3b',
-    limb:20,legLen:90,armLen:84,torsoLen:73,headR:21,shoulderW:55,hipW:34,earLen:0,rig:'human',
-    props:['club']},
+  // Mongo: Task 3.5's RigBig brute rig (see Rig.solve's 'big' branch below and Rig.solveBig).
+  // Grey-green skin, bald with a heavy brow (drawn unconditionally in drawBig, not a props entry),
+  // bare barrel chest with a couple of scars, dark trousers instead of a shirt. hunch is the per-look
+  // spine-offset constant solveBig adds to every torso angle (see POSES_BIG's table comment) — kept
+  // small (4deg) here; height comes from torsoLen itself, not from leaning the torso hard over.
+  // Proportions: shoulderW (112) ~1.35x Carl's 83; armLen (97) > legLen (95) for "arms longer than
+  // legs" — both capped fairly close together by EDGE_PAD's reach budget (shoulderW/2+armLen+limb at
+  // mongo's 1.25 scale), which is also why legLen can't itself carry most of the height the way it
+  // does for Carl. torsoLen (172) is what makes up the difference, plus a big, thick headR (27,
+  // bigger than Carl's 25 even at Mongo's larger shoulderW, so the head still visually anchors the
+  // torso) and thick limbs (22, vs Carl's 20). waistW is a genuine taper (not flat "barrel") to two
+  // visually distinct volumes — see drawBig's two-hexagon pelvis/chest split.
+  // Fix round 1 (art review): the first two passes (hunch 10-12deg, torsoLen 180-230, headR 21-25,
+  // waistW near shoulderW for a flat "barrel") rendered as a featureless diagonal slab — a torso this
+  // long combined with ANY nonzero lean angle sweeps its far end sideways by torsoLen*sin(angle), so a
+  // 10-12deg permanent "hunch" over a 180-230 unit torso produced a dramatic lean no amount of width/
+  // color tuning fixed, and a small headR/flat waist gave the eye nothing to break the mass up against.
+  // Cut the permanent lean to 4deg, added a real waist taper, and sized the head/limbs up.
+  // Fix round 2: round 1's torsoLen (180, ratio 1.29x Carl's idle height) stood so tall that even at
+  // the camera's widest (zoom 1.0, debugPose's default) Mongo's head crowded the FIGHTER title — no
+  // test catches this (only heavyCharge/s3 at the 1.28 cinematic zoom are graded), but it read badly
+  // in the p3-mongo-idle.png review shot. Trimmed torsoLen to the smallest value that still clears
+  // 1.25x with a safety margin (ratio 1.261) — total height (and therefore idle framing) is set by
+  // the height floor either way, so this is about minimizing margin, not changing the torso:shoulderW
+  // shape ratio. Still clears every numeric gate — see task-3.5-report.md for the verified numbers.
+  mongo:{rig:'big',skin:'#7a8a6a',hair:null,primary:'#2a2a24',secondary:'#4a3a28',
+    limb:22,legLen:95,armLen:97,torsoLen:172,headR:27,shoulderW:112,hipW:60,waistW:80,hunch:D(4),
+    props:['trousers','scars']},
   // PLACEHOLDER (Task 3.4/3.5): a copy of Katia's lean proportions with a bone-white palette and
   // rig:'human' set explicitly.
   skeleton:{skin:'#d8d0c0',hair:null,primary:'#2a2a2a',secondary:'#555555',
@@ -1152,13 +1282,18 @@ const LOOKS={
     hipH:40,legLen:40,bodyLen:119,neckLen:15,headR:17,tailLen:36,
     frontW:13,backW:13,legW:14,
     props:['segments']},
-  // PLACEHOLDER (Task 3.4 gives Grull his own RigBig rig): a scaled-down copy of the hobgoblin's
-  // proportions (def.scale is 1.3, the biggest in the roster — see the mongo comment above for why
-  // this can't just reuse the hobgoblin's own numbers) with a boss-red palette and rig:'human' set
-  // explicitly.
-  grull:{skin:'#5c2f2f',hair:null,primary:'#2f1a1a',secondary:'#8a3a3a',
-    limb:18,legLen:85,armLen:79,torsoLen:69,headR:20,shoulderW:52,hipW:32,earLen:0,rig:'human',
-    props:['club']},
+  // Grull (boss): Task 3.5's RigBig brute rig, same bone set and Fix-round-1/2 reasoning as Mongo (see
+  // LOOKS.mongo's comment — a long torso can't carry a big permanent lean without reading as a
+  // diagonal slab, and margin above the 1.25x height floor should be minimized to keep idle framing
+  // reasonable, since only heavyCharge/s3 are HUD-tested) but darker olive skin, horns (the 'horns'
+  // prop) instead of hair, and a spiked club in the right hand ('spikedclub'). A slightly bigger hunch
+  // than Mongo's (6 vs 4deg) reads as a touch more stooped/feral for the boss without reintroducing
+  // the lean problem. Every EDGE_PAD/height/zoom-cap number here holds at his def.scale even at 1.3,
+  // but 40_movedata.js's BOSSES.grull sets scale:1.1 anyway — a real fight camera crops his head above
+  // debugPose's default zoom=1.0, which no unit test catches; see that file's comment for why.
+  grull:{rig:'big',skin:'#4a5c34',hair:null,primary:'#2a2420',secondary:'#5c3a22',
+    limb:19,legLen:95,armLen:97,torsoLen:179,headR:23,shoulderW:104,hipW:56,waistW:74,hunch:D(6),
+    props:['trousers','horns','spikedclub']},
   // Mother Rat (boss): Task 3.4's RigQuad bone set at boss scale (def.scale:1.3, applied on top of
   // these already-large numbers). Grey-brown fur, a long pink tail, big rounded ears, and yellow
   // teeth drawn in drawQuad.
@@ -1206,10 +1341,42 @@ const Rig={
   // yet renders through whatever placeholder LOOKS entry it has today).
   solve(look,poseKey,t01,face){
     if(look.rig==='quad')return this.solveQuad(look,poseKey,t01,face);
+    if(look.rig==='big')return this.solveBig(look,poseKey,t01,face);
     const{ang,off}=samplePose(POSES,poseKey,t01),a=k=>ang[k]||0;
     const legU=look.legLen*.5,legL=look.legLen*.5,armU=look.armLen*.5,armL=look.armLen*.5;
     const hip={x:(off.x||0)*face,y:-look.legLen+(off.y||0)};
     const torsoA=a('torso');
+    const torso={x:hip.x+face*Math.sin(torsoA)*look.torsoLen*.6,y:hip.y-Math.cos(torsoA)*look.torsoLen*.6};
+    const waist={x:hip.x+face*Math.sin(torsoA)*look.torsoLen*.42,y:hip.y-Math.cos(torsoA)*look.torsoLen*.42};
+    const neck={x:hip.x+face*Math.sin(torsoA)*look.torsoLen,y:hip.y-Math.cos(torsoA)*look.torsoLen};
+    const headA=torsoA+a('head'),headNeckLen=look.headR*1.6;
+    const head={x:neck.x+face*Math.sin(headA)*headNeckLen,y:neck.y-Math.cos(headA)*headNeckLen};
+    const rShoulder={x:neck.x+face*look.shoulderW/2,y:neck.y+4},lShoulder={x:neck.x-face*look.shoulderW/2,y:neck.y+4};
+    const rHip={x:hip.x+face*look.hipW/2,y:hip.y},lHip={x:hip.x-face*look.hipW/2,y:hip.y};
+    const armFK=(sh,shA,elA)=>{const ex=sh.x+face*Math.sin(shA)*armU,ey=sh.y+Math.cos(shA)*armU;
+      const tot=shA+elA;return{elbow:{x:ex,y:ey},hand:{x:ex+face*Math.sin(tot)*armL,y:ey+Math.cos(tot)*armL}}};
+    const legFK=(hp,hA,kA)=>{const kx=hp.x+face*Math.sin(hA)*legU,ky=hp.y+Math.cos(hA)*legU;
+      const tot=hA+kA;return{knee:{x:kx,y:ky},foot:{x:kx+face*Math.sin(tot)*legL,y:ky+Math.cos(tot)*legL}}};
+    const rArm=armFK(rShoulder,a('rShoulder'),a('rElbow')),lArm=armFK(lShoulder,a('lShoulder'),a('lElbow'));
+    const rLeg=legFK(rHip,a('rHip'),a('rKnee')),lLeg=legFK(lHip,a('lHip'),a('lKnee'));
+    return{hip,torso,waist,neck,head,
+      rShoulder,rElbow:rArm.elbow,rHand:rArm.hand,lShoulder,lElbow:lArm.elbow,lHand:lArm.hand,
+      rHip,rKnee:rLeg.knee,rFoot:rLeg.foot,lHip,lKnee:lLeg.knee,lFoot:lLeg.foot}},
+  // Big-brute FK (Phase 3 ruling #5 / Task 3.5's frozen interface): the SAME bone chain formula as
+  // solve() above — same bone names, same hip->torso->neck->head + shoulder/hip-mounted arm/leg FK —
+  // sampled against POSES_BIG instead of POSES, with one structural addition: look.hunch (a per-look
+  // radian constant) is added on top of the per-pose 'torso' angle, every frame, for every pose. That
+  // single line is the "hunched spine offset" — it pitches the whole torso->neck->head chain forward/
+  // down relative to hip on top of whatever that pose's own torso lean already does, which is what
+  // reads as a permanently stooped brute stance rather than a human rig standing up straight. See
+  // POSES_BIG's own table comment for how heavyCharge/s3 combine with this to stay under the HUD's
+  // zoom-cap test despite 'idle' standing well over 1.25x a human's height (the "big rig idle height"
+  // test) — this function makes no other distinction between poses.
+  solveBig(look,poseKey,t01,face){
+    const{ang,off}=samplePose(POSES_BIG,poseKey,t01),a=k=>ang[k]||0;
+    const legU=look.legLen*.5,legL=look.legLen*.5,armU=look.armLen*.5,armL=look.armLen*.5;
+    const hip={x:(off.x||0)*face,y:-look.legLen+(off.y||0)};
+    const torsoA=a('torso')+look.hunch;
     const torso={x:hip.x+face*Math.sin(torsoA)*look.torsoLen*.6,y:hip.y-Math.cos(torsoA)*look.torsoLen*.6};
     const waist={x:hip.x+face*Math.sin(torsoA)*look.torsoLen*.42,y:hip.y-Math.cos(torsoA)*look.torsoLen*.42};
     const neck={x:hip.x+face*Math.sin(torsoA)*look.torsoLen,y:hip.y-Math.cos(torsoA)*look.torsoLen};
@@ -1266,6 +1433,7 @@ const Rig={
   draw(c,F,cam,frame){
     const look0=lookFor(F.def);
     if(look0.rig==='quad')return this.drawQuad(c,F,cam,frame,look0);
+    if(look0.rig==='big')return this.drawBig(c,F,cam,frame,look0);
     const look=look0,scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solve(look,key,t01,face);
     const skinDark=shade(look.skin,-.35);
@@ -1363,6 +1531,84 @@ const Rig={
         c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*10,h.y-30);c.stroke();
         c.fillStyle='#3a2f22';for(let i=0;i<3;i++){c.beginPath();
           c.arc(h.x+face*(6+i*2),h.y-8-i*8,3,0,Math.PI*2);c.fill()}}}
+    c.restore()},
+  // Big-brute draw: same shading philosophy as draw() (thick rounded-cap limb strokes with a dark
+  // outline under the fill, back-limbs-then-torso-then-front-limbs layering, a waist-tapered torso
+  // hexagon) but built on solveBig's joints and with three brute-specific additions the human rig has
+  // no fields for: a filled fist circle at each hand (radius (look.limb/2)*1.5 — the human rig never
+  // draws a distinct hand shape at all, just the forearm stroke's own round line cap, so "1.5x human
+  // size" reads as 1.5x that stroke's own half-width), a heavy brow ridge arced across the upper head
+  // (unconditional — both Mongo and Grull read as "hulking brute"), and dark boots instead of Carl's
+  // optional bare feet (no look.bareFeet field on either big look). look is passed through from
+  // draw()'s dispatch so it doesn't re-resolve lookFor(F.def) a second time.
+  drawBig(c,F,cam,frame,look){
+    look=look||lookFor(F.def);
+    const scale=F.def.scale||1,face=F.face;
+    const{key,t01}=this.poseFor(F),j=this.solveBig(look,key,t01,face);
+    const skinDark=shade(look.skin,-.35);
+    c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
+    const limb=(p,q,w)=>{c.lineCap='round';
+      c.lineWidth=w+3;c.strokeStyle=skinDark;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke();
+      c.lineWidth=w;c.strokeStyle=look.skin;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke()};
+    const foot=(p)=>{const w=look.limb*1.15,h=look.limb*.68,fx=p.x+face*w*.3,fy=p.y+h*.22;
+      c.fillStyle='#241a12';c.strokeStyle='#120c08';c.lineWidth=1.4;c.beginPath();
+      if(c.roundRect)c.roundRect(fx-w/2,fy-h/2,w,h,Math.min(w,h)*.4);else c.rect(fx-w/2,fy-h/2,w,h);
+      c.fill();c.stroke()};
+    const fist=(p)=>{const r=(look.limb/2)*1.5;c.fillStyle=look.skin;c.strokeStyle=skinDark;c.lineWidth=1.8;
+      c.beginPath();c.arc(p.x,p.y,r,0,Math.PI*2);c.fill();c.stroke()};
+    limb(j.lHip,j.lKnee,look.limb);limb(j.lKnee,j.lFoot,look.limb*.85);foot(j.lFoot);
+    limb(j.lShoulder,j.lElbow,look.limb*.95);limb(j.lElbow,j.lHand,look.limb*.8);fist(j.lHand);
+    // Torso: drawn as TWO separate quads (hip->waist pelvis, waist->shoulder chest) with a visible
+    // seam stroke between them, not one hip-to-shoulder hexagon. A big look's torsoLen (needed for
+    // height — see LOOKS.mongo's Fix round 1 note) is long enough that one unbroken hexagon reads as
+    // a featureless slab regardless of width tuning; splitting it at the waist and stroking a seam
+    // there gives the eye a torso/pelvis joint to read, at any torsoLen.
+    const waistW=look.waistW!==undefined?look.waistW:(look.hipW+look.shoulderW)/2*.7;
+    const lWaist={x:j.waist.x-face*waistW/2,y:j.waist.y},rWaist={x:j.waist.x+face*waistW/2,y:j.waist.y};
+    c.beginPath();c.moveTo(j.lHip.x,j.lHip.y);c.lineTo(lWaist.x,lWaist.y);c.lineTo(rWaist.x,rWaist.y);c.lineTo(j.rHip.x,j.rHip.y);c.closePath();
+    c.fillStyle=shade(look.skin,-.08);c.fill();c.lineWidth=2;c.strokeStyle=skinDark;c.stroke();
+    c.beginPath();c.moveTo(lWaist.x,lWaist.y);c.lineTo(j.lShoulder.x,j.lShoulder.y);c.lineTo(j.rShoulder.x,j.rShoulder.y);c.lineTo(rWaist.x,rWaist.y);c.closePath();
+    c.fillStyle=look.skin;c.fill();c.lineWidth=2.4;c.strokeStyle=skinDark;c.stroke();
+    c.strokeStyle=shade(look.skin,-.3);c.lineWidth=1.8;
+    c.beginPath();c.moveTo(lWaist.x,lWaist.y);c.lineTo(rWaist.x,rWaist.y);c.stroke();
+    c.fillStyle=shade(look.skin,.16);c.beginPath();
+    c.ellipse((j.lShoulder.x+j.rShoulder.x)/2,(j.lShoulder.y+j.rShoulder.y)/2+look.torsoLen*.08,
+      look.shoulderW*.26,look.torsoLen*.1,0,0,Math.PI*2);c.fill();
+    c.fillStyle=look.skin;c.beginPath();c.arc(j.head.x,j.head.y,look.headR,0,Math.PI*2);c.fill();
+    c.lineWidth=1.6;c.strokeStyle=skinDark;c.stroke();
+    // Heavy brow ridge: a thick dark arc across the upper-front third of the head.
+    c.strokeStyle=shade(look.skin,-.42);c.lineWidth=look.headR*.32;c.lineCap='round';
+    c.beginPath();c.arc(j.head.x,j.head.y-look.headR*.08,look.headR*.76,D(195),D(345));c.stroke();
+    if(look.hair){c.fillStyle=look.hair;c.beginPath();
+      c.arc(j.head.x,j.head.y-look.headR*.3,look.headR*1.05,Math.PI*1.05,Math.PI*1.95);c.fill()}
+    c.fillStyle='#141414';c.beginPath();c.arc(j.head.x+face*look.headR*.3,j.head.y+look.headR*.1,1.8,0,Math.PI*2);c.fill();
+    limb(j.rHip,j.rKnee,look.limb);limb(j.rKnee,j.rFoot,look.limb*.85);foot(j.rFoot);
+    limb(j.rShoulder,j.rElbow,look.limb*.95);limb(j.rElbow,j.rHand,look.limb*.8);fist(j.rHand);
+    for(const p of look.props||[]){
+      if(p==='trousers'){ // dark trousers with a belt, down to mid-thigh — a bare barrel chest above
+        const hw=look.hipW/2+10,topY=j.hip.y-4,botY=j.hip.y+look.legLen*.42;
+        c.fillStyle=look.primary;
+        c.beginPath();c.moveTo(j.hip.x-hw,topY);c.lineTo(j.hip.x+hw,topY);
+        c.lineTo(j.hip.x+hw*.7,botY);c.lineTo(j.hip.x+hw*.15,botY-6);
+        c.lineTo(j.hip.x-hw*.15,botY-6);c.lineTo(j.hip.x-hw*.7,botY);c.closePath();c.fill();
+        c.strokeStyle=shade(look.primary,-.4);c.lineWidth=1.6;c.stroke();
+        c.fillStyle=look.secondary||shade(look.primary,-.5);c.fillRect(j.hip.x-hw,topY-3,hw*2,6)}
+      if(p==='scars'){ // a couple of jagged lighter lines across the bare chest
+        c.strokeStyle=shade(look.skin,.35);c.lineWidth=2;c.lineCap='round';
+        const cx=(j.lShoulder.x+j.rShoulder.x)/2,cy=(j.lShoulder.y+j.rShoulder.y)/2+look.torsoLen*.16;
+        for(const dx of[-10,8]){c.beginPath();c.moveTo(cx+dx-6,cy-14);c.lineTo(cx+dx+5,cy+16);c.stroke()}}
+      if(p==='horns'){ // two curved horns sweeping up and back from the temples
+        c.strokeStyle='#e8ded0';c.lineWidth=5;c.lineCap='round';
+        for(const s of[-1,1]){c.beginPath();c.moveTo(j.head.x+s*look.headR*.5,j.head.y-look.headR*.7);
+          c.quadraticCurveTo(j.head.x+s*look.headR*1.3,j.head.y-look.headR*1.5,
+            j.head.x+s*look.headR*1.05,j.head.y-look.headR*2.1);c.stroke()}}
+      if(p==='spikedclub'){ // a bigger, spiked take on the human rig's 'club' prop
+        const h=j.rHand,len=look.armLen*.6;
+        c.strokeStyle=look.secondary;c.lineWidth=16;c.lineCap='round';
+        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*len*.3,h.y-len);c.stroke();
+        c.fillStyle='#c9c2b0';
+        for(let i=0;i<4;i++){const t=.25+i*.2,px=h.x+face*len*.3*t,py=h.y-len*t;
+          c.beginPath();c.moveTo(px,py);c.lineTo(px+face*7,py-3);c.lineTo(px,py+5);c.closePath();c.fill()}}}
     c.restore()},
   // Quadruped draw: same shading philosophy as the human draw() (thick rounded-cap limb strokes with
   // a dark outline under the fill, back-limbs-then-body-then-front-limbs layering) built around the
@@ -2172,14 +2418,17 @@ Test.add('every look\'s reach fits inside EDGE_PAD',()=>{
   for(const id in LOOKS){const look=LOOKS[id],sc=(DEFS[id]&&DEFS[id].scale)||1;
     // Quad reach is body length/2 (hip-to-chest half the body, the far end from the fighter's x
     // anchor) plus a front leg's full extension, per the Task 3.4 brief's formula — not the human
-    // shoulderW/armLen/limb formula, which quad looks don't have the fields for.
+    // shoulderW/armLen/limb formula, which quad looks don't have the fields for. 'big' looks (Task
+    // 3.5) reuse the human bone names (shoulderW/armLen/limb), so they fall through to that same
+    // formula rather than needing a third branch.
     const reach=look.rig==='quad'
       ?(look.bodyLen/2+look.legLen)*sc
       :(look.shoulderW/2+look.armLen+look.limb)*sc;
     ok(reach<=EDGE_PAD,id+' reach '+reach.toFixed(1)+' must fit inside EDGE_PAD ('+EDGE_PAD+')')}});
 Test.add('every look renders every pose without throwing',()=>{
   for(const id in LOOKS){const look=LOOKS[id];
-    const table=look.rig==='quad'?POSES_QUAD:POSES,bones=look.rig==='quad'?Rig.bonesQuad:Rig.bones;
+    const table=look.rig==='quad'?POSES_QUAD:look.rig==='big'?POSES_BIG:POSES;
+    const bones=look.rig==='quad'?Rig.bonesQuad:Rig.bones;
     for(const key in table){const j=Rig.solve(look,key,0.5,1);
       for(const b of bones)ok(j[b]&&isFinite(j[b].x)&&isFinite(j[b].y),id+'/'+key+'/'+b)}}
   // Render.frame on a live fight with each def as p1, via an offscreen G.fight swapped in and
@@ -2207,6 +2456,34 @@ Test.add('quad light1 at t0.5 moves the leading front paw forward of idle',()=>{
 Test.add('Render.frame does not throw with a quad p1 (donut) and a quad p2 (grub)',()=>{
   G.startFight({p1:'donut',p2:'grub',ctrl1:Ctrl.idle()});
   ok(!threw(()=>Render.frame(G.fight)),'Render.frame must not throw for donut vs grub');
+  G.toTitle()});
+
+// --- Task 3.5: big rig (Mongo, Grull) ---
+Test.add('big rig idle height at scale 1 is at least 1.25x a human idle height',()=>{
+  // "Height" is the same "max joint y extent from Rig.solve" measure used by the HUD zoom-cap test
+  // below: the topmost (most negative-y) joint returned by Rig.solve, floor at y=0. Both looks are
+  // solved at t=0 with face=1 and no def.scale applied (scale 1), matching the brief's "at scale 1"
+  // wording — the def's actual scale (1.25/1.3) is a separate, already-covered concern (EDGE_PAD reach
+  // and the zoom-cap test just below both apply it).
+  const height=look=>{const j=Rig.solve(look,'idle',0,1);return -Math.min(...Object.values(j).map(p=>p.y))};
+  const carlH=height(LOOKS.carl);
+  for(const id of['mongo','grull']){
+    ok(LOOKS[id].rig==='big',id+' must use rig:"big"');
+    const h=height(LOOKS[id]);
+    ok(h>=1.25*carlH,id+' idle height '+h.toFixed(1)+' must be >= 1.25x carl\'s '+carlH.toFixed(1)+' ('+(1.25*carlH).toFixed(1)+')')}});
+Test.add('every POSES_BIG key the state machine can reach exists with at least 2 keyframes',()=>{
+  const need=['idle','walk','dash','light1','light2','light3','light4','light5','medium','heavyCharge',
+    'heavy','block','blockstun','hit','knockdown','getup','stunned','s1','s2','s3','win','ko'];
+  for(const k of need)ok(POSES_BIG[k]&&POSES_BIG[k].length>=2,'POSES_BIG.'+k)});
+Test.add('big rig solve returns all 16 human-named bones with feet on the floor line',()=>{
+  for(const id of['mongo','grull']){
+    const j=Rig.solve(LOOKS[id],'idle',0,1);
+    for(const b of Rig.bones)ok(j[b]&&isFinite(j[b].x)&&isFinite(j[b].y),id+'/'+b);
+    ok(Math.abs(j.lFoot.y)<6,id+' left foot at y≈0');ok(Math.abs(j.rFoot.y)<6,id+' right foot at y≈0');
+    ok(j.head.y<j.hip.y,id+' head above hip')}});
+Test.add('Render.frame does not throw with a big p1 (mongo) and a big p2 (grull)',()=>{
+  G.startFight({p1:'mongo',p2:'grull',ctrl1:Ctrl.idle()});
+  ok(!threw(()=>Render.frame(G.fight)),'Render.frame must not throw for mongo vs grull');
   G.toTitle()});
 Test.add('sim files contain no DOM or presentation identifiers',()=>{
   for(const f of [Fight,Fighter])

@@ -17,8 +17,7 @@ const CHAMPS={
   donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad'},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
     moves:{s1:{hits:5,gap:4,dmg:1.2}}},
-  // rig:'big' — Mongo is Task 3.4's brute bone set (RigBig). Until then LOOKS.mongo (68_rig.js) is a
-  // human-rig placeholder, same deal as Donut above.
+  // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
   mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big'}};
 const MOBS={
   goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:300,atk:38,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',
@@ -33,10 +32,20 @@ const MOBS={
   // drawn as a segmented larva with stubby leg nubs instead of a cat.
   grub:     {id:'grub',    name:'GRUB',    cls:'beast', hp:380,atk:40,color:'#8a9a4f',armor:.05,crit:.05,critMul:1.6,blockProf:0,  scale:.8, rig:'quad'}};
 const BOSSES={
-  // rig:'big' — Task 3.4's brute bone set. Until then LOOKS.grull (68_rig.js) is a human-rig
-  // placeholder. s3 override + buffs are his boss-signature mechanics per Phase 3 ruling #4 (a mob
-  // def with boss:true, a bigger rig, a unique S3, and one signature buff — no boss-only engine).
-  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1600,atk:70,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:1.3,rig:'big',
+  // rig:'big' — Task 3.5's brute bone set (see LOOKS.grull, 68_rig.js). scale reduced from the
+  // Task 3.4-era placeholder's 1.3 to .94 per the Task 3.5 brief's own allowance ("if Grull at boss
+  // scale cannot fit under the HUD at the cap, reduce his scale... and document it"): LOOKS.grull's
+  // proportions alone (a big-rig look is already >=1.25x a human's idle height, per the "big rig idle
+  // height" test) clear the 1.28-zoom HUD test and EDGE_PAD at 1.3 scale with room to spare, so that
+  // specific test never forced a reduction on its own — but at both 1.3 and an intermediate 1.1, his
+  // head/horns went off the TOP of the canvas once the fight camera zoomed in past debugPose's default
+  // 1.0 during a real --sim run (see docs/shots/p3-floor1-boss.png), which no unit test catches but the
+  // brief's own shot review does ("Grull must read as a horned club-wielding brute" — not if his head
+  // isn't on screen). At scale:.94 the look's own proportions alone (no extra def-level multiplier
+  // stacked on top) are enough to read as clearly bigger than Carl while actually fitting the frame.
+  // s3 override + buffs are his boss-signature mechanics per Phase 3 ruling #4 (a mob def with
+  // boss:true, a bigger rig, a unique S3, and one signature buff — no boss-only engine).
+  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1600,atk:70,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
     boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1400,atk:62,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.3,rig:'quad',
