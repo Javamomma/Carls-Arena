@@ -48,7 +48,7 @@ const Tutorial={
   reset(){
     this.state={step:0,done:[false,false,false,false]};
     this._lights=0;this._parried=false;this._powerSet=false;this._flash=0;
-    this._stepFrames=0;this.stalled=false;
+    this._stepFrames=0;this.stalled=false;this._pendingShieldDown=false;
     this.prompt=this.steps[0].prompt},
   // Fed every Fight.emit'd event (mirrors Broadcast.onEvent's own wiring), gated to the CURRENT step
   // only -- each branch sets just its own step's flag, so an event that would match a LATER step
@@ -72,6 +72,19 @@ const Tutorial={
   tick(fight){
     if(!fight)return;
     if(this._flash>0)this._flash--;
+    // Fix-wave item 6 (final review, Important): lesson 4's SHIELD DOWN/FINISH HIM used to fire the
+    // instant the special STARTED (same frame state.step reached steps.length, below), clearing
+    // fight.p2.guardActive while the special's own hits were still landing -- BUFFS.tutorialGuard
+    // stopped capping damage mid-special, so the dummy died in the same beat the shield dropped
+    // instead of surviving to a real "FINISH HIM" follow-up. The step counter/prompt/flash still
+    // advance on the frame the special starts (unchanged, and still needed for the UI), but the
+    // actual guardActive clear + shieldDown fx are deferred via this flag until fight.p1 is back to
+    // IDLE (the special's own move has fully finished, startup+active+recovery all done) -- checked
+    // here, ahead of the "no more steps" early return just below, since state.step is already at
+    // steps.length by the time this flag is ever set.
+    if(this._pendingShieldDown&&fight.p1&&fight.p1.state==='IDLE'){
+      this._pendingShieldDown=false;
+      if(fight.p2){fight.p2.guardActive=false;fight.fx.push({kind:'shieldDown',x:fight.p2.x,y:FLOOR-160})}}
     const step=this.state.step;
     if(step>=this.steps.length)return;
     if(step===3&&!this._powerSet&&fight.p1){fight.p1.power=100;this._powerSet=true}
@@ -113,16 +126,12 @@ const Tutorial={
       // 3 itself armed, so POWER's own stall hint (pulsing #btnPower) is the only thing left pointing
       // at anything once every attack button lesson is behind the player.
       if(this.state.step===3&&typeof G!=='undefined'){G.forceButtons=false;G.applySettings()}
-      // Release pass: clears the p2 dummy's own guardActive flag (not a Tutorial-side read) the
-      // instant every step is done, so BUFFS.tutorialGuard (47_buffs.js) stops capping damage and
-      // "FINISH HIM" is a real natural KO -- see that buff's comment for why it reads holder state
-      // instead of this object directly. Task 6.4: also pushes the 'shieldDown' fx (72_fx.js: a white
-      // flash + 'SHIELD DOWN' text) on the exact same frame, so the shield's release is a visible
-      // beat, not a silent flag flip -- the HP bar (Render.hud, gated on this same guardActive read)
-      // returns starting the very next frame this draws.
-      if(this.state.step>=this.steps.length&&fight.p2){
-        fight.p2.guardActive=false;
-        fight.fx.push({kind:'shieldDown',x:fight.p2.x,y:FLOOR-160})}}}};
+      // Fix-wave item 6: the guardActive clear + shieldDown fx are deferred to tick()'s own top-of-
+      // function check above (fight.p1 back to IDLE) instead of firing right here -- see that check's
+      // comment for why. Only arm the flag here; nothing about fight.p2 changes on this frame, so the
+      // dummy survives the special's own hits (BUFFS.tutorialGuard, 47_buffs.js, still reads
+      // guardActive true throughout) instead of dying in the same beat SHIELD DOWN fires.
+      if(this.state.step>=this.steps.length&&fight.p2)this._pendingShieldDown=true}}};
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   // Fix-wave item 5 (final review, Minor): the page's own ?atlas=1 URL override, computed once here
   // (location.search doesn't change without a navigation) -- the exact same regex Atlas.load's own

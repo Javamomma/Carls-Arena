@@ -3156,7 +3156,14 @@ Test.add('the tutorial prompt pill clears p1\'s head by >=30px canvas-local px a
   ok(gap>=30,'prompt pill must clear p1\'s head by >=30px at lesson-1 spawn, got '+gap.toFixed(1)+
     ' (headTopY='+headTopY.toFixed(1)+', pillBottom='+pillBottom.toFixed(1)+')');
   G.toTitle();G.sim=false});
-Test.add('completing lesson 4 pushes a shieldDown fx and clears p2.guardActive on the same tick',()=>{
+// Fix-wave item 6 (final review, Important): SHIELD DOWN/FINISH HIM used to fire the instant the
+// special STARTED (same frame lesson 4 completed), clearing guardActive while the special's own hits
+// were still landing -- BUFFS.tutorialGuard stopped capping damage mid-special and the dummy died in
+// the same beat the shield dropped, collapsing "the goblin dies to the next chain" into one frame.
+// Lesson 4 itself still completes (state.step advances) the instant the special starts -- only the
+// actual guardActive clear + shieldDown fx are now deferred until fight.p1 is back to IDLE (the
+// special's whole move -- startup+active+recovery -- has finished).
+Test.add('lesson 4\'s guardActive clear + shieldDown fx are deferred until the special\'s own move ends, not the instant it starts',()=>{
   Tutorial.reset();Tutorial.state.step=3;
   const p1={power:0,state:'IDLE',moveName:null};
   const p2={guardActive:true,x:900};
@@ -3165,12 +3172,35 @@ Test.add('completing lesson 4 pushes a shieldDown fx and clears p2.guardActive o
   eq(p1.power,100);
   p1.state='ATTACK';p1.moveName='s1';
   Tutorial.tick(f);
-  eq(Tutorial.state.step,4,'firing the special must complete lesson 4');
-  eq(p2.guardActive,false,'guardActive must clear the instant lesson 4 completes');
+  eq(Tutorial.state.step,4,'firing the special must complete lesson 4 immediately');
+  eq(p2.guardActive,true,'guardActive must NOT clear yet -- the special is still mid-move');
+  ok(!f.fx.some(e=>e.kind==='shieldDown'),'no shieldDown fx yet -- the special has not resolved');
+  Tutorial.tick(f);Tutorial.tick(f); // still mid-swing
+  eq(p2.guardActive,true,'guardActive must still hold while the special is mid-flight');
+  p1.state='IDLE';p1.moveName=null; // the special's own move has now fully ended
+  Tutorial.tick(f);
+  eq(p2.guardActive,false,'guardActive must clear once the special\'s move actually ends');
   const sd=f.fx.find(e=>e.kind==='shieldDown');
-  ok(sd,'a shieldDown fx must be pushed: '+JSON.stringify(f.fx));
+  ok(sd,'a shieldDown fx must be pushed once the special ends: '+JSON.stringify(f.fx));
   eq(sd.x,p2.x,'the shieldDown fx must be positioned at the dummy');
   Tutorial.reset()});
+Test.add('lesson 4: the dummy survives the special with hp>=1, then a real follow-up light chain gives the natural KO',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({seed:1,ctrl1:Ctrl.script([{f:0,intent:{special:1}}]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=3;Tutorial.state.done=[true,true,true,false];
+  closeIn(G.fight);G.sim=true;
+  G.fight.p1.power=100;
+  for(let i=0;i<60&&G.fight.p1.moveName!=='s1';i++)G.tick();
+  eq(G.fight.p1.moveName,'s1','sanity: the special must have started');
+  eq(Tutorial.state.step,4,'lesson 4 must complete the instant the special starts');
+  for(let i=0;i<60&&G.fight.p1.state!=='IDLE';i++)G.tick();
+  eq(G.fight.p1.state,'IDLE','sanity: the special must have run its own move out to completion');
+  ok(G.fight.p2.hp>=1,'the dummy must survive the whole special with at least 1 hp');
+  eq(G.fight.p2.guardActive,false,'guardActive must have cleared once the special ended');
+  G.fight.p1.ctrl=Ctrl.script([L(0,600)]);
+  for(let i=0;i<600&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT','a real follow-up light chain must finish the dummy for a genuine FINISH HIM KO');
+  G.toTitle();G.sim=false});
 Test.add('the HUD shows the SPAR plate and the "cannot be KO\'d" label while p2.guardActive, and the normal name/hp bar once it clears',()=>{
   Save.data=Meta.defaults();
   G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
