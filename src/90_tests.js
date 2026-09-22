@@ -4980,3 +4980,100 @@ Test.add('Rig.portrait builds and caches a bust per size (56 HUD, 112 roster) of
   // A look with no .body block (the big rigs) keeps the pre-8.1 bust and must still not throw.
   for(const id of['mongo','grull']){LOOKS[id]._portraits=null;
     ok(Rig.portrait(LOOKS[id]).width===56,id+' keeps the legacy 56px bust')}});
+
+// ---- Task 8.2: joint seams ---------------------------------------------------------------------
+// The controller's visual read of 8.1: every rig read as "a jointed wooden mannequin -- each limb
+// segment shows its end caps and a joint circle at shoulders/elbows/knees". Two structural causes,
+// both pinned here because neither is visible to any other test:
+//   1. the joint BALL was drawn at .56-.62 of a limb width -- i.e. 12-24% WIDER than the tube it
+//      joined -- so its outline ring stuck out past the limb as a visible bolt head; and at the
+//      elbow/knee it was drawn BETWEEN the two segments, so the ring also sat on top of the
+//      proximal one.
+//   2. both segments are capsules, so their rounded OUTLINE caps crossed inside the limb.
+// The fix is a draw-order + sizing contract, which is exactly what this asserts, for every rig:
+// both balls down before either segment, every ball inside the limb, and a seam cap (BodyStyle.seam,
+// a fill with no ring at all) afterwards, small enough to sit strictly inside both segments' fills.
+Test.add('every rig lays its joint balls under both segments, inside the limb, and closes the seam after',()=>{
+  const realJoint=BodyStyle.joint,realLimb=BodyStyle.limb,realSeam=BodyStyle.seam;
+  const realStroke=CanvasRenderingContext2D.prototype.stroke;
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  const trace=[];
+  try{
+    BodyStyle.joint=function(cx,x,y,r,look,face,col){trace.push({op:'joint',x,y,r});return realJoint.apply(this,arguments)};
+    BodyStyle.seam=function(cx,x,y,r,look,face,col){trace.push({op:'seam',x,y,r});return realSeam.apply(this,arguments)};
+    BodyStyle.limb=function(cx,x1,y1,x2,y2,w,look,opts){
+      trace.push({op:'limb',x1,y1,x2,y2,w,w2:(opts&&opts.w2!==undefined)?opts.w2:w*.84,
+        bone:(opts&&opts.bone)||'limb',cloth:(opts&&opts.cloth)||'bare'});
+      return realLimb.apply(this,arguments)};
+    // Every look that draws through BodyStyle -- read off LOOKS rather than listed, so a look that
+    // gains a .body block is covered by this contract from the commit that gives it one, across all
+    // three rigs. The bone special case (a skeleton's lobed knobs ARE the art, so it is exempt from
+    // the seam cap itself, but not from the ball-sizing or the draw-order rule) is handled below.
+    const bodyLooks=Object.keys(LOOKS).filter(id=>LOOKS[id].body&&DEFS[id]);
+    ok(bodyLooks.length>=6,'expected at least the six human looks to carry a .body block');
+    for(const id of bodyLooks){
+      const look=LOOKS[id];
+      const f=mkFight({p1:DEFS[id]}),F=f.p1;
+      G.fight=f;G.state='FIGHT';F.state='IDLE';F.f=0;
+      trace.length=0;
+      c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,{x:0,zoom:1},0);c.restore();
+      ok(trace.length>0,id+' must draw through BodyStyle at all, got no calls');
+      const near=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y)<1e-6;
+      // (a) no joint ball may be drawn after a limb whose own endpoint it sits on -- that is the
+      //     ring-on-top-of-a-tube case exactly.
+      for(let i=0;i<trace.length;i++){
+        const t=trace[i];if(t.op!=='joint')continue;
+        for(let k=0;k<i;k++){const L=trace[k];if(L.op!=='limb')continue;
+          const touchesStart=near(t,{x:L.x1,y:L.y1}),touchesEnd=near(t,{x:L.x2,y:L.y2});
+          ok(!(touchesStart||touchesEnd),
+            id+': a joint ball at ('+t.x.toFixed(1)+','+t.y.toFixed(1)+') was drawn AFTER the '+L.bone+
+            ' that meets it -- its ring lands on top of the tube')}}
+      // (b) every ball is at most the half-width of the narrowest segment that meets it, so it can
+      //     never bulge past the limb as a bolt head.
+      let balls=0;
+      for(const t of trace){
+        if(t.op!=='joint')continue;
+        let narrowest=Infinity;
+        for(const L of trace){if(L.op!=='limb')continue;
+          if(near(t,{x:L.x1,y:L.y1}))narrowest=Math.min(narrowest,L.w/2);
+          if(near(t,{x:L.x2,y:L.y2}))narrowest=Math.min(narrowest,L.w2/2)}
+        if(!isFinite(narrowest))continue;
+        balls++;
+        ok(t.r<=narrowest+.001,
+          id+': joint ball r='+t.r.toFixed(2)+' is wider than the narrowest limb it joins (half-width '+
+          narrowest.toFixed(2)+') -- that reads as a bolt head, not a shoulder')}
+      ok(balls>0,id+' must draw at least one joint ball on a limb endpoint');
+      // (c) a seam cap closes every ball that sits BETWEEN two segments (an elbow/knee/hock), and
+      //     it is strictly inside both of their fills so it can never break the silhouette.
+      const bone=trace.some(t=>t.op==='limb'&&t.cloth==='bone');
+      for(const t of trace){
+        if(t.op!=='joint')continue;
+        const ends=trace.filter(L=>L.op==='limb'&&(near(t,{x:L.x1,y:L.y1})||near(t,{x:L.x2,y:L.y2})));
+        if(ends.length<2)continue;                       // an attach point, not a mid-chain joint
+        const cap=trace.find(s=>s.op==='seam'&&near(t,s));
+        if(bone){ok(!cap||cap.r>0,id+': a bone rig may skip the seam cap');continue}
+        ok(cap,id+': the joint at ('+t.x.toFixed(1)+','+t.y.toFixed(1)+
+          ') joins two segments but no seam cap closes their crossing outline arcs');
+        let narrowest=Infinity;
+        for(const L of ends){
+          if(near(t,{x:L.x1,y:L.y1}))narrowest=Math.min(narrowest,L.w/2);
+          if(near(t,{x:L.x2,y:L.y2}))narrowest=Math.min(narrowest,L.w2/2)}
+        ok(cap.r<narrowest,id+': the seam cap (r='+cap.r.toFixed(2)+') must sit strictly inside the '+
+          'narrowest segment it closes (half-width '+narrowest.toFixed(2)+'), or it breaks the outline');
+        const capIdx=trace.indexOf(cap);
+        for(const L of ends)ok(trace.indexOf(L)<capIdx,
+          id+': the seam cap must be drawn AFTER both segments it closes, not before')}
+    }
+    // (d) the seam cap is a FILL, never a ring: the ruling says "never a visible joint ring".
+    BodyStyle.clearCache();
+    let strokes=0;
+    CanvasRenderingContext2D.prototype.stroke=function(){strokes++;return realStroke.apply(this,arguments)};
+    realSeam.call(BodyStyle,c,0,0,6,LOOKS.carl,1,LOOKS.carl.skin);
+    CanvasRenderingContext2D.prototype.stroke=realStroke;
+    eq(strokes,0,'BodyStyle.seam must never stroke -- a stroked cap is the joint ring the ruling forbids');
+  }finally{
+    BodyStyle.joint=realJoint;BodyStyle.limb=realLimb;BodyStyle.seam=realSeam;
+    CanvasRenderingContext2D.prototype.stroke=realStroke;
+    G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});

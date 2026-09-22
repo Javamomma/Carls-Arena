@@ -1636,6 +1636,37 @@ const BodyStyle={
       if(bone){g.strokeStyle=shade(base,lo*1.3);g.lineWidth=Math.max(.7,r*.16);
         g.beginPath();g.moveTo(-r*.5,0);g.lineTo(r*.5,0);g.stroke()}});
     c.drawImage(cv,x-half,y-half,cv.width/px,cv.height/px)},
+  // ---- seam cap (Task 8.2) ----------------------------------------------------------------------
+  // The controller's visual read of 8.1 was that every rig looked like "a jointed wooden mannequin".
+  // Two separate things cause that, and this is the second one. Every limb is a CAPSULE, so each
+  // segment ends in a rounded OUTLINE cap; where two segments meet, those two dark arcs cross INSIDE
+  // the limb and read as the pin of a ball joint. (The first cause is the joint ball itself: drawn
+  // with its own ring, at a radius larger than the limbs it joins, and -- at the elbow/knee -- drawn
+  // BETWEEN the two segments so the ring sat on top of the proximal one. Both are fixed at the call
+  // sites: the balls shrank inside the limb and moved UNDER both segments.)
+  //
+  // The seam cap is a small disc of the limb's own color with NO outline at all, drawn AFTER both
+  // segments and sized by the caller to sit strictly inside BOTH of their fills. It erases the two
+  // interior arcs while leaving the outer silhouette -- the only place the outline is actually doing
+  // work -- completely untouched. It is deliberately not a ring, per the ruling.
+  //
+  // Not used for 'bone' limbs: a skeleton's lobed joint knobs ARE the art (see _paintBoneLimb), so
+  // there is no seam to hide there.
+  seam(c,x,y,r,look,face,col){
+    const b=look&&look.body;
+    if(!b||!(r>.4))return;
+    const base=col||look.skin;
+    const zb=this.zoomBucket(c),px=this.SS*zb,half=r+2;
+    const bw=Math.ceil(half*2*px);
+    const cv=this.cache(this.key(look,'seam:'+Math.round(r*4)+':'+base,face,zb),bw,bw,g=>{
+      g.scale(px,px);g.translate(half,half);
+      const lo=b.skinShade[0],hi=b.skinShade[1];
+      // A shallower gradient than joint()'s: the disc has to read as MORE of the same tube, not as
+      // its own sphere, so the stops sit well inside the tube's own lo/hi range.
+      const gr=g.createLinearGradient(0,-r,0,r);
+      gr.addColorStop(0,shade(base,hi*.75));gr.addColorStop(.45,base);gr.addColorStop(1,shade(base,lo*.6));
+      g.fillStyle=gr;g.beginPath();g.arc(0,0,r,0,Math.PI*2);g.fill()});
+    c.drawImage(cv,x-half,y-half,cv.width/px,cv.height/px)},
   foot(c,x,y,look,face,ang){
     const b=look&&look.body;
     if(!b)return;
@@ -2116,16 +2147,28 @@ const Rig={
     const wrapped=(look.props||[]).includes('bandages');
     const armW=limb*.88,foreW=limb*.70,thighW=limb*1.08,shinW=limb*.86;
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
+    // Task 8.2 joint-seam polish, applied to all three rigs (see BodyStyle.seam). Three changes per
+    // chain: the balls shrank from proud-of-the-limb (.62/.58/.56 of a width, i.e. 12-24% WIDER than
+    // the tube they joined) to inside it; BOTH balls are laid down before EITHER segment, so no ring
+    // is ever drawn on top of a limb; and a seam cap closes the crossing outline arcs afterwards.
+    const boney=cf('upperArm')==='bone';
     const arm=(sh,el,hand)=>{
-      BodyStyle.joint(c,sh.x,sh.y,armW*.62,look,face,this.jointCol(look,'upperArm'));
+      const jc=this.jointCol(look,'foreArm');
+      BodyStyle.joint(c,sh.x,sh.y,armW*.48,look,face,this.jointCol(look,'upperArm'));
+      BodyStyle.joint(c,el.x,el.y,Math.min(armW*.86,foreW)*.48,look,face,jc);
       BodyStyle.limb(c,sh.x,sh.y,el.x,el.y,armW,look,{bone:'upperArm',cloth:cf('upperArm'),face,lit,w2:armW*.86});
-      BodyStyle.joint(c,el.x,el.y,foreW*.58,look,face,this.jointCol(look,'foreArm'));
       BodyStyle.limb(c,el.x,el.y,hand.x,hand.y,foreW,look,{bone:'foreArm',cloth:cf('foreArm'),face,lit,w2:foreW*.90});
+      if(!boney){
+        BodyStyle.seam(c,sh.x,sh.y,armW*.42,look,face,this.jointCol(look,'upperArm'));
+        BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5-1.4,look,face,jc)}
       BodyStyle.hand(c,hand.x,hand.y,limb*.40,look,face,Math.atan2(hand.y-el.y,hand.x-el.x),wrapped)};
     const leg=(hp,kn,ft)=>{
+      const jc=this.jointCol(look,'shin');
+      BodyStyle.joint(c,kn.x,kn.y,Math.min(thighW*.78,shinW)*.48,look,face,jc);
       BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,thighW,look,{bone:'thigh',cloth:cf('thigh'),face,lit,w2:thighW*.78});
-      BodyStyle.joint(c,kn.x,kn.y,shinW*.56,look,face,this.jointCol(look,'shin'));
       BodyStyle.limb(c,kn.x,kn.y,ft.x,ft.y,shinW,look,{bone:'shin',cloth:cf('shin'),face,lit,w2:shinW*.72});
+      if(cf('shin')!=='bone')
+        BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.78,shinW)*.5-1.4,look,face,jc);
       BodyStyle.foot(c,ft.x+face*limb*.28,ft.y+limb*.14,look,face,0)};
     leg(j.lHip,j.lKnee,j.lFoot);
     arm(j.lShoulder,j.lElbow,j.lHand);
