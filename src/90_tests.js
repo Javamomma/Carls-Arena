@@ -2866,6 +2866,26 @@ Test.add('completing the tutorial sets tutorialDone and grants 300 gold exactly 
   eq(G.state,'RESULT');
   eq(Save.data.gold,goldAfterFirst,'a second completion (replayed via the map\'s .node.tutorial row) must not grant gold again');
   G.toTitle();G.sim=false});
+// Fix-wave item 2 (final review, Critical): hideTutorialPrompt() now runs FIRST in onFightEnd, so the
+// tutorial's own prompt pill and lesson banner (both z-index above .overlay) never paint over a
+// tutorial win's VICTORY headline/reward line -- previously only startFight/toTitle/backToOrigin ever
+// hid them, never the RESULT transition itself.
+Test.add('a tutorial completion hides #tutorialPrompt/#tutorialLesson the instant the result overlay shows',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=Tutorial.steps.length;G.fight.p2.guardActive=false; // every step already taught
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  G.tick(); // one real tutorial-mode tick so #tutorialPrompt/#tutorialLesson are actually shown first
+  ok(document.getElementById('tutorialPrompt').classList.contains('show'),
+    'sanity: the prompt must be visible mid-fight before the KO');
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT','the tutorial fight must reach a natural KO result');
+  eq(document.getElementById('result').classList.contains('show'),true,'#result must be showing');
+  ok(!document.getElementById('tutorialPrompt').classList.contains('show'),
+    '#tutorialPrompt must be hidden once the result overlay shows');
+  ok(!document.getElementById('tutorialLesson').classList.contains('show'),
+    '#tutorialLesson must be hidden once the result overlay shows');
+  G.toTitle();G.sim=false});
 // Fix-wave item 1 (final review, Critical): every lesson now gets its own stall timer and fallback
 // hint (not just POWER), and the tutorial fight has no clock of its own -- a tap-only player used to
 // dead-end at lesson 2 (the dummy stays passive until lesson 3, so nothing ever happens) with no hint

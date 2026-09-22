@@ -654,6 +654,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // for tests. Screens.result (arriving in Task 4.5) takes over rendering the overlay once it
   // exists; until then this fills the existing #result DOM directly.
   onFightEnd(won){
+    // Fix-wave item 2 (final review, Critical): hides the tutorial's own prompt pill/lesson banner
+    // (z-index above .overlay) FIRST, before anything else below -- they used to only get hidden by
+    // startFight/toTitle/backToOrigin, never on the RESULT transition itself, so a tutorial win's own
+    // VICTORY headline and reward line rendered underneath a stale "FINISH HIM"/"LESSON 4 / 4" pill on
+    // the very first result screen a new player ever sees. Harmless (a no-op) for every non-tutorial
+    // fight, since the prompt is already hidden outside tutorial mode.
+    this.hideTutorialPrompt();
     const winner=this.fight.winner;
     let rewards=null;
     if(this.mode==='quest'&&this.questTarget){
