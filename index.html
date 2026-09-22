@@ -30,20 +30,20 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 .sub{font-size:11px;color:#999;margin:0 0 10px}
 .scr{box-sizing:border-box;text-align:center;padding:10px 14px;width:820px;max-width:96vw;max-height:456px;overflow:hidden;display:flex;flex-direction:column}
 .scr h2{margin:0 0 8px;font-size:17px;letter-spacing:3px;color:#f4c542;text-transform:uppercase;transform:scaleX(.92)}
-.backbtn{margin-top:14px;width:180px;min-height:44px;align-self:center;padding:10px;font-size:13px;letter-spacing:1px;background:#1a1f33;color:#f4c542;border:2px solid #f4c542;border-radius:6px;flex:none}
+.backbtn{margin-top:8px;width:180px;min-height:44px;align-self:center;padding:10px;font-size:13px;letter-spacing:1px;background:#1a1f33;color:#f4c542;border:2px solid #f4c542;border-radius:6px;flex:none}
 .curstrip{display:flex;gap:14px;justify-content:center;font-size:12px;color:#f4c542;margin:0 0 10px;flex-wrap:wrap}
 .ftabs{display:flex;gap:6px;justify-content:center;margin-bottom:8px}
 .ftab{min-height:44px;padding:6px 16px;font-size:12px;letter-spacing:1px;background:#1a1f33;color:#999;border:1px solid #444;border-radius:4px}
 .ftab.active{color:#f4c542;border-color:#f4c542}
-.path{display:flex;flex-direction:column-reverse;align-items:center;gap:6px;overflow:hidden;flex:1;justify-content:center}
-.node{width:320px;max-width:84%;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;
+.path{display:flex;flex-direction:column-reverse;align-items:center;gap:4px;overflow:hidden;flex:1;justify-content:center}
+.node{width:320px;max-width:84%;min-height:40px;display:flex;align-items:center;justify-content:center;gap:6px;
   font-size:12px;letter-spacing:2px;border-radius:6px;border:2px solid #3a3a3a;background:#181c2b;color:#666}
 .node.open{border-color:#f4c542;color:#f4c542;background:#20263d}
 .node.done{border-color:#5c8a4a;color:#8fd18a;background:#182018}
 .node.boss{font-weight:bold}
 .node.locked::before{content:'\1F512';margin-right:2px}
 .node.boss::before{content:'\1F451';margin-right:2px}
-.energy{display:flex;gap:4px;justify-content:center;margin:6px 0}
+.energy{display:flex;gap:4px;justify-content:center;margin:4px 0}
 .pip{width:14px;height:14px;border-radius:3px;background:#2a2a2a;border:1px solid #555}
 .pip.full{background:#f4c542;border-color:#f4c542}
 /* Fix round 1: cards are a single-column, full-width row (portrait | info | action row) instead of
@@ -4923,6 +4923,20 @@ Test.add('the map screen\'s energy pip row has energy.max pips, energy.n of them
   const pips=[...document.querySelectorAll('#mapEnergy .pip')];
   eq(pips.length,Save.data.energy.max);
   eq(pips.filter(p=>p.classList.contains('full')).length,3);
+  Screens.title()});
+// Fix-wave item 3 (Important): six node rows (5 doors + boss) at the old 44px min-height + 5x6px
+// gaps summed to 294px into a 272px #mapPath box, so `overflow:hidden` clipped both ends -- BOSS cut
+// off at the top, DOOR 1 half-hidden behind BACK (final-review-verdict.md issue 3, measured
+// scrollHeight 283 vs clientHeight 272). .node min-height dropped to 40px, .path gap to 4px, and the
+// energy row/BACK spacing tightened so a full floor's six rows actually fit.
+Test.add('the map path fits a full floor with no clipping/scroll at 854x480 (fix-wave item 3)',()=>{
+  Save.data=Meta.defaults();
+  for(let i=0;i<5;i++)Save.data.floors[1].nodes[i]='open'; // worst case: every row rendered, none locked-thin
+  Save.data.floors[1].boss='open';
+  Screens.map(1);
+  const path=document.getElementById('mapPath');
+  ok(path.scrollHeight<=path.clientHeight,
+    '#mapPath must not overflow: scrollHeight '+path.scrollHeight+' > clientHeight '+path.clientHeight);
   Screens.title()});
 Test.add('a map node click starts the quest fight via G.startFight and records the map screen (with its floor) as the fight\'s origin',()=>{
   Save.data=Meta.defaults();

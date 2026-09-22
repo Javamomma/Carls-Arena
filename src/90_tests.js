@@ -1266,6 +1266,20 @@ Test.add('the map screen\'s energy pip row has energy.max pips, energy.n of them
   eq(pips.length,Save.data.energy.max);
   eq(pips.filter(p=>p.classList.contains('full')).length,3);
   Screens.title()});
+// Fix-wave item 3 (Important): six node rows (5 doors + boss) at the old 44px min-height + 5x6px
+// gaps summed to 294px into a 272px #mapPath box, so `overflow:hidden` clipped both ends -- BOSS cut
+// off at the top, DOOR 1 half-hidden behind BACK (final-review-verdict.md issue 3, measured
+// scrollHeight 283 vs clientHeight 272). .node min-height dropped to 40px, .path gap to 4px, and the
+// energy row/BACK spacing tightened so a full floor's six rows actually fit.
+Test.add('the map path fits a full floor with no clipping/scroll at 854x480 (fix-wave item 3)',()=>{
+  Save.data=Meta.defaults();
+  for(let i=0;i<5;i++)Save.data.floors[1].nodes[i]='open'; // worst case: every row rendered, none locked-thin
+  Save.data.floors[1].boss='open';
+  Screens.map(1);
+  const path=document.getElementById('mapPath');
+  ok(path.scrollHeight<=path.clientHeight,
+    '#mapPath must not overflow: scrollHeight '+path.scrollHeight+' > clientHeight '+path.clientHeight);
+  Screens.title()});
 Test.add('a map node click starts the quest fight via G.startFight and records the map screen (with its floor) as the fight\'s origin',()=>{
   Save.data=Meta.defaults();
   Screens.map(1);
