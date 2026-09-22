@@ -252,13 +252,16 @@ const MOVES={
 const CHAMPS={
   carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human'},
   donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'human'},
-  katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human'}};
+  katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',
+    moves:{s1:{hits:5,gap:4,dmg:1.2}}}};
 const MOBS={
-  goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:300,atk:38,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human'},
-  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:700,atk:55,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.2,rig:'human'}};
+  goblin:   {id:'goblin',   name:'GOBLIN SCAVENGER',cls:'rogue',hp:300,atk:38,color:'#6b9a45',armor:0,  crit:.15,critMul:1.6,blockProf:0,  scale:.85,rig:'human',
+    moves:{heavy:{charge:14,dmg:2.0}}},
+  hobgoblin:{id:'hobgoblin',name:'HOBGOBLIN BRUTE',  cls:'tank', hp:700,atk:55,color:'#5c6b52',armor:.15,crit:.05,critMul:1.6,blockProf:.1, scale:1.2,rig:'human',
+    moves:{heavy:{charge:30,dmg:3.4,hitstop:12}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
-const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,HITSTOP=4,POWER_MAX=300;
+const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,HITSTOP=4,POWER_MAX=300,PARRY_LOCKOUT=20,CRIT_MUL_DEFAULT=1.6;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
 const STAGE_W=1400;
 
@@ -281,11 +284,16 @@ class Fighter{
   constructor(def,side,ctrl){this.def=def;this.side=side;this.face=side;this.ctrl=ctrl;
     this.x=side===1?STAGE_W/2-160:STAGE_W/2+160;this.width=48;this.hp=def.hp;this.maxHp=def.hp;this.power=0;
     this.state='IDLE';this.f=0;this.move=null;this.moveName=null;this.hits=null;this.landed=false;
-    this.combo=0;this.stun=0;this.inv=0;this.blockAge=0}
+    this.combo=0;this.stun=0;this.inv=0;this.blockAge=0;
+    this.parryLock=0;this.blockPressedAt=0;this._parried=false;this._mdCache=null}
   get front(){return this.x+this.face*this.width/2}
   busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
   setState(s,f=0){this.state=s;this.f=f}
-  startMove(name){this.move=MOVES[name];this.moveName=name;this.hits=new Set();this.landed=false;
+  // MOVES[name] shallow-merged with this.def.moves?.[name]; cached per fighter instance (no per-frame alloc).
+  moveDef(name){let c=this._mdCache;if(!c)c=this._mdCache=new Map();let d=c.get(name);
+    if(!d){d=Object.assign({},MOVES[name],this.def.moves&&this.def.moves[name]);c.set(name,d)}
+    return d}
+  startMove(name){this.move=this.moveDef(name);this.moveName=name;this.hits=new Set();this.landed=false;
     if(this.move.cost)this.power-=this.move.cost;this.setState(this.move.charge?'CHARGE':'ATTACK')}
   activeSpan(){const m=this.move,n=m.hits||1;return n*m.active+(n-1)*(m.gap||0)}
   phase(){const m=this.move;if(!m||this.state!=='ATTACK')return null;const su=m.startup,act=this.activeSpan();
@@ -294,9 +302,15 @@ class Fighter{
   hitbox(){if(this.phase()!=='active')return null;const a=this.front,b=this.front+this.face*this.move.range;return{x0:Math.min(a,b),x1:Math.max(a,b)}}
   hurtbox(){return{x0:this.x-this.width/2,x1:this.x+this.width/2}}
   // Consume one frame of intent. Called before tick().
-  act(intent){this.blockAge=intent.block?this.blockAge+1:0;const S=this.state;
+  act(intent){const prevAge=this.blockAge;this.blockAge=intent.block?this.blockAge+1:0;
+    // Parry lockout bookkeeping: a block press that closes its PARRY_WINDOW (or ends) without a
+    // parry arms a PARRY_LOCKOUT-frame lock; a successful parry (flagged by Fight.resolve) clears it.
+    if(prevAge===0&&this.blockAge===1){this.blockPressedAt=this.blockAge;this._parried=false}
+    if(intent.block&&this.blockAge===PARRY_WINDOW+1&&!this._parried)this.parryLock=PARRY_LOCKOUT;
+    if(!intent.block&&prevAge>0&&prevAge<=PARRY_WINDOW&&!this._parried)this.parryLock=PARRY_LOCKOUT;
+    const S=this.state;
     if(S==='IDLE'||S==='BLOCK'){
-      if(intent.special&&this.power>=MOVES['s'+intent.special].cost)return this.startMove('s'+intent.special);
+      if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special);
       if(intent.dashBack){this.inv=DASH_BACK.inv;return this.setState('DASH')}
       if(intent.medium)return this.startMove('medium');
       if(intent.light)return this.startMove('light1');
@@ -307,7 +321,7 @@ class Fighter{
       if(intent.medium&&this.moveName!=='medium')return this.startMove('medium')}
     else if(S==='CHARGE'&&!intent.heavy){this.move=null;this.moveName=null;this.setState('IDLE')}}
   // Advance one frame of the state machine.
-  tick(){this.f++;if(this.inv>0)this.inv--;
+  tick(){this.f++;if(this.inv>0)this.inv--;if(this.parryLock>0)this.parryLock--;
     switch(this.state){
       case'CHARGE':if(this.f>=this.move.charge)this.setState('ATTACK');break;
       case'ATTACK':{const m=this.move;if(m.dash&&this.f<=m.startup)this.x+=this.face*m.dash/m.startup;
@@ -341,6 +355,7 @@ class Fight{
   constructor(o){this.rng=RNG(o.seed||1);this.p1=new Fighter(o.p1,1,o.ctrl1);this.p2=new Fighter(o.p2,-1,o.ctrl2);
     this.frame=0;this.clock=o.clock===undefined?120:o.clock;this.hitstop=0;this.over=false;this.winner=null;this.log=[];this.onEvent=o.onEvent||(()=>{});
     this.fx=[];this.slowmo=0;this.cinematic=0; // fx: plain events drained by G into FX each tick; slowmo/cinematic: frame counters G steps around
+    this.noCrit=!!o.noCrit; // mkFight defaults this true for deterministic Phase 1/2 tests; G.startFight leaves crits live
     this.updateCam()}
   updateCam(){const dist=Math.abs(this.p2.x-this.p1.x);
     this.camTarget={x:(this.p1.x+this.p2.x)/2,zoom:clamp(1.35-(dist-120)/380*0.35,1,1.35)}}
@@ -360,32 +375,37 @@ class Fight{
     if(def.inv>0||def.state==='KNOCKDOWN'||def.state==='KO'||def.state==='WIN')return{type:'miss',att,def,idx};
     const blocking=def.state==='BLOCK'||def.state==='BLOCKSTUN';
     if(blocking&&!m.unblockable){
-      if(def.blockAge<=PARRY_WINDOW&&!m.cost)return{type:'parry',att,def,idx};
+      if(def.blockAge<=PARRY_WINDOW&&def.parryLock===0&&!m.cost)return{type:'parry',att,def,idx};
       return{type:'block',att,def,idx,m}}
     return{type:'hit',att,def,idx,m,last}}
   resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
     if(type==='miss')return this.emit('miss',att,def,0);
-    if(type==='parry'){att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');
+    if(type==='parry'){def.parryLock=0;def._parried=true;att.move=null;att.moveName=null;att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;def.setState('IDLE');
       this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
       return this.emit('parry',def,att,0)}
-    if(type==='block'){const m=r.m;const chip=Math.round(att.def.atk*m.dmg*CHIP);def.hp=Math.max(0,def.hp-chip);def.stun=m.blockstun;def.setState('BLOCKSTUN');
+    if(type==='block'){const m=r.m;const chip=Math.round(att.def.atk*m.dmg*CHIP*(1-(def.def.blockProf||0)));def.hp=Math.max(0,def.hp-chip);def.stun=m.blockstun;def.setState('BLOCKSTUN');
       def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;
       this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip)}
     const m=r.m,last=r.last;
     const cls=CLASS_BEATS[att.def.cls]===def.def.cls?CLASS_BONUS:1;
-    const dmg=Math.round(att.def.atk*m.dmg*cls*(1-def.def.armor));
+    // Crit rolls once per landed hit, after the class bonus and before armor.
+    const crit=!this.noCrit&&this.rng.next()<att.def.crit;
+    const critMul=crit?(att.def.critMul||CRIT_MUL_DEFAULT):1;
+    const dmg=Math.round(att.def.atk*m.dmg*cls*critMul*(1-def.def.armor));
     def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
     att.power=Math.min(POWER_MAX,att.power+m.powHit);def.power=Math.min(POWER_MAX,def.power+m.powTaken);
     def.move=null;def.moveName=null;if(m.knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
-    if(!m.hits||last)def.x+=att.face*m.push;
+    // Medium landed as a combo ender (3rd+ hit of the combo, counting this one) shoves the defender
+    // out past light range instead of the move's normal push, so the follow-up can't just re-chain.
+    const push=(att.moveName==='medium'&&att.combo>=3)?90:m.push;
+    if(!m.hits||last)def.x+=att.face*push;
     // Sim freeze only on a single-hit move or the last blow of a multi-hit special (mirrors the
     // knockback gate above): a 4-hit S3 shouldn't stack four 14-frame freezes back to back. Every
     // landed hit still shakes/sparks/pops for combo feedback; only the freeze itself is gated, and
     // an intermediate multi-hit leaves any hitstop already armed by a same-frame mutual trade alone.
     if(!m.hits||last)this.hitstop=m.hitstop;
-    // crit rolling (att.def.crit/critMul) lands in a later task; fx styling stays neutral until then.
-    this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:'#ffd86b'});
-    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:'#ffd86b',big:false});
+    this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:crit?'#ff5a4a':'#ffd86b'});
+    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit});
     this.fx.push({kind:'shake',amt:m.hitstop});
     this.emit('hit',att,def,dmg)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
@@ -1102,7 +1122,7 @@ Test.add('script controller fires at frames and holds through until',()=>{
   const c=Ctrl.script([{f:0,intent:{light:true}},{f:2,until:4,intent:{block:true}}]);
   eq(c.next().light,true);eq(c.next().block,false);eq(c.next().block,true);eq(c.next().block,true);eq(c.next().block,true);eq(c.next().block,false)});
 Test.add('random controller is deterministic per seed',()=>{const a=Ctrl.random(5),b=Ctrl.random(5);for(let i=0;i<50;i++)eq(JSON.stringify(a.next()),JSON.stringify(b.next()))});
-function mkFight(o={}){return new Fight(Object.assign({seed:1,p1:CHAMPS.carl,p2:CHAMPS.carl,ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),clock:120},o))}
+function mkFight(o={}){return new Fight(Object.assign({seed:1,p1:CHAMPS.carl,p2:CHAMPS.carl,ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),clock:120,noCrit:true},o))}
 function run(f,n){for(let i=0;i<n;i++)f.step()}
 function closeIn(f){f.p1.x=f.p2.x-f.p1.width-10}   // p1 within light range of p2
 const L=(f,until)=>({f,until,intent:{light:true}});
@@ -1213,5 +1233,10 @@ Test.add('a multi-hit special plays its recipe once and a light thud per landed 
   try{for(let i=0;i<90;i++)G.tick()}
   finally{Audio.recipes.s2=origS2;Audio.recipes.light1=origL1;G.fight=null;G.state='TITLE'}
   eq(s2n,1,'s2 recipe fires once, on the moveName transition');eq(l1n,5,'one light thud per landed sub-hit')});
+Test.add('crit rolls from the fight rng and multiplies damage; noCrit disables',()=>{const a=mkFight({ctrl1:Ctrl.script([L(0)]),noCrit:false,seed:3});a.p1.def=Object.assign({},CHAMPS.carl,{crit:1});closeIn(a);run(a,5);eq(a.p2.hp,1000-Math.round(60*1.6));const b=mkFight({ctrl1:Ctrl.script([L(0)])});b.p1.def=Object.assign({},CHAMPS.carl,{crit:1});closeIn(b);run(b,5);eq(b.p2.hp,940)});
+Test.add('block proficiency reduces chip',()=>{const f=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});f.p2.def=Object.assign({},CHAMPS.carl,{blockProf:.5});closeIn(f);run(f,15);eq(f.p2.hp,Math.round(1000-5*.5))});
+Test.add('a missed parry locks out re-parry for PARRY_LOCKOUT frames',()=>{const mash=Ctrl.script(Array.from({length:40},(_,i)=>({f:i*7,until:i*7+5,intent:{block:true}})));const f=mkFight({ctrl1:Ctrl.script([L(0,300)]),ctrl2:mash});closeIn(f);run(f,300);const parries=f.log.filter(e=>e.type==='parry').length;ok(parries<=2,'mash parries: '+parries);const hold=mkFight({ctrl1:Ctrl.script([L(0,300)]),ctrl2:Ctrl.hold({block:true})});closeIn(hold);run(hold,300);ok(hold.p2.hp>=f.p2.hp-50,'holding is not much worse than mashing')});
+Test.add('per-champion move overrides merge over MOVES',()=>{const F=new Fighter(DEFS.goblin,-1,Ctrl.idle());eq(F.moveDef('heavy').charge,14);eq(F.moveDef('light1').startup,MOVES.light1.startup);const H=new Fighter(DEFS.hobgoblin,-1,Ctrl.idle());eq(H.moveDef('heavy').hitstop,12)});
+Test.add('medium as a combo ender pushes the defender out of light range',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0,40),{f:41,intent:{medium:true}}])});closeIn(f);run(f,120);const gap=f.p2.x-f.p1.x-f.p1.width;ok(gap>MOVES.light1.range,'gap '+gap)});
 
 </script></body></html>
