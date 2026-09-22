@@ -96,6 +96,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // Steps the sim one tick, handling KO slow-mo (step every 4th tick while fight.slowmo>0) and
   // draining fight.fx into FX after any step. No rAF/wall-clock dependency, so tests can call it
   // directly. G.loop drives this once per accumulated STEP; simFrames/stepFrame delegate to it too.
+  // FX and the camera both advance exactly once per call here (never from loop()'s rAF cadence):
+  // on a >60Hz display the old rAF-driven update ran FX/camera at double speed and could desync
+  // the S3 card's own clock from fight.cinematic. This also means both freeze whenever tick() isn't
+  // being called, i.e. while PAUSED (desired) or between --sim harness round trips.
   tick(){if(this.state!=='FIGHT')return;const f=this.fight;
     if(f.cinematic>0){
       // Sim frozen (Fight.step() itself no-ops while cinematic>0); G is the one counting the 72
@@ -103,22 +107,18 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // drained and discarded so nothing queued during the card fires the instant it clears.
       f.cinematic--;this.frameNow=f.frame;Input.drain();
       if(f.cinematic===0){this.cinemFocus=null;this.showToast()}
-      FX.pushAll(f.fx);f.fx.length=0;
-      // In sim mode FX ages exactly once per tick, right here (never off rAF/wall clock), so a
-      // --sim --shot screenshot depends only on how many G.tick() calls ran, not on real elapsed
-      // time; loop() skips its own FX.update() while G.sim is true so it isn't aged twice.
-      if(this.sim)FX.update();
-      return}
-    const pm1=f.p1.moveName,pm2=f.p2.moveName;
-    if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
-    else f.step();
-    this.frameNow=f.frame;
-    this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
-    this.checkCinematicFx(f);
+    }else{
+      const pm1=f.p1.moveName,pm2=f.p2.moveName;
+      if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
+      else f.step();
+      this.frameNow=f.frame;
+      this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
+      this.checkCinematicFx(f);
+      this.syncSpecials()}
     FX.pushAll(f.fx);f.fx.length=0;
-    // Same determinism note as the cinematic branch above.
-    if(this.sim)FX.update();
-    this.syncSpecials();
+    const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.6}:null;
+    Camera.update(this.cam,f,punchIn);
+    FX.update();
     // f.over flips true inside f.step() the instant a KO/timeout resolves, well before slow-mo has
     // played; f.slowmo (armed to 90 by Fight.finish) is what keeps this branch re-entering FIGHT and
     // counting down every 4th tick above (f.step() itself is a no-op once over, per Fight.step's own
@@ -156,22 +156,20 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.sim=true;
     this.startFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});
     this.fight.p1.power=300;
-    for(let i=0;i<25;i++)this.tick();
-    for(let i=0;i<20;i++)FX.update()},
+    // Step until the card is up and settled past its 12-frame slide-in. tick() ages FX (and so
+    // FX.card.t) exactly once per call now, so this no longer needs a second FX.update() loop
+    // layered on top (that used to double-age the card once tick() itself started aging FX in sim
+    // mode, per the 2.9 review) — just keep calling the one true per-tick step until the card says
+    // it's ready, with a generous cap in case something upstream never arms it.
+    for(let i=0;i<200&&!(FX.card&&FX.card.t>=20);i++)this.tick()},
   stepFrame(){this.tick()},
   simFrames(n){for(let i=0;i<n;i++)this.stepFrame()},
   syncSpecials(){const p=this.fight.p1.power;
     document.getElementById('btnPower').classList.toggle('ready',p>=100);
     for(const n of[1,2,3])document.getElementById('pk'+n).disabled=p<100*n},
+  // FX/camera no longer advance here: tick() ages both exactly once per sim tick (see its comment),
+  // so loop() is purely the wall-clock -> tick() driver plus the render call.
   loop(t){if(!this.sim){const dt=Math.min(.1,(t-this.last)/1000||0);this.last=t;this.acc+=dt;while(this.acc>=STEP){this.tick();this.acc-=STEP}}
-    if(this.fight){
-      const punchIn=this.fight.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.6}:null;
-      Camera.update(this.cam,this.fight,punchIn)}
-    // In sim mode, tick() already aged FX once per sim step above (or per cinematic frame); aging it
-    // again here off the wall-clock rAF cadence is exactly the non-determinism this closes (a --sim
-    // screenshot's FX state would otherwise depend on real time elapsed between Python evaluate()
-    // round trips, not on the number of sim frames actually stepped).
-    if(!this.sim)FX.update();
     Render.frame(this.fight);requestAnimationFrame(t=>this.loop(t))},
   init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
     document.getElementById('fightBtn').onclick=()=>{Audio.init();this.startFight()};
