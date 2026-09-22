@@ -230,7 +230,9 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
   // action's own lifetime is new.
   drain(){const it={light:false,medium:false,heavy:this.held.heavy,block:this.held.block,dashBack:false,special:0};
     const f=typeof G!=='undefined'&&G.fight&&G.fight.p1;
-    for(const a of this.q)this._buf.push({a,left:this.GESTURE.BUFFER_FRAMES,seq:f?f.moveSeq:-1});
+    // dashBack is a read, not a chain link: it is presented this frame only and never buffered
+    // (Phase 7 fix-wave ruling; a dodge that fires 4 frames after the thumb moved would surprise).
+    for(const a of this.q){if(a==='dashBack')it.dashBack=true;else this._buf.push({a,left:this.GESTURE.BUFFER_FRAMES,seq:f?f.moveSeq:-1})}
     this.q.length=0;
     const kept=[];
     for(const e of this._buf){

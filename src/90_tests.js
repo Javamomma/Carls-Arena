@@ -312,7 +312,7 @@ Test.add('Input.drain folds the action queue into an intent, buffers it for up t
     const it=Input.drain();
     eq(it.light,true,'buffered light must still be presented on drain call '+i);
     eq(it.special,2,'buffered special2 must still be presented on drain call '+i);
-    eq(it.dashBack,true,'buffered dashBack must still be presented on drain call '+i);
+    eq(it.dashBack,i===0,'dashBack is presented on the frame it was queued and never buffered (call '+i+')');
     eq(it.block,true);
     eq(Input.q.length,0,'the raw push queue itself must always be empty right after any drain() call')}
   const after=Input.drain();

@@ -1532,3 +1532,10 @@ No node collapsed to a near-0/near-100 wall; nothing here needed a retune.
   future per-effect dispel. `HITFEEL.<class>.stop` is a drift alarm, not a hitstop source (see the
   7.4-review bullet above) — it earns its keep by staying in the test suite, not by being read at
   runtime. No fix needed; this note is the "one-line note in ARENA.md" M7 asked for.
+
+### Phase 7 final-review fix-wave rulings (2026-09-22)
+- **I1 (dilation swallowed by hitstop):** dilation is spent only on ticks where hitstop is 0; intercept keeps hitstop 10, then 6 real ticks at half rate with the sim actually moving (tested).
+- **I2 (punch-in inert at the 1.12 cap):** the distance ramp's ceiling dropped 1.12→1.06; the HUD-clearance cap stays 1.12; the punch test now runs at the real cap and real landing distances. Close-range framing is ~5% smaller; p7 shots regenerated and reviewed.
+- **I3 (no intent buffer):** Input re-presents light/medium/heavy/special for up to 4 sim frames, dropping on a new move (Fighter.moveSeq) or on HITSTUN/KNOCKDOWN/STUNNED; block is a held flag and dashBack is presented only on its own frame (a dodge is a read, not a chain link). Scripted/AI controllers never touch Input, so batch/matrix/replays are bit-identical.
+- Minors M1-M9 fixed in the same wave (dead audio recipe, dilation/pointer resets on startFight, stun vs knockdown, CHAIN.nodes-derived node 4, effects cleared on finish, README/ARENA accuracy). Deferred: t4/t5 separation is thin at seed-base 101 n=60 (30.0 vs 21.7); revisit in the Phase 10 balance pass.
+- Gate on the close-out commit: build --check; unit 455/0; matrix 216 cells; e2e; tutorial; screens-smoke; phone-check; perf 0.094 ms; batch n=30 t1..t5 100/70/50/36.7/23.3, doors 100/100/96.7, f1_hob 63.3, f1_grull 26.7, f2_mother 20.0.
