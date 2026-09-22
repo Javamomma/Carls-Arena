@@ -8,8 +8,11 @@ class Fighter{
     // set by G.startFight from Sponsors.apply's parryWindow) -- 0 for every fighter that isn't the
     // live player Fighter a fight actually started with an owned insurance perk. secondWindSpent:
     // see BUFFS.secondWind's own comment (47_buffs.js) for why this one-shot flag lives on the
-    // Fighter itself rather than as buff-local state.
-    this.parryBonus=0;this._secondWindSpent=false;
+    // Fighter itself rather than as buff-local state. guardActive (release pass): plain Fighter state
+    // BUFFS.tutorialGuard reads instead of the global Tutorial object -- see that buff's own comment
+    // (47_buffs.js) for why; defaults false for every fighter, set/cleared only by G.startTutorial/
+    // Tutorial.tick on the tutorial's own dummy p2.
+    this.parryBonus=0;this._secondWindSpent=false;this.guardActive=false;
     this.buffs=[]; // resolved BUFFS objects (Buffs.apply sets this once; Fight never re-resolves ids per frame)
     // wasKnockedDown (Task 3.6 refactor): set true the instant this fighter enters KNOCKDOWN
     // (setState below), stays true through the knockdown timer and the post-getup invulnerable

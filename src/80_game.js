@@ -49,7 +49,12 @@ const Tutorial={
     if(step===3&&!this._powerSet&&fight.p1){fight.p1.power=100;this._powerSet=true}
     if(this.steps[step].done(fight)){
       this.state.done[step]=true;this._flash=30;this.state.step++;
-      this.prompt=this.state.step<this.steps.length?this.steps[this.state.step].prompt:'FINISH HIM'}}};
+      this.prompt=this.state.step<this.steps.length?this.steps[this.state.step].prompt:'FINISH HIM';
+      // Release pass: clears the p2 dummy's own guardActive flag (not a Tutorial-side read) the
+      // instant every step is done, so BUFFS.tutorialGuard (47_buffs.js) stops capping damage and
+      // "FINISH HIM" is a real natural KO -- see that buff's comment for why it reads holder state
+      // instead of this object directly.
+      if(this.state.step>=this.steps.length&&fight.p2)fight.p2.guardActive=false}}};
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
   cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
@@ -309,9 +314,14 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       playerBuffs:(o.playerBuffs||[]).concat('noKo')}));
     // Task 5.3: BUFFS.tutorialGuard (47_buffs.js) layered onto the live p2 Fighter directly, outside
     // ENCOUNTERS.tutorial's own frozen `buffs:[]` -- it keeps the dummy from dying to an early light
-    // chain before every step is taught, and stops applying itself the instant Tutorial.state.step
-    // reaches all-steps-done, so "FINISH HIM" is a real natural KO.
-    if(started!==false&&this.fight)this.fight.p2.buffs=(this.fight.p2.buffs||[]).concat(BUFFS.tutorialGuard);
+    // chain before every step is taught, and stops applying itself the instant guardActive is cleared
+    // (Tutorial.tick does that the moment its own step counter reaches all-steps-done), so
+    // "FINISH HIM" is a real natural KO. guardActive is set true here (release pass: the buff itself
+    // no longer reads the global Tutorial object, see BUFFS.tutorialGuard's comment) rather than
+    // defaulted true on the Fighter, since it only ever means something for a tutorial's own dummy.
+    if(started!==false&&this.fight){
+      this.fight.p2.buffs=(this.fight.p2.buffs||[]).concat(BUFFS.tutorialGuard);
+      this.fight.p2.guardActive=true}
     return started},
   // Fix-wave item 4: a fighter's current pose's own top (Rig.topAt), scaled by its def.scale — the
   // per-frame counterpart to the per-fight Rig.extent worst-case calc above, read by tick() every

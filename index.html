@@ -1339,9 +1339,17 @@ const BUFFS={
     // `buffs:[]` (kept empty exactly as specified) -- G.startTutorial layers this onto the live p2
     // Fighter directly after construction, the same "G sets extra live-Fighter state outside the
     // buffIds pipeline" pattern G.startFight already uses for a sponsor perk's parryBonus.
+    // Fix (release pass, Important): this used to read the global Tutorial object directly
+    // (Tutorial.state.step/Tutorial.steps.length), which put a `src/80_game.js` presentation/meta
+    // global inside a sim-boundary hook -- BUFFS.* hooks run from Fight.resolve and must stay pure
+    // functions of (fight, att, def, ref, holder), like every other buff here. holder.guardActive is
+    // plain Fighter state (defaulted false in the Fighter constructor, see 50_fighter.js) that
+    // G.startTutorial sets true right after layering this buff on, and that Tutorial.tick clears the
+    // instant its own step counter reaches steps.length ("FINISH HIM") -- so this hook only ever reads
+    // the holder it was already given, exactly like armorUp/thorns/secondWind do.
     onHit(fight,att,def,ref,holder){
       if(holder!==def)return; // only ever meaningful for the dummy defending, never attacking
-      if(typeof Tutorial==='undefined'||Tutorial.state.step>=Tutorial.steps.length)return; // FINISH HIM: no cap
+      if(!holder.guardActive)return; // FINISH HIM already fired (or this holder was never guarded): no cap
       if(ref.dmg>=holder.hp)ref.dmg=Math.max(0,holder.hp-1)}}};
 const Buffs={
   // Resolves ids[] to BUFFS objects and sets holder.buffs (replacing whatever was there). Called
@@ -1363,8 +1371,11 @@ class Fighter{
     // set by G.startFight from Sponsors.apply's parryWindow) -- 0 for every fighter that isn't the
     // live player Fighter a fight actually started with an owned insurance perk. secondWindSpent:
     // see BUFFS.secondWind's own comment (47_buffs.js) for why this one-shot flag lives on the
-    // Fighter itself rather than as buff-local state.
-    this.parryBonus=0;this._secondWindSpent=false;
+    // Fighter itself rather than as buff-local state. guardActive (release pass): plain Fighter state
+    // BUFFS.tutorialGuard reads instead of the global Tutorial object -- see that buff's own comment
+    // (47_buffs.js) for why; defaults false for every fighter, set/cleared only by G.startTutorial/
+    // Tutorial.tick on the tutorial's own dummy p2.
+    this.parryBonus=0;this._secondWindSpent=false;this.guardActive=false;
     this.buffs=[]; // resolved BUFFS objects (Buffs.apply sets this once; Fight never re-resolves ids per frame)
     // wasKnockedDown (Task 3.6 refactor): set true the instant this fighter enters KNOCKDOWN
     // (setState below), stays true through the knockdown timer and the post-getup invulnerable
@@ -3585,7 +3596,12 @@ const Tutorial={
     if(step===3&&!this._powerSet&&fight.p1){fight.p1.power=100;this._powerSet=true}
     if(this.steps[step].done(fight)){
       this.state.done[step]=true;this._flash=30;this.state.step++;
-      this.prompt=this.state.step<this.steps.length?this.steps[this.state.step].prompt:'FINISH HIM'}}};
+      this.prompt=this.state.step<this.steps.length?this.steps[this.state.step].prompt:'FINISH HIM';
+      // Release pass: clears the p2 dummy's own guardActive flag (not a Tutorial-side read) the
+      // instant every step is done, so BUFFS.tutorialGuard (47_buffs.js) stops capping damage and
+      // "FINISH HIM" is a real natural KO -- see that buff's comment for why it reads holder state
+      // instead of this object directly.
+      if(this.state.step>=this.steps.length&&fight.p2)fight.p2.guardActive=false}}};
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
   cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
@@ -3845,9 +3861,14 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       playerBuffs:(o.playerBuffs||[]).concat('noKo')}));
     // Task 5.3: BUFFS.tutorialGuard (47_buffs.js) layered onto the live p2 Fighter directly, outside
     // ENCOUNTERS.tutorial's own frozen `buffs:[]` -- it keeps the dummy from dying to an early light
-    // chain before every step is taught, and stops applying itself the instant Tutorial.state.step
-    // reaches all-steps-done, so "FINISH HIM" is a real natural KO.
-    if(started!==false&&this.fight)this.fight.p2.buffs=(this.fight.p2.buffs||[]).concat(BUFFS.tutorialGuard);
+    // chain before every step is taught, and stops applying itself the instant guardActive is cleared
+    // (Tutorial.tick does that the moment its own step counter reaches all-steps-done), so
+    // "FINISH HIM" is a real natural KO. guardActive is set true here (release pass: the buff itself
+    // no longer reads the global Tutorial object, see BUFFS.tutorialGuard's comment) rather than
+    // defaulted true on the Fighter, since it only ever means something for a tutorial's own dummy.
+    if(started!==false&&this.fight){
+      this.fight.p2.buffs=(this.fight.p2.buffs||[]).concat(BUFFS.tutorialGuard);
+      this.fight.p2.guardActive=true}
     return started},
   // Fix-wave item 4: a fighter's current pose's own top (Rig.topAt), scaled by its def.scale — the
   // per-frame counterpart to the per-fight Rig.extent worst-case calc above, read by tick() every
@@ -5143,17 +5164,34 @@ Test.add('Render.frame does not throw with a big p1 (mongo) and a big p2 (grull)
   ok(!threw(()=>Render.frame(G.fight)),'Render.frame must not throw for mongo vs grull');
   G.toTitle()});
 Test.add('sim files contain no DOM or presentation identifiers',()=>{
+  const PURITY=/document|canvas|Audio\.|FX\.|Render\.|Stage\./;
   for(const f of [Fight,Fighter])
-    ok(!/document|canvas|Audio\.|FX\.|Render\.|Stage\./.test(f.toString()),(f.name||'?')+' must stay presentation-free');
-  ok(!/document|canvas|Audio\.|FX\.|Render\.|Stage\./.test(AI.make.toString()),'AI.make must stay presentation-free');
+    ok(!PURITY.test(f.toString()),(f.name||'?')+' must stay presentation-free');
+  ok(!PURITY.test(AI.make.toString()),'AI.make must stay presentation-free');
   // Fix round 1 (Important): Broadcast sits right next to the sim boundary (fed by Fight.emit'd
   // events) and its own header claims the same no-DOM/no-presentation purity -- folded into this
   // existing scan (rather than only the separate Math.random/Date.now one below) so a Render./FX./
   // Audio./document/canvas leak into 13_broadcast.js is caught the same way one in Fight/Fighter/AI
   // already is.
   for(const fn of[Broadcast.reset,Broadcast.onEvent,Broadcast.tick,Broadcast._gain,Broadcast._setMult])
-    ok(!/document|canvas|Audio\.|FX\.|Render\.|Stage\./.test(fn.toString()),
-      'Broadcast.'+(fn.name||'?')+' must stay presentation-free')});
+    ok(!PURITY.test(fn.toString()),
+      'Broadcast.'+(fn.name||'?')+' must stay presentation-free');
+  // Release pass (Important, deferred from Task 5.3): every BUFFS.* hook body scanned too -- these
+  // run from inside Fight.resolve/Fight.step (Fight.buffHook) so they're exactly as much on the sim
+  // side of the boundary as Fight/Fighter/AI.make/Broadcast are, and BUFFS.tutorialGuard's own
+  // Tutorial.state.step read (now fixed -- see 47_buffs.js and holder.guardActive) proved a hook here
+  // can drift onto a presentation global with nothing catching it. This scan uses a WIDER pattern
+  // than PURITY above (also bans Tutorial./Screens./G., not just the DOM/render/audio surface) since
+  // a buff hook has no legitimate reason to reach into ANY global outside its own (fight, att, def,
+  // ref, holder) args -- unlike Fight/Fighter/AI.make/Broadcast's own comments, which mention G./
+  // Tutorial. by name often enough (as prose, not code) that the wider pattern would false-positive
+  // on class-body comment text; a single-method toString() like a buff hook's never includes the
+  // doc comment that precedes it, only comments genuinely inside the hook body, so this is safe here.
+  const BUFF_PURITY=/document|canvas|Audio\.|FX\.|Render\.|Stage\.|Tutorial\.|Screens\.|G\./;
+  for(const id in BUFFS){
+    const b=BUFFS[id];
+    for(const hook of['onFrame','onHit','onBlock'])
+      if(b[hook])ok(!BUFF_PURITY.test(b[hook].toString()),'BUFFS.'+id+'.'+hook+' must stay presentation-free')}});
 Test.add('FX and camera advance per tick, not per render',()=>{
   G.startFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
   FX.reset();FX.push({kind:'spark',x:0,y:0,n:4,col:'#fff'});
@@ -6880,9 +6918,10 @@ Test.add('G.shareCard returns an 854x480 PNG data URL, decoded via the raw PNG I
   const bytes=atob(url.slice('data:image/png;base64,'.length));
   const byteAt=i=>bytes.charCodeAt(i);
   // PNG: an 8-byte signature, then the IHDR chunk (4-byte length, 'IHDR', 4-byte width, 4-byte
-  // height, big-endian) starting at byte 12 -- decoded here by hand (Test.run() is synchronous, so
-  // an async Image-element decode isn't available in-page); tests/harness.py's --share does the
-  // equivalent decode in Python against the same bytes.
+  // height, big-endian) starting at byte 12 -- decoded here by hand rather than via an async
+  // Image-element load (Test.run() is async since Task 5.5, so a case COULD await one, but a raw
+  // byte decode is simpler and needs no DOM element or load event at all); tests/harness.py's
+  // --share does the equivalent decode in Python against the same bytes.
   eq(bytes.slice(12,16),'IHDR','bytes 12..16 must be the IHDR chunk tag');
   const u32=off=>(byteAt(off)<<24|byteAt(off+1)<<16|byteAt(off+2)<<8|byteAt(off+3))>>>0;
   eq(u32(16),854,'PNG width must be 854');
@@ -6974,15 +7013,18 @@ Test.add('Ctrl.tutorialDummy is deterministic (two fresh instances match exactly
   for(let i=0;i<200;i++){seq1.push(JSON.stringify(c1.next(null,me,me)));seq2.push(JSON.stringify(c2.next(null,me,me)))}
   eq(JSON.stringify(seq1),JSON.stringify(seq2),'two fresh instances must be identical (deterministic, no rng)');
   ok(seq1.some(s=>JSON.parse(s).medium),'the dummy must throw a medium at some point')});
-Test.add('BUFFS.tutorialGuard caps incoming damage so a defending holder can\'t drop below 1 hp while Tutorial has steps left, and stops capping once FINISH HIM fires',()=>{
-  Tutorial.reset();
-  const b=BUFFS.tutorialGuard,holder={hp:5};
+Test.add('BUFFS.tutorialGuard caps incoming damage so a defending holder can\'t drop below 1 hp while holder.guardActive is set, and stops capping once cleared',()=>{
+  // Release pass: this buff now reads only holder.guardActive (plain Fighter state), not the global
+  // Tutorial object -- see BUFFS.tutorialGuard's own comment (47_buffs.js) and the sim-purity scan
+  // above, which now includes every BUFFS.* hook.
+  const b=BUFFS.tutorialGuard,holder={hp:5,guardActive:true};
   let ref={dmg:20};b.onHit(null,{},holder,ref,holder);
-  eq(ref.dmg,4,'dmg must be capped to leave exactly 1 hp while a step remains');
-  Tutorial.state.step=Tutorial.steps.length; // all steps done -- FINISH HIM
+  eq(ref.dmg,4,'dmg must be capped to leave exactly 1 hp while guardActive is true');
+  holder.guardActive=false; // FINISH HIM: Tutorial.tick clears this once every step is done
   ref={dmg:20};b.onHit(null,{},holder,ref,holder);
-  eq(ref.dmg,20,'dmg must pass through uncapped once every step is done');
-  Tutorial.reset()});
+  eq(ref.dmg,20,'dmg must pass through uncapped once guardActive is cleared');
+  ref={dmg:20};b.onHit(null,{},{hp:5},ref,{hp:5,guardActive:true}); // holder !== def: never applies
+  eq(ref.dmg,20,'must not cap when holder is not the defender of this exchange')});
 Test.add('the tutorial dummy cannot be KO\'d by a light chain before every Tutorial step is done, but dies normally once they are',()=>{
   Save.data=Meta.defaults();
   G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
@@ -6990,7 +7032,7 @@ Test.add('the tutorial dummy cannot be KO\'d by a light chain before every Tutor
   for(let i=0;i<300;i++)G.tick();
   eq(G.state,'FIGHT','a light chain alone must never finish the dummy before PARRY/POWER are taught');
   ok(G.fight.p2.hp>=1,'the dummy\'s hp must never have dropped below 1');
-  Tutorial.state.step=Tutorial.steps.length; // simulate every step having been completed
+  Tutorial.state.step=Tutorial.steps.length;G.fight.p2.guardActive=false; // simulate every step having been completed (mirrors what Tutorial.tick itself would clear)
   for(let i=0;i<500&&G.state!=='RESULT';i++)G.tick();
   eq(G.state,'RESULT','the SAME light chain must now finish the dummy once every step is done');
   G.toTitle();G.sim=false});
@@ -6998,7 +7040,7 @@ Test.add('completing the tutorial sets tutorialDone and grants 300 gold exactly 
   Save.data=Meta.defaults();
   const goldBefore=Save.data.gold||0;
   G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
-  Tutorial.state.step=Tutorial.steps.length; // every step already taught -- the dummy is now killable
+  Tutorial.state.step=Tutorial.steps.length;G.fight.p2.guardActive=false; // every step already taught -- the dummy is now killable
   closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
   for(let i=0;i<400;i++)G.tick();
   eq(G.state,'RESULT','the tutorial fight must reach a natural KO result');
@@ -7007,7 +7049,7 @@ Test.add('completing the tutorial sets tutorialDone and grants 300 gold exactly 
   const goldAfterFirst=Save.data.gold;
   G.toTitle();
   G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
-  Tutorial.state.step=Tutorial.steps.length;
+  Tutorial.state.step=Tutorial.steps.length;G.fight.p2.guardActive=false;
   closeIn(G.fight);G.fight.p2.hp=1;
   for(let i=0;i<400;i++)G.tick();
   eq(G.state,'RESULT');
@@ -7037,7 +7079,7 @@ Test.add('a fresh save\'s CAMPAIGN button starts the tutorial instead of opening
 Test.add('the result screen shows a TUTORIAL COMPLETE line on a tutorial win',()=>{
   Save.data=Meta.defaults();
   G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
-  Tutorial.state.step=Tutorial.steps.length; // every step already taught -- the dummy is now killable
+  Tutorial.state.step=Tutorial.steps.length;G.fight.p2.guardActive=false; // every step already taught -- the dummy is now killable
   closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
   for(let i=0;i<400;i++)G.tick();
   eq(G.state,'RESULT');

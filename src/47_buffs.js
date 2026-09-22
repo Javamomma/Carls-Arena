@@ -89,9 +89,17 @@ const BUFFS={
     // `buffs:[]` (kept empty exactly as specified) -- G.startTutorial layers this onto the live p2
     // Fighter directly after construction, the same "G sets extra live-Fighter state outside the
     // buffIds pipeline" pattern G.startFight already uses for a sponsor perk's parryBonus.
+    // Fix (release pass, Important): this used to read the global Tutorial object directly
+    // (Tutorial.state.step/Tutorial.steps.length), which put a `src/80_game.js` presentation/meta
+    // global inside a sim-boundary hook -- BUFFS.* hooks run from Fight.resolve and must stay pure
+    // functions of (fight, att, def, ref, holder), like every other buff here. holder.guardActive is
+    // plain Fighter state (defaulted false in the Fighter constructor, see 50_fighter.js) that
+    // G.startTutorial sets true right after layering this buff on, and that Tutorial.tick clears the
+    // instant its own step counter reaches steps.length ("FINISH HIM") -- so this hook only ever reads
+    // the holder it was already given, exactly like armorUp/thorns/secondWind do.
     onHit(fight,att,def,ref,holder){
       if(holder!==def)return; // only ever meaningful for the dummy defending, never attacking
-      if(typeof Tutorial==='undefined'||Tutorial.state.step>=Tutorial.steps.length)return; // FINISH HIM: no cap
+      if(!holder.guardActive)return; // FINISH HIM already fired (or this holder was never guarded): no cap
       if(ref.dmg>=holder.hp)ref.dmg=Math.max(0,holder.hp-1)}}};
 const Buffs={
   // Resolves ids[] to BUFFS objects and sets holder.buffs (replacing whatever was there). Called
