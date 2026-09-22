@@ -279,7 +279,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(won&&(this.mode==='quest'||this.mode==='arena')){
       const scoreCtx=this.mode==='quest'?{floor:this.questTarget.floor}:{streak:Save.data.arena.streak};
       Meta.recordScore(Object.assign({viewers:peakViewers,champ:this.champ,
-        date:new Date().toISOString().slice(0,10)},scoreCtx))}
+        date:Meta.today()},scoreCtx))}
     this.state='RESULT';
     if(typeof Screens!=='undefined'&&Screens.result)Screens.result(rewards,won,peakViewers);
     else{
@@ -366,10 +366,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       if(f.cinematic===0){this.cinemFocus=null;this.showToast()}
     }else{
       const pm1=f.p1.moveName,pm2=f.p2.moveName;
-      if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
-      else f.step();
+      // Fix round 1 (ruling): Broadcast.tick's decay/multiplier-window countdown counts SIM frames,
+      // not G.tick() calls -- called only from inside the branch that actually ran f.step(), so the
+      // once-every-4th-call KO slow-mo throttle above doesn't also run Broadcast's windows 4x too
+      // fast relative to the fight frames they're meant to track.
+      if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--;Broadcast.tick(f)}}
+      else{f.step();Broadcast.tick(f)}
       this.frameNow=f.frame;
-      Broadcast.tick(f);
       this.checkSpecial(f.p1,pm1);this.checkSpecial(f.p2,pm2);
       this.checkCinematicFx(f);
       this.syncSpecials()}

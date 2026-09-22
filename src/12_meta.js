@@ -72,6 +72,11 @@ const Meta={
     Save.put();
     return true},
   buyIso(){return Meta.buy('isoPack')},
+  // Fix round 1 (Important): the leaderboard date must route through the same injectable clock
+  // Energy already uses (Energy.now, real Date.now() by default but swappable in tests) instead of
+  // calling Date.now()/new Date() directly -- a raw wall-clock read makes the leaderboard date
+  // untestable and inconsistent with the one other place a wall clock already enters this codebase.
+  today(){return new Date(Energy.now()).toISOString().slice(0,10)},
   // Task 5.1: the one place Save.data.leaderboard is ever inserted into -- push, sort desc by
   // viewers, cap at 10. G.onFightEnd is the only caller today (a quest/arena win, entry shaped
   // {viewers,champ,floor|streak,date}), kept generic here so nothing else has to re-implement the

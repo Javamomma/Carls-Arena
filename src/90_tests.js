@@ -356,7 +356,15 @@ Test.add('Render.frame does not throw with a big p1 (mongo) and a big p2 (grull)
 Test.add('sim files contain no DOM or presentation identifiers',()=>{
   for(const f of [Fight,Fighter])
     ok(!/document|canvas|Audio\.|FX\.|Render\.|Stage\./.test(f.toString()),(f.name||'?')+' must stay presentation-free');
-  ok(!/document|canvas|Audio\.|FX\.|Render\.|Stage\./.test(AI.make.toString()),'AI.make must stay presentation-free')});
+  ok(!/document|canvas|Audio\.|FX\.|Render\.|Stage\./.test(AI.make.toString()),'AI.make must stay presentation-free');
+  // Fix round 1 (Important): Broadcast sits right next to the sim boundary (fed by Fight.emit'd
+  // events) and its own header claims the same no-DOM/no-presentation purity -- folded into this
+  // existing scan (rather than only the separate Math.random/Date.now one below) so a Render./FX./
+  // Audio./document/canvas leak into 13_broadcast.js is caught the same way one in Fight/Fighter/AI
+  // already is.
+  for(const fn of[Broadcast.reset,Broadcast.onEvent,Broadcast.tick,Broadcast._gain,Broadcast._setMult])
+    ok(!/document|canvas|Audio\.|FX\.|Render\.|Stage\./.test(fn.toString()),
+      'Broadcast.'+(fn.name||'?')+' must stay presentation-free')});
 Test.add('FX and camera advance per tick, not per render',()=>{
   G.startFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
   FX.reset();FX.push({kind:'spark',x:0,y:0,n:4,col:'#fff'});
@@ -1345,6 +1353,11 @@ Test.add('Meta.recordScore inserts, sorts desc by viewers, and caps at 10',()=>{
   eq(Save.data.leaderboard.length,10,'must cap at 10');
   eq(Save.data.leaderboard[0].viewers,1100,'must be sorted descending');
   eq(Save.data.leaderboard[9].viewers,200,'the lowest 2 of 12 entries must have been dropped')});
+Test.add('Meta.today() reads the injectable clock (Energy.now), not a raw Date.now()/new Date()',()=>{
+  const orig=Energy.now;
+  Energy.now=()=>new Date('2026-03-15T12:00:00Z').getTime();
+  eq(Meta.today(),'2026-03-15');
+  Energy.now=orig});
 Test.add('G wires Broadcast: startFight resets it, a scripted landed hit raises viewers, and tick() drives decay',()=>{
   Save.data=Meta.defaults();
   G.startFight({p2:'donut',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
@@ -1352,6 +1365,21 @@ Test.add('G wires Broadcast: startFight resets it, a scripted landed hit raises 
   closeIn(G.fight);G.sim=true;
   for(let i=0;i<8;i++)G.tick();
   ok(Broadcast.state.viewers>0,'a landed player hit must raise viewers via G.onEvent -> Broadcast.onEvent');
+  G.toTitle();G.sim=false});
+// Fix round 1 (ruling): Broadcast.tick must fire once per actual SIM frame (f.step()), not once per
+// G.tick() call -- during the KO slow-mo throttle (one real f.step() every 4th G.tick() call) the
+// hitstun decay/multiplier-window countdown must advance at the fight's own frame rate, not 4x it.
+Test.add('Broadcast.tick advances once per sim frame during KO slow-mo, not once per G.tick() call',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p2:'donut',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.sim=true;
+  Broadcast.onEvent('parry',G.fight.p1,G.fight.p2,0,G.fight); // arm a 180-frame x1.5 window
+  eq(Broadcast.state.mult,1.5);
+  G.fight.slowmo=90; // same throttle Fight.finish() arms on KO: one real f.step() per 4 G.tick() calls
+  const frameBefore=G.fight.frame;
+  for(let i=0;i<4;i++)G.tick(); // exactly one slow-mo'd sim step should occur
+  eq(G.fight.frame,frameBefore+1,'sanity: slow-mo must still only have advanced the sim by 1 frame');
+  eq(Broadcast._multFrames,179,'Broadcast.tick must have run exactly once (180-1), not 4 times (180-4)');
   G.toTitle();G.sim=false});
 Test.add('a scripted quest KO win records a leaderboard entry (peak viewers) and the result text shows PEAK VIEWERS',()=>{
   Save.data=Meta.defaults();
@@ -1365,6 +1393,28 @@ Test.add('a scripted quest KO win records a leaderboard entry (peak viewers) and
   ok(!!entry.date,'entry must carry a date');
   const line=document.getElementById('resultLine').textContent;
   ok(line.includes('PEAK VIEWERS'),'result text must include PEAK VIEWERS: '+line);
+  G.toTitle();G.sim=false});
+Test.add('a quest win records the leaderboard date via the injectable clock (Energy.now), not a raw Date.now()',()=>{
+  Save.data=Meta.defaults();
+  const orig=Energy.now;
+  Energy.now=()=>new Date('2027-01-02T00:00:00Z').getTime();
+  G.startFight({floor:1,node:0,champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(Save.data.leaderboard[0].date,'2027-01-02','recorded date must come from the injected clock');
+  Energy.now=orig;
+  G.toTitle();G.sim=false});
+Test.add('a scripted arena win through G banks a leaderboard entry with a streak field (not floor)',()=>{
+  Save.data=Meta.defaults();Save.data.arena={best:0,streak:0};
+  G.startArena({ctrl1:Ctrl.script([L(0)]),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Save.data.leaderboard.length,1,'an arena win must record exactly one leaderboard entry');
+  const entry=Save.data.leaderboard[0];
+  eq(entry.streak,1,'must record the post-win streak (Arena.record already ran by the time this reads it)');
+  eq(entry.floor,undefined,'an arena entry must not carry a floor field');
+  eq(entry.champ,'carl');
   G.toTitle();G.sim=false});
 Test.add('a quest loss still shows PEAK VIEWERS on the result screen but records no leaderboard entry',()=>{
   Save.data=Meta.defaults();
