@@ -2850,15 +2850,17 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // entry whose Stats.derive(hp,atk) overrides p1's def -- o.p1 (a raw DEFS id, used by tests/debug
   // to put a mob/boss in p1) still wins for WHICH def becomes p1 when given; the derive only ever
   // applies when that resolved id is actually owned in the roster (mobs/bosses aren't), matching the
-  // Phase 4 ruling "fall back to base stats for non-roster p1 defs". G.mode is 'quest' whenever
-  // {floor,node} or a plain quest-encounter id was used, 'arena' only via the explicit o.mode
-  // G.startArena() sugar passes, else 'exhibition'. Energy is spent (via Quest.start, refusing --
-  // unchanged state -- when locked/empty) only by the {floor,node} sugar itself: a *plain*
-  // {encounter:'f1_goblin'} id is still labeled G.mode='quest' for onFightEnd/HUD purposes but
-  // spends no energy, so tests/batch.py's --encounter win-rate sweeps (dozens of restart-on-KO
-  // fights against one encounter id) and docs/ARENA.md's --encounter screenshot recipes keep
-  // working unmodified -- "the sugar" (45_encounter.js's own term for {floor,node}) is the one and
-  // only gate.
+  // Phase 4 ruling "fall back to base stats for non-roster p1 defs".
+  //
+  // Fix round 1 (controller review): G.mode is 'quest' ONLY when the fight was started through the
+  // {floor,node} sugar and its Quest.start actually succeeded -- never for a bare {encounter:ID}.
+  // The earlier version labeled a bare encounter id 'quest' too (without spending energy or
+  // checking the lock), which meant onFightEnd's Quest.complete/Rewards.grant ran for it on a win --
+  // free, unlimited reward/progression farming for anything that repeatedly starts an encounter id
+  // (exactly what tests/batch.py's --encounter win-rate sweeps and docs/ARENA.md's --encounter
+  // screenshot recipes already do, dozens of times per run). A bare encounter id is 'exhibition' now
+  // (no Quest.complete, no rewards, no energy) but still populates G.encounter so the HUD floor line
+  // keeps working -- 'arena' remains the explicit o.mode G.startArena() sugar passes.
   startFight(o={}){const seed=o.seed||this.seed;
     this.lastFightOpts=o; // FIGHT AGAIN replays these (minus seed) so a custom p2/ai isn't lost
     let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
@@ -2872,22 +2874,16 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       if(!fl)throw new Error('unknown floor: '+o.floor);
       encSrc=o.node==='boss'?fl.boss:fl.nodes[o.node];
       if(!encSrc)throw new Error('unknown floor node: floor '+o.floor+' node '+o.node)}
-    // questTarget = {floor,node} for Quest.complete/Quest.start, resolved either straight off the
-    // {floor,node} sugar above, or by finding which FLOORS node/boss a plain encounter id names.
+    // questTarget = {floor,node}, set ONLY by the {floor,node} sugar succeeding through Quest.start
+    // (spends 1 energy, checks the node is open) -- a bare o.encounter id never gets one, so it can
+    // never drive Quest.complete/Rewards.grant in onFightEnd. A refusal here leaves every G.* fight
+    // property (state, fight, encounter, mode, champ) exactly as it was; nothing below has run yet.
     let questTarget=null;
-    if(o.floor!==undefined)questTarget={floor:o.floor,node:o.node};
-    else if(typeof encSrc==='string'){
-      for(const fl of FLOORS){
-        const idx=fl.nodes.indexOf(encSrc);
-        if(idx>=0){questTarget={floor:fl.floor,node:idx};break}
-        if(fl.boss===encSrc){questTarget={floor:fl.floor,node:'boss'};break}}}
-    const mode=o.mode||(questTarget?'quest':'exhibition');
-    // Only the {floor,node} sugar spends energy/checks the lock -- see the block comment above for
-    // why a plain encounter id must not. A refusal leaves every G.* fight property (state, fight,
-    // encounter, mode, champ) exactly as it was; nothing below this point has run yet.
     if(o.floor!==undefined){
+      questTarget={floor:o.floor,node:o.node};
       const id=Quest.start(questTarget.floor,questTarget.node);
       if(!id){this.refuseQuest(questTarget.floor,questTarget.node);return false}}
+    const mode=o.mode||(questTarget?'quest':'exhibition');
     this.mode=mode;this.questTarget=questTarget;
     if(encSrc){
       // Arena encounters (o.mode==='arena', built by Arena.start() via G.startArena()) arrive
@@ -3025,7 +3021,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     }else if(this.mode==='arena')Arena.record(won);
     let leveledUp=false;
     if(rewards){
-      const entry=Save.data.roster[Save.data.active];
+      // Fix round 1: reads this.champ (the champion who actually fought), not Save.data.active --
+      // they're normally the same id, but reading champ is the one that's actually correct if they
+      // ever diverge (an explicit o.champ different from the active roster pick).
+      const entry=Save.data.roster[this.champ];
       const lvlBefore=entry?entry.level:0;
       Rewards.grant(rewards);
       if(entry&&entry.level>lvlBefore)leveledUp=true}
@@ -4242,27 +4241,37 @@ Test.add('a non-roster p1 def (a mob/boss put in p1 for debug/test purposes) fal
   G.startFight({p1:'donut'});
   eq(G.fight.p1.maxHp,CHAMPS.donut.hp);eq(G.fight.p1.def.atk,CHAMPS.donut.atk);
   G.toTitle()});
-Test.add('G.mode is quest for {floor,node} or a plain quest encounter id, arena via G.startArena, exhibition otherwise',()=>{
+Test.add('G.mode is quest ONLY via a successful {floor,node} Quest.start; a bare encounter id is exhibition (still populates G.encounter)',()=>{
   Save.data=Meta.defaults();
   G.startFight({floor:1,node:0});eq(G.mode,'quest');G.toTitle();
   Save.data=Meta.defaults();
-  G.startFight({encounter:'f1_goblin'});eq(G.mode,'quest');G.toTitle();
+  G.startFight({encounter:'f1_goblin'});
+  eq(G.mode,'exhibition','a bare encounter id must never be quest mode (fix round 1: farming fix)');
+  ok(G.encounter&&G.encounter.floor===1&&G.encounter.name==='THE DEPTHS','G.encounter must still be populated for the HUD floor line');
+  G.toTitle();
   Save.data=Meta.defaults();
   G.startArena();eq(G.mode,'arena');G.toTitle();
   G.startFight({p2:'donut'});eq(G.mode,'exhibition');G.toTitle()});
-// "The sugar" (45_encounter.js's own term) is specifically the {floor,node} option object -- a plain
-// {encounter:ID} start must stay ungated so tests/batch.py's --encounter win-rate sweeps (dozens of
-// restart-on-KO fights against one id) and docs/ARENA.md's --encounter screenshot recipes, both
-// pre-existing and unaware of energy, keep working unmodified.
-Test.add('a plain {encounter:ID} quest fight does not spend energy; only the {floor,node} sugar does',()=>{
+// Fix round 1 (controller review, Important): the pre-fix version labeled a bare {encounter:ID}
+// start G.mode='quest' too, so a scripted win through it ran Quest.complete/Rewards.grant with no
+// energy spent and no lock check -- free, unlimited reward/progression farming for anything that
+// repeatedly starts an encounter id (tests/batch.py's --encounter win-rate sweeps and
+// docs/ARENA.md's --encounter screenshot recipes already do exactly that, dozens of times per run).
+// Now a bare encounter id is 'exhibition': no energy spent AND no rewards/floor-state changes on a
+// win either -- verified end to end here, not just "no energy spent" as the old (insufficient) test
+// checked.
+Test.add('a bare {encounter:ID} scripted KO win grants nothing: no rewards, no energy spent, no floor/roster/gold change',()=>{
   Save.data=Meta.defaults();
-  G.startFight({encounter:'f1_goblin'});
-  eq(G.mode,'quest');eq(Save.data.energy.n,10,'a plain encounter id must not spend energy');
-  G.toTitle();
-  Save.data=Meta.defaults();
-  G.startFight({floor:1,node:0});
-  eq(Save.data.energy.n,9,'the {floor,node} sugar must spend 1 energy via Quest.start');
-  G.toTitle()});
+  const before=JSON.stringify(Save.data);
+  G.startFight({encounter:'f1_goblin',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  eq(G.mode,'exhibition');
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(document.getElementById('resultTitle').textContent,'VICTORY','the fight itself still plays out normally');
+  eq(G.lastRewards,null,'a bare encounter win must not grant anything');
+  eq(JSON.stringify(Save.data),before,'Save.data (gold/iso/xp/energy/floor node states) must be completely unchanged');
+  G.toTitle();G.sim=false});
 Test.add('G.startFight({floor,node}) refuses without starting a fight when energy is empty, leaving G.state/G.fight unchanged',()=>{
   Save.data=Meta.defaults();Save.data.energy.n=0;
   G.toTitle();
@@ -4278,7 +4287,8 @@ Test.add('G.startFight({floor,node}) refuses a locked node the same way',()=>{
   eq(G.state,stateBefore)});
 Test.add('scripted KO in quest mode completes the node, opens the next one, grants rewards once, and shows VICTORY with the reward line',()=>{
   Save.data=Meta.defaults();
-  G.startFight({floor:1,node:0,ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  G.startFight({floor:1,node:0,champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  eq(G.champ,'carl','fix round 1: onFightEnd\'s level-up check reads this.champ, exercised here explicit');
   eq(G.mode,'quest');eq(Save.data.energy.n,9,'Quest.start must have spent 1 energy at fight start');
   closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
   for(let i=0;i<400;i++)G.tick();

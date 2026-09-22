@@ -49,15 +49,17 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // entry whose Stats.derive(hp,atk) overrides p1's def -- o.p1 (a raw DEFS id, used by tests/debug
   // to put a mob/boss in p1) still wins for WHICH def becomes p1 when given; the derive only ever
   // applies when that resolved id is actually owned in the roster (mobs/bosses aren't), matching the
-  // Phase 4 ruling "fall back to base stats for non-roster p1 defs". G.mode is 'quest' whenever
-  // {floor,node} or a plain quest-encounter id was used, 'arena' only via the explicit o.mode
-  // G.startArena() sugar passes, else 'exhibition'. Energy is spent (via Quest.start, refusing --
-  // unchanged state -- when locked/empty) only by the {floor,node} sugar itself: a *plain*
-  // {encounter:'f1_goblin'} id is still labeled G.mode='quest' for onFightEnd/HUD purposes but
-  // spends no energy, so tests/batch.py's --encounter win-rate sweeps (dozens of restart-on-KO
-  // fights against one encounter id) and docs/ARENA.md's --encounter screenshot recipes keep
-  // working unmodified -- "the sugar" (45_encounter.js's own term for {floor,node}) is the one and
-  // only gate.
+  // Phase 4 ruling "fall back to base stats for non-roster p1 defs".
+  //
+  // Fix round 1 (controller review): G.mode is 'quest' ONLY when the fight was started through the
+  // {floor,node} sugar and its Quest.start actually succeeded -- never for a bare {encounter:ID}.
+  // The earlier version labeled a bare encounter id 'quest' too (without spending energy or
+  // checking the lock), which meant onFightEnd's Quest.complete/Rewards.grant ran for it on a win --
+  // free, unlimited reward/progression farming for anything that repeatedly starts an encounter id
+  // (exactly what tests/batch.py's --encounter win-rate sweeps and docs/ARENA.md's --encounter
+  // screenshot recipes already do, dozens of times per run). A bare encounter id is 'exhibition' now
+  // (no Quest.complete, no rewards, no energy) but still populates G.encounter so the HUD floor line
+  // keeps working -- 'arena' remains the explicit o.mode G.startArena() sugar passes.
   startFight(o={}){const seed=o.seed||this.seed;
     this.lastFightOpts=o; // FIGHT AGAIN replays these (minus seed) so a custom p2/ai isn't lost
     let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
@@ -71,22 +73,16 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       if(!fl)throw new Error('unknown floor: '+o.floor);
       encSrc=o.node==='boss'?fl.boss:fl.nodes[o.node];
       if(!encSrc)throw new Error('unknown floor node: floor '+o.floor+' node '+o.node)}
-    // questTarget = {floor,node} for Quest.complete/Quest.start, resolved either straight off the
-    // {floor,node} sugar above, or by finding which FLOORS node/boss a plain encounter id names.
+    // questTarget = {floor,node}, set ONLY by the {floor,node} sugar succeeding through Quest.start
+    // (spends 1 energy, checks the node is open) -- a bare o.encounter id never gets one, so it can
+    // never drive Quest.complete/Rewards.grant in onFightEnd. A refusal here leaves every G.* fight
+    // property (state, fight, encounter, mode, champ) exactly as it was; nothing below has run yet.
     let questTarget=null;
-    if(o.floor!==undefined)questTarget={floor:o.floor,node:o.node};
-    else if(typeof encSrc==='string'){
-      for(const fl of FLOORS){
-        const idx=fl.nodes.indexOf(encSrc);
-        if(idx>=0){questTarget={floor:fl.floor,node:idx};break}
-        if(fl.boss===encSrc){questTarget={floor:fl.floor,node:'boss'};break}}}
-    const mode=o.mode||(questTarget?'quest':'exhibition');
-    // Only the {floor,node} sugar spends energy/checks the lock -- see the block comment above for
-    // why a plain encounter id must not. A refusal leaves every G.* fight property (state, fight,
-    // encounter, mode, champ) exactly as it was; nothing below this point has run yet.
     if(o.floor!==undefined){
+      questTarget={floor:o.floor,node:o.node};
       const id=Quest.start(questTarget.floor,questTarget.node);
       if(!id){this.refuseQuest(questTarget.floor,questTarget.node);return false}}
+    const mode=o.mode||(questTarget?'quest':'exhibition');
     this.mode=mode;this.questTarget=questTarget;
     if(encSrc){
       // Arena encounters (o.mode==='arena', built by Arena.start() via G.startArena()) arrive
@@ -224,7 +220,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     }else if(this.mode==='arena')Arena.record(won);
     let leveledUp=false;
     if(rewards){
-      const entry=Save.data.roster[Save.data.active];
+      // Fix round 1: reads this.champ (the champion who actually fought), not Save.data.active --
+      // they're normally the same id, but reading champ is the one that's actually correct if they
+      // ever diverge (an explicit o.champ different from the active roster pick).
+      const entry=Save.data.roster[this.champ];
       const lvlBefore=entry?entry.level:0;
       Rewards.grant(rewards);
       if(entry&&entry.level>lvlBefore)leveledUp=true}

@@ -1064,27 +1064,37 @@ Test.add('a non-roster p1 def (a mob/boss put in p1 for debug/test purposes) fal
   G.startFight({p1:'donut'});
   eq(G.fight.p1.maxHp,CHAMPS.donut.hp);eq(G.fight.p1.def.atk,CHAMPS.donut.atk);
   G.toTitle()});
-Test.add('G.mode is quest for {floor,node} or a plain quest encounter id, arena via G.startArena, exhibition otherwise',()=>{
+Test.add('G.mode is quest ONLY via a successful {floor,node} Quest.start; a bare encounter id is exhibition (still populates G.encounter)',()=>{
   Save.data=Meta.defaults();
   G.startFight({floor:1,node:0});eq(G.mode,'quest');G.toTitle();
   Save.data=Meta.defaults();
-  G.startFight({encounter:'f1_goblin'});eq(G.mode,'quest');G.toTitle();
+  G.startFight({encounter:'f1_goblin'});
+  eq(G.mode,'exhibition','a bare encounter id must never be quest mode (fix round 1: farming fix)');
+  ok(G.encounter&&G.encounter.floor===1&&G.encounter.name==='THE DEPTHS','G.encounter must still be populated for the HUD floor line');
+  G.toTitle();
   Save.data=Meta.defaults();
   G.startArena();eq(G.mode,'arena');G.toTitle();
   G.startFight({p2:'donut'});eq(G.mode,'exhibition');G.toTitle()});
-// "The sugar" (45_encounter.js's own term) is specifically the {floor,node} option object -- a plain
-// {encounter:ID} start must stay ungated so tests/batch.py's --encounter win-rate sweeps (dozens of
-// restart-on-KO fights against one id) and docs/ARENA.md's --encounter screenshot recipes, both
-// pre-existing and unaware of energy, keep working unmodified.
-Test.add('a plain {encounter:ID} quest fight does not spend energy; only the {floor,node} sugar does',()=>{
+// Fix round 1 (controller review, Important): the pre-fix version labeled a bare {encounter:ID}
+// start G.mode='quest' too, so a scripted win through it ran Quest.complete/Rewards.grant with no
+// energy spent and no lock check -- free, unlimited reward/progression farming for anything that
+// repeatedly starts an encounter id (tests/batch.py's --encounter win-rate sweeps and
+// docs/ARENA.md's --encounter screenshot recipes already do exactly that, dozens of times per run).
+// Now a bare encounter id is 'exhibition': no energy spent AND no rewards/floor-state changes on a
+// win either -- verified end to end here, not just "no energy spent" as the old (insufficient) test
+// checked.
+Test.add('a bare {encounter:ID} scripted KO win grants nothing: no rewards, no energy spent, no floor/roster/gold change',()=>{
   Save.data=Meta.defaults();
-  G.startFight({encounter:'f1_goblin'});
-  eq(G.mode,'quest');eq(Save.data.energy.n,10,'a plain encounter id must not spend energy');
-  G.toTitle();
-  Save.data=Meta.defaults();
-  G.startFight({floor:1,node:0});
-  eq(Save.data.energy.n,9,'the {floor,node} sugar must spend 1 energy via Quest.start');
-  G.toTitle()});
+  const before=JSON.stringify(Save.data);
+  G.startFight({encounter:'f1_goblin',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  eq(G.mode,'exhibition');
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(document.getElementById('resultTitle').textContent,'VICTORY','the fight itself still plays out normally');
+  eq(G.lastRewards,null,'a bare encounter win must not grant anything');
+  eq(JSON.stringify(Save.data),before,'Save.data (gold/iso/xp/energy/floor node states) must be completely unchanged');
+  G.toTitle();G.sim=false});
 Test.add('G.startFight({floor,node}) refuses without starting a fight when energy is empty, leaving G.state/G.fight unchanged',()=>{
   Save.data=Meta.defaults();Save.data.energy.n=0;
   G.toTitle();
@@ -1100,7 +1110,8 @@ Test.add('G.startFight({floor,node}) refuses a locked node the same way',()=>{
   eq(G.state,stateBefore)});
 Test.add('scripted KO in quest mode completes the node, opens the next one, grants rewards once, and shows VICTORY with the reward line',()=>{
   Save.data=Meta.defaults();
-  G.startFight({floor:1,node:0,ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  G.startFight({floor:1,node:0,champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  eq(G.champ,'carl','fix round 1: onFightEnd\'s level-up check reads this.champ, exercised here explicit');
   eq(G.mode,'quest');eq(Save.data.energy.n,9,'Quest.start must have spent 1 energy at fight start');
   closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
   for(let i=0;i<400;i++)G.tick();
