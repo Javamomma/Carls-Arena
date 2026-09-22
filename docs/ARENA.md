@@ -68,8 +68,7 @@ katia  carl       brute  2     7       4       4707          0
 
 ## Deferred from the Phase 1 final review (2026-09-21)
 
-Not fixed yet; triage before or during Phase 2.
-- Spec gap: mash-blocking (6 frames on, 1 off) out-parries holding block about 7:1. Fix in Phase 2 task 2.6 with a parry-attempt lockout.
+Not fixed yet; triage before or during Phase 2. (Mash-blocking is closed — Task 2.6 added the `PARRY_LOCKOUT` fix — so it's dropped from this list; not-blocking minors from the Phase 2 final review are appended below.)
 - `G.startFight` resets `Input.q`/`held` but not `Input._ptrs`; a restart mid-touch can carry stale pointer records.
 - Pointer zone is fixed at pointerdown; a finger that swipes across the def/off boundary keeps its original zone.
 - `src/80_game.js` looks up the three special buttons every simulated frame; cache the nodes at init.
@@ -79,3 +78,4 @@ Not fixed yet; triage before or during Phase 2.
 - Double KO awards p2; attacker combo never resets while the foe sits in BLOCK; hitstop pauses the round clock (~3% at current hit rates).
 - Harness restart block names its variable `ctrl2` while feeding `ctrl1` (cosmetic).
 - `src/90_tests.js` is the largest source file; split into `9x_*.js` files once it passes ~200 lines.
+- From the Phase 2 final review, not blocking, deferred on purpose: `src/50_fighter.js` `blockPressedAt` is written and never read; `Render.pauseRect`'s hit-test is a square under a rounded glyph; `Rig.draw`'s signature accepts `cam`/`frame` but ignores both (harmless today, but settle the signature before Phase 3 authors rigs against it); `src/55_ai.js`'s brute `hHold` counter is blind to interruption (fine while nothing reads it mid-charge — fix inside Phase 3's AI task, not before it, since an AI tier that reacts mid-swing needs it to actually reset on interruption).

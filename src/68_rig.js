@@ -153,6 +153,16 @@ const LOOKS={
     limb:14,legLen:107,armLen:88,torsoLen:74,headR:23,shoulderW:39,hipW:29,earLen:0,
     props:['gear']}};
 
+// Resolves a def's look, falling back to LOOKS.carl (once, with a console.warn) for a Phase-3-added
+// def that ships without one, instead of every reader (Rig.draw, Render.overlayY/shadow) crashing on
+// an unguarded F.def.look dereference. Shared across 68_rig.js/70_render.js via plain global scope.
+let _warnedNoLook=false;
+function lookFor(def){
+  if(def.look)return def.look;
+  if(!_warnedNoLook){_warnedNoLook=true;
+    console.warn('Rig: def "'+(def.id||'?')+'" has no .look; falling back to LOOKS.carl')}
+  return LOOKS.carl}
+
 // ---- forward kinematics ----
 const Rig={
   bones:['hip','torso','neck','head','lShoulder','lElbow','lHand','rShoulder','rElbow','rHand','lHip','lKnee','lFoot','rHip','rKnee','rFoot'],
@@ -195,7 +205,7 @@ const Rig={
       rShoulder,rElbow:rArm.elbow,rHand:rArm.hand,lShoulder,lElbow:lArm.elbow,lHand:lArm.hand,
       rHip,rKnee:rLeg.knee,rFoot:rLeg.foot,lHip,lKnee:lLeg.knee,lFoot:lLeg.foot}},
   draw(c,F,cam,frame){
-    const look=F.def.look,scale=F.def.scale||1,face=F.face;
+    const look=lookFor(F.def),scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solve(look,key,t01,face);
     const skinDark=shade(look.skin,-.35);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);

@@ -22,6 +22,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // (the HUD's floor line reads it), and clones the enemy def here (never inside Fight) so p2's
   // hp/atk carry the encounter's multipliers without mutating the shared DEFS entry.
   startFight(o={}){const seed=o.seed||this.seed;
+    this.lastFightOpts=o; // FIGHT AGAIN replays these (minus seed) so a custom p2/ai isn't lost
     let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
     this.encounter=null;
     if(o.encounter){
@@ -56,7 +57,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
       // not the whole recipe again (that would replay a 3-14 tone burst per sub-hit, overlapping).
       (mv&&mv.hits>1?Audio.recipes.light1:(Audio.recipes[a.moveName]||Audio.recipes.lights))();
-      if(a.combo===3||a.combo===5||a.combo===10)Audio.announce('streak'+a.combo,this.fight.presRng)}
+      // Streak lines are in the player's own voice ("Carl's fan club just doubled in size"), so they
+      // only fire for p1's combos, not a mob/AI p2's.
+      if(this.fight&&a===this.fight.p1&&(a.combo===3||a.combo===5||a.combo===10))Audio.announce('streak'+a.combo,this.fight.presRng)}
     else if(t==='block')Audio.recipes.block();
     else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.presRng)}
     else if(t==='miss'){if(b&&b.state==='DASH')Audio.recipes.dash()}
@@ -185,7 +188,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     Render.frame(this.fight);requestAnimationFrame(t=>this.loop(t))},
   init(){this.fit();addEventListener('resize',()=>this.fit());Input.init(canvas);
     document.getElementById('fightBtn').onclick=()=>{Audio.init();this.startFight()};
-    document.getElementById('again').onclick=()=>this.startFight({seed:this.fight?this.fight.rng.int(1e9)+1:this.seed,encounter:this.encounter});
+    // Reuses the previous fight's full options (p1/p2/ai/ctrl1/ctrl2/encounter/clock), overriding only
+    // the seed — previously this passed just {seed,encounter}, silently dropping a custom p2/ai back
+    // to the startFight defaults (donut/basic) on every rematch.
+    document.getElementById('again').onclick=()=>this.startFight(Object.assign({},this.lastFightOpts,
+      {seed:this.fight?this.fight.rng.int(1e9)+1:this.seed}));
     document.getElementById('resultTitleBtn').onclick=()=>this.toTitle();
     document.getElementById('resume').onclick=()=>this.togglePause();
     document.getElementById('quit').onclick=()=>this.toTitle();

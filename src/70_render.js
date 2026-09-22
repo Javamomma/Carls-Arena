@@ -35,14 +35,14 @@ const Render={ctx:canvas.getContext('2d'),
       fc.font='11px ui-monospace,monospace';fc.fillStyle='#ccc';fc.textAlign='center';fc.letterSpacing='1px';
       fc.fillText(label,hc.floorCanvas.width/2,12);hc.floorLabel=label}
     c.drawImage(hc.floorCanvas,W/2-hc.floorCanvas.width/2,80)},
-  overlayY(F){const l=F.def.look;return FLOOR-(l.legLen+l.torsoLen+l.headR*2.4)*(F.def.scale||1)-14},
+  overlayY(F){const l=lookFor(F.def);return FLOOR-(l.legLen+l.torsoLen+l.headR*2.4)*(F.def.scale||1)-14},
   reflection(c,F,cam,frame){c.save();c.beginPath();c.rect(0,FLOOR,STAGE_W,90);c.clip();
     c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.12;Rig.draw(c,F,cam,frame);c.restore()},
   // A grounding contact shadow at the fighter's feet — the mirrored reflection alone reads as a
   // detached ghost. A flattened dark ellipse under the floor art, sized off shoulderW (a stand-in
   // for the character's overall footprint) so bigger/scaled-up looks (the hobgoblin) get a bigger
   // shadow than smaller ones (the goblin) without a dedicated per-look radius.
-  shadow(c,F){const look=F.def.look;if(!look)return;const scale=F.def.scale||1,w=look.shoulderW*1.6*scale;
+  shadow(c,F){const look=lookFor(F.def),scale=F.def.scale||1,w=look.shoulderW*1.6*scale;
     c.save();c.globalAlpha=.35;c.fillStyle='#000';
     c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore()},
   fighter(c,F,cam,frame){

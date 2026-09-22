@@ -224,6 +224,28 @@ Test.add('brute AI lands a heavy on an idle target within 600 frames',()=>{
   const f=mkFight({ctrl2:AI.make('brute',13),onEvent:(type,a)=>{if(type==='hit'&&a&&a.side===-1&&a.moveName==='heavy')landed=true}});
   closeIn(f);run(f,600);
   ok(landed,'brute AI should land at least one heavy on an idle p1 within 600 frames')});
+Test.add('streak announcer lines fire for p1 combos only, not mob/p2 combos',()=>{
+  const f=mkFight({seed:9});G.fight=f;G.state='FIGHT';
+  const orig=Audio.announce;let calls=[];Audio.announce=kind=>calls.push(kind);
+  try{
+    f.p1.combo=3;G.onEvent('hit',f.p1,f.p2,10);
+    ok(calls.includes('streak3'),'p1 landing a 3-combo must announce a streak line');
+    calls.length=0;
+    f.p2.combo=3;G.onEvent('hit',f.p2,f.p1,10);
+    ok(!calls.some(k=>k.startsWith('streak')),'p2/mob combo must not announce a streak line (it would be in the player\'s own voice)')
+  }finally{Audio.announce=orig;G.fight=null;G.state='TITLE'}});
+Test.add('FIGHT AGAIN reuses the previous non-encounter p2/ai instead of resetting to defaults',()=>{
+  G.startFight({p2:'katia',ai:'brawl',seed:5});
+  eq(G.fight.p2.def.id,'katia');
+  document.getElementById('again').click();
+  eq(G.fight.p2.def.id,'katia','FIGHT AGAIN must keep the p2 champ/mob the previous fight used');
+  G.toTitle()});
+Test.add('Render/Rig fall back to LOOKS.carl for a def missing .look instead of throwing',()=>{
+  const F=mkFighter();const savedLook=F.def.look;delete F.def.look;
+  try{
+    ok(!threw(()=>Render.overlayY(F)),'overlayY must not throw on a look-less def');
+    ok(!threw(()=>Rig.draw(Render.ctx,F,{x:0,zoom:1},0)),'Rig.draw must not throw on a look-less def')
+  }finally{F.def.look=savedLook}});
 Test.add('HUD statics are cached across frames',()=>{Render.frame(null);const a=Render._hudCache;Render.frame(null);ok(a&&a===Render._hudCache)});
 Test.add('FX ages once per sim tick in sim mode, deterministically (not off wall-clock rAF)',()=>{
   const runOnce=()=>{

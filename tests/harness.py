@@ -136,7 +136,7 @@ def main():
     a = ap.parse_args()
     if a.matrix:
         sys.exit(run_matrix())
-    if a.perf:
+    if a.perf is not None:
         with sync_playwright() as p:
             b = p.chromium.launch()
             pg = b.new_page(viewport={'width': 854, 'height': 480})
@@ -145,13 +145,19 @@ def main():
             pg.on('console', lambda m: perf_errors.append(m.text) if m.type == 'error' else None)
             pg.goto(INDEX)
             pg.wait_for_function('typeof G!=="undefined"')
-            js = ("(()=>{G.sim=true;G.startFight({seed:1,p1:'carl',p2:'donut',ai:'brawl',ctrl1:Ctrl.random(1)});"
-                  "const N=%d;let tStep=0,tRender=0;"
-                  "for(let i=0;i<N;i++){"
+            # Restart-on-KO, same as build_soak_js: a plain N-tick loop with no restart leaves
+            # G.stepFrame() a no-op for the remainder of the run once the fight ends (Fight.step
+            # returns immediately while over), silently deflating ms_step toward 0 well before N
+            # frames are up.
+            js = ("(()=>{G.sim=true;let s=1,n=%d,tStep=0,tRender=0;"
+                  "const start=seed=>G.startFight({seed,p1:'carl',p2:'donut',ai:'brawl',ctrl1:Ctrl.random(seed)});"
+                  "start(s);"
+                  "for(let i=0;i<n;i++){"
                   "const a=performance.now();G.stepFrame();const b=performance.now();"
                   "Render.frame(G.fight);const c=performance.now();"
-                  "tStep+=(b-a);tRender+=(c-b);}"
-                  "return{ms_per_frame:(tStep+tRender)/N,ms_step:tStep/N,ms_render:tRender/N}})()"
+                  "tStep+=(b-a);tRender+=(c-b);"
+                  "if(G.state==='RESULT'){s++;start(s)}}"
+                  "return{ms_per_frame:(tStep+tRender)/n,ms_step:tStep/n,ms_render:tRender/n}})()"
                   ) % a.perf
             r = pg.evaluate(js)
             b.close()
