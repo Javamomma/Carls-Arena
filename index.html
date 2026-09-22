@@ -3876,6 +3876,895 @@ const Atlas={
     ATLAS[lookId]=p;
     return p}};
 
+// ---- Task 8.1: BodyStyle -- the layered vector body/face renderer for the human rig ------------
+// Replaces the old draw() primitives (a two-pass round-cap stroke per limb, one flat hexagon for the
+// torso, a flat circle head with a single 1.6px eye dot) with real layered art: gradient-shaded,
+// outlined, tapered limb tubes with cloth over them; a torso split into chest and abdomen under a
+// cloth layer; and a head carrying an actual face that changes with what the fighter is doing.
+// Reference: docs/reference/rendition.jpg -- lit wet-stone dungeon, gritty painted realism. The
+// target is a good STYLIZED game read at 854x480, not a repaint of that image.
+//
+// PERF -- why every layer can be baked once and blitted forever after. Every part this draws is a
+// rigid shape under an affine function of the pose, which is not obvious until you look for it:
+//   * a bone (upper arm, forearm, thigh, shin) has a FIXED length for a given look -- Rig.solve
+//     splits armLen/legLen in half and never varies them -- so its art is one bitmap plus a
+//     rotate() about the proximal joint;
+//   * the head is a rigid disc-plus-features that only translates and rotates (by face*headA);
+//   * the TORSO looks non-rigid, and it genuinely does shear -- solve() hangs the shoulders off the
+//     neck with an axis-aligned +/-shoulderW/2 offset that does NOT rotate with the torso -- but
+//     that shear is exactly linear in the pose. With (sx,sy) the hip->chest vector and L its length,
+//         (lx,ly) -> (hip.x + lx - (sx/L)*ly,  hip.y - (sy/L)*ly)
+//     maps the upright local torso onto the real one for ANY torso angle: ly=0 lands the hips, ly=-L
+//     lands the shoulder line, and every intermediate ly lands the waist exactly where solve() puts
+//     it. So one upright bitmap plus a 6-value c.transform() covers every pose the torso can reach.
+// The cache is therefore keyed on look|part|face|zoomBucket and nothing pose-dependent, which is what
+// the "600 frames add no cache entries" test (90_tests.js) actually proves.
+//
+// `lit` is accepted by limb/torso/head and ignored while undefined -- Task 8.3 (stage lighting) is
+// what supplies it. Nothing here consumes randomness of any kind (no presRng, no Math.random): the
+// art is a pure function of the look, so two fighters sharing a look share every bitmap.
+const HEAD_STATES=['idle','hit','ko','block','attack','win'];
+const BodyStyle={
+  _cache:{},
+  // Bitmap pixels per world unit at zoom bucket 1. 2x, so a bucket-1 bitmap blitted at the fight
+  // camera's usual ~1.0-1.3 zoom is DOWNsampled rather than magnified -- a rotated blit of an
+  // exactly-1:1 bitmap aliases badly along a limb's outline.
+  SS:2,
+  cacheCount(){return Object.keys(this._cache).length},
+  clearCache(){this._cache={}},
+  // The context's own world->device scale, quantized to 1/2 steps in [0.5,4]. Read off the live CTM
+  // rather than off cam.zoom so every caller -- the fight camera, Render.shadow's vertically flipped
+  // transform, a portrait's identity transform -- gets a bucket matching the pixels it will cover.
+  zoomBucket(c){
+    let s=1;
+    if(c&&c.getTransform){
+      const m=c.getTransform(),v=Math.hypot(m.a,m.b);
+      if(isFinite(v)&&v>1e-4)s=v}
+    return Math.max(.5,Math.min(4,Math.round(s*2)/2))},
+  // look|part|face|zoomBucket -- the frozen key shape. face is folded into EVERY part, including the
+  // ones whose art happens to be facing-symmetric today (a bone tube): Task 8.3's lighting makes
+  // every part facing-dependent, and a key whose shape has to change then is a key that gets
+  // forgotten. Two extra small bitmaps per look is not a memory problem.
+  key(look,part,face,zb){return (look.id||'anon')+'|'+part+'|'+(face>0?'r':face<0?'l':'f')+'|'+zb},
+  cache(key,w,h,paint){
+    const hit=this._cache[key];
+    if(hit)return hit;
+    const cnv=document.createElement('canvas');
+    cnv.width=Math.max(1,Math.ceil(w));cnv.height=Math.max(1,Math.ceil(h));
+    paint(cnv.getContext('2d'),cnv.width,cnv.height);
+    return this._cache[key]=cnv},
+
+  // ---- pose key -> face state -------------------------------------------------------------------
+  // The Phase 8 ruling's six expressions, reached with no new sim state at all: Rig.poseFor already
+  // turns Fighter.state into a pose key every frame, so the face rides on that. 'dash' wears the
+  // braced block face (a backdash is a defensive retreat, not an attack); 'getup' stays on the ko
+  // face because a fighter pushing himself off the floor has not recovered his composure yet.
+  FACE_STATE:{idle:'idle',walk:'idle',dash:'block',
+    light1:'attack',light2:'attack',light3:'attack',light4:'attack',light5:'attack',
+    medium:'attack',heavyCharge:'attack',heavy:'attack',s1:'attack',s2:'attack',s3:'attack',
+    block:'block',blockstun:'block',hit:'hit',stunned:'hit',
+    knockdown:'ko',getup:'ko',ko:'ko',win:'win'},
+  faceState(poseKey){return this.FACE_STATE[poseKey]||'idle'},
+
+  // ---- shared paint helpers ---------------------------------------------------------------------
+  waistW(look){return look.waistW!==undefined?look.waistW:(look.hipW+look.shoulderW)/2*.8},
+  // A cylinder's shade ACROSS the tube: dark rim, a highlight band on the up-side, core color, dark
+  // underside. Baked across the bone's own axis rather than world-up, which is exactly what makes one
+  // cached bitmap valid at every rotation the bone can reach.
+  _tube(g,col,lo,hi,w){
+    const gr=g.createLinearGradient(0,-w/2,0,w/2);
+    gr.addColorStop(0,shade(col,lo*.55));
+    gr.addColorStop(.22,shade(col,hi));
+    gr.addColorStop(.55,col);
+    gr.addColorStop(1,shade(col,lo));
+    return gr},
+  // A tapered capsule from (0,0) to (len,0), half-widths wa/wb, optionally grown by `grow` (used to
+  // lay the outline down as a slightly larger copy of the same shape under the fill).
+  _capsule(g,len,wa,wb,grow){
+    const ra=Math.max(.2,wa/2+grow),rb=Math.max(.2,wb/2+grow);
+    g.beginPath();
+    g.arc(0,0,ra,Math.PI/2,Math.PI*1.5);
+    g.lineTo(len,-rb);
+    g.arc(len,0,rb,-Math.PI/2,Math.PI/2);
+    g.closePath()},
+
+  // ---- limb -------------------------------------------------------------------------------------
+  // opts: {cloth, bone, face, w2, lit}. `bone` is a name for the cache key only; `cloth` is one of
+  // bare/sleeve/pant/shorts/robe/ragged/wrap/bone/full (see Rig.clothFor; 'full' is used only by the
+  // prone-torso underlay below).
+  limb(c,x1,y1,x2,y2,w,look,opts){
+    opts=opts||{};
+    const dx=x2-x1,dy=y2-y1,len=Math.hypot(dx,dy);
+    if(!(len>.01))return;
+    const b=look&&look.body;
+    if(!b){ // pre-8.1 fallback: the old two-pass stroke, for a look with no .body block
+      const d=shade(look.skin,-.35);c.lineCap='round';
+      c.lineWidth=w+3;c.strokeStyle=d;c.beginPath();c.moveTo(x1,y1);c.lineTo(x2,y2);c.stroke();
+      c.lineWidth=w;c.strokeStyle=look.skin;c.beginPath();c.moveTo(x1,y1);c.lineTo(x2,y2);c.stroke();
+      return}
+    const face=opts.face||0,cloth=opts.cloth||'bare',bone=opts.bone||'limb';
+    const w2=opts.w2!==undefined?opts.w2:w*.84;
+    const zb=this.zoomBucket(c),px=this.SS*zb;
+    // Bone lengths are constants of the look, so rounding len into the key is a no-op in practice --
+    // it is here only so a caller passing an odd-length segment can never collide with a cached
+    // bitmap of a different size.
+    const part='limb:'+bone+':'+cloth+':'+Math.round(len)+':'+Math.round(w*4)+':'+Math.round(w2*4);
+    const half=Math.max(w,w2)*.5+Math.max(4,w*.5); // outline + cloth bulge + bone-knob headroom
+    const bw=Math.ceil((len+half*2)*px),bh=Math.ceil(half*2*px);
+    const cv=this.cache(this.key(look,part,face,zb),bw,bh,g=>{
+      g.scale(px,px);g.translate(half,half);
+      this._paintLimb(g,len,w,w2,look,cloth)});
+    c.save();
+    c.translate(x1,y1);c.rotate(Math.atan2(dy,dx));
+    c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
+    c.restore()},
+  _paintLimb(g,len,w,w2,look,cloth){
+    const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
+    if(cloth==='bone')return this._paintBoneLimb(g,len,w,w2,look);
+    g.lineJoin='round';
+    // 1. outline -- the same capsule, grown, in the look's own outline color
+    g.fillStyle=b.outline;this._capsule(g,len,w,w2,1.3);g.fill();
+    // 2. skin
+    this._capsule(g,len,w,w2,0);g.fillStyle=this._tube(g,look.skin,lo,hi,Math.max(w,w2));g.fill();
+    // 3. muscle -- a long soft belly highlight up-side and a crease along the under-side, both scaled
+    //    off the tube's own width so a forearm doesn't get a thigh's worth of definition
+    g.save();
+    g.globalAlpha=.45;g.fillStyle=shade(look.skin,Math.min(.95,hi*1.5));
+    g.beginPath();g.ellipse(len*.40,-w*.16,len*.30,Math.max(.7,w*.16),0,0,Math.PI*2);g.fill();
+    g.globalAlpha=.30;g.fillStyle=shade(look.skin,lo*.95);
+    g.beginPath();g.ellipse(len*.54,w*.25,len*.28,Math.max(.6,w*.10),0,0,Math.PI*2);g.fill();
+    g.restore();
+    // 4. cloth
+    if(cloth==='wrap'){ // hand wraps climbing the distal third of the forearm
+      g.lineCap='butt';
+      for(let i=0;i<3;i++){const t=len*(.62+i*.12);
+        g.strokeStyle='#e6dccb';g.lineWidth=Math.max(1.4,w*.30);
+        g.beginPath();g.moveTo(t,-w2*.62);g.lineTo(t-w2*.36,w2*.62);g.stroke();
+        g.strokeStyle='rgba(58,46,32,.40)';g.lineWidth=Math.max(.6,w*.09);
+        g.beginPath();g.moveTo(t+w2*.17,-w2*.62);g.lineTo(t-w2*.19,w2*.62);g.stroke()}
+      return}
+    if(cloth==='bare')return;
+    const frac=cloth==='full'?1.0:cloth==='pant'?.84:cloth==='robe'?.60:cloth==='ragged'?.44:cloth==='shorts'?.36:.52;
+    const L=len*frac,wa=w+2.4,wb=w2*(cloth==='robe'?1.34:1.0)+1.6;
+    const prim=b.cloth.primary;
+    g.fillStyle=b.outline;this._capsule(g,L,wa,wb,1.2);g.fill();
+    const cg=g.createLinearGradient(0,-wa/2,0,wa/2);
+    cg.addColorStop(0,shade(prim,-.34));cg.addColorStop(.24,shade(prim,.20));
+    cg.addColorStop(.58,prim);cg.addColorStop(1,shade(prim,-.44));
+    this._capsule(g,L,wa,wb,0);g.fillStyle=cg;g.fill();
+    if(cloth==='ragged'){ // a torn hem: four alternating teeth across the cuff
+      g.fillStyle=shade(prim,-.26);g.beginPath();
+      const rb=wb/2;g.moveTo(L-1.2,-rb);
+      for(let i=0;i<=4;i++)g.lineTo(L+(i%2?5.2:.6),-rb+rb*2*(i/4));
+      g.lineTo(L-1.2,rb);g.closePath();g.fill()}
+    else{g.strokeStyle=shade(b.cloth.secondary,-.08);g.lineWidth=Math.max(1.1,w*.15);
+      g.beginPath();g.moveTo(L,-wb*.52);g.lineTo(L,wb*.52);g.stroke()}
+    g.strokeStyle=shade(prim,-.32);g.lineWidth=Math.max(.7,w*.08);
+    g.beginPath();g.moveTo(L*.26,-wa*.20);g.lineTo(L*.74,-wb*.10);g.stroke();
+    g.beginPath();g.moveTo(L*.34,wa*.16);g.lineTo(L*.80,wb*.20);g.stroke()},
+  // Skeleton limbs are not a bone-COLORED tube: a thin shaft between two lobed joint knobs, which is
+  // what actually reads as bone at this scale.
+  _paintBoneLimb(g,len,w,w2,look){
+    const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
+    const shaft=Math.max(2.2,w*.44),ka=Math.max(2.6,w*.58),kb=Math.max(2.2,w2*.58);
+    g.fillStyle=b.outline;
+    this._capsule(g,len,shaft,shaft,1.2);g.fill();
+    g.beginPath();g.arc(0,0,ka+1.2,0,Math.PI*2);g.fill();
+    g.beginPath();g.arc(len,0,kb+1.2,0,Math.PI*2);g.fill();
+    const gr=g.createLinearGradient(0,-ka,0,ka);
+    gr.addColorStop(0,shade(look.skin,lo*.55));gr.addColorStop(.3,shade(look.skin,hi));
+    gr.addColorStop(.7,look.skin);gr.addColorStop(1,shade(look.skin,lo));
+    g.fillStyle=gr;
+    this._capsule(g,len,shaft,shaft,0);g.fill();
+    g.beginPath();g.arc(0,0,ka,0,Math.PI*2);g.fill();
+    g.beginPath();g.arc(len,0,kb,0,Math.PI*2);g.fill();
+    g.strokeStyle=shade(look.skin,lo*1.3);g.lineWidth=Math.max(.6,w*.08);
+    g.beginPath();g.moveTo(0,-ka*.55);g.lineTo(0,ka*.55);g.stroke();
+    g.beginPath();g.moveTo(len,-kb*.55);g.lineTo(len,kb*.55);g.stroke()},
+
+  // ---- torso ------------------------------------------------------------------------------------
+  // `chest` is the neck joint, `hip` the hip joint; every width comes from the look. See the header
+  // comment for why the shear between them is an exact affine of one upright bitmap.
+  torso(c,chest,hip,look,face,lit){
+    const b=look&&look.body;
+    if(!b)return;
+    const sx=chest.x-hip.x,sy=chest.y-hip.y,L=Math.hypot(sx,sy);
+    if(!(L>.01))return;
+    const zb=this.zoomBucket(c),px=this.SS*zb;
+    const MW=Math.max(look.shoulderW,look.hipW,this.waistW(look))+look.limb*2.4;
+    const topPad=look.headR*1.15,botPad=look.limb*1.9;
+    const bw=Math.ceil(MW*px),bh=Math.ceil((L+topPad+botPad)*px);
+    // A torso leaning past about 66deg from vertical (knockdown/ko) foreshortens to a sliver under
+    // the exact shear -- faithful to the FK, and exactly what the pre-8.1 hexagon did, but it reads
+    // as a body that simply isn't there. Laying a rotated capsule along the hip->chest axis first
+    // gives a prone fighter real mass; the fade is 0 for every upright pose, so nothing else changes.
+    const flat=1-Math.min(1,Math.abs(sy)/(L*.42));
+    if(flat>0){
+      const tw=Math.max(look.hipW,this.waistW(look))*.88;
+      const covered=b.cloth.torso==='shirt'||b.cloth.torso==='plate'||b.cloth.torso==='chitin'||b.cloth.torso==='fur';
+      c.save();c.globalAlpha=Math.min(1,flat);
+      this.limb(c,hip.x,hip.y,chest.x,chest.y,tw,look,
+        {bone:'trunk',cloth:b.cloth.torso==='bone'?'bare':covered?'full':b.cloth.torso==='robe'?'full':'bare',face,lit,w2:tw*.94});
+      c.restore()}
+    const cv=this.cache(this.key(look,'torso:'+Math.round(L),face,zb),bw,bh,g=>{
+      g.scale(px,px);g.translate(MW/2,L+topPad);
+      this._paintTorso(g,L,look,face)});
+    c.save();
+    c.transform(1,0,-sx/L,-sy/L,hip.x,hip.y);
+    c.drawImage(cv,-MW/2,-(L+topPad),cv.width/px,cv.height/px);
+    c.restore()},
+  _paintTorso(g,L,look,face){
+    const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
+    const sw=look.shoulderW,hw=look.hipW,ww=this.waistW(look),limb=look.limb;
+    // solve() hangs the shoulders at neck.y+4, so the local shoulder line sits 4 units below the
+    // top of the chain -- that is what puts this torso's collar exactly where the arms attach.
+    const shY=-L+4,wY=-L*.42,fw=face<0?-1:1;
+    const cl=b.cloth,bone=cl.torso==='bone';
+    g.lineJoin='round';
+    const body=()=>{
+      g.beginPath();
+      g.moveTo(-hw/2-limb*.18,limb*.55);
+      g.quadraticCurveTo(-ww/2-limb*.12,wY*.42,-ww/2,wY);
+      g.quadraticCurveTo(-sw/2*.93,shY+L*.22,-sw/2,shY+limb*.24);
+      g.quadraticCurveTo(-sw/2*.52,shY-limb*.32,0,shY-limb*.26);
+      g.quadraticCurveTo(sw/2*.52,shY-limb*.32,sw/2,shY+limb*.24);
+      g.quadraticCurveTo(sw/2*.93,shY+L*.22,ww/2,wY);
+      g.quadraticCurveTo(ww/2+limb*.12,wY*.42,hw/2+limb*.18,limb*.55);
+      g.quadraticCurveTo(0,limb*1.0,-hw/2-limb*.18,limb*.55);
+      g.closePath()};
+    // --- neck, under everything so the collar and the head both cover its ends
+    const neckTop=shY-look.headR*.95;
+    if(!bone){
+      // A neck plus the trapezius wedge that ties it into the shoulders -- without the wedge the head
+      // rides a bare stalk, which was the single worst read of the first pass.
+      const nw=Math.max(7,look.headR*.86);
+      const neck=k=>{g.beginPath();
+        g.moveTo(-nw/2*k,neckTop);g.lineTo(nw/2*k,neckTop);
+        g.quadraticCurveTo(nw*.62*k,shY-limb*.10,sw*.32*k,shY+limb*.30);
+        g.lineTo(-sw*.32*k,shY+limb*.30);
+        g.quadraticCurveTo(-nw*.62*k,shY-limb*.10,-nw/2*k,neckTop);
+        g.closePath()};
+      g.fillStyle=b.outline;neck(1.10);g.fill();
+      const ng=g.createLinearGradient(-nw*.6,neckTop,nw*.6,shY);
+      ng.addColorStop(0,shade(look.skin,lo*.30));ng.addColorStop(.55,shade(look.skin,lo*.55));
+      ng.addColorStop(1,shade(look.skin,lo*1.05));
+      g.fillStyle=ng;neck(1);g.fill();
+      g.strokeStyle=shade(look.skin,lo*1.4);g.lineWidth=Math.max(.8,limb*.07);
+      g.beginPath();g.moveTo(fw*nw*.16,neckTop+look.headR*.2);g.lineTo(fw*nw*.22,shY-limb*.05);g.stroke()}
+    else{ // the skeleton's own neck: a stack of vertebrae, so the skull isn't left floating
+      g.strokeStyle=b.outline;g.lineWidth=Math.max(2.6,limb*.30);g.lineCap='round';
+      g.beginPath();g.moveTo(0,neckTop);g.lineTo(0,shY+limb*.3);g.stroke();
+      g.strokeStyle=look.skin;g.lineWidth=Math.max(1.6,limb*.20);
+      g.beginPath();g.moveTo(0,neckTop);g.lineTo(0,shY+limb*.3);g.stroke();
+      g.fillStyle=look.skin;g.strokeStyle=b.outline;g.lineWidth=Math.max(.7,limb*.06);
+      for(let i=0;i<4;i++){const y=neckTop+(shY+limb*.2-neckTop)*(i/3);
+        g.beginPath();g.ellipse(0,y,Math.max(1.8,limb*.26),Math.max(1.1,limb*.14),0,0,Math.PI*2);
+        g.fill();g.stroke()}}
+    // --- silhouette
+    g.strokeStyle=b.outline;g.lineWidth=Math.max(1.7,limb*.15);body();g.stroke();
+    if(bone)return this._paintRibCage(g,L,look,body);
+    // The one place in the body layer where a world-locked light is possible: the torso bitmap is
+    // world-AXIS-aligned (the affine only shears and scales it, never rotates it), so this gradient
+    // stays a genuine upper-left key light in world space, matching the rendition's torchlight.
+    const sg=g.createLinearGradient(-sw*.46,shY,sw*.46,limb*.5);
+    sg.addColorStop(0,shade(look.skin,hi));sg.addColorStop(.42,look.skin);
+    sg.addColorStop(1,shade(look.skin,lo*.85));
+    g.fillStyle=sg;body();g.fill();
+    // --- chest / abdomen split
+    g.save();body();g.clip();
+    const pcY=shY+L*.24,pcR=Math.min(sw*.27,L*.21);
+    g.globalAlpha=.55;g.fillStyle=shade(look.skin,Math.min(.95,hi*1.15));
+    for(const s of[-1,1]){g.beginPath();g.ellipse(s*sw*.21,pcY,pcR,pcR*.64,s*.14,0,Math.PI*2);g.fill()}
+    g.globalAlpha=.42;g.strokeStyle=shade(look.skin,lo);g.lineCap='round';
+    g.lineWidth=Math.max(1.2,limb*.11);
+    g.beginPath();g.moveTo(0,pcY-pcR*.55);g.lineTo(0,pcY+pcR*.95);g.stroke();               // sternum
+    g.beginPath();g.moveTo(-sw*.37,pcY+pcR*.58);
+    g.quadraticCurveTo(0,pcY+pcR*1.06,sw*.37,pcY+pcR*.58);g.stroke();                        // pec shelf
+    g.lineWidth=Math.max(.9,limb*.075);
+    const abTop=pcY+pcR*1.40;
+    for(let i=0;i<3;i++){const y=abTop+i*(L*.115),hx=ww*.36*(1-i*.14);
+      g.beginPath();g.moveTo(-hx,y);g.lineTo(hx,y);g.stroke()}
+    g.beginPath();g.moveTo(0,abTop-L*.05);g.lineTo(0,wY+L*.10);g.stroke();                   // linea alba
+    g.beginPath();g.moveTo(-ww*.48,wY+L*.04);g.lineTo(-hw*.20,limb*.30);g.stroke();          // obliques
+    g.beginPath();g.moveTo(ww*.48,wY+L*.04);g.lineTo(hw*.20,limb*.30);g.stroke();
+    // collarbones, always visible whatever the torso wears
+    g.globalAlpha=.38;g.lineWidth=Math.max(1,limb*.09);
+    g.beginPath();g.moveTo(-sw*.30,shY+limb*.36);g.quadraticCurveTo(0,shY+limb*.62,sw*.30,shY+limb*.36);g.stroke();
+    g.globalAlpha=1;g.restore();
+    this._paintTorsoCloth(g,L,look,fw,body)},
+  _paintTorsoCloth(g,L,look,fw,body){
+    const b=look.body,cl=b.cloth,prim=cl.primary,sec=cl.secondary,lo=b.skinShade[0];
+    const sw=look.shoulderW,hw=look.hipW,ww=this.waistW(look),limb=look.limb;
+    const shY=-L+4,wY=-L*.42;
+    const cg=a=>{const gr=g.createLinearGradient(-sw*.46,shY,sw*.46,limb*.5);
+      gr.addColorStop(0,shade(a,.24));gr.addColorStop(.42,a);gr.addColorStop(1,shade(a,-.34));
+      return gr};
+    if(cl.torso==='vest'){
+      // An open, torn vest: two panels down the sides with a ragged inner edge, the chest bare
+      // between them (the rendition's Carl, and the goblins' scavenged rags).
+      // Narrow panels hanging off each shoulder with a torn inner edge, leaving the chest and abs
+      // bare between them -- the first pass ran them nearly to the sternum, which read as a closed
+      // coat and buried the whole chest/abdomen layer underneath it.
+      const panel=s=>{g.beginPath();
+        g.moveTo(s*sw*.56,shY+limb*.10);
+        g.lineTo(s*sw*.30,shY+L*.10);
+        g.lineTo(s*ww*.44,wY-L*.02);
+        g.lineTo(s*ww*.34,wY+L*.10);
+        g.lineTo(s*ww*.52,wY+L*.06);
+        g.lineTo(s*ww*.44,wY+L*.22);
+        g.lineTo(s*(ww*.72+limb*.10),wY+L*.26);
+        g.lineTo(s*(sw*.54+limb*.10),shY+L*.30);
+        g.closePath()};
+      for(const s of[-1,1]){
+        g.strokeStyle=b.outline;g.lineWidth=Math.max(1.4,limb*.11);panel(s);g.stroke();
+        g.fillStyle=cg(prim);panel(s);g.fill();
+        g.save();panel(s);g.clip();
+        g.globalAlpha=.45;g.strokeStyle=shade(prim,-.45);g.lineWidth=Math.max(.9,limb*.07);
+        for(let i=0;i<3;i++){g.beginPath();
+          g.moveTo(s*sw*.52,shY+L*.14+i*L*.17);g.lineTo(s*ww*.40,wY-L*.02+i*L*.14);g.stroke()}
+        g.globalAlpha=1;g.restore()}
+      // A ragged fur collar riding the shoulder line, following the collar curve rather than cutting
+      // a straight bar across the chest.
+      g.fillStyle=shade(prim,-.18);
+      g.beginPath();g.moveTo(-sw*.50,shY-limb*.04);
+      g.quadraticCurveTo(0,shY-limb*.44,sw*.50,shY-limb*.04);
+      for(let i=6;i>=0;i--){const t=-.50+(i/6)*1.00;
+        g.lineTo(sw*t,shY+limb*(i%2?.26:.06))}
+      g.closePath();g.fill();
+      g.strokeStyle=b.outline;g.lineWidth=Math.max(1.1,limb*.08);g.stroke();
+      return}
+    if(cl.torso==='shirt'||cl.torso==='plate'||cl.torso==='chitin'||cl.torso==='fur'){
+      g.save();body();g.clip();
+      g.fillStyle=cg(prim);g.fillRect(-sw,shY-limb,sw*2,L+limb*3);
+      // a V of bare throat so the head doesn't sit on a solid color block
+      g.fillStyle=shade(look.skin,lo*.35);
+      g.beginPath();g.moveTo(-sw*.15,shY-1);g.lineTo(sw*.15,shY-1);g.lineTo(0,shY+L*.15);g.closePath();g.fill();
+      // shoulder seams + a couple of folds, so it reads as cloth over a body rather than a decal
+      g.strokeStyle=shade(prim,-.42);g.lineWidth=Math.max(1,limb*.10);g.lineCap='round';
+      for(const s of[-1,1]){g.beginPath();
+        g.moveTo(s*sw*.30,shY+limb*.16);g.quadraticCurveTo(s*sw*.40,shY+L*.16,s*sw*.34,shY+L*.30);g.stroke()}
+      g.globalAlpha=.55;
+      for(let i=0;i<2;i++){g.beginPath();
+        g.moveTo(-ww*.40,wY-L*.12+i*L*.10);g.quadraticCurveTo(0,wY-L*.06+i*L*.10,ww*.40,wY-L*.13+i*L*.10);g.stroke()}
+      g.globalAlpha=1;
+      if(cl.torso==='chitin'||cl.torso==='plate'){ // banded plates for the schema's armored kinds
+        g.strokeStyle=shade(prim,-.5);g.lineWidth=Math.max(1.4,limb*.14);
+        for(let i=0;i<3;i++){const y=shY+L*.34+i*L*.18;
+          g.beginPath();g.moveTo(-ww*.46,y);g.quadraticCurveTo(0,y+L*.05,ww*.46,y);g.stroke()}}
+      // belt
+      g.fillStyle=b.outline;g.fillRect(-sw,wY+L*.09,sw*2,limb*.58);
+      g.fillStyle=shade(sec,.04);g.fillRect(-sw,wY+L*.09+1,sw*2,limb*.58-2);
+      g.fillStyle=shade(sec,.38);
+      g.fillRect(fw*ww*.04-limb*.26,wY+L*.09,limb*.52,limb*.58);
+      g.restore();
+      g.strokeStyle=b.outline;g.lineWidth=Math.max(1.7,limb*.15);body();g.stroke();
+      return}
+    if(cl.torso==='robe'){
+      // Full coverage that flares past the body silhouette below the waist, plus a sash. The hood
+      // itself lives in _paintHead -- see LOOKS.shaman's comment for why the robe carries it.
+      const robe=()=>{g.beginPath();
+        g.moveTo(-sw*.50,shY+limb*.10);
+        g.quadraticCurveTo(-ww*.80,wY,-hw*.78-limb*.72,limb*1.5);
+        g.quadraticCurveTo(0,limb*1.95,hw*.78+limb*.72,limb*1.5);
+        g.quadraticCurveTo(ww*.80,wY,sw*.50,shY+limb*.10);
+        g.quadraticCurveTo(0,shY-limb*.22,-sw*.50,shY+limb*.10);
+        g.closePath()};
+      g.strokeStyle=b.outline;g.lineWidth=Math.max(1.7,limb*.15);robe();g.stroke();
+      g.fillStyle=cg(prim);robe();g.fill();
+      g.save();robe();g.clip();
+      g.strokeStyle=shade(prim,-.42);g.lineWidth=Math.max(1.1,limb*.11);g.lineCap='round';
+      for(const s of[-1,-.35,.35,1]){g.beginPath();
+        g.moveTo(s*sw*.30,shY+L*.16);g.quadraticCurveTo(s*ww*.62,wY+L*.20,s*(hw*.62+limb*.5),limb*1.35);g.stroke()}
+      g.fillStyle=b.outline;g.fillRect(-sw,wY+L*.16,sw*2,limb*.62);
+      g.fillStyle=shade(sec,.06);g.fillRect(-sw,wY+L*.16+1,sw*2,limb*.62-2);
+      g.restore();
+      // a knot with two tails hanging off the sash
+      g.fillStyle=shade(sec,.3);
+      g.beginPath();g.ellipse(fw*ww*.22,wY+L*.16+limb*.3,limb*.30,limb*.34,0,0,Math.PI*2);g.fill();
+      g.strokeStyle=shade(sec,-.12);g.lineWidth=Math.max(1.6,limb*.16);g.lineCap='round';
+      g.beginPath();g.moveTo(fw*ww*.22,wY+L*.16+limb*.5);g.lineTo(fw*ww*.30,limb*.9);g.stroke();
+      return}},
+  // The pelvis garment (a waistband, and for 'shorts' real trunks) rides the HIP JOINT in world
+  // space, deliberately OUTSIDE the torso's shear transform. At a knockdown/ko torso angle (-92deg)
+  // that transform squashes local y to nearly nothing and stretches x to nearly a full torso length,
+  // which turned Carl's trunks into a 90px red streak lying along the floor -- caught in the --pose
+  // ko shot. A garment hanging off the hips does not foreshorten with the ribcage, so it does not
+  // belong in the ribcage's bitmap. Drawn after both legs so the trunks cover the top of each thigh,
+  // the same z-order the pre-8.1 'boxers'/'gear' props had at the end of the prop loop.
+  hips(c,x,y,look,face){
+    const b=look&&look.body;
+    if(!b)return;
+    const cl=b.cloth;
+    if(cl.legs==='bare'||cl.legs==='bone')return;
+    const zb=this.zoomBucket(c),px=this.SS*zb,limb=look.limb,hw=look.hipW;
+    const halfW=hw*.5+limb*.8+3,up=limb*.8,down=cl.legs==='shorts'?limb*2.0:limb*1.0;
+    const bw=Math.ceil(halfW*2*px),bh=Math.ceil((up+down)*px);
+    const cv=this.cache(this.key(look,'hips:'+cl.legs,face,zb),bw,bh,g=>{
+      g.scale(px,px);g.translate(halfW,up);
+      this._paintHipCloth(g,look,face<0?-1:1)});
+    c.drawImage(cv,x-halfW,y-up,cv.width/px,cv.height/px)},
+  _paintHipCloth(g,look,fw){
+    const b=look.body,cl=b.cloth,prim=cl.primary,sec=cl.secondary,limb=look.limb,hw=look.hipW;
+    if(cl.legs==='bare'||cl.legs==='bone')return;
+    const shorts=cl.legs==='shorts';
+    const col=shorts?sec:prim;
+    const halfW=hw*.5+limb*.62,top=-limb*.42,bot=shorts?limb*1.72:limb*.62;
+    g.strokeStyle=b.outline;g.lineWidth=2.4;g.lineJoin='round';
+    const hipPath=()=>{g.beginPath();
+      g.moveTo(-halfW,top);g.lineTo(halfW,top);
+      g.lineTo(halfW*.92,bot);
+      if(shorts){g.lineTo(halfW*.24,bot*.86);g.lineTo(-halfW*.24,bot*.86)}
+      g.lineTo(-halfW*.92,bot);g.closePath()};
+    hipPath();g.stroke();
+    const gr=g.createLinearGradient(-halfW,top,halfW,bot);
+    gr.addColorStop(0,shade(col,.24));gr.addColorStop(.45,col);gr.addColorStop(1,shade(col,-.34));
+    g.fillStyle=gr;hipPath();g.fill();
+    g.save();hipPath();g.clip();
+    g.fillStyle=b.outline;g.fillRect(-halfW,top,halfW*2,limb*.38);      // waistband
+    g.fillStyle=shade(col,-.3);g.fillRect(-halfW,top+limb*.38,halfW*2,1.4);
+    if(shorts&&(look.props||[]).includes('boxers')){
+      // Carl's heart-print boxers, straight out of the rendition -- the same three-heart bezier the
+      // old 'boxers' prop drew, now printed on real trunks instead of a flat rectangle.
+      g.fillStyle='#ff9fd0';
+      for(const dx of[-halfW*.46,0,halfW*.46])for(const dy of[limb*.72,limb*1.24]){
+        const hx=dx+(dy>limb*1.0?halfW*.22:0),hy=dy,s=Math.max(2,limb*.15);
+        g.beginPath();g.moveTo(hx,hy+s*.3);
+        g.bezierCurveTo(hx-s,hy-s*.6,hx-s*1.6,hy+s*.4,hx,hy+s*1.4);
+        g.bezierCurveTo(hx+s*1.6,hy+s*.4,hx+s,hy-s*.6,hx,hy+s*.3);g.fill()}}
+    g.strokeStyle=shade(col,-.4);g.lineWidth=Math.max(.9,limb*.08);g.lineCap='round';
+    g.beginPath();g.moveTo(-halfW*.5,top+limb*.5);g.lineTo(-halfW*.3,bot*.8);g.stroke();
+    g.beginPath();g.moveTo(halfW*.5,top+limb*.5);g.lineTo(halfW*.3,bot*.8);g.stroke();
+    g.restore()},
+  // Skeleton torso: a rib cage over a dark void, not a bone-tinted body.
+  // Skeleton torso. The first pass filled the whole torso silhouette black and drew ribs on it,
+  // which read as a dark slab with scratches; the cage is now its own tapered shape, so the ribs and
+  // the pelvis ARE the silhouette and the body outline is never stroked at all.
+  _paintRibCage(g,L,look,body){
+    const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
+    const sw=look.shoulderW,hw=look.hipW,ww=this.waistW(look),limb=look.limb;
+    const shY=-L+4,wY=-L*.42;
+    const top=shY+limb*.55,bot=wY+L*.24,mid=(top+bot)/2;
+    const cage=k=>{const w1=sw*.44*k,w2=ww*.34*k;
+      g.beginPath();
+      g.moveTo(-w1,top);
+      g.quadraticCurveTo(-w1*1.10,mid,-w2,bot);
+      g.quadraticCurveTo(0,bot+L*.07,w2,bot);
+      g.quadraticCurveTo(w1*1.10,mid,w1,top);
+      g.quadraticCurveTo(0,top-L*.06,-w1,top);
+      g.closePath()};
+    g.strokeStyle=shade(look.skin,hi*.5);g.lineWidth=Math.max(1.8,limb*.24);g.lineCap='round';
+    g.beginPath();g.moveTo(-sw*.40,shY+limb*.24);                                  // clavicles
+    g.quadraticCurveTo(0,shY+limb*.70,sw*.40,shY+limb*.24);g.stroke();
+    g.fillStyle=b.outline;cage(1.10);g.fill();
+    g.fillStyle='#17160f';cage(1);g.fill();
+    g.save();cage(1);g.clip();
+    g.strokeStyle=shade(look.skin,lo*1.2);g.lineWidth=Math.max(2.0,limb*.24);
+    g.beginPath();g.moveTo(0,top-L*.04);g.lineTo(0,bot+L*.06);g.stroke();          // sternum/spine
+    g.strokeStyle=look.skin;g.lineWidth=Math.max(1.6,limb*.19);
+    const span=bot-top;
+    for(let i=0;i<5;i++){const y=top+span*(.12+i*.19),wid=sw*.46*(1-i*.11);
+      for(const s of[-1,1]){g.beginPath();g.moveTo(0,y);
+        g.quadraticCurveTo(s*wid,y+span*.02,s*wid*.78,y+span*.13);g.stroke()}}
+    g.restore();
+    g.fillStyle=b.outline;                                                          // pelvis
+    const pel=k=>{g.beginPath();
+      g.moveTo(-hw*.74*k,bot+L*.03);g.lineTo(hw*.74*k,bot+L*.03);
+      g.quadraticCurveTo(hw*.62*k,limb*.55,hw*.40*k,limb*.85);
+      g.lineTo(-hw*.40*k,limb*.85);
+      g.quadraticCurveTo(-hw*.62*k,limb*.55,-hw*.74*k,bot+L*.03);
+      g.closePath()};
+    pel(1.09);g.fill();
+    const pg2=g.createLinearGradient(-hw*.7,bot,hw*.7,limb);
+    pg2.addColorStop(0,shade(look.skin,hi));pg2.addColorStop(.5,look.skin);
+    pg2.addColorStop(1,shade(look.skin,lo));
+    g.fillStyle=pg2;pel(1);g.fill();
+    g.fillStyle='#17160f';
+    g.beginPath();g.ellipse(0,limb*.28,hw*.24,limb*.34,0,0,Math.PI*2);g.fill()},
+
+  // ---- head / face ------------------------------------------------------------------------------
+  head(c,x,y,r,look,face,state,lit){
+    const b=look&&look.body;
+    if(!b)return;
+    const st=HEAD_STATES.indexOf(state)>=0?state:'idle';
+    const fx=face>0?1:face<0?-1:0;
+    const zb=this.zoomBucket(c),px=this.SS*zb;
+    const ear=b.face.ears==='pointed'?this.earLen(look,r):0;
+    const halfW=r+Math.max(ear*1.15,r*.55)+4;
+    const up=r*1.62,down=r*1.60;
+    const bw=Math.ceil(halfW*2*px),bh=Math.ceil((up+down)*px);
+    const cv=this.cache(this.key(look,'head:'+st+':'+Math.round(r),fx,zb),bw,bh,g=>{
+      g.scale(px,px);g.translate(halfW,up);
+      this._paintHead(g,r,look,fx,st)});
+    c.drawImage(cv,x-halfW,y-up,cv.width/px,cv.height/px)},
+  // The look's ear length rescaled to whatever radius the head is being drawn at (look.headR in a
+  // fight, S*.27 in a portrait), so one head module serves both.
+  earLen(look,r){return (look.earLen||r*.7)*(r/(look.headR||r))},
+  _paintHead(g,r,look,face,st){
+    const b=look.body,F=b.face,lo=b.skinShade[0],hi=b.skinShade[1];
+    const fw=face<0?-1:1,front=face===0,skull=F.eyes==='skull';
+    const hood=b.cloth.torso==='robe';
+    g.lineJoin='round';g.lineCap='round';
+    // --- hair behind the head (a long mane reads as mass BEHIND the skull, not a hat)
+    if(F.hair==='long'){
+      g.fillStyle=b.outline;
+      g.beginPath();g.ellipse(front?0:-fw*r*.20,r*.10,r*(front?1.06:.98),r*1.30,0,0,Math.PI*2);g.fill();
+      g.fillStyle=shade(look.hair||'#1a1410',-.05);
+      g.beginPath();g.ellipse(front?0:-fw*r*.20,r*.08,r*(front?1.00:.92),r*1.24,0,0,Math.PI*2);g.fill()}
+    // --- ears, behind the skull so its fill covers each base
+    if(F.ears==='pointed'){
+      // Drawn as a tapered capsule along the ear's own axis rather than as a triangle. A goblin ear
+      // is 29 units long on an 18-unit head: as a polygon with quadratic sides it pinched to a 1-2px
+      // dark line that the outline alone filled, which is how the first passes read -- two scratches
+      // rather than ears. A capsule keeps a real width all the way up the taper.
+      const el=this.earLen(look,r);
+      const ears=front?[[-1,0,el],[1,0,el]]:[[-fw,-r*.10,el*.80],[-fw,r*.26,el]];
+      for(const e of ears){
+        const dir=e[0],dy=e[1],len=e[2];
+        const bx=dir*r*.55,by=dy,tx=dir*(r*.90+len*.90),ty=dy-len*.85;
+        const L2=Math.hypot(tx-bx,ty-by);
+        g.save();g.translate(bx,by);g.rotate(Math.atan2(ty-by,tx-bx));
+        g.fillStyle=b.outline;this._capsule(g,L2,r*.70,r*.12,1.3);g.fill();
+        const eg=g.createLinearGradient(0,-r*.35,0,r*.35);
+        eg.addColorStop(0,shade(look.skin,hi));eg.addColorStop(.55,look.skin);
+        eg.addColorStop(1,shade(look.skin,lo));
+        g.fillStyle=eg;this._capsule(g,L2,r*.70,r*.12,0);g.fill();
+        g.fillStyle=shade(look.skin,lo*.75);
+        this._capsule(g,L2*.80,r*.36,r*.07,0);g.fill();
+        g.restore()}}
+    // --- skull silhouette
+    const shape=()=>{
+      g.beginPath();
+      if(front){g.ellipse(0,0,r*.90,r,0,0,Math.PI*2);return}
+      if(skull){ // a real skull: big cranium, pinched temple, narrow jaw
+        g.moveTo(-fw*r*.92,-r*.18);
+        g.quadraticCurveTo(-fw*r*.88,-r*1.00,0,-r*1.00);
+        g.quadraticCurveTo(fw*r*.90,-r*.96,fw*r*.92,-r*.14);
+        g.quadraticCurveTo(fw*r*.96,r*.24,fw*r*.60,r*.34);
+        g.quadraticCurveTo(fw*r*.56,r*.98,0,r*1.00);
+        g.quadraticCurveTo(-fw*r*.58,r*.94,-fw*r*.78,r*.30);
+        g.quadraticCurveTo(-fw*r*.96,r*.10,-fw*r*.92,-r*.18);
+        g.closePath();return}
+      // A profile, not a disc. The decisive part is that the NOSE is cut INTO the silhouette rather
+      // than painted on the cheek: a nose drawn inside the head's own clip can only ever read as a
+      // loop sitting on the face, which is exactly how the earlier passes read at 6x. Cranium, brow
+      // ridge, bridge dip, nose, lip, chin, jawline, back of the skull -- in that order.
+      // Forward extent: the tip caps at 1.24r for the goblins' hook and 1.04r otherwise. Rig.extent
+      // and Rig.topAt fold the head as a circle of radius headR, so the goblin hook is the one place
+      // the drawn silhouette exceeds the folded one, by 0.24*headR (4.3px on a goblin, 6px on a
+      // hobgoblin). Deliberate -- the hooked nose is the scavenger's whole read in the rendition --
+      // and far inside the margin those two looks have against EDGE_PAD (goblin 144 of 260).
+      const gob=F.eyes==='goblin';
+      const nx=fw*r*(gob?1.24:1.04),ny=r*(gob?.30:.12);
+      g.moveTo(-fw*r*.90,-r*.14);
+      g.quadraticCurveTo(-fw*r*.94,-r*.90,fw*r*.02,-r*.98);
+      g.quadraticCurveTo(fw*r*.72,-r*.90,fw*r*.84,-r*.40);   // forehead into the brow ridge
+      g.quadraticCurveTo(fw*r*.72,-r*.30,fw*r*.64,-r*.20);   // the bridge dip under the brow
+      g.quadraticCurveTo(fw*r*(gob?1.06:.94),-r*.02,nx,ny);  // out to the tip
+      g.quadraticCurveTo(fw*r*.78,ny+r*.14,fw*r*.60,r*.30);  // back in under the nostril
+      g.quadraticCurveTo(fw*r*.86,r*.50,fw*r*.58,r*.82);     // lip, then the chin
+      g.quadraticCurveTo(fw*r*.06,r*1.10,-fw*r*.50,r*.76);   // jawline running back
+      g.quadraticCurveTo(-fw*r*.98,r*.30,-fw*r*.90,-r*.14);
+      g.closePath()};
+    g.strokeStyle=b.outline;g.lineWidth=Math.max(1.5,r*.11);shape();g.stroke();
+    const hg=g.createLinearGradient(-r*.85,-r*.95,r*.75,r*.95);
+    hg.addColorStop(0,shade(look.skin,hi));hg.addColorStop(.48,look.skin);
+    hg.addColorStop(1,shade(look.skin,lo*.9));
+    g.fillStyle=hg;shape();g.fill();
+    g.save();shape();g.clip();
+    if(F.ears==='human'&&!front){ // inside the clip, so it sits ON the profile instead of behind it
+      g.fillStyle=shade(look.skin,lo*.45);g.strokeStyle=b.outline;g.lineWidth=Math.max(.9,r*.055);
+      g.beginPath();g.ellipse(-fw*r*.46,r*.06,r*.15,r*.21,fw*.18,0,Math.PI*2);g.fill();g.stroke();
+      g.strokeStyle=shade(look.skin,lo*1.2);g.lineWidth=Math.max(.7,r*.045);
+      g.beginPath();g.arc(-fw*r*.46,r*.06,r*.08,0,Math.PI*1.4);g.stroke()}
+    // --- cheekbone / jaw shading
+    g.globalAlpha=.30;g.fillStyle=shade(look.skin,lo);
+    g.beginPath();g.ellipse(front?0:-fw*r*.30,r*.46,r*.62,r*.40,0,0,Math.PI*2);g.fill();
+    g.globalAlpha=1;
+    // --- eye geometry: a 3/4 read -- the near eye large and forward, the far one smaller and tucked
+    //     toward the far edge. Front-facing portraits get two equal eyes.
+    const eyeY=-r*.06;
+    const eyes=front
+      ?[{x:-r*.33,y:eyeY,s:1,in:1},{x:r*.33,y:eyeY,s:1,in:-1}]
+      :[{x:fw*r*.32,y:eyeY,s:1,in:-fw}];
+    const open={idle:1,attack:.78,block:.60,hit:.42,win:.66,ko:0}[st];
+    for(const e of eyes)this._paintEye(g,r,look,e,open,st,fw,front);
+    // --- brow
+    if(F.brow&&!skull){
+      const tilt={idle:0,attack:.34,block:.40,hit:-.30,win:-.10,ko:-.05}[st];
+      g.strokeStyle=look.hair?shade(look.hair,.10):shade(look.skin,lo*1.55);
+      g.lineWidth=Math.max(1.6,r*.11);g.lineCap='round';
+      for(const e of eyes){
+        const inner=e.in;
+        g.beginPath();
+        g.moveTo(e.x-inner*r*.26*e.s,e.y-r*.24*e.s+inner*tilt*r*.14);
+        g.quadraticCurveTo(e.x,e.y-r*.32*e.s+inner*tilt*r*.08,
+          e.x+inner*r*.22*e.s,e.y-r*.20*e.s-inner*tilt*r*.12);
+        g.stroke()}}
+    // --- nose
+    if(!front&&!skull){
+      // The nose is in the outline now, so all that is left is the far nostril's plane and the
+      // nostril itself.
+      const gob2=F.eyes==='goblin';
+      g.globalAlpha=.5;g.fillStyle=shade(look.skin,lo);
+      g.beginPath();g.moveTo(fw*r*.62,r*(gob2?.10:.02));
+      g.quadraticCurveTo(fw*r*(gob2?1.02:.88),r*(gob2?.30:.16),fw*r*.58,r*.30);
+      g.closePath();g.fill();g.globalAlpha=1;
+      g.fillStyle=shade(look.skin,lo*1.6);
+      g.beginPath();g.ellipse(fw*r*(gob2?.82:.72),r*(gob2?.30:.20),r*.085,r*.05,fw*.4,0,Math.PI*2);g.fill()}
+    else if(front&&!skull){
+      g.strokeStyle=shade(look.skin,lo*1.2);g.lineWidth=Math.max(1.2,r*.08);
+      g.beginPath();g.moveTo(r*.05,-r*.02);g.lineTo(r*.10,r*.22);g.lineTo(-r*.07,r*.24);g.stroke()}
+    this._paintMouth(g,r,look,st,fw,front,skull);
+    g.restore();
+    // --- hair on top (drawn after the clip is released so a fringe may overhang the silhouette)
+    const hair=look.hair||'#221a12';
+    if(F.hair==='crop'){
+      // A short, messy crop: a cap over the cranium with a torn front edge and a fringe that falls
+      // toward the face, plus a sideburn down past the ear. A smooth arc here read as a bowl cut.
+      const cap=()=>{g.beginPath();
+        g.moveTo(-fw*r*.96,-r*.10);
+        g.quadraticCurveTo(-fw*r*1.02,-r*.92,fw*r*.04,-r*1.12);
+        g.quadraticCurveTo(fw*r*.84,-r*1.02,fw*r*.92,-r*.34);
+        g.lineTo(fw*r*.74,-r*.62);g.lineTo(fw*r*.62,-r*.46);
+        g.lineTo(fw*r*.44,-r*.66);g.lineTo(fw*r*.22,-r*.50);
+        g.lineTo(fw*r*.04,-r*.68);g.lineTo(-fw*r*.22,-r*.50);
+        g.lineTo(-fw*r*.50,-r*.62);g.lineTo(-fw*r*.74,-r*.36);
+        g.closePath()};
+      g.fillStyle=b.outline;g.lineWidth=Math.max(1.4,r*.10);g.lineJoin='round';
+      cap();g.stroke();
+      g.fillStyle=hair;cap();g.fill();
+      g.save();cap();g.clip();
+      g.strokeStyle=shade(hair,.26);g.lineWidth=Math.max(.9,r*.055);g.lineCap='round';
+      for(let i=0;i<5;i++){const t=-.8+i*.4;
+        g.beginPath();g.moveTo(fw*r*t,-r*.40);
+        g.quadraticCurveTo(fw*r*(t+.16),-r*.86,fw*r*(t+.06),-r*1.10);g.stroke()}
+      g.restore()}
+    else if(F.hair==='long'){
+      g.fillStyle=hair;
+      g.beginPath();g.moveTo(-fw*r*1.00,-r*.20);
+      g.quadraticCurveTo(-fw*r*.86,-r*1.28,fw*r*.16,-r*1.26);
+      g.quadraticCurveTo(fw*r*.94,-r*1.06,fw*r*.90,-r*.26);
+      g.quadraticCurveTo(fw*r*.60,-r*.66,fw*r*.16,-r*.60);
+      g.quadraticCurveTo(-fw*r*.44,-r*.54,-fw*r*1.00,-r*.20);
+      g.closePath();g.fill();
+      g.strokeStyle=shade(hair,.20);g.lineWidth=Math.max(1,r*.055);
+      for(let i=0;i<3;i++){const t=-.6+i*.5;
+        g.beginPath();g.moveTo(fw*r*t,-r*.62);g.quadraticCurveTo(fw*r*(t+.1),-r*1.0,fw*r*(t+.02),-r*1.18);g.stroke()}}
+    else if(F.hair==='mohawk'){
+      g.fillStyle=hair;g.beginPath();
+      g.moveTo(-fw*r*.50,-r*.86);
+      for(let i=0;i<5;i++){const t=-.5+i*.26;
+        g.lineTo(fw*r*(t+.08),-r*(1.30-Math.abs(i-2)*.08));g.lineTo(fw*r*(t+.18),-r*.90)}
+      g.closePath();g.fill()}
+    // --- horns (face-module stubs: deliberately inside the head circle's own r*1.35 bound, so they
+    //     add nothing to the silhouette the HUD-clearance test measures)
+    if(F.horns){
+      const hl=F.horns==='big'?r*.62:r*.40;
+      g.strokeStyle=b.outline;g.lineWidth=Math.max(3.4,r*.24);g.lineCap='round';
+      for(const s of[-1,1]){g.beginPath();g.moveTo(s*r*.60,-r*.66);
+        g.quadraticCurveTo(s*r*.86,-r*.66-hl*.5,s*r*.70,-r*.66-hl);g.stroke()}
+      g.strokeStyle=shade('#d8cdb4',-.12);g.lineWidth=Math.max(2,r*.15);
+      for(const s of[-1,1]){g.beginPath();g.moveTo(s*r*.60,-r*.66);
+        g.quadraticCurveTo(s*r*.86,-r*.66-hl*.5,s*r*.70,-r*.66-hl);g.stroke()}}
+    // --- hood (the shaman's cowl; carried by cloth.torso==='robe', see LOOKS.shaman)
+    if(hood){
+      const prim=b.cloth.primary;
+      const cowl=k=>{g.beginPath();
+        g.moveTo(-fw*r*1.14*k,r*.78*k+1);
+        g.quadraticCurveTo(-fw*r*1.26*k,-r*1.26*k,fw*r*.20*k,-r*1.32*k);
+        g.quadraticCurveTo(fw*r*1.06*k,-r*1.08*k,fw*r*.86*k,-r*.34*k);
+        g.quadraticCurveTo(fw*r*.66*k,-r*.66*k,fw*r*.14*k,-r*.62*k);
+        g.quadraticCurveTo(-fw*r*.56*k,-r*.52*k,-fw*r*.76*k,r*.86*k+1);
+        g.closePath()};
+      g.fillStyle=b.outline;cowl(1);g.fill();
+      const cg2=g.createLinearGradient(-r,-r*1.3,r,r*.6);
+      cg2.addColorStop(0,shade(prim,.26));cg2.addColorStop(.5,prim);cg2.addColorStop(1,shade(prim,-.36));
+      g.fillStyle=cg2;cowl(.94);g.fill();
+      g.strokeStyle=shade(prim,-.4);g.lineWidth=Math.max(1,r*.06);
+      g.beginPath();g.moveTo(-fw*r*.90,r*.30);g.quadraticCurveTo(-fw*r*.60,-r*.60,fw*r*.20,-r*.90);g.stroke();
+      g.save();shape();g.clip();                       // the cowl's own shadow across the brow
+      g.globalAlpha=.34;g.fillStyle='#0a0710';
+      g.beginPath();g.rect(-r*1.2,-r*1.2,r*2.4,r*.90);g.fill();
+      g.globalAlpha=1;g.restore()}},
+  _paintEye(g,r,look,e,open,st,fw,front){
+    const b=look.body,F=b.face,lo=b.skinShade[0];
+    const s=e.s,ew=r*.195*s,eh=r*.145*s;
+    if(F.eyes==='none')return;
+    if(F.eyes==='skull'){
+      // A dark socket with an ember in it. 'ko' dims the ember to an almost-out coal -- that is what
+      // "x-eyes" means for a skull.
+      g.fillStyle='#14120c';
+      g.beginPath();g.ellipse(e.x,e.y,ew*1.25,eh*1.55,front?0:fw*.16,0,Math.PI*2);g.fill();
+      const lit=st==='ko'?.35:st==='attack'||st==='win'?1.25:1;
+      const gr=g.createRadialGradient(e.x,e.y,0,e.x,e.y,ew*1.35);
+      gr.addColorStop(0,F.iris);gr.addColorStop(.35,shade(F.iris,-.35));
+      gr.addColorStop(1,'rgba(0,0,0,0)');
+      g.save();g.globalAlpha=.85*lit;g.fillStyle=gr;
+      g.beginPath();g.ellipse(e.x,e.y,ew*1.35,eh*1.6,0,0,Math.PI*2);g.fill();g.restore();
+      g.fillStyle=F.iris;
+      g.beginPath();g.arc(e.x,e.y,Math.max(.7,ew*.30*lit),0,Math.PI*2);g.fill();
+      return}
+    if(st==='ko'){ // crossed-out eyes: the one unambiguous "this fighter is done" signal
+      g.strokeStyle=shade(look.skin,lo*1.7);g.lineWidth=Math.max(1.6,r*.10);g.lineCap='round';
+      g.beginPath();g.moveTo(e.x-ew*.8,e.y-eh*1.0);g.lineTo(e.x+ew*.8,e.y+eh*1.0);g.stroke();
+      g.beginPath();g.moveTo(e.x+ew*.8,e.y-eh*1.0);g.lineTo(e.x-ew*.8,e.y+eh*1.0);g.stroke();
+      return}
+    const gob=F.eyes==='goblin';
+    const oh=Math.max(eh*.22,eh*open);
+    // sclera
+    g.fillStyle=gob?'#2d2a15':'#f0e8d8';
+    g.beginPath();g.ellipse(e.x,e.y,ew,oh,front?0:fw*.14,0,Math.PI*2);g.fill();
+    g.strokeStyle=b.outline;g.lineWidth=Math.max(.9,r*.05);g.stroke();
+    // iris + pupil, nudged toward the facing direction so the fighter looks at the opponent
+    const ix=e.x+(front?0:fw*ew*.24),ir=Math.min(oh*1.02,ew*.62);
+    g.save();
+    g.beginPath();g.ellipse(e.x,e.y,ew,oh,front?0:fw*.14,0,Math.PI*2);g.clip();
+    g.fillStyle=F.iris;g.beginPath();g.arc(ix,e.y,ir,0,Math.PI*2);g.fill();
+    g.strokeStyle=shade(F.iris,-.55);g.lineWidth=Math.max(.6,ir*.24);
+    g.beginPath();g.arc(ix,e.y,ir*.88,0,Math.PI*2);g.stroke();
+    g.fillStyle='#120e08';
+    if(gob){g.beginPath();g.ellipse(ix,e.y,Math.max(.6,ir*.28),ir*.92,0,0,Math.PI*2);g.fill()}
+    else{g.beginPath();g.arc(ix,e.y,Math.max(.7,ir*.48),0,Math.PI*2);g.fill()}
+    g.fillStyle='rgba(255,255,255,.85)';
+    g.beginPath();g.arc(ix-ew*.20,e.y-oh*.34,Math.max(.5,ir*.26),0,Math.PI*2);g.fill();
+    g.restore();
+    // lids: an upper lid that actually closes over the eye for the narrowed states
+    if(open<.95){
+      g.fillStyle=shade(look.skin,lo*.35);
+      g.beginPath();g.ellipse(e.x,e.y-eh*(1+open*.55),ew*1.22,eh*1.05,0,0,Math.PI*2);g.fill()}
+    if(st==='win'){ // a smiling lower lid
+      g.strokeStyle=shade(look.skin,lo*1.5);g.lineWidth=Math.max(1,r*.055);
+      g.beginPath();g.moveTo(e.x-ew*.9,e.y+oh*.5);
+      g.quadraticCurveTo(e.x,e.y-oh*.3,e.x+ew*.9,e.y+oh*.5);g.stroke()}},
+  _paintMouth(g,r,look,st,fw,front,skull){
+    const b=look.body,F=b.face,lo=b.skinShade[0];
+    const mx=front?0:fw*r*.34,my=r*.52,w=r*.34,fang=F.mouth==='fangs';
+    if(skull||F.mouth==='none'){
+      // The skull's own teeth: a row of them across the jaw, dropped open when it is done.
+      const drop=st==='ko'?r*.16:st==='attack'?r*.07:0;
+      const tw=r*(skull?.62:.5),ty=my+drop*.5;
+      g.fillStyle='#14120c';
+      g.beginPath();g.rect(mx-tw*.5,ty-r*.10,tw,r*.20+drop);g.fill();
+      g.strokeStyle=shade(look.skin,-.05);g.lineWidth=Math.max(.9,r*.06);
+      for(let i=0;i<=5;i++){const x=mx-tw*.5+tw*(i/5);
+        g.beginPath();g.moveTo(x,ty-r*.10);g.lineTo(x,ty+r*.10+drop);g.stroke()}
+      g.strokeStyle=shade(look.skin,lo*.6);g.lineWidth=Math.max(1,r*.07);
+      g.beginPath();g.moveTo(mx-tw*.55,ty-r*.10);g.lineTo(mx+tw*.55,ty-r*.10);g.stroke();
+      return}
+    g.lineCap='round';g.lineJoin='round';
+    const dark='#3a1d18';
+    const openMouth=(hw,hh,tilt)=>{
+      g.fillStyle=dark;g.beginPath();g.ellipse(mx,my,hw,hh,tilt||0,0,Math.PI*2);g.fill();
+      g.strokeStyle=shade(look.skin,lo*1.5);g.lineWidth=Math.max(1,r*.055);g.stroke();
+      g.save();g.beginPath();g.ellipse(mx,my,hw,hh,tilt||0,0,Math.PI*2);g.clip();
+      g.fillStyle='#efe6d4';g.fillRect(mx-hw,my-hh,hw*2,hh*.62);                   // upper teeth
+      if(fang){g.fillStyle='#e8dcc0';
+        for(const s of[-.5,.5]){g.beginPath();
+          g.moveTo(mx+s*hw*.9,my+hh);g.lineTo(mx+s*hw*.55,my-hh*.1);g.lineTo(mx+s*hw*1.15,my-hh*.05);
+          g.closePath();g.fill()}}
+      g.restore()};
+    if(st==='hit'){openMouth(w*.72,r*.26,fw*.18);return}
+    if(st==='attack'){openMouth(w*.92,r*.20,0);return}
+    if(st==='win'){
+      g.strokeStyle=shade(look.skin,lo*1.7);g.lineWidth=Math.max(1.6,r*.10);
+      g.beginPath();g.moveTo(mx-w,my-r*.06);
+      g.quadraticCurveTo(mx,my+r*.20,mx+w,my-r*.08);g.stroke();
+      g.save();g.beginPath();g.moveTo(mx-w,my-r*.06);
+      g.quadraticCurveTo(mx,my+r*.20,mx+w,my-r*.08);g.lineTo(mx+w,my-r*.20);g.lineTo(mx-w,my-r*.20);
+      g.closePath();g.clip();g.fillStyle='#efe6d4';g.fillRect(mx-w,my-r*.2,w*2,r*.22);g.restore();
+      return}
+    if(st==='block'){ // clenched: a short, thick, hard line
+      g.strokeStyle=shade(look.skin,lo*1.8);g.lineWidth=Math.max(2,r*.13);
+      g.beginPath();g.moveTo(mx-w*.7,my);g.lineTo(mx+w*.7,my-r*.03);g.stroke()}
+    else{ // idle: a relaxed flat line with a hint of a corner shadow
+      g.strokeStyle=shade(look.skin,lo*1.5);g.lineWidth=Math.max(1.3,r*.08);
+      g.beginPath();g.moveTo(mx-w*.75,my);g.quadraticCurveTo(mx,my+r*.05,mx+w*.75,my-r*.02);g.stroke()}
+    if(fang){ // two lower fangs riding over the closed lip
+      g.fillStyle='#e8dcc0';g.strokeStyle=shade('#e8dcc0',-.45);g.lineWidth=.8;
+      for(const s of[-.6,.6]){g.beginPath();
+        g.moveTo(mx+s*w*.9,my+r*.02);g.lineTo(mx+s*w*.62,my-r*.18);g.lineTo(mx+s*w*1.16,my-r*.14);
+        g.closePath();g.fill();g.stroke()}}},
+
+  // ---- hands and feet ---------------------------------------------------------------------------
+  // The old rig drew no hand at all -- a forearm's round line cap was the fist. A real fist is what
+  // sells a punch at this size.
+  hand(c,x,y,r,look,face,ang,wrap){
+    const b=look&&look.body;
+    if(!b)return;
+    const zb=this.zoomBucket(c),px=this.SS*zb;
+    const half=r*1.75+3;
+    const bw=Math.ceil(half*2*px);
+    const cv=this.cache(this.key(look,'hand:'+Math.round(r*4)+':'+(wrap?'w':'b'),face,zb),bw,bw,g=>{
+      g.scale(px,px);g.translate(half,half);
+      this._paintHand(g,r,look,wrap)});
+    c.save();c.translate(x,y);c.rotate(ang||0);
+    c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
+    c.restore()},
+  _paintHand(g,r,look,wrap){
+    const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
+    const bone=b.cloth.torso==='bone';
+    g.fillStyle=b.outline;
+    g.beginPath();g.ellipse(r*.18,0,r*1.24,r*1.06,0,0,Math.PI*2);g.fill();
+    const gr=g.createLinearGradient(0,-r,0,r);
+    gr.addColorStop(0,shade(look.skin,hi));gr.addColorStop(.55,look.skin);
+    gr.addColorStop(1,shade(look.skin,lo));
+    g.fillStyle=gr;
+    g.beginPath();g.ellipse(r*.18,0,r*1.10,r*.92,0,0,Math.PI*2);g.fill();
+    if(bone){ // a splayed claw of finger bones rather than a fist
+      g.strokeStyle=look.skin;g.lineWidth=Math.max(1.2,r*.22);g.lineCap='round';
+      for(const a of[-.5,-.16,.18,.52]){g.beginPath();g.moveTo(0,0);
+        g.lineTo(Math.cos(a)*r*1.5,Math.sin(a)*r*1.5);g.stroke()}
+      return}
+    g.strokeStyle=shade(look.skin,lo*1.3);g.lineWidth=Math.max(.8,r*.13);g.lineCap='round';
+    for(const dy of[-.44,0,.44]){g.beginPath();
+      g.moveTo(r*.70,dy*r);g.lineTo(r*1.02,dy*r*.86);g.stroke()}          // knuckles
+    if(wrap){
+      g.strokeStyle='#e6dccb';g.lineWidth=Math.max(1.4,r*.34);g.lineCap='butt';
+      g.beginPath();g.moveTo(-r*.92,-r*.30);g.lineTo(r*.42,-r*.52);g.stroke();
+      g.beginPath();g.moveTo(-r*.92,r*.36);g.lineTo(r*.50,r*.24);g.stroke();
+      g.strokeStyle='rgba(58,46,32,.38)';g.lineWidth=Math.max(.6,r*.10);
+      g.beginPath();g.moveTo(-r*.92,-r*.05);g.lineTo(r*.46,-r*.16);g.stroke()}},
+  // A ball at a limb's attach point. Without it the tube's flat proximal cap leaves a visible notch
+  // against the torso silhouette, which is what made the first pass read as parts bolted together.
+  joint(c,x,y,r,look,face,col){
+    const b=look&&look.body;
+    if(!b)return;
+    const base=col||look.skin;
+    const zb=this.zoomBucket(c),px=this.SS*zb,half=r*1.3+3;
+    const bw=Math.ceil(half*2*px);
+    const cv=this.cache(this.key(look,'joint:'+Math.round(r*4)+':'+base,face,zb),bw,bw,g=>{
+      g.scale(px,px);g.translate(half,half);
+      const lo=b.skinShade[0],hi=b.skinShade[1];
+      const bone=b.cloth.torso==='bone';
+      g.fillStyle=b.outline;g.beginPath();g.arc(0,0,r+1.2,0,Math.PI*2);g.fill();
+      const gr=g.createLinearGradient(-r*.7,-r*.9,r*.6,r*.9);
+      gr.addColorStop(0,shade(base,hi));gr.addColorStop(.5,base);
+      gr.addColorStop(1,shade(base,lo));
+      g.fillStyle=gr;g.beginPath();g.arc(0,0,r,0,Math.PI*2);g.fill();
+      if(bone){g.strokeStyle=shade(base,lo*1.3);g.lineWidth=Math.max(.7,r*.16);
+        g.beginPath();g.moveTo(-r*.5,0);g.lineTo(r*.5,0);g.stroke()}});
+    c.drawImage(cv,x-half,y-half,cv.width/px,cv.height/px)},
+  foot(c,x,y,look,face,ang){
+    const b=look&&look.body;
+    if(!b)return;
+    const zb=this.zoomBucket(c),px=this.SS*zb;
+    const w=look.limb*1.35,h=look.limb*.82,half=Math.max(w,h)*1.15+3;
+    const bw=Math.ceil(half*2*px);
+    const bare=!!look.bareFeet,kind=b.cloth.legs==='bone'?'bone':bare?'bare':'boot';
+    const cv=this.cache(this.key(look,'foot:'+kind+':'+Math.round(w*2),face,zb),bw,bw,g=>{
+      g.scale(px,px);g.translate(half,half);
+      this._paintFoot(g,w,h,look,kind)});
+    c.save();c.translate(x,y);c.rotate(ang||0);
+    c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
+    c.restore()},
+  _paintFoot(g,w,h,look,kind){
+    const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
+    const skin=kind==='boot'?'#3a2a1c':look.skin;
+    const path=()=>{g.beginPath();
+      g.moveTo(-w*.42,-h*.52);
+      g.quadraticCurveTo(w*.30,-h*.62,w*.62,-h*.14);
+      g.quadraticCurveTo(w*.74,h*.46,w*.30,h*.50);
+      g.lineTo(-w*.40,h*.50);
+      g.quadraticCurveTo(-w*.60,0,-w*.42,-h*.52);
+      g.closePath()};
+    g.strokeStyle=b.outline;g.lineWidth=2.2;g.lineJoin='round';path();g.stroke();
+    const gr=g.createLinearGradient(0,-h*.6,0,h*.6);
+    gr.addColorStop(0,shade(skin,hi));gr.addColorStop(.55,skin);gr.addColorStop(1,shade(skin,lo));
+    g.fillStyle=gr;path();g.fill();
+    g.save();path();g.clip();
+    if(kind==='boot'){
+      g.fillStyle='#1a120b';g.fillRect(-w,h*.22,w*2,h);                       // sole
+      g.strokeStyle=shade(look.body.cloth.secondary,-.2);g.lineWidth=Math.max(1.2,h*.16);
+      g.beginPath();g.moveTo(-w*.42,-h*.10);g.lineTo(w*.40,-h*.22);g.stroke()} // strap
+    else if(kind==='bone'){
+      g.strokeStyle=shade(look.skin,lo*1.2);g.lineWidth=Math.max(.9,h*.12);
+      for(const t of[-.2,.1,.4]){g.beginPath();g.moveTo(w*t,-h*.5);g.lineTo(w*t,h*.5);g.stroke()}}
+    else{ // bare toes
+      g.strokeStyle=shade(look.skin,lo*1.2);g.lineWidth=Math.max(.8,h*.10);
+      for(const t of[.18,.40,.58]){g.beginPath();
+        g.moveTo(w*t,h*.08);g.lineTo(w*(t+.04),h*.46);g.stroke()}}
+    g.restore()}};
+
 // ---- forward kinematics ----
 const Rig={
   bones:['hip','torso','neck','head','lShoulder','lElbow','lHand','rShoulder','rElbow','rHand','lHip','lKnee','lFoot','rHip','rKnee','rFoot'],
@@ -4171,6 +5060,10 @@ const Rig={
     if(look0.rig==='big')return this.drawBig(c,F,cam,frame,look0);
     const look=look0,scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solve(look,key,t01,face);
+    // Task 8.1: every human look ships a `.body` block, so this is the live path; everything below
+    // it is the pre-8.1 stroke rig, kept intact as the fallback for a look that has none (the
+    // lookFor() fallback target, LOOKS.carl, does have one, so nothing reaches it today).
+    if(look.body)return this._drawHuman(c,F,look,j,face,scale,key);
     const skinDark=shade(look.skin,-.35);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
     const limb=(p,q,w)=>{c.lineCap='round';
@@ -4273,6 +5166,88 @@ const Rig={
         // to keep it artificially short.
         c.strokeStyle=look.secondary;c.lineWidth=10;c.lineCap='round';
         c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*12,h.y-30);c.stroke();
+        c.fillStyle='#3a2f22';for(let i=0;i<3;i++){c.beginPath();
+          c.arc(h.x+face*(4+i*4),h.y-10-i*10,3,0,Math.PI*2);c.fill()}}}
+    c.restore()},
+  // Which limb cloth each bone of the human rig wears, derived from the look's own cloth block
+  // rather than from a per-look list -- one wardrobe decision (cloth.torso/cloth.legs) dresses the
+  // whole body consistently, so a new look cannot end up with a shirt and bare sleeves.
+  // 'shorts' deliberately maps the THIGH to bare: the trunks themselves are drawn by the torso
+  // module, because they ride the hip joint rather than the thigh bone (see _paintHipCloth).
+  // What color the ball at a joint takes: whatever the limb on the far side of it is wearing, so a
+  // shoulder/elbow/knee cap never punches a skin-toned hole through a sleeve or a trouser leg.
+  jointCol(look,part){
+    const c=this.clothFor(look,part);
+    return (c==='sleeve'||c==='pant'||c==='robe'||c==='ragged'||c==='shorts')
+      ?look.body.cloth.primary:look.skin},
+  clothFor(look,part){
+    const cl=look.body.cloth,t=cl.torso,l=cl.legs;
+    if(part==='upperArm')return t==='bone'?'bone':t==='robe'?'robe':
+      (t==='shirt'||t==='plate'||t==='chitin')?'sleeve':t==='fur'?'ragged':'bare';
+    if(part==='foreArm')return t==='bone'?'bone':
+      (look.props||[]).includes('bandages')?'wrap':t==='robe'?'robe':'bare';
+    if(part==='thigh')return l==='bone'?'bone':l==='pants'?'pant':l==='robe'?'robe':
+      l==='fur'?'ragged':'bare';
+    if(part==='shin')return l==='bone'?'bone':(l==='pants'||l==='robe')?'pant':'bare';
+    return 'bare'},
+  // Cloth that BodyStyle now draws for itself. Left in each look's `props` array on purpose: props
+  // is also what Rig.extent/propExtra walk, and removing entries (even entries propExtra returns []
+  // for) would have meant touching the one structure the extent snapshot is pinned against. The
+  // prop LOOP skips them instead, so only real held objects -- a dagger, a club -- still draw there.
+  BODY_CLOTH_PROPS:{vest:1,rags:1,boxers:1,gear:1,bandages:1,scars:1,trousers:1},
+  // The layered human body. Same z-order the old stroke rig used -- back leg, back arm, torso, head,
+  // front leg, front arm, then held props -- so the silhouette and the overlap read are unchanged;
+  // only what fills each layer is new. `lit` rides through untouched for Task 8.3.
+  _drawHuman(c,F,look,j,face,scale,poseKey,lit){
+    const limb=look.limb,fs=BodyStyle.faceState(poseKey);
+    const cf=part=>this.clothFor(look,part);
+    const wrapped=(look.props||[]).includes('bandages');
+    const armW=limb*.88,foreW=limb*.70,thighW=limb*1.08,shinW=limb*.86;
+    c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
+    const arm=(sh,el,hand)=>{
+      BodyStyle.joint(c,sh.x,sh.y,armW*.62,look,face,this.jointCol(look,'upperArm'));
+      BodyStyle.limb(c,sh.x,sh.y,el.x,el.y,armW,look,{bone:'upperArm',cloth:cf('upperArm'),face,lit,w2:armW*.86});
+      BodyStyle.joint(c,el.x,el.y,foreW*.58,look,face,this.jointCol(look,'foreArm'));
+      BodyStyle.limb(c,el.x,el.y,hand.x,hand.y,foreW,look,{bone:'foreArm',cloth:cf('foreArm'),face,lit,w2:foreW*.90});
+      BodyStyle.hand(c,hand.x,hand.y,limb*.40,look,face,Math.atan2(hand.y-el.y,hand.x-el.x),wrapped)};
+    const leg=(hp,kn,ft)=>{
+      BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,thighW,look,{bone:'thigh',cloth:cf('thigh'),face,lit,w2:thighW*.78});
+      BodyStyle.joint(c,kn.x,kn.y,shinW*.56,look,face,this.jointCol(look,'shin'));
+      BodyStyle.limb(c,kn.x,kn.y,ft.x,ft.y,shinW,look,{bone:'shin',cloth:cf('shin'),face,lit,w2:shinW*.72});
+      BodyStyle.foot(c,ft.x+face*limb*.28,ft.y+limb*.14,look,face,0)};
+    leg(j.lHip,j.lKnee,j.lFoot);
+    arm(j.lShoulder,j.lElbow,j.lHand);
+    BodyStyle.torso(c,j.neck,j.hip,look,face,lit);
+    // The head rotates rigidly with the neck->head bone; its world angle comes straight off that
+    // vector, so no second samplePose call is needed to recover the pose's own head angle.
+    const hx=j.head.x-j.neck.x,hy=j.head.y-j.neck.y;
+    c.save();c.translate(j.head.x,j.head.y);
+    if(hx||hy)c.rotate(Math.atan2(hx,-hy));
+    BodyStyle.head(c,0,0,look.headR,look,face,fs,lit);
+    c.restore();
+    leg(j.rHip,j.rKnee,j.rFoot);
+    BodyStyle.hips(c,j.hip.x,j.hip.y,look,face);
+    arm(j.rShoulder,j.rElbow,j.rHand);
+    for(const p of look.props||[]){
+      if(this.BODY_CLOTH_PROPS[p])continue;
+      if(p==='dagger'){
+        const h=j.rHand,len=look.armLen*.46,ux=face,uy=-.32,n=Math.hypot(ux,uy),dx=ux/n,dy=uy/n,px=-dy,py=dx;
+        const tipX=h.x+dx*len,tipY=h.y+dy*len,baseX=h.x+dx*3,baseY=h.y+dy*3,w=4.2;
+        c.fillStyle='#e4e4e4';
+        c.beginPath();c.moveTo(baseX+px*w,baseY+py*w);c.lineTo(tipX,tipY);c.lineTo(baseX-px*w,baseY-py*w);c.closePath();c.fill();
+        c.strokeStyle='#5a5a5a';c.lineWidth=1.3;c.stroke();
+        c.strokeStyle='#fbfbfb';c.lineWidth=1.2;
+        c.beginPath();c.moveTo(baseX+dx*2,baseY+dy*2);c.lineTo(tipX-dx*2,tipY-dy*2);c.stroke();
+        c.strokeStyle=look.secondary;c.lineWidth=3.6;
+        c.beginPath();c.moveTo(baseX+px*6,baseY+py*6);c.lineTo(baseX-px*6,baseY-py*6);c.stroke();
+        c.strokeStyle='#3a2f22';c.lineWidth=4;c.lineCap='round';
+        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(baseX,baseY);c.stroke()}
+      if(p==='club'){ // shaft geometry kept in sync with propExtra's own 'club' entry
+        const h=j.rHand;
+        c.strokeStyle=look.secondary;c.lineWidth=10;c.lineCap='round';
+        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*12,h.y-30);c.stroke();
+        c.strokeStyle=shade(look.secondary,-.4);c.lineWidth=2;
+        c.beginPath();c.moveTo(h.x+face*2,h.y-6);c.lineTo(h.x+face*10,h.y-26);c.stroke();
         c.fillStyle='#3a2f22';for(let i=0;i<3;i++){c.beginPath();
           c.arc(h.x+face*(4+i*4),h.y-10-i*10,3,0,Math.PI*2);c.fill()}}}
     c.restore()},
@@ -4473,10 +5448,20 @@ const Rig={
   // palette/proportions (not a crop of the side-view fight rig, which has no front-facing pose).
   // Cached on the look object itself, so it's built once per character regardless of how many
   // fighters (or hp-scaled encounter clones sharing the same look) use it.
-  portrait(look){
+  // Task 8.1: for a look with a `.body` block the bust is now BodyStyle.head at state 'idle' and
+  // face 0 (the module's front-facing branch) over a shoulder wedge in the look's own cloth, so the
+  // HUD portrait, the roster card and the fight sprite are demonstrably the same character. `size`
+  // is 56 (HUD/map) or 112 (roster cards, Task 8.4); each size is cached separately on the look,
+  // since the head bitmap is resolution-dependent. Looks with no `.body` (the big and quad rigs)
+  // keep the pre-8.1 bust below, unchanged.
+  portrait(look,size){
     if(look.rig==='quad')return this.portraitQuad(look);
-    if(look._portrait)return look._portrait;
-    const S=56,cnv=document.createElement('canvas');cnv.width=S;cnv.height=S;
+    const S=size||56;
+    look._portraits=look._portraits||{};
+    if(look._portraits[S])return look._portraits[S];
+    if(look.body)return look._portraits[S]=this._portraitBody(look,S);
+    if(look._portrait)return look._portraits[S]=look._portrait;
+    const cnv=document.createElement('canvas');cnv.width=S;cnv.height=S;
     const c=cnv.getContext('2d'),skinDark=shade(look.skin,-.35);
     const cx=S/2,headR=Math.min(16,look.headR*1.3),headY=S*0.42,shW=Math.min(S*0.92,look.shoulderW*1.7),shY=S*0.64;
     if(look.earLen){ // drawn behind the head so the head fill covers each ear's base
@@ -4498,7 +5483,40 @@ const Rig={
     c.fillStyle='#141414';
     c.beginPath();c.arc(cx-headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
     c.beginPath();c.arc(cx+headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
-    look._portrait=cnv;return cnv},
+    look._portrait=cnv;look._portraits[S]=cnv;return cnv},
+  _portraitBody(look,S){
+    const b=look.body,cl=b.cloth;
+    const cnv=document.createElement('canvas');cnv.width=S;cnv.height=S;
+    const c=cnv.getContext('2d');
+    const cx=S/2,headR=S*.245,headY=S*.42,shW=S*1.02,shY=S*.71;
+    // A bare or vested torso shows skin at the shoulders; anything with real coverage shows cloth.
+    const worn=cl.torso==='bare'||cl.torso==='vest'||cl.torso==='bone';
+    const garment=cl.torso==='bone'?look.skin:worn?look.skin:cl.primary;
+    const wedge=(inset,drop)=>{c.beginPath();
+      c.moveTo(cx-shW/2+inset,S+4);
+      c.quadraticCurveTo(cx-shW*.36+inset,shY+drop,cx-shW*.20+inset,shY+drop);
+      c.lineTo(cx+shW*.20-inset,shY+drop);
+      c.quadraticCurveTo(cx+shW*.36-inset,shY+drop,cx+shW/2-inset,S+4);
+      c.closePath()};
+    c.fillStyle=b.outline;wedge(0,0);c.fill();
+    const gr=c.createLinearGradient(cx-shW*.4,shY,cx+shW*.4,S);
+    gr.addColorStop(0,shade(garment,.22));gr.addColorStop(.5,garment);gr.addColorStop(1,shade(garment,-.32));
+    c.fillStyle=gr;wedge(2,2);c.fill();
+    if(cl.torso==='vest'){ // the same open panels the fight sprite wears, read head-on
+      c.fillStyle=shade(cl.primary,-.06);
+      for(const s of[-1,1]){c.beginPath();
+        c.moveTo(cx+s*shW*.44,S+4);c.lineTo(cx+s*shW*.16,shY+4);
+        c.lineTo(cx+s*shW*.05,S+4);c.closePath();c.fill()}}
+    if(cl.torso==='bone'){ // clavicles instead of a chest
+      c.strokeStyle=shade(look.skin,-.18);c.lineWidth=Math.max(2,S*.045);c.lineCap='round';
+      c.beginPath();c.moveTo(cx-shW*.20,shY+S*.07);
+      c.quadraticCurveTo(cx,shY+S*.15,cx+shW*.20,shY+S*.07);c.stroke()}
+    // neck
+    const nw=headR*.68;
+    c.fillStyle=b.outline;c.fillRect(cx-nw/2-1.4,headY,nw+2.8,shY-headY+4);
+    c.fillStyle=shade(look.skin,b.skinShade[0]*.55);c.fillRect(cx-nw/2,headY,nw,shY-headY+4);
+    BodyStyle.head(c,cx,headY,headR,look,0,'idle');
+    return cnv},
   // Quadruped HUD bust: same front-facing head-and-shoulders shape language as the human portrait
   // (a fill wedge for shoulders, a round head on top) but with cat/rat ears, tiara/whiskers/teeth
   // props, and no hair — quads have no LOOKS.hair field.
@@ -11661,5 +12679,157 @@ Test.add('human-look extent snapshot (per pose and whole-set) is unchanged by th
     for(const key of['idle','light1','medium','heavy','s3']){
       const[top,reach]=posesOf(look,key);
       near(top,snap[key][0],id+'/'+key+'.top');near(reach,snap[key][1],id+'/'+key+'.reach')}}});
+// The offscreen cache is the whole perf story of the body layer: a gradient/outline/cloth stack this
+// heavy cannot be rebuilt per limb per frame. BodyStyle.cache(key,w,h,paint) must paint exactly once
+// per key and hand back that same canvas forever after, and a different zoom bucket must be a
+// different key (so a zoomed-in fighter gets a sharper bitmap rather than a stretched one).
+Test.add('BodyStyle.cache paints once per key, returns the identical canvas after, and buckets by zoom',()=>{
+  BodyStyle.clearCache();
+  let paints=0;
+  const paint=(g,w,h)=>{paints++;g.fillStyle='#fff';g.fillRect(0,0,w,h)};
+  const a=BodyStyle.cache('t|limb|r|1',10,10,paint);
+  const b=BodyStyle.cache('t|limb|r|1',10,10,paint);
+  eq(paints,1,'the paint callback must run exactly once for a repeated key');
+  ok(a===b,'the same key must return the identical canvas object, not an equal one');
+  ok(a instanceof HTMLCanvasElement&&a.width===10&&a.height===10,'the cached entry must be a sized offscreen canvas');
+  const c2=BodyStyle.cache('t|limb|r|2',10,10,paint);
+  eq(paints,2,'a different zoom bucket in the key must paint its own entry');
+  ok(c2!==a,'a different zoom bucket must be a different canvas');
+  // zoomBucket itself: quantized off the context CTM's own world->device scale, so the same camera
+  // zoom always lands on the same bucket and a wildly different one does not.
+  const cnv=document.createElement('canvas'),g=cnv.getContext('2d');
+  g.setTransform(1,0,0,1,0,0);const z1=BodyStyle.zoomBucket(g);
+  g.setTransform(1.04,0,0,1.04,0,0);const z1b=BodyStyle.zoomBucket(g);
+  g.setTransform(3,0,0,3,0,0);const z3=BodyStyle.zoomBucket(g);
+  eq(z1,z1b,'a 4% camera zoom change must stay in the same bucket');
+  ok(z3>z1,'a 3x transform must bucket higher than a 1x one');
+  // A vertically flipped CTM (Render.shadow draws the rig with scale(1,-1)) must not bucket to 0.
+  g.setTransform(1,0,0,-1,0,0);ok(BodyStyle.zoomBucket(g)>0,'a flipped transform must still bucket positive');
+  BodyStyle.clearCache()});
+Test.add('BodyStyle\'s cache stops growing: 600 drawn frames at a fixed zoom bucket add no new entries',()=>{
+  // The perf contract from the task brief, checked the way it actually matters: draw every human
+  // look through the real Rig.draw path for 600 frames of a live pose cycle at ONE fixed transform,
+  // and assert the cache count is flat after the first pass. A per-frame gradient rebuild, or a
+  // cache key that folded in a continuously-varying quantity (a raw t01, a raw joint length, the
+  // live fight frame), would show up here as unbounded growth.
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  try{
+    BodyStyle.clearCache();
+    const fighters=HUMAN_LOOK_IDS.map(id=>{const f=mkFight({p1:DEFS[id]});return f.p1});
+    const cam={x:0,zoom:1};
+    const drawAll=frame=>{
+      for(const F of fighters){
+        F.f=frame%60;
+        c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,frame);c.restore()}};
+    for(let i=0;i<60;i++)drawAll(i);               // warm every look through a full idle cycle
+    const warm=BodyStyle.cacheCount();
+    ok(warm>0,'the warm-up must actually have cached something, got '+warm);
+    for(let i=0;i<600;i++)drawAll(i);
+    eq(BodyStyle.cacheCount(),warm,'600 further frames at the same zoom bucket must add no cache entries');
+  }finally{G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+// Faces react to what the fighter is doing (the Phase 8 ruling: idle flat, hit open, ko x-eyes,
+// block clenched, attack grit, win grin). The mapping is pose-key -> face state, so it rides on
+// Rig.poseFor and needs no new sim state at all.
+Test.add('BodyStyle.faceState maps every reachable pose key to a face state, and hit/ko/block/attack/win all differ from idle',()=>{
+  const STATES=['idle','hit','ko','block','attack','win'];
+  const need=['idle','walk','dash','light1','light2','light3','light4','light5','medium','heavyCharge',
+    'heavy','block','blockstun','hit','knockdown','getup','stunned','s1','s2','s3','win','ko'];
+  for(const k of need){
+    const st=BodyStyle.faceState(k);
+    ok(STATES.includes(st),'faceState("'+k+'") returned "'+st+'", not one of '+STATES.join('/'))}
+  eq(BodyStyle.faceState('idle'),'idle');
+  eq(BodyStyle.faceState('walk'),'idle');
+  eq(BodyStyle.faceState('hit'),'hit','a fighter in hitstun must wear the hit face');
+  eq(BodyStyle.faceState('stunned'),'hit','a stunned fighter must not wear the neutral idle face');
+  eq(BodyStyle.faceState('ko'),'ko');
+  eq(BodyStyle.faceState('knockdown'),'ko','a knocked-down fighter must not wear the neutral idle face');
+  eq(BodyStyle.faceState('block'),'block');
+  eq(BodyStyle.faceState('blockstun'),'block');
+  eq(BodyStyle.faceState('win'),'win');
+  for(const k of['light1','light5','medium','heavy','heavyCharge','s1','s2','s3'])
+    eq(BodyStyle.faceState(k),'attack',k+' must wear the attack face');
+  eq(BodyStyle.faceState('nonesuch'),'idle','an unknown pose key must fall back to idle, never throw');
+  // And it must actually be reachable from live fighter state, not just from a literal key.
+  const F=mkFighter();F.state='HITSTUN';F.f=1;F.stun=10;
+  eq(BodyStyle.faceState(Rig.poseFor(F).key),'hit','a HITSTUN fighter resolves through poseFor to the hit face')});
+// The drawn face must differ between states, not merely report a different string: same look, same
+// head, six states, six distinct bitmaps.
+Test.add('BodyStyle.head caches one distinct bitmap per face state and per facing',()=>{
+  BodyStyle.clearCache();
+  const cnv=document.createElement('canvas');cnv.width=200;cnv.height=200;
+  const c=cnv.getContext('2d');c.setTransform(1,0,0,1,100,100);
+  const seen=new Set();
+  for(const st of['idle','hit','ko','block','attack','win']){
+    BodyStyle.head(c,0,0,LOOKS.carl.headR,LOOKS.carl,1,st);
+    const n=BodyStyle.cacheCount();
+    ok(!seen.has(n),'face state '+st+' must add its own cache entry (count stuck at '+n+')');
+    seen.add(n)}
+  const before=BodyStyle.cacheCount();
+  BodyStyle.head(c,0,0,LOOKS.carl.headR,LOOKS.carl,1,'idle');
+  eq(BodyStyle.cacheCount(),before,'redrawing an already-cached state must not add an entry');
+  BodyStyle.head(c,0,0,LOOKS.carl.headR,LOOKS.carl,-1,'idle');
+  ok(BodyStyle.cacheCount()>before,'the mirrored facing is its own bitmap (the key light and the profile both flip)');
+  BodyStyle.clearCache()});
+// The mapping has to reach the actual draw, not just be a helper nobody calls: drawing a fighter who
+// is genuinely in HITSTUN must bake (and blit) the 'hit' head bitmap, and an idle one the 'idle' one.
+Test.add('Rig.draw bakes the head bitmap for the fighter\'s own state (HITSTUN -> head:hit, IDLE -> head:idle)',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  try{
+    const f=mkFight({p1:DEFS.carl}),F=f.p1,cam={x:0,zoom:1};
+    G.fight=f;G.state='FIGHT';
+    const headKeys=()=>Object.keys(BodyStyle._cache).filter(k=>k.indexOf('|head:')>=0);
+    BodyStyle.clearCache();
+    F.state='IDLE';F.f=0;
+    c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,0);c.restore();
+    ok(headKeys().some(k=>k.indexOf('|head:idle:')>=0),'an IDLE carl must bake head:idle, got '+headKeys());
+    ok(!headKeys().some(k=>k.indexOf('|head:hit:')>=0),'an IDLE carl must not bake head:hit');
+    F.state='HITSTUN';F.f=2;F.stun=12;
+    c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,1);c.restore();
+    ok(headKeys().some(k=>k.indexOf('|head:hit:')>=0),'a HITSTUN carl must bake head:hit, got '+headKeys());
+    F.state='KO';F.f=2;
+    c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,2);c.restore();
+    ok(headKeys().some(k=>k.indexOf('|head:ko:')>=0),'a KO carl must bake head:ko, got '+headKeys());
+  }finally{G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+// One wardrobe decision (cloth.torso/cloth.legs) has to dress the whole body, or a look ends up in a
+// shirt with bare sleeves. 'shorts' mapping the thigh to bare is deliberate -- the trunks are drawn
+// by BodyStyle.hips off the hip joint, not by the thigh bone.
+Test.add('Rig.clothFor dresses every bone from the look\'s own cloth block',()=>{
+  eq(Rig.clothFor(LOOKS.carl,'upperArm'),'bare','an open vest has no sleeve');
+  eq(Rig.clothFor(LOOKS.carl,'foreArm'),'wrap','carl\'s bandages prop becomes the forearm wrap');
+  eq(Rig.clothFor(LOOKS.carl,'thigh'),'bare','shorts are drawn by BodyStyle.hips, not on the thigh');
+  eq(Rig.clothFor(LOOKS.katia,'upperArm'),'sleeve');
+  eq(Rig.clothFor(LOOKS.katia,'thigh'),'pant');
+  eq(Rig.clothFor(LOOKS.katia,'shin'),'pant','a trouser leg must reach the boot');
+  eq(Rig.clothFor(LOOKS.shaman,'upperArm'),'robe');
+  eq(Rig.clothFor(LOOKS.shaman,'shin'),'pant','a robe covers the calf too');
+  for(const part of['upperArm','foreArm','thigh','shin'])
+    eq(Rig.clothFor(LOOKS.skeleton,part),'bone',part+' of a bone-clothed look must be bone');
+  for(const id of HUMAN_LOOK_IDS)for(const part of['upperArm','foreArm','thigh','shin'])
+    ok(typeof Rig.clothFor(LOOKS[id],part)==='string',id+'/'+part+' must resolve to some cloth kind')});
+Test.add('Rig.portrait builds and caches a bust per size (56 HUD, 112 roster) off BodyStyle.head',()=>{
+  for(const id of HUMAN_LOOK_IDS){
+    const look=LOOKS[id];
+    look._portraits=null;
+    const a=Rig.portrait(look),a2=Rig.portrait(look);
+    eq(a.width,56,id+' default portrait must be 56px');
+    ok(a===a2,id+' must cache its 56px bust');
+    const b=Rig.portrait(look,112);
+    eq(b.width,112,id+' roster portrait must be 112px');
+    ok(b!==a,id+' must build the 112px bust separately, not rescale the 56px one');
+    ok(Rig.portrait(look,112)===b,id+' must cache its 112px bust')}
+  // It must actually go through the face module, so the bust and the fight sprite can't drift apart.
+  const real=BodyStyle.head;let calls=0;
+  try{
+    BodyStyle.head=function(...a){calls++;return real.apply(this,a)};
+    LOOKS.carl._portraits=null;Rig.portrait(LOOKS.carl);
+    eq(calls,1,'a .body look\'s portrait must be drawn with BodyStyle.head');
+  }finally{BodyStyle.head=real;LOOKS.carl._portraits=null}
+  // A look with no .body block (the big rigs) keeps the pre-8.1 bust and must still not throw.
+  for(const id of['mongo','grull']){LOOKS[id]._portraits=null;
+    ok(Rig.portrait(LOOKS[id]).width===56,id+' keeps the legacy 56px bust')}});
 
 </script></body></html>

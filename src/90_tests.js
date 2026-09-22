@@ -4828,3 +4828,155 @@ Test.add('human-look extent snapshot (per pose and whole-set) is unchanged by th
     for(const key of['idle','light1','medium','heavy','s3']){
       const[top,reach]=posesOf(look,key);
       near(top,snap[key][0],id+'/'+key+'.top');near(reach,snap[key][1],id+'/'+key+'.reach')}}});
+// The offscreen cache is the whole perf story of the body layer: a gradient/outline/cloth stack this
+// heavy cannot be rebuilt per limb per frame. BodyStyle.cache(key,w,h,paint) must paint exactly once
+// per key and hand back that same canvas forever after, and a different zoom bucket must be a
+// different key (so a zoomed-in fighter gets a sharper bitmap rather than a stretched one).
+Test.add('BodyStyle.cache paints once per key, returns the identical canvas after, and buckets by zoom',()=>{
+  BodyStyle.clearCache();
+  let paints=0;
+  const paint=(g,w,h)=>{paints++;g.fillStyle='#fff';g.fillRect(0,0,w,h)};
+  const a=BodyStyle.cache('t|limb|r|1',10,10,paint);
+  const b=BodyStyle.cache('t|limb|r|1',10,10,paint);
+  eq(paints,1,'the paint callback must run exactly once for a repeated key');
+  ok(a===b,'the same key must return the identical canvas object, not an equal one');
+  ok(a instanceof HTMLCanvasElement&&a.width===10&&a.height===10,'the cached entry must be a sized offscreen canvas');
+  const c2=BodyStyle.cache('t|limb|r|2',10,10,paint);
+  eq(paints,2,'a different zoom bucket in the key must paint its own entry');
+  ok(c2!==a,'a different zoom bucket must be a different canvas');
+  // zoomBucket itself: quantized off the context CTM's own world->device scale, so the same camera
+  // zoom always lands on the same bucket and a wildly different one does not.
+  const cnv=document.createElement('canvas'),g=cnv.getContext('2d');
+  g.setTransform(1,0,0,1,0,0);const z1=BodyStyle.zoomBucket(g);
+  g.setTransform(1.04,0,0,1.04,0,0);const z1b=BodyStyle.zoomBucket(g);
+  g.setTransform(3,0,0,3,0,0);const z3=BodyStyle.zoomBucket(g);
+  eq(z1,z1b,'a 4% camera zoom change must stay in the same bucket');
+  ok(z3>z1,'a 3x transform must bucket higher than a 1x one');
+  // A vertically flipped CTM (Render.shadow draws the rig with scale(1,-1)) must not bucket to 0.
+  g.setTransform(1,0,0,-1,0,0);ok(BodyStyle.zoomBucket(g)>0,'a flipped transform must still bucket positive');
+  BodyStyle.clearCache()});
+Test.add('BodyStyle\'s cache stops growing: 600 drawn frames at a fixed zoom bucket add no new entries',()=>{
+  // The perf contract from the task brief, checked the way it actually matters: draw every human
+  // look through the real Rig.draw path for 600 frames of a live pose cycle at ONE fixed transform,
+  // and assert the cache count is flat after the first pass. A per-frame gradient rebuild, or a
+  // cache key that folded in a continuously-varying quantity (a raw t01, a raw joint length, the
+  // live fight frame), would show up here as unbounded growth.
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  try{
+    BodyStyle.clearCache();
+    const fighters=HUMAN_LOOK_IDS.map(id=>{const f=mkFight({p1:DEFS[id]});return f.p1});
+    const cam={x:0,zoom:1};
+    const drawAll=frame=>{
+      for(const F of fighters){
+        F.f=frame%60;
+        c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,frame);c.restore()}};
+    for(let i=0;i<60;i++)drawAll(i);               // warm every look through a full idle cycle
+    const warm=BodyStyle.cacheCount();
+    ok(warm>0,'the warm-up must actually have cached something, got '+warm);
+    for(let i=0;i<600;i++)drawAll(i);
+    eq(BodyStyle.cacheCount(),warm,'600 further frames at the same zoom bucket must add no cache entries');
+  }finally{G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+// Faces react to what the fighter is doing (the Phase 8 ruling: idle flat, hit open, ko x-eyes,
+// block clenched, attack grit, win grin). The mapping is pose-key -> face state, so it rides on
+// Rig.poseFor and needs no new sim state at all.
+Test.add('BodyStyle.faceState maps every reachable pose key to a face state, and hit/ko/block/attack/win all differ from idle',()=>{
+  const STATES=['idle','hit','ko','block','attack','win'];
+  const need=['idle','walk','dash','light1','light2','light3','light4','light5','medium','heavyCharge',
+    'heavy','block','blockstun','hit','knockdown','getup','stunned','s1','s2','s3','win','ko'];
+  for(const k of need){
+    const st=BodyStyle.faceState(k);
+    ok(STATES.includes(st),'faceState("'+k+'") returned "'+st+'", not one of '+STATES.join('/'))}
+  eq(BodyStyle.faceState('idle'),'idle');
+  eq(BodyStyle.faceState('walk'),'idle');
+  eq(BodyStyle.faceState('hit'),'hit','a fighter in hitstun must wear the hit face');
+  eq(BodyStyle.faceState('stunned'),'hit','a stunned fighter must not wear the neutral idle face');
+  eq(BodyStyle.faceState('ko'),'ko');
+  eq(BodyStyle.faceState('knockdown'),'ko','a knocked-down fighter must not wear the neutral idle face');
+  eq(BodyStyle.faceState('block'),'block');
+  eq(BodyStyle.faceState('blockstun'),'block');
+  eq(BodyStyle.faceState('win'),'win');
+  for(const k of['light1','light5','medium','heavy','heavyCharge','s1','s2','s3'])
+    eq(BodyStyle.faceState(k),'attack',k+' must wear the attack face');
+  eq(BodyStyle.faceState('nonesuch'),'idle','an unknown pose key must fall back to idle, never throw');
+  // And it must actually be reachable from live fighter state, not just from a literal key.
+  const F=mkFighter();F.state='HITSTUN';F.f=1;F.stun=10;
+  eq(BodyStyle.faceState(Rig.poseFor(F).key),'hit','a HITSTUN fighter resolves through poseFor to the hit face')});
+// The drawn face must differ between states, not merely report a different string: same look, same
+// head, six states, six distinct bitmaps.
+Test.add('BodyStyle.head caches one distinct bitmap per face state and per facing',()=>{
+  BodyStyle.clearCache();
+  const cnv=document.createElement('canvas');cnv.width=200;cnv.height=200;
+  const c=cnv.getContext('2d');c.setTransform(1,0,0,1,100,100);
+  const seen=new Set();
+  for(const st of['idle','hit','ko','block','attack','win']){
+    BodyStyle.head(c,0,0,LOOKS.carl.headR,LOOKS.carl,1,st);
+    const n=BodyStyle.cacheCount();
+    ok(!seen.has(n),'face state '+st+' must add its own cache entry (count stuck at '+n+')');
+    seen.add(n)}
+  const before=BodyStyle.cacheCount();
+  BodyStyle.head(c,0,0,LOOKS.carl.headR,LOOKS.carl,1,'idle');
+  eq(BodyStyle.cacheCount(),before,'redrawing an already-cached state must not add an entry');
+  BodyStyle.head(c,0,0,LOOKS.carl.headR,LOOKS.carl,-1,'idle');
+  ok(BodyStyle.cacheCount()>before,'the mirrored facing is its own bitmap (the key light and the profile both flip)');
+  BodyStyle.clearCache()});
+// The mapping has to reach the actual draw, not just be a helper nobody calls: drawing a fighter who
+// is genuinely in HITSTUN must bake (and blit) the 'hit' head bitmap, and an idle one the 'idle' one.
+Test.add('Rig.draw bakes the head bitmap for the fighter\'s own state (HITSTUN -> head:hit, IDLE -> head:idle)',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  try{
+    const f=mkFight({p1:DEFS.carl}),F=f.p1,cam={x:0,zoom:1};
+    G.fight=f;G.state='FIGHT';
+    const headKeys=()=>Object.keys(BodyStyle._cache).filter(k=>k.indexOf('|head:')>=0);
+    BodyStyle.clearCache();
+    F.state='IDLE';F.f=0;
+    c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,0);c.restore();
+    ok(headKeys().some(k=>k.indexOf('|head:idle:')>=0),'an IDLE carl must bake head:idle, got '+headKeys());
+    ok(!headKeys().some(k=>k.indexOf('|head:hit:')>=0),'an IDLE carl must not bake head:hit');
+    F.state='HITSTUN';F.f=2;F.stun=12;
+    c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,1);c.restore();
+    ok(headKeys().some(k=>k.indexOf('|head:hit:')>=0),'a HITSTUN carl must bake head:hit, got '+headKeys());
+    F.state='KO';F.f=2;
+    c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,2);c.restore();
+    ok(headKeys().some(k=>k.indexOf('|head:ko:')>=0),'a KO carl must bake head:ko, got '+headKeys());
+  }finally{G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+// One wardrobe decision (cloth.torso/cloth.legs) has to dress the whole body, or a look ends up in a
+// shirt with bare sleeves. 'shorts' mapping the thigh to bare is deliberate -- the trunks are drawn
+// by BodyStyle.hips off the hip joint, not by the thigh bone.
+Test.add('Rig.clothFor dresses every bone from the look\'s own cloth block',()=>{
+  eq(Rig.clothFor(LOOKS.carl,'upperArm'),'bare','an open vest has no sleeve');
+  eq(Rig.clothFor(LOOKS.carl,'foreArm'),'wrap','carl\'s bandages prop becomes the forearm wrap');
+  eq(Rig.clothFor(LOOKS.carl,'thigh'),'bare','shorts are drawn by BodyStyle.hips, not on the thigh');
+  eq(Rig.clothFor(LOOKS.katia,'upperArm'),'sleeve');
+  eq(Rig.clothFor(LOOKS.katia,'thigh'),'pant');
+  eq(Rig.clothFor(LOOKS.katia,'shin'),'pant','a trouser leg must reach the boot');
+  eq(Rig.clothFor(LOOKS.shaman,'upperArm'),'robe');
+  eq(Rig.clothFor(LOOKS.shaman,'shin'),'pant','a robe covers the calf too');
+  for(const part of['upperArm','foreArm','thigh','shin'])
+    eq(Rig.clothFor(LOOKS.skeleton,part),'bone',part+' of a bone-clothed look must be bone');
+  for(const id of HUMAN_LOOK_IDS)for(const part of['upperArm','foreArm','thigh','shin'])
+    ok(typeof Rig.clothFor(LOOKS[id],part)==='string',id+'/'+part+' must resolve to some cloth kind')});
+Test.add('Rig.portrait builds and caches a bust per size (56 HUD, 112 roster) off BodyStyle.head',()=>{
+  for(const id of HUMAN_LOOK_IDS){
+    const look=LOOKS[id];
+    look._portraits=null;
+    const a=Rig.portrait(look),a2=Rig.portrait(look);
+    eq(a.width,56,id+' default portrait must be 56px');
+    ok(a===a2,id+' must cache its 56px bust');
+    const b=Rig.portrait(look,112);
+    eq(b.width,112,id+' roster portrait must be 112px');
+    ok(b!==a,id+' must build the 112px bust separately, not rescale the 56px one');
+    ok(Rig.portrait(look,112)===b,id+' must cache its 112px bust')}
+  // It must actually go through the face module, so the bust and the fight sprite can't drift apart.
+  const real=BodyStyle.head;let calls=0;
+  try{
+    BodyStyle.head=function(...a){calls++;return real.apply(this,a)};
+    LOOKS.carl._portraits=null;Rig.portrait(LOOKS.carl);
+    eq(calls,1,'a .body look\'s portrait must be drawn with BodyStyle.head');
+  }finally{BodyStyle.head=real;LOOKS.carl._portraits=null}
+  // A look with no .body block (the big rigs) keeps the pre-8.1 bust and must still not throw.
+  for(const id of['mongo','grull']){LOOKS[id]._portraits=null;
+    ok(Rig.portrait(LOOKS[id]).width===56,id+' keeps the legacy 56px bust')}});

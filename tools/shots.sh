@@ -87,4 +87,12 @@ $H --sim --seconds 1.65 --p1 carl --p2 goblin --ai t3 --seed 2 --shot "$S/p7-hea
 # touch the card itself, but this is the frozen "p7-s3" filename the task brief asked for.
 $H --cinematic --shot "$S/p7-s3.png"
 
+# ---- Phase 8: layered vector bodies for the human rig (Task 8.1) -----------------------------
+# One idle frame per human-rig look, the same --pose fixture the earlier phases use. These are the
+# shots the body layer is graded on: a stick figure, a blob, or a limb disconnected at a joint is a
+# failure, so regenerate and LOOK at them after any change to BodyStyle or to a look's .body block.
+for id in carl katia goblin skeleton; do
+  $H --p1 "$id" --pose idle --shot "$S/p8-human-$id.png"
+done
+
 echo "shots.sh: regenerated $(ls "$S"/*.png | wc -l | tr -d ' ') PNGs in $S"
