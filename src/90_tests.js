@@ -964,6 +964,15 @@ Test.add('Crystal.open advances Save.data.seed by one per open, so consecutive o
   eq(Save.data.seed,s0+1);
   Crystal.open('basic');
   eq(Save.data.seed,s0+2)});
+// Fix-wave item 9 (Phase 5 seams, ruled): floors used to be looked up by array index (FLOORS[n-1])
+// in three separate places (Quest.floor, Rewards.forNode, G.startFight's {floor,node} sugar), which
+// would all need renumbering together the day a tutorial floor 0 is inserted at FLOORS[0].
+// Quest.floorDef(n) looks a floor up by its own .floor field instead, so a future floor:0 just plugs
+// in without touching any of the three call sites' indexing math.
+Test.add('Quest.floorDef(n) looks floors up by their own .floor field, not array index (fix-wave item 9, Phase 5 seam)',()=>{
+  eq(Quest.floorDef(1).id,'f1');
+  eq(Quest.floorDef(2).id,'f2');
+  eq(Quest.floorDef(99),null,'a floor number FLOORS doesn\'t define must return null, same as before')});
 // Task 4.3: Quest floors, rewards, roster progression, arena state -----------------------------
 Test.add('Quest.floor(1) reads node states from Meta.defaults()',()=>{
   Save.data=Meta.defaults();
@@ -1044,6 +1053,18 @@ Test.add('Rewards.forNode boss adds units and one catalyst of the enemy class',(
   eq(r.iso,20);eq(r.xp,30);eq(r.units,50);
   eq(DEFS.grull.cls,'tank');
   eq(r.cats.tank,1)});
+// Fix-wave item 9 (Phase 5 seam, ruled): Rewards had no multiplier hook, which is exactly where a
+// future ratings/viewers system needs to land -- without it, that multiplier would have to thread
+// through onFightEnd or every call site individually. Rewards.mult (default {gold:1,iso:1,xp:1}) is
+// applied once, inside forNode, so nothing downstream needs to know it exists.
+Test.add('Rewards.mult multiplies forNode\'s gold/iso/xp (fix-wave item 9, Phase 5 seam): mult 2 doubles gold',()=>{
+  const orig=Rewards.mult;
+  try{
+    Rewards.mult={gold:2,iso:1,xp:1};
+    const r=Rewards.forNode(1,0);
+    eq(r.gold,2*(160*1+60*0));
+    eq(r.iso,20*1);eq(r.xp,30*1)
+  }finally{Rewards.mult=orig}});
 Test.add('Rewards.grant applies currencies/cats and xp to the active champion',()=>{
   Save.data=Meta.defaults();
   Rewards.grant({gold:10,iso:5,units:2,cats:{tank:1},xp:0});
@@ -1424,16 +1445,39 @@ Test.add('a crystal reveal completes after exactly 40 G.tick() frames (frame-cou
   G.simFrames(20); // ticks past 40 must not keep advancing the counter
   eq(Screens._reveal.frame,40);
   Screens.title();G.sim=false});
+// Fix-wave item 9 (Phase 5 seams, ruled): the kiosk used to be three hand-copied blocks (basic
+// crystal, premium crystal, ISO pack), each with its own cost/label/afford check baked in -- adding
+// a fourth sponsor perk meant copying a fourth block. Meta.SHOP_ITEMS is now the single table the
+// kiosk renders from (cost/label per item); Meta.buy(itemId) is the generic purchase (refuses when
+// short, applies a currency `grant`, or defers to `run` for a crystal item, whose own Crystal.open
+// already does its cost check/deduction); Meta.buyIso delegates to Meta.buy('isoPack'). DOM ids
+// follow the item id (buyBasicCrystal/buyPremiumCrystal/buyIsoPack), replacing the old
+// buyBasic/buyPremium/buyIso.
 Test.add('shop BASIC CRYSTAL opens a crystal immediately on buy (ruling: buy == Crystal.open + reveal): deducts 500 gold and mutates the roster',()=>{
   Save.data=Meta.defaults();Save.data.gold=500;Save.data.seed=1;
   Screens.shop();
   const before=JSON.stringify(Save.data.roster);
-  document.getElementById('buyBasic').click();
+  document.getElementById('buyBasicCrystal').click();
   eq(Save.data.gold,0,'500 gold deducted');
   ok(JSON.stringify(Save.data.roster)!==before,'roster must change (new champ or shards) via Crystal.open');
   eq(Screens._current,'crystal','buying navigates to the crystal screen to show the reveal');
   Screens.title()});
-Test.add('Meta.buyIso converts 200 gold into 60 iso, refuses when short (fix round 1: was Screens reusing Rewards.grant with negative gold)',()=>{
+Test.add('Meta.buy purchases a plain currency-grant SHOP_ITEMS entry (isoPack), refusing (unchanged) when short',()=>{
+  Save.data=Meta.defaults();Save.data.gold=500;
+  ok(Meta.buy('isoPack'));
+  eq(Save.data.gold,300);eq(Save.data.iso,60);
+  Save.data.gold=100;
+  const before=JSON.stringify(Save.data);
+  eq(Meta.buy('isoPack'),false,'short on gold');
+  eq(JSON.stringify(Save.data),before)});
+Test.add('Meta.buy runs Crystal.open for a run-type SHOP_ITEMS entry (basicCrystal)',()=>{
+  Save.data=Meta.defaults();Save.data.gold=999999;Save.data.seed=1;
+  const before=JSON.stringify(Save.data.roster);
+  const r=Meta.buy('basicCrystal');
+  ok(r,'basicCrystal must run Crystal.open and return its pull result');
+  eq(Save.data.gold,999999-500);
+  ok(JSON.stringify(Save.data.roster)!==before,'roster must change via the underlying Crystal.open')});
+Test.add('Meta.buyIso converts 200 gold into 60 iso, refuses when short (delegates to Meta.buy(\'isoPack\'))',()=>{
   Save.data=Meta.defaults();Save.data.gold=500;
   ok(Meta.buyIso());
   eq(Save.data.gold,300);eq(Save.data.iso,60);
@@ -1444,8 +1488,17 @@ Test.add('Meta.buyIso converts 200 gold into 60 iso, refuses when short (fix rou
 Test.add('shop ISO PACK buy button calls Meta.buyIso',()=>{
   Save.data=Meta.defaults();Save.data.gold=500;
   Screens.shop();
-  document.getElementById('buyIso').click();
+  document.getElementById('buyIsoPack').click();
   eq(Save.data.gold,300);eq(Save.data.iso,60);
+  Screens.title()});
+Test.add('the kiosk renders one card per Meta.SHOP_ITEMS entry, with its own cost/label',()=>{
+  Save.data=Meta.defaults();
+  Screens.shop();
+  const cards=[...document.querySelectorAll('#shopCards .kcard')];
+  eq(cards.length,Object.keys(Meta.SHOP_ITEMS).length);
+  ok(document.getElementById('buyBasicCrystal'),'basicCrystal button must exist');
+  ok(document.getElementById('buyPremiumCrystal'),'premiumCrystal button must exist');
+  ok(document.getElementById('buyIsoPack'),'isoPack button must exist');
   Screens.title()});
 Test.add('the title screen\'s CAMPAIGN/ARENA/ROSTER/KIOSK buttons route to the matching screens',()=>{
   Save.data=Meta.defaults();

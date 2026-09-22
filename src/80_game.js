@@ -63,13 +63,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   startFight(o={}){const seed=o.seed||this.seed;
     this.lastFightOpts=o; // FIGHT AGAIN replays these (minus seed) so a custom p2/ai isn't lost
     let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
-    // {floor,node} sugar: node is an index into FLOORS[floor-1].nodes, or the string 'boss' for
-    // that floor's boss encounter. Resolved to an encounter id up front so the block below (which
-    // already knows how to turn an encounter id into p2def+ai+G.encounter) handles it exactly like
-    // a plain o.encounter id, with no separate code path.
+    // {floor,node} sugar: node is an index into that floor's .nodes, or the string 'boss' for that
+    // floor's boss encounter. Resolved to an encounter id up front so the block below (which already
+    // knows how to turn an encounter id into p2def+ai+G.encounter) handles it exactly like a plain
+    // o.encounter id, with no separate code path. Fix-wave item 9 (Phase 5 seam): looks the floor up
+    // via Quest.floorDef(o.floor) (12_meta.js, by its own .floor field) instead of FLOORS[o.floor-1],
+    // so a future tutorial floor 0 doesn't need this renumbered.
     let encSrc=o.encounter;
     if(o.floor!==undefined){
-      const fl=FLOORS[o.floor-1];
+      const fl=Quest.floorDef(o.floor);
       if(!fl)throw new Error('unknown floor: '+o.floor);
       encSrc=o.node==='boss'?fl.boss:fl.nodes[o.node];
       if(!encSrc)throw new Error('unknown floor node: floor '+o.floor+' node '+o.node)}

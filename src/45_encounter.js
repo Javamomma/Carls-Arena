@@ -4,11 +4,15 @@
 // hpMul/atkMul scale +15% per floor past the first (floor 1 -> 1.0, floor 2 -> 1.15, ...), computed
 // from the floor number here rather than hard-coded per encounter so a future floor 3+ just plugs in.
 function floorMul(floor){return 1+0.15*(floor-1)}
-// FLOORS[i] = {floor, name, nodes:[encounterId,...], boss:encounterId}. G.startFight({floor,node})
+// FLOORS[i] = {floor, id, name, nodes:[encounterId,...], boss:encounterId}. G.startFight({floor,node})
 // resolves node (an index into .nodes, or the string 'boss') to one of these ids.
+// Fix-wave item 9 (Phase 5 seam, ruled): each floor now carries its own `id` ('f1','f2') so
+// Quest.floorDef(n) (12_meta.js) can look a floor up by its `.floor` field instead of array index --
+// a future tutorial floor (floor:0) can then be inserted at FLOORS[0] without renumbering every
+// existing FLOORS[n-1] lookup across Quest.floor/Rewards.forNode/G.startFight's {floor,node} sugar.
 const FLOORS=[
-  {floor:1,name:'THE DEPTHS',nodes:['f1_goblin','f1_skel','f1_hob','f1_shaman','f1_goblin2'],boss:'f1_grull'},
-  {floor:2,name:'THE SEWERS',nodes:['f2_grub','f2_skel2','f2_shaman2','f2_hob2','f2_grub2'],boss:'f2_mother'}];
+  {floor:1,id:'f1',name:'THE DEPTHS',nodes:['f1_goblin','f1_skel','f1_hob','f1_shaman','f1_goblin2'],boss:'f1_grull'},
+  {floor:2,id:'f2',name:'THE SEWERS',nodes:['f2_grub','f2_skel2','f2_shaman2','f2_hob2','f2_grub2'],boss:'f2_mother'}];
 // Fix-wave item 5: node buffs were dead content — no ENCOUNTERS entry carried a `buffs` list, so
 // degen/powerGain/unblockableSpecials/thorns never ran in a real fight despite being fully wired
 // (Buffs.apply, Fight.buffHook/buffFrame, HUD badges) since Task 3.2. Every FLOORS node except two

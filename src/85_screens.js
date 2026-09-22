@@ -226,31 +226,36 @@ const Screens={
     if(!rv||rv.frame>=Screens.REVEAL_FRAMES)return;
     rv.frame++;Screens.drawReveal(rv)},
   // ---- shop (SPONSOR PERK KIOSK) --------------------------------------------------------------
-  // ISO PACK isn't a Crystal.KINDS entry (no draw, just a currency conversion) -- Meta.buyIso()
-  // (fix round 1) is the dedicated Meta function for it, cost/gain kept here only for the card's
-  // own cost text and affordability check (both read-only).
-  ISO_PACK:{cost:{gold:200},iso:60},
+  // Fix-wave item 9 (Phase 5 seam, ruled): renders one card per Meta.SHOP_ITEMS entry instead of
+  // three hand-copied blocks, so a future sponsor perk is just a new table entry, not a new block
+  // here. A `run`-type item (a crystal) keeps the established reveal UX -- navigate to the crystal
+  // screen and arm the reveal via Screens.openCrystal -- rather than Meta.buy's own plain
+  // refuse/refresh, since Meta.buy would just call Crystal.open directly and lose that presentation.
+  canAffordItem(itemId){
+    const item=Meta.SHOP_ITEMS[itemId];
+    for(const c in item.cost)if((Save.data[c]||0)<item.cost[c])return false;
+    return true},
   renderShop(){
     const cur=document.getElementById('shopCurrency');
     const catParts=Object.keys(Save.data.cats).map(c=>c.slice(0,4).toUpperCase()+' '+Save.data.cats[c]);
     cur.innerHTML=['GOLD '+Save.data.gold,'UNITS '+Save.data.units,'ISO '+Save.data.iso]
       .concat(catParts).map(s=>'<span>'+s+'</span>').join('');
     const wrap=document.getElementById('shopCards');wrap.innerHTML='';
-    const mk=(id,label,costObj,afford,onclick)=>{
+    for(const itemId in Meta.SHOP_ITEMS){
+      const item=Meta.SHOP_ITEMS[itemId];
       const card=document.createElement('div');card.className='kcard';
-      const h=document.createElement('h3');h.textContent=label;
-      const costTxt=Object.keys(costObj).filter(c=>costObj[c]).map(c=>costObj[c]+' '+c.toUpperCase()).join(' + ');
+      const h=document.createElement('h3');h.textContent=item.label;
+      const costTxt=Object.keys(item.cost).filter(c=>item.cost[c]).map(c=>item.cost[c]+' '+c.toUpperCase()).join(' + ');
       const cost=document.createElement('div');cost.className='cost';cost.textContent=costTxt;
-      const btn=document.createElement('button');btn.id=id;btn.textContent='BUY';
-      btn.disabled=!afford;btn.onclick=onclick;
+      const btn=document.createElement('button');
+      btn.id='buy'+itemId[0].toUpperCase()+itemId.slice(1);
+      btn.textContent='BUY';
+      btn.disabled=!Screens.canAffordItem(itemId);
+      btn.onclick=item.run
+        ?(()=>Screens.openCrystal(itemId==='basicCrystal'?'basic':'premium'))
+        :(()=>{Meta.buy(itemId);Screens.refresh()});
       card.appendChild(h);card.appendChild(cost);card.appendChild(btn);
-      wrap.appendChild(card)};
-    mk('buyBasic','BASIC CRYSTAL',Crystal.KINDS.basic.cost,Screens.canAfford('basic'),
-      ()=>Screens.openCrystal('basic'));
-    mk('buyPremium','PREMIUM CRYSTAL',Crystal.KINDS.premium.cost,Screens.canAfford('premium'),
-      ()=>Screens.openCrystal('premium'));
-    const isoAfford=(Save.data.gold||0)>=Screens.ISO_PACK.cost.gold;
-    mk('buyIso','ISO PACK',Screens.ISO_PACK.cost,isoAfford,()=>{Meta.buyIso();Screens.refresh()});
+      wrap.appendChild(card)}
     document.getElementById('shopBack').onclick=()=>Screens.title()},
   // ---- arena ---------------------------------------------------------------------------------
   renderArena(){

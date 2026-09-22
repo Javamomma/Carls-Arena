@@ -39,17 +39,29 @@ const Meta={
       if(!data.roster||typeof data.roster!=='object'||!Object.keys(data.roster).length)data.roster=d.roster;
       return data}
     return Meta.defaults()},
-  // Fix round 1 (Task 4.5 controller review, Minor): the SPONSOR PERK KIOSK's ISO PACK (200 gold ->
-  // 60 iso) has no dedicated Meta function of its own yet -- added here rather than left as a
-  // Screens-side Rewards.grant({gold:-200,...}) reuse, same refuse-when-short/deduct-then-Save.put
-  // shape as Roster.levelUp/rankUp right below.
-  buyIso(){
-    const cost=200,gain=60;
-    if((Save.data.gold||0)<cost)return false;
-    Save.data.gold-=cost;
-    Save.data.iso=(Save.data.iso||0)+gain;
+  // Fix-wave item 9 (Phase 5 seam, ruled): the SPONSOR PERK KIOSK used to be three hand-copied
+  // Screens-side blocks (basic crystal, premium crystal, the old bespoke buyIso), each with its own
+  // cost/afford check -- adding a fourth sponsor perk meant copying a fourth block. SHOP_ITEMS is now
+  // the one table Screens.renderShop reads (cost/label per item) and Meta.buy(itemId) purchases from:
+  // a `run` item (a crystal) just defers its whole cost+effect to Crystal.open, which already does
+  // its own cost check/deduction; a plain item (isoPack) is refuse-when-short/deduct/`grant`, the
+  // same shape Roster.levelUp/rankUp below already use. Referenced here as CHAMPS/Crystal.open are —
+  // Crystal is defined later in this same file, but SHOP_ITEMS.basicCrystal.run is a closure only
+  // ever called well after the whole script has parsed.
+  SHOP_ITEMS:{
+    basicCrystal:{label:'BASIC CRYSTAL',cost:{gold:500},run:()=>Crystal.open('basic')},
+    premiumCrystal:{label:'PREMIUM CRYSTAL',cost:{units:100},run:()=>Crystal.open('premium')},
+    isoPack:{label:'ISO PACK',cost:{gold:200},grant:{iso:60}}},
+  buy(itemId){
+    const item=Meta.SHOP_ITEMS[itemId];
+    if(!item)throw new Error('unknown shop item: '+itemId);
+    if(item.run)return item.run(); // crystal items: Crystal.open does its own cost check/deduction
+    for(const c in item.cost)if((Save.data[c]||0)<item.cost[c])return false;
+    for(const c in item.cost)Save.data[c]-=item.cost[c];
+    if(item.grant)for(const c in item.grant)Save.data[c]=(Save.data[c]||0)+item.grant[c];
     Save.put();
-    return true}};
+    return true},
+  buyIso(){return Meta.buy('isoPack')}};
 const Stats={
   caps:{stars:[1,5],rank:stars=>stars,level:rank=>10*rank},
   xpToLevel(level){return 40*level},
@@ -160,11 +172,17 @@ const Crystal={
 // concatenated after this file) and G is never touched here — same later-file-from-earlier-file,
 // no-DOM pattern as Crystal above.
 const Quest={
+  // Fix-wave item 9 (Phase 5 seam, ruled): looks a floor up by its own `.floor` field instead of
+  // array index (FLOORS[n-1]) -- the one place that indexing lived before this, now shared by
+  // Quest.floor, Rewards.forNode, and G.startFight's {floor,node} sugar, all of which used to do
+  // their own FLOORS[n-1]/FLOORS[n]. A future tutorial floor (floor:0) can be inserted at FLOORS[0]
+  // without renumbering any of them.
+  floorDef(n){return FLOORS.find(f=>f.floor===n)||null},
   // Read floor n's current playable state: Phase 3's static FLOORS def merged with Save.data's
   // per-node progress. null when either side is missing — an as-yet-uncreated floor (Save.data),
   // or a floor number FLOORS itself never defined (only 1-2 exist today).
   floor(n){
-    const def=FLOORS[n-1];
+    const def=Quest.floorDef(n);
     const save=Save.data.floors[n];
     if(!def||!save)return null;
     return{floor:n,name:def.name,
@@ -194,8 +212,8 @@ const Quest={
     if(!save)return false;
     if(k==='boss'){
       save.boss='done';
-      if(FLOORS[n]&&!Save.data.floors[n+1]){
-        const nextDef=FLOORS[n];
+      const nextDef=Quest.floorDef(n+1);
+      if(nextDef&&!Save.data.floors[n+1]){
         Save.data.floors[n+1]={nodes:nextDef.nodes.map((_,i)=>i===0?'open':'locked'),boss:'locked'}}}
     else{
       if(!save.nodes||save.nodes[k]===undefined)return false;
@@ -206,13 +224,18 @@ const Quest={
     Save.put();
     return true}};
 const Rewards={
+  // Fix-wave item 9 (Phase 5 seam, ruled): forNode had no multiplier hook, which is exactly where a
+  // future ratings/viewers system needs to land -- without one, that multiplier would have to thread
+  // through onFightEnd or every call site individually instead of applying once, here. Phase 4 keeps
+  // this at 1/1/1; Phase 5 sets it from ratings.
+  mult:{gold:1,iso:1,xp:1},
   // gold/iso/xp scale with the floor number; gold also nudges up with node position within the
   // floor (0-3 for the four early nodes) so later nodes pay a bit more than earlier ones. A boss
   // uses the position just past the last regular node (def.nodes.length, 5 today) for that same
   // gold term, so its base gold continues the node ramp before the boss-only units/catalyst bonus
   // is layered on top.
   forNode(n,k){
-    const def=FLOORS[n-1];
+    const def=Quest.floorDef(n);
     if(!def)throw new Error('unknown floor: '+n);
     const isBoss=k==='boss';
     const idx=isBoss?def.nodes.length:k;
@@ -220,9 +243,11 @@ const Rewards={
     // ~1200 gold total under the old numbers, while a single roster star costs roughly 5 dupes
     // (~10000 gold at 500g/basic), gating floor-2 progression almost entirely behind a currency wall
     // unrelated to play (final-review-verdict.md UX/balance note 3). iso/xp unchanged.
-    const r={gold:160*n+60*idx,iso:20*n,xp:30*n};
+    const r={gold:Math.round((160*n+60*idx)*Rewards.mult.gold),
+             iso:Math.round(20*n*Rewards.mult.iso),
+             xp:Math.round(30*n*Rewards.mult.xp)};
     if(isBoss){
-      r.units=50*n;
+      r.units=50*n; // not multiplied: Rewards.mult only covers gold/iso/xp, per the frozen shape
       const enemyId=ENCOUNTERS[def.boss].enemy;
       r.cats={};
       r.cats[DEFS[enemyId].cls]=1}
