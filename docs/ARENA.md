@@ -4,6 +4,36 @@ Rubric table lands in Phase 5 (same format as Carls-Dash docs/PARITY.md: criteri
 
 ## Progress log
 
+- 2026-09-22 — Final-review fix wave for Phase 5 (release blockers), items 1-8, one commit each
+  (docs/shots/p3-floor1-boss.png regenerated in its own commit alongside item 1). Both Important-path
+  defects from the final review fixed: (1) the heavy-charge bar/block-parry ring collided with the
+  HUD on tall fighters (Grull at boss doors, the exact frame `docs/shots/p3-floor1-boss.png` ships) --
+  `Render.overlayScreenY` now converts the overlay's world-space point to screen space via
+  `Camera.toScreen` and clamps it to never read closer than its own height+2px above `HUD_LINE`,
+  drawing both overlays in screen space at that clamp instead of trusting the live camera zoom; (2)
+  FIGHT AGAIN after a tutorial win replayed a broken tutorial (`Tutorial.state` already past step 4,
+  "FINISH HIM" pinned from frame one) since its handler always called `startFight` directly, never
+  `Tutorial.reset()` -- `#again` is now hidden for any tutorial-mode result, CONTINUE already routed
+  to the map. Three Minors closed: kiosk perk rows now show a `Sponsors.DESC` effect line (ruling #2's
+  own wording, dropped in implementation); the README's atlas-fallback claim now matches the rubric's
+  own documented caveat (two browser resource-log lines, none from the app); turning USE SPRITE ATLAS
+  off mid-session now actually falls back to the FK rig (`Rig.draw` re-checks
+  `Save.data.settings.useAtlas||G.atlasQuery` every frame, not just at load). Two UX passes: an idle
+  player stalled on the tutorial's POWER step for 900 sim frames now gets an extra hint and a pulsing
+  `#btnPower` (reduceMotion-safe, both via a setting and the OS `prefers-reduced-motion` media query);
+  the viewers `×N` badge now anchors off the "VIEWERS n" label's own measured width instead of the
+  fixed 200px offscreen canvas it used to float off the end of. The share card was redesigned (gold
+  card frame, dark stage strip behind the portrait, the game's own title glyph, a larger PEAK VIEWERS
+  line, the play URL in small text) -- `docs/shots/p5-share.png` regenerated and viewed. **Ruling**
+  (closing final review Minor #7): the map's TUTORIAL entry is permanent, by design -- it was never
+  meant to disappear once `tutorialDone` flips true (the pre-flight conflict scan's "only until
+  tutorialDone" line was superseded during Task 5.3 implementation but the reversal went undocumented
+  until now). A completed tutorial stays replayable from floor 1's map for as long as the save exists;
+  `Screens.renderMap` (`src/85_screens.js`) and its own unit test already encode this, unchanged by
+  this fix wave. `--unit` 304 passing (was 298 before this wave; 6 new regression tests, one per item
+  with a test named), `--matrix` 216/216, `--sim --seconds 60` clean, `index.html` 555,168 bytes. Every
+  item's gate (`build.py && --unit && --sim --seconds 60 && --matrix`) reran green before its own
+  commit.
 - 2026-09-22 — Final-review fix wave for Phase 4 (items 1-10, one commit each except 10's minors,
   which were grouped). Two exploits, both invisible to the test suite for the same reason: (1) energy
   never regenerated against the wall clock (`e.ts` never anchored to a real `Energy.now()`), so node
@@ -874,6 +904,21 @@ slightly since — e.g. unit test count — which is expected and fine, the gate
 Both new harness flags (`--screens-smoke`, `--phone-check`) are documented in `tests/harness.py`'s own
 module docstring and `--help`, and in the README's Development section, alongside every other flag
 this rubric exercises.
+
+### Fix-wave rubric deltas (2026-09-22, post final review)
+
+Rows above are the Task 5.6 snapshot and, per this table's own note, are expected to drift slightly
+without needing a rewrite. Two deltas from the final-review fix wave are worth calling out
+specifically since they touch artifacts other rows/docs point at directly:
+
+- **Unit tests**: 298 → 304 (6 new regression tests, one per fix-wave item with a test named — see
+  the "Progress log" entry above). `--matrix` stays 216/216; `--sim --seconds 60` stays clean.
+- **`docs/shots/p3-floor1-boss.png`** (the screenshot `README.md`'s gallery embeds and the `?atlas=1`
+  caveat's own neighbor above) was regenerated after fix-wave item 1's `Render.overlayScreenY` clamp —
+  the charge bar no longer crosses "THE DEPTHS". `docs/shots/p5-share.png` was also regenerated after
+  item 8's share-card redesign. Both viewed by eye; neither the README's gallery table nor its other
+  image references changed (same filenames, same table).
+- `index.html` size moved from 533,906 to 555,168 bytes with this wave's added source/tests.
 
 ## Task 5.6 close-out (2026-09-22)
 
