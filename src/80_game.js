@@ -26,8 +26,17 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.announce('start',this.fight.rng)},
   // Throttled announcer display: only updates the toast if at least 90 frames (1.5s) have passed
   // since the last line, so a burst of events can't stomp on each other mid-read. Audio.say remains
-  // the unthrottled display primitive this calls into.
-  say(text){if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
+  // the unthrottled display primitive this calls into. A no-op while the S3 cinematic is up — the
+  // card already reads SPECIAL 3 on-canvas, and the toast element is hidden for the duration anyway
+  // (see hideToast/showToast), so there is nothing useful for a line to update.
+  say(text){if(this.fight&&this.fight.cinematic>0)return;if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
+  // Hides the DOM #toast announcer (an absolutely-positioned element outside the canvas, so nothing
+  // drawn on-canvas can cover it) for the duration of the S3 cinematic, and cancels Audio.say's
+  // pending fade-out timeout so a stale line already on screen (e.g. the opening announcer, whose
+  // 2.2s fade can easily still be running by the time an early s3 lands) can't keep showing through,
+  // or flash back in, mid-card. showToast restores it once the cinematic ends (G.tick, cinematic hits 0).
+  hideToast(){const el=document.getElementById('toast');clearTimeout(Audio._t);el.textContent='';el.classList.add('hidden')},
+  showToast(){document.getElementById('toast').classList.remove('hidden')},
   // Per-move sound recipe dispatch + announcer hookup. `a`/`b`/`val` mirror Fight.emit's args.
   onEvent(t,a,b,val){
     if(t==='hit'){const mv=MOVES[a.moveName];
@@ -88,7 +97,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // Sim frozen (Fight.step() itself no-ops while cinematic>0); G is the one counting the 72
       // frames down, one per tick, so FX/Render keep animating around a frozen sim. Input is
       // drained and discarded so nothing queued during the card fires the instant it clears.
-      f.cinematic--;this.frameNow=f.frame;Input.drain();FX.pushAll(f.fx);f.fx.length=0;return}
+      f.cinematic--;this.frameNow=f.frame;Input.drain();
+      if(f.cinematic===0){this.cinemFocus=null;this.showToast()}
+      FX.pushAll(f.fx);f.fx.length=0;return}
     const pm1=f.p1.moveName,pm2=f.p2.moveName;
     if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
     else f.step();
@@ -110,11 +121,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       if(fighter===this.fight.p1)Audio.announce('special',this.fight.rng)}},
   // Watches the fx this tick's f.step() (if any) just queued for a 'card' event — the S3 cinematic
   // trigger — and, off that, plays the s3 recipe once, sets G.cinemFocus (read by loop() to punch
-  // the camera in on the attacker while fight.cinematic>0), and announces for the human's own s3.
+  // the camera in on the attacker while fight.cinematic>0), and hides the toast so nothing already
+  // on screen (or queued) can show through/behind the card. The announce('special') call below is
+  // now a no-op in practice (G.say bails while fight.cinematic>0, which is already true here) — kept
+  // for symmetry with s1/s2 and in case that guard ever moves to fire after the card instead.
   checkCinematicFx(f){
     if(!f.fx.some(e=>e.kind==='card'))return;
     const att=(f.p1.state==='ATTACK'&&f.p1.moveName==='s3')?f.p1:f.p2;
     this.cinemFocus=att;
+    this.hideToast();
     Audio.recipes.s3();
     if(att===f.p1)Audio.announce('special',f.rng)},
   // Test/debug helper (also used by tests/harness.py --cinematic): starts a fight, arms p1 with a

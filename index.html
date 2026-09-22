@@ -18,6 +18,7 @@ canvas{display:block;image-rendering:pixelated;background:#101422}
 #powerPicker button{width:52px;height:52px;border-radius:50%;border:2px solid #f4c542;background:#1a1f33;color:#f4c542;font:inherit;font-size:13px;font-weight:bold}
 #powerPicker button:disabled{opacity:.3}
 #toast{position:absolute;left:50%;top:104px;transform:translateX(-50%);font-size:13px;color:#f4c542;pointer-events:none;text-shadow:0 1px 0 #000;white-space:nowrap}
+#toast.hidden{visibility:hidden}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
 <button id="btnBlock" class="cbtn" data-label="BLOCK">&#128737;</button>
@@ -992,22 +993,26 @@ const FX={list:[],shake:0,flash:0,card:null,
   // Called by Render.frame AFTER the camera transform is reset and the HUD is drawn, so it always
   // sits on top and is unaffected by camera zoom/shake. Unskippable: purely a function of card.t,
   // which only Fight.checkCinematic (via the 'card' fx push) can (re)start.
+  // Band is a ~150px-tall (measured perpendicular to the band, i.e. in the rotated frame) name
+  // card centered on 52% of screen height, rotated about its own center (not the canvas origin) so
+  // its footprint stays roughly symmetric around that center line instead of growing off the top —
+  // this keeps the portraits/hp bars/floor line above it and the chevrons below it clear, per fix
+  // round 1. The DOM on-screen buttons sit in their own stacking context above the canvas either
+  // way, but the band is kept clear of that row too for a clean read.
   drawScreen(c,frame){
     if(!this.card)return;
-    const cd=this.card,t=cd.t,frames=cd.frames,slide=12;
+    const cd=this.card,t=cd.t,frames=cd.frames,slide=12,bandH=150,centerY=H*.52,angle=-8*Math.PI/180;
     c.save();c.setTransform(1,0,0,1,0,0);
     c.globalAlpha=.55;c.fillStyle='#000';c.fillRect(0,0,W,H);
     c.globalAlpha=1;
     const enter=Math.min(1,t/slide),exit=t>frames-slide?Math.min(1,(t-(frames-slide))/slide):0;
-    const offsetX=-W*(1-enter)+W*exit;
-    c.save();c.translate(offsetX,0);c.rotate(-.12);
-    c.fillStyle='#f4c542';c.fillRect(-120,H*.28,W+240,H*.3);
-    c.strokeStyle='#8a6a12';c.lineWidth=3;c.strokeRect(-120,H*.28,W+240,H*.3);
-    c.restore();
-    c.save();c.translate(W/2+offsetX,H/2);c.rotate(-.12);
+    const offsetX=-W*(1-enter)+W*exit,cx=W/2+offsetX;
+    c.save();c.translate(cx,centerY);c.rotate(angle);
+    c.fillStyle='#f4c542';c.fillRect(-(W/2+120),-bandH/2,W+240,bandH);
+    c.strokeStyle='#8a6a12';c.lineWidth=3;c.strokeRect(-(W/2+120),-bandH/2,W+240,bandH);
     c.textAlign='center';c.fillStyle='#1a1208';
-    c.font='900 34px ui-monospace,monospace';c.fillText(cd.name,0,-6);
-    c.font='bold 16px ui-monospace,monospace';c.fillText('SPECIAL 3',0,22);
+    c.font='900 44px ui-monospace,monospace';c.fillText(cd.name,0,-8);
+    c.font='bold 18px ui-monospace,monospace';c.fillText('SPECIAL 3',0,26);
     c.restore();
     c.restore()}};
 
@@ -1039,8 +1044,17 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);this.show('btns',true);Audio.announce('start',this.fight.rng)},
   // Throttled announcer display: only updates the toast if at least 90 frames (1.5s) have passed
   // since the last line, so a burst of events can't stomp on each other mid-read. Audio.say remains
-  // the unthrottled display primitive this calls into.
-  say(text){if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
+  // the unthrottled display primitive this calls into. A no-op while the S3 cinematic is up — the
+  // card already reads SPECIAL 3 on-canvas, and the toast element is hidden for the duration anyway
+  // (see hideToast/showToast), so there is nothing useful for a line to update.
+  say(text){if(this.fight&&this.fight.cinematic>0)return;if(this.frameNow-this._sayAt>=90){this._sayAt=this.frameNow;Audio.say(text)}},
+  // Hides the DOM #toast announcer (an absolutely-positioned element outside the canvas, so nothing
+  // drawn on-canvas can cover it) for the duration of the S3 cinematic, and cancels Audio.say's
+  // pending fade-out timeout so a stale line already on screen (e.g. the opening announcer, whose
+  // 2.2s fade can easily still be running by the time an early s3 lands) can't keep showing through,
+  // or flash back in, mid-card. showToast restores it once the cinematic ends (G.tick, cinematic hits 0).
+  hideToast(){const el=document.getElementById('toast');clearTimeout(Audio._t);el.textContent='';el.classList.add('hidden')},
+  showToast(){document.getElementById('toast').classList.remove('hidden')},
   // Per-move sound recipe dispatch + announcer hookup. `a`/`b`/`val` mirror Fight.emit's args.
   onEvent(t,a,b,val){
     if(t==='hit'){const mv=MOVES[a.moveName];
@@ -1101,7 +1115,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // Sim frozen (Fight.step() itself no-ops while cinematic>0); G is the one counting the 72
       // frames down, one per tick, so FX/Render keep animating around a frozen sim. Input is
       // drained and discarded so nothing queued during the card fires the instant it clears.
-      f.cinematic--;this.frameNow=f.frame;Input.drain();FX.pushAll(f.fx);f.fx.length=0;return}
+      f.cinematic--;this.frameNow=f.frame;Input.drain();
+      if(f.cinematic===0){this.cinemFocus=null;this.showToast()}
+      FX.pushAll(f.fx);f.fx.length=0;return}
     const pm1=f.p1.moveName,pm2=f.p2.moveName;
     if(f.slowmo>0){if(++this._tickN%4===0){f.step();f.slowmo--}}
     else f.step();
@@ -1123,11 +1139,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       if(fighter===this.fight.p1)Audio.announce('special',this.fight.rng)}},
   // Watches the fx this tick's f.step() (if any) just queued for a 'card' event — the S3 cinematic
   // trigger — and, off that, plays the s3 recipe once, sets G.cinemFocus (read by loop() to punch
-  // the camera in on the attacker while fight.cinematic>0), and announces for the human's own s3.
+  // the camera in on the attacker while fight.cinematic>0), and hides the toast so nothing already
+  // on screen (or queued) can show through/behind the card. The announce('special') call below is
+  // now a no-op in practice (G.say bails while fight.cinematic>0, which is already true here) — kept
+  // for symmetry with s1/s2 and in case that guard ever moves to fire after the card instead.
   checkCinematicFx(f){
     if(!f.fx.some(e=>e.kind==='card'))return;
     const att=(f.p1.state==='ATTACK'&&f.p1.moveName==='s3')?f.p1:f.p2;
     this.cinemFocus=att;
+    this.hideToast();
     Audio.recipes.s3();
     if(att===f.p1)Audio.announce('special',f.rng)},
   // Test/debug helper (also used by tests/harness.py --cinematic): starts a fight, arms p1 with a

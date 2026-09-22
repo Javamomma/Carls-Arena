@@ -55,21 +55,25 @@ const FX={list:[],shake:0,flash:0,card:null,
   // Called by Render.frame AFTER the camera transform is reset and the HUD is drawn, so it always
   // sits on top and is unaffected by camera zoom/shake. Unskippable: purely a function of card.t,
   // which only Fight.checkCinematic (via the 'card' fx push) can (re)start.
+  // Band is a ~150px-tall (measured perpendicular to the band, i.e. in the rotated frame) name
+  // card centered on 52% of screen height, rotated about its own center (not the canvas origin) so
+  // its footprint stays roughly symmetric around that center line instead of growing off the top —
+  // this keeps the portraits/hp bars/floor line above it and the chevrons below it clear, per fix
+  // round 1. The DOM on-screen buttons sit in their own stacking context above the canvas either
+  // way, but the band is kept clear of that row too for a clean read.
   drawScreen(c,frame){
     if(!this.card)return;
-    const cd=this.card,t=cd.t,frames=cd.frames,slide=12;
+    const cd=this.card,t=cd.t,frames=cd.frames,slide=12,bandH=150,centerY=H*.52,angle=-8*Math.PI/180;
     c.save();c.setTransform(1,0,0,1,0,0);
     c.globalAlpha=.55;c.fillStyle='#000';c.fillRect(0,0,W,H);
     c.globalAlpha=1;
     const enter=Math.min(1,t/slide),exit=t>frames-slide?Math.min(1,(t-(frames-slide))/slide):0;
-    const offsetX=-W*(1-enter)+W*exit;
-    c.save();c.translate(offsetX,0);c.rotate(-.12);
-    c.fillStyle='#f4c542';c.fillRect(-120,H*.28,W+240,H*.3);
-    c.strokeStyle='#8a6a12';c.lineWidth=3;c.strokeRect(-120,H*.28,W+240,H*.3);
-    c.restore();
-    c.save();c.translate(W/2+offsetX,H/2);c.rotate(-.12);
+    const offsetX=-W*(1-enter)+W*exit,cx=W/2+offsetX;
+    c.save();c.translate(cx,centerY);c.rotate(angle);
+    c.fillStyle='#f4c542';c.fillRect(-(W/2+120),-bandH/2,W+240,bandH);
+    c.strokeStyle='#8a6a12';c.lineWidth=3;c.strokeRect(-(W/2+120),-bandH/2,W+240,bandH);
     c.textAlign='center';c.fillStyle='#1a1208';
-    c.font='900 34px ui-monospace,monospace';c.fillText(cd.name,0,-6);
-    c.font='bold 16px ui-monospace,monospace';c.fillText('SPECIAL 3',0,22);
+    c.font='900 44px ui-monospace,monospace';c.fillText(cd.name,0,-8);
+    c.font='bold 18px ui-monospace,monospace';c.fillText('SPECIAL 3',0,26);
     c.restore();
     c.restore()}};
