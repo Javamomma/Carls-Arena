@@ -6,6 +6,7 @@
   python3 tests/harness.py --seconds 20 --shot /tmp/fight.png --eval 'G.fight.p1.hp'
   python3 tests/harness.py --sim --seconds 30 --probe 'G.fight.p1.combo'
   python3 tests/harness.py --matrix                                  # AI/content soak matrix; exit 1 on any error
+  python3 tests/harness.py --perf 600                                # ms/frame gate; exit 1 if >= 6
 
 Exit 1 on any page error, console error, or if the game never left TITLE.
 """
