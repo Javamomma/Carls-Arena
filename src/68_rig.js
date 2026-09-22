@@ -481,8 +481,16 @@ const LOOKS={
   // Fix round 1 (art review): bodyLen trimmed ~15% (170->144) and legW bumped (15->18) so the body
   // capsule drawQuad now draws (width = bodyLen*.42, a filled rounded shape, not a thin stroke) reads
   // as "long and low", not a snake — see drawQuad's body-drawing comment for the shape itself.
+  // Fix-wave item 9: bodyLen 144->134. solveQuad's body chain (hip->spine->chest, each segment
+  // bodyLen*.5*cos(angle)) puts the chest very nearly a full bodyLen forward of the hip even at small
+  // pitch angles, and everything downstream (neck, head, and the 'whiskers' prop off the head) rides
+  // on top of that — 'medium's own forward lean made the whisker tip Donut's true worst-case reach
+  // point, 266.5px, past EDGE_PAD (260, bumped from 220 in item 3). This is the "quad EDGE_PAD
+  // carve-out" the final review flagged as a real, player-visible gap (Important) between the rig's
+  // drawn reach and the sim's wall-clamp budget. Trimmed until Rig.extent's reach (props included)
+  // clears 260 with real margin (257.2 to the old 266.5), not just past it by a rounding error.
   donut:{rig:'quad',species:'cat',skin:'#f7ecdc',earInner:'#f6b8d6',eye:'#3f7fd6',accent:'#f4c542',
-    hipH:65,legLen:65,bodyLen:144,neckLen:46,headR:26,tailLen:120,
+    hipH:65,legLen:65,bodyLen:134,neckLen:46,headR:26,tailLen:120,
     frontW:20,backW:24,legW:18,
     props:['tiara','whiskers']},
   // Mongo: Task 3.5's RigBig brute rig (see Rig.solve's 'big' branch below and Rig.solveBig).
@@ -578,14 +586,19 @@ const LOOKS={
   grull:{rig:'big',skin:'#4a5c34',hair:null,primary:'#2a2420',secondary:'#5c3a22',
     limb:15,legLen:135,armLen:76,torsoLen:140,headR:24,shoulderW:84,hipW:52,waistW:59,hunch:D(6),
     props:['trousers','horns','spikedclub']},
-  // Mother Rat (boss): Task 3.4's RigQuad bone set at boss scale (def.scale:1.3, applied on top of
-  // these already-large numbers). Grey-brown fur, a long pink tail, big rounded ears, and yellow
-  // teeth drawn in drawQuad.
+  // Mother Rat (boss): Task 3.4's RigQuad bone set at boss scale (def.scale, 40_movedata.js's
+  // BOSSES.mother_rat, applied on top of these already-large numbers). Grey-brown fur, a long pink
+  // tail, big rounded ears, and yellow teeth drawn in drawQuad.
   // Fix round 1 (art review): bodyLen trimmed ~15% (170->144), legW bumped (18->20) for "bulkier
   // chest/haunches" on top of the filled-capsule body drawQuad now draws for every quad look.
+  // Fix-wave item 9: def.scale 1.3->1.15 and bodyLen 144->125 — same "quad EDGE_PAD carve-out" gap
+  // as Donut above (solveQuad's body chain puts most of a look's reach a bodyLen forward of the hip),
+  // compounded here by the 1.3x boss scale on top of it: 310.9px reach at the old numbers, nearly 1.5x
+  // EDGE_PAD (260, bumped from 220 in item 3). Scale alone (1.3->1.15) only got to 275.1; bodyLen
+  // trimmed further on top clears 260 with real margin (254.7).
   mother_rat:{rig:'quad',species:'rat',skin:'#6b5a4a',earInner:'#d98fa0',tailTint:'#d98fa0',
     teeth:'#e8d24a',eye:'#1a1a1a',
-    hipH:65,legLen:65,bodyLen:144,neckLen:42,headR:26,tailLen:170,
+    hipH:65,legLen:65,bodyLen:125,neckLen:42,headR:26,tailLen:170,
     frontW:22,backW:26,legW:20,
     props:['teeth']}};
 

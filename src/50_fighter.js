@@ -15,10 +15,20 @@ class Fighter{
     // constants, not a real invariant, so nothing stopped a future DASH_BACK retune from making a
     // plain dash-back misread as a knockdown get-up. This flag is scoped to KNOCKDOWN specifically
     // and never touches DASH at all.
-    this.wasKnockedDown=false}
+    this.wasKnockedDown=false;
+    // _kdCounter (fix-wave item 9): drives wasKnockedDown's self-clear, armed to KNOCKDOWN.frames+
+    // KNOCKDOWN.inv the instant KNOCKDOWN starts (setState below) and decremented once per tick()
+    // regardless of state — see tick()'s own comment for why this replaced the old state==='IDLE'
+    // gate (a controller, AI.make's decidePunish, used to reach into the OPPONENT Fighter it doesn't
+    // own and clear wasKnockedDown itself the moment it acted on the window, exactly to paper over
+    // that gate's one real gap: if the foe's OWN controller made it act this same frame, its state
+    // could read something other than IDLE right when tick()'s old check ran, leaving the flag stuck
+    // true until some later, unrelated IDLE frame). _kdCounter never looks at .state at all, so it
+    // can't be defeated the same way; AI.make now only ever reads wasKnockedDown.
+    this._kdCounter=0}
   get front(){return this.x+this.face*this.width/2}
   busy(){return this.state!=='IDLE'&&this.state!=='BLOCK'}
-  setState(s,f=0){if(s==='KNOCKDOWN')this.wasKnockedDown=true;this.state=s;this.f=f}
+  setState(s,f=0){if(s==='KNOCKDOWN'){this.wasKnockedDown=true;this._kdCounter=KNOCKDOWN.frames+KNOCKDOWN.inv}this.state=s;this.f=f}
   // MOVES[name] shallow-merged with this.def.moves?.[name]; cached per fighter instance (no per-frame alloc).
   moveDef(name){let c=this._mdCache;if(!c)c=this._mdCache=new Map();let d=c.get(name);
     if(!d){d=Object.assign({},MOVES[name],this.def.moves&&this.def.moves[name]);c.set(name,d)}
@@ -53,14 +63,18 @@ class Fighter{
     else if(S==='CHARGE'&&!intent.heavy){this.move=null;this.moveName=null;this.setState('IDLE')}}
   // Advance one frame of the state machine.
   tick(){
-    // Self-clear wasKnockedDown one full tick after inv actually reached 0 (checked here, before
-    // this tick's own decrement, against the state left over from the END of the previous tick —
-    // exactly the state a controller's next() call for THIS step already read). That one-tick delay
-    // is what gives AI.make's 'punish' behavior its single-frame "just got up" window: the frame
+    // Self-clear wasKnockedDown the tick after _kdCounter (armed to KNOCKDOWN.frames+KNOCKDOWN.inv
+    // the instant KNOCKDOWN starts — setState above) counts all the way down, checked here before
+    // this tick's own decrement, against the value left over from the END of the previous tick —
+    // exactly what a controller's next() call for THIS step already read. That one-tick delay is
+    // what gives AI.make's 'punish' behavior its single-frame "just got up" window: the frame
     // wasKnockedDown&&inv===0 is visible to next() is the same frame this check clears it for next
-    // time. AI.make also clears it directly the moment it acts on that window (see decidePunish).
-    if(this.wasKnockedDown&&this.state==='IDLE'&&this.inv===0)this.wasKnockedDown=false;
+    // time (inv and _kdCounter count down in lockstep from the moment KNOCKDOWN ends, since nothing
+    // else touches _kdCounter — see setState's own comment for why inv alone, or gating on
+    // state==='IDLE', both used to leave a real gap here).
+    if(this.wasKnockedDown&&this._kdCounter===0)this.wasKnockedDown=false;
     const prevX=this.x;this.f++;if(this.inv>0)this.inv--;if(this.parryLock>0)this.parryLock--;
+    if(this._kdCounter>0)this._kdCounter--;
     switch(this.state){
       case'CHARGE':if(this.f>=this.move.charge)this.setState('ATTACK');break;
       case'ATTACK':{const m=this.move;if(m.dash&&this.f<=m.startup)this.x+=this.face*m.dash/m.startup;

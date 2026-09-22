@@ -61,7 +61,10 @@ const BOSSES={
   // heal, was the problem). Same story as Grull above: atk 50 alone was still a 0/20 wall even with
   // items 1/8 in. Retuned to atk 35 + hp 1400->1100 (close to the final review's own alternate, "rat
   // atk 46 + hp 1100") once items 1/8 landed — 16.7-25% (n=30/n=20), ending well below full hp.
-  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1100,atk:35,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.3,rig:'quad',
+  // Fix-wave item 9: scale 1.3->1.15 (paired with a LOOKS.mother_rat bodyLen trim — see that look's
+  // own comment) to close the quad-rig reach gap past EDGE_PAD; a presentation-side number, doesn't
+  // touch the balance numbers above.
+  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1100,atk:35,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
@@ -81,4 +84,8 @@ const STAGE_W=1400;
 // the old 220 margin. 260 is item 9's own number (it fixes Donut/Mother Rat's much larger quad-rig
 // gap the same pass), so bumping it here rather than re-deriving a smaller one just for Mongo avoids
 // moving this constant twice across two commits for the same underlying (headR/reach) reason.
+// Fix-wave item 9: Donut/Mother Rat (LOOKS.donut/mother_rat, 68_rig.js) trimmed until Rig.extent's
+// reach — props and head both included — clears this 260 value for every look with real margin
+// (Mongo 234.3, Grull 191.2, Donut 257.2, Mother Rat 254.7, everyone else already well under); the
+// "every look's reach fits inside EDGE_PAD" test's quad carve-out is deleted, no longer needed.
 const EDGE_PAD=260;

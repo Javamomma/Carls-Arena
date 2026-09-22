@@ -128,7 +128,13 @@ Test.add('AI.make punishes exactly on the frame wasKnockedDown+inv0 line up (jus
   eq(foe.inv,0);eq(foe.state,'IDLE');eq(foe.wasKnockedDown,true,'flag still set on the frame AI.make must read it');
   const it=ctrl.next(f,me,foe);
   eq(it.medium,true,'t5 must punish on the exact justGotUp frame');
-  eq(foe.wasKnockedDown,false,'decidePunish consumes the flag once it acts on it')});
+  // Fix-wave item 9: AI.make only reads wasKnockedDown now — it no longer writes to foe (the
+  // opponent's own Fighter, which the controller doesn't own). The flag is still true immediately
+  // after next() returns (next() never touches it); Fighter.tick's own _kdCounter-driven self-clear
+  // (50_fighter.js) is what actually clears it, one real tick later.
+  eq(foe.wasKnockedDown,true,'AI never writes foe state; still true immediately after next()');
+  foe.tick();
+  eq(foe.wasKnockedDown,false,'Fighter.tick self-clears one tick after i-frames actually expired')});
 Test.add('t1 loses to t5 head to head over 5 seeds',()=>{let w5=0;for(let s=1;s<=5;s++){const f=mkFight({ctrl1:AI.make('t1',s),ctrl2:AI.make('t5',s+100),clock:120});run(f,7200);if(f.winner===f.p2)w5++}ok(w5>=4,'t5 wins '+w5+'/5')});
 Test.add('Input.drain folds the action queue into one intent and clears it',()=>{
   Input.q.push('light','special2','dashBack');Input.held.block=true;const it=Input.drain();
@@ -272,19 +278,12 @@ Test.add('every look\'s reach fits inside EDGE_PAD',()=>{
   // pose data was retuned this fix round so this holds true-FK-wide, not just at the old formula's
   // idle-silhouette approximation — see LOOKS.mongo's Fix round 3 and POSES_BIG's per-key comments.)
   //
-  // KNOWN PRE-EXISTING GAP, out of this fix round's scope (flagged to the controller, not silently
-  // patched): donut/mother_rat (Task 3.4's quad rig) fail this stricter check — solveQuad's body chain
-  // puts the chest a full bodyLen (not bodyLen/2, as the old quad reach formula assumed) forward of
-  // the hip, so donut's own head already sits at x=193 at a calm IDLE pose, before any attack pose
-  // moves at all. This is a real, pre-existing (already-shipped, already-reviewed) characteristic of
-  // Task 3.4's rig, not something Task 3.5's big-rig work introduced or should silently rewrite —
-  // fixing it means touching solveQuad's chain formula or donut/mother_rat's frozen bodyLen/legLen,
-  // which is outside a rig/camera fix round scoped to Mongo/Grull. Excluded here with this explicit
-  // carve-out rather than either leaving the gate red or quietly loosening EDGE_PAD/rewriting Task
-  // 3.4's shipped look data without review.
-  const PRE_EXISTING_QUAD_GAP=new Set(['donut','mother_rat']);
+  // Fix-wave item 9: the donut/mother_rat quad-rig carve-out this test used to need is gone — both
+  // were trimmed (LOOKS.donut/mother_rat's own comments) until their reach clears EDGE_PAD (bumped
+  // 220->260 in item 3) with real margin, closing the gap the final review flagged (Important): at
+  // 260px separation the old numbers put the rat's snout drawing through Carl's torso, visual and
+  // hurtbox disagreeing by about a body length. Every look in the roster now passes the same check.
   for(const id in LOOKS){
-    if(PRE_EXISTING_QUAD_GAP.has(id))continue;
     const look=LOOKS[id],sc=(DEFS[id]&&DEFS[id].scale)||1;
     const reach=Rig.extent(look,sc).reach;
     ok(reach<=EDGE_PAD,id+' reach '+reach.toFixed(1)+' must fit inside EDGE_PAD ('+EDGE_PAD+')')}});

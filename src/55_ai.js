@@ -107,6 +107,13 @@ const AI={
     // KNOCKDOWN get-up i-frames (justGotUp — see Fighter.wasKnockedDown), or is still locked out from
     // a missed parry (parryLock>0), with a medium that arms comboFollow=3. p.punish>0 short-circuits
     // before touching rng for profiles that don't use it (dummy, t1).
+    // Fix-wave item 9: this used to also write foe.wasKnockedDown=false the instant it acted on the
+    // justGotUp window — a controller reaching into the OPPONENT Fighter's own sim state, which it
+    // doesn't own (only Fight/Fighter mutate Fighter fields; controllers only ever read foe). Fighter.
+    // tick's own _kdCounter-driven self-clear (50_fighter.js) now handles this unconditionally and
+    // correctly on its own — see that file's comments for why the old state==='IDLE' gate needed this
+    // belt-and-suspenders write in the first place, and why _kdCounter doesn't. AI.make only reads
+    // foe.wasKnockedDown now, same as everything else it reads off foe.
     function decidePunish(it,me,foe,justGotUp,phase){
       if(phase==='follow'){
         if(st.comboFollow>0){
@@ -115,7 +122,6 @@ const AI={
           st.comboFollow=0} // fully back to IDLE/BLOCK without ever seeing a chain window: the combo is over
         return false}
       if(p.punish>0&&st.cd===0&&(foe.state==='STUNNED'||justGotUp||foe.parryLock>0)&&r.next()<p.punish){
-        foe.wasKnockedDown=false; // consumed: see Fighter.tick's own self-clear for the other path (missed)
         it.medium=true;st.cd=p.react;st.comboFollow=3;return true}
       return false}
 
