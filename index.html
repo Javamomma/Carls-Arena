@@ -2545,7 +2545,10 @@ const Render={ctx:canvas.getContext('2d'),
     return this._hudCache={title,titleRightEdge,chevrons,cellW,cellH,gap,total,
       // Floor line text is rebuilt only when the label string changes (once per fight/encounter, not
       // per frame): cached on a fixed-size canvas keyed by the last label drawn onto it.
-      floorCanvas:mk(400,16),floorLabel:null}},
+      floorCanvas:mk(400,16),floorLabel:null,
+      // p1's "LVL n ★★★" sub-label, same cached-canvas-keyed-by-string pattern as floorLine just
+      // above; p1SubLabel is the composite string tests assert against instead of reading pixels.
+      p1SubCanvas:mk(140,14),p1SubLabel:null}},
   floorLine(c,label){
     const hc=this.hudCache();
     if(hc.floorLabel!==label){
@@ -2553,6 +2556,21 @@ const Render={ctx:canvas.getContext('2d'),
       fc.font='11px ui-monospace,monospace';fc.fillStyle='#ccc';fc.textAlign='center';fc.letterSpacing='1px';
       fc.fillText(label,hc.floorCanvas.width/2,12);hc.floorLabel=label}
     c.drawImage(hc.floorCanvas,W/2-hc.floorCanvas.width/2,80)},
+  // p1's sub-label under their name: "LVL n" in grey plus a gold ★-per-star string, sized to the
+  // roster entry's stars. hud() passes the champion's own level/stars (Save.data.roster[G.champ]);
+  // p2 has no roster entry to read so it keeps the plain hardcoded 'LVL 1' hud() already drew.
+  p1Sub(c,x,y,level,stars){
+    const hc=this.hudCache();
+    const label='LVL '+level+' '+'★'.repeat(Math.max(0,stars));
+    if(hc.p1SubLabel!==label){
+      const cv=hc.p1SubCanvas,sc=cv.getContext('2d');sc.clearRect(0,0,cv.width,cv.height);
+      sc.textAlign='left';sc.textBaseline='alphabetic';sc.font='10px ui-monospace,monospace';
+      const lvlText='LVL '+level;
+      sc.fillStyle='#bbb';sc.fillText(lvlText,0,10);
+      const w=sc.measureText(lvlText+' ').width;
+      sc.fillStyle='#f4c542';sc.fillText('★'.repeat(Math.max(0,stars)),w,10);
+      hc.p1SubLabel=label}
+    c.drawImage(hc.p1SubCanvas,x,y-10)},
   // Quad looks have no legLen/torsoLen (see LOOKS.donut/grub/mother_rat in 68_rig.js) — hipH+neckLen
   // stands in for legLen+torsoLen as "how tall the body's base is off the ground before the head".
   overlayY(F){const l=lookFor(F.def),h=l.rig==='quad'?(l.hipH+l.neckLen):(l.legLen+l.torsoLen);
@@ -2658,7 +2676,7 @@ const Render={ctx:canvas.getContext('2d'),
     c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(p1x+1,15,54,54);c.strokeRect(p2x+1,15,54,54);
     c.textBaseline='alphabetic';
     c.font='bold 14px ui-monospace,monospace';c.textAlign='left';c.fillStyle='#fff';c.fillText(a.def.name,p1barX,25);
-    c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p1barX,39);
+    {const entry=Save.data.roster[G.champ];this.p1Sub(c,p1barX,39,entry?entry.level:1,entry?entry.stars:1)}
     c.font='bold 14px ui-monospace,monospace';c.textAlign='right';c.fillStyle='#fff';c.fillText(b.def.name,p2barX+barW,25);
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39);
     if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW,b.def.name);
@@ -2674,7 +2692,7 @@ const Render={ctx:canvas.getContext('2d'),
     this.pauseGlyph(c);
     // Floor line: reads G.encounter (a plain fight without one shows an exhibition label instead).
     // floorLine() only redraws its offscreen text when the label string itself changes.
-    this.floorLine(c,G.encounter?('FLOOR '+G.encounter.floor+' • '+G.encounter.name):'EXHIBITION • DOORWAY');
+    this.floorLine(c,G.encounter?(G.encounter.floor!=null?('FLOOR '+G.encounter.floor+' • '+G.encounter.name):G.encounter.name):'EXHIBITION • DOORWAY');
     if(a.combo>1)this.combo(c,56,190,a.combo+' HITS',-6,'#f4c542','left');
     if(b.combo>1)this.combo(c,W-56,190,b.combo+' HITS',6,'#f66','right');
     this.chevrons(c,a.power);
@@ -2827,10 +2845,23 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // {encounter:'f1_goblin'|{...}} resolves via Encounter.resolve, stores the result on G.encounter
   // (the HUD's floor line reads it), and clones the enemy def here (never inside Fight) so p2's
   // hp/atk carry the encounter's multipliers without mutating the shared DEFS entry.
+  //
+  // Task 4.4: roster/quest/arena integration. `champ` (default Save.data.active) picks the roster
+  // entry whose Stats.derive(hp,atk) overrides p1's def -- o.p1 (a raw DEFS id, used by tests/debug
+  // to put a mob/boss in p1) still wins for WHICH def becomes p1 when given; the derive only ever
+  // applies when that resolved id is actually owned in the roster (mobs/bosses aren't), matching the
+  // Phase 4 ruling "fall back to base stats for non-roster p1 defs". G.mode is 'quest' whenever
+  // {floor,node} or a plain quest-encounter id was used, 'arena' only via the explicit o.mode
+  // G.startArena() sugar passes, else 'exhibition'. Energy is spent (via Quest.start, refusing --
+  // unchanged state -- when locked/empty) only by the {floor,node} sugar itself: a *plain*
+  // {encounter:'f1_goblin'} id is still labeled G.mode='quest' for onFightEnd/HUD purposes but
+  // spends no energy, so tests/batch.py's --encounter win-rate sweeps (dozens of restart-on-KO
+  // fights against one encounter id) and docs/ARENA.md's --encounter screenshot recipes keep
+  // working unmodified -- "the sugar" (45_encounter.js's own term for {floor,node}) is the one and
+  // only gate.
   startFight(o={}){const seed=o.seed||this.seed;
     this.lastFightOpts=o; // FIGHT AGAIN replays these (minus seed) so a custom p2/ai isn't lost
     let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
-    this.encounter=null;
     // {floor,node} sugar: node is an index into FLOORS[floor-1].nodes, or the string 'boss' for
     // that floor's boss encounter. Resolved to an encounter id up front so the block below (which
     // already knows how to turn an encounter id into p2def+ai+G.encounter) handles it exactly like
@@ -2841,11 +2872,42 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       if(!fl)throw new Error('unknown floor: '+o.floor);
       encSrc=o.node==='boss'?fl.boss:fl.nodes[o.node];
       if(!encSrc)throw new Error('unknown floor node: floor '+o.floor+' node '+o.node)}
+    // questTarget = {floor,node} for Quest.complete/Quest.start, resolved either straight off the
+    // {floor,node} sugar above, or by finding which FLOORS node/boss a plain encounter id names.
+    let questTarget=null;
+    if(o.floor!==undefined)questTarget={floor:o.floor,node:o.node};
+    else if(typeof encSrc==='string'){
+      for(const fl of FLOORS){
+        const idx=fl.nodes.indexOf(encSrc);
+        if(idx>=0){questTarget={floor:fl.floor,node:idx};break}
+        if(fl.boss===encSrc){questTarget={floor:fl.floor,node:'boss'};break}}}
+    const mode=o.mode||(questTarget?'quest':'exhibition');
+    // Only the {floor,node} sugar spends energy/checks the lock -- see the block comment above for
+    // why a plain encounter id must not. A refusal leaves every G.* fight property (state, fight,
+    // encounter, mode, champ) exactly as it was; nothing below this point has run yet.
+    if(o.floor!==undefined){
+      const id=Quest.start(questTarget.floor,questTarget.node);
+      if(!id){this.refuseQuest(questTarget.floor,questTarget.node);return false}}
+    this.mode=mode;this.questTarget=questTarget;
     if(encSrc){
-      const enc=Encounter.resolve(encSrc);this.encounter=enc;
+      // Arena encounters (o.mode==='arena', built by Arena.start() via G.startArena()) arrive
+      // already fully resolved -- same {enemy,tier,hpMul,atkMul,buffIds,buffs,boss} shape
+      // Encounter.resolve itself produces -- so they're used as-is; routing them back through
+      // Encounter.resolve would misread its already-resolved `buffs` (objects) as raw buff ids.
+      const enc=mode==='arena'?encSrc:Encounter.resolve(encSrc);
+      this.encounter=enc;
       p2def=Object.assign({},enc.enemy,{hp:Math.round(enc.enemy.hp*enc.hpMul),atk:Math.round(enc.enemy.atk*enc.atkMul)});
-      ai=enc.tier}
-    this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:p2def,clock:o.clock,
+      ai=enc.tier
+    }else this.encounter=null;
+    // champ: the roster entry id whose derived stats override p1's hp/atk. o.p1 wins for identity
+    // when given (tests/debug putting a mob/boss in p1); otherwise it defaults through champ to the
+    // active roster champion.
+    const champ=o.champ||o.p1||Save.data.active;
+    this.champ=champ;
+    let p1def=DEFS[champ];
+    const rosterEntry=Save.data.roster[champ];
+    if(rosterEntry){const d=Stats.derive(p1def,rosterEntry);p1def=Object.assign({},p1def,{hp:d.hp,atk:d.atk})}
+    this.fight=new Fight({seed,p1:p1def,p2:p2def,clock:o.clock,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
     // ids, not enc.buffs' resolved objects, so the sim's Buffs.apply does its own resolution instead
     // of trusting a reference that passed through the encounter/presentation layer.
@@ -2918,14 +2980,64 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.presRng)}
     else if(t==='miss'){if(b&&b.state==='DASH')Audio.recipes.dash()}
     else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}},
+  // Arena sugar: draws the next Arena.start() encounter for the current streak and starts it with
+  // mode:'arena' (never gated by Quest.start/energy -- Phase 4 ruling 4, "arena costs no energy").
+  startArena(o={}){return this.startFight(Object.assign({},o,{encounter:Arena.start(),mode:'arena'}))},
+  // A refused Quest.start (energy empty, or the node isn't 'open') toasts why instead of silently
+  // doing nothing -- reads Quest.floor directly rather than trusting Quest.canStart's single boolean
+  // so the message can tell the two refusal reasons apart.
+  refuseQuest(floor,node){
+    const f=Quest.floor(floor);
+    const n=f&&(node==='boss'?f.boss:f.nodes[node]);
+    this.say(!n||n.state!=='open'?'That node is locked.':'Not enough energy.')},
+  // Debug/test-only energy override (mirrors debugPose/debugCinematic's role): lets a harness soak
+  // loop that restarts many quest fights in a row (tests/harness.py --sim --floor/--node) top energy
+  // up once instead of hitting Quest.start's refusal mid-run. Never called from real gameplay code.
+  debugEnergy(n){Save.data.energy.n=n;Save.put()},
+  // Formats a Rewards.grant-shaped object into the #result overlay's reward line, e.g.
+  // "+100 G  +20 ISO  +30 XP" -- only the currencies/xp actually present are shown.
+  rewardsText(r){
+    const parts=[];
+    if(r.gold)parts.push('+'+r.gold+' G');
+    if(r.iso)parts.push('+'+r.iso+' ISO');
+    if(r.xp)parts.push('+'+r.xp+' XP');
+    if(r.units)parts.push('+'+r.units+' UNITS');
+    return parts.join('  ')},
   // Called from tick() once the KO slow-mo has fully counted down (fight.slowmo hits 0). Split out
   // of onEvent('ko',...) because the KO event fires synchronously inside the same f.step() that ends
   // the fight, well before slow-mo has had a chance to play; flipping state here on the frame it
   // actually happens (RESULT is set from tick(), not from Fight's own onEvent callback).
-  showResult(winner){
-    this.state='RESULT';document.getElementById('resultTitle').textContent=winner.side===1?'VICTORY':'DEFEATED';
-    document.getElementById('resultLine').textContent=winner.def.name+' wins with '+Math.round(100*winner.hp/winner.maxHp)+'% health.';
-    this.show('result',true);this.show('btns',false)},
+  //
+  // Task 4.4: the meta/rewards bookkeeping a fight's result feeds back into Save.data, run exactly
+  // once per fight (tick()'s own f.over&&f.slowmo<=0 guard only ever reaches this once -- the next
+  // tick() call bails out on `this.state!=='FIGHT'`). 'quest' completes the node/boss fought (a win
+  // only) and grants that node's Rewards.forNode; 'arena' records the streak; 'exhibition' does
+  // neither. G.lastRewards mirrors whatever was granted (null on a loss, or in 'arena'/'exhibition')
+  // for tests. Screens.result (arriving in Task 4.5) takes over rendering the overlay once it
+  // exists; until then this fills the existing #result DOM directly.
+  onFightEnd(won){
+    const winner=this.fight.winner;
+    let rewards=null;
+    if(this.mode==='quest'&&this.questTarget){
+      const{floor,node}=this.questTarget;
+      Quest.complete(floor,node,won);
+      if(won)rewards=Rewards.forNode(floor,node)
+    }else if(this.mode==='arena')Arena.record(won);
+    let leveledUp=false;
+    if(rewards){
+      const entry=Save.data.roster[Save.data.active];
+      const lvlBefore=entry?entry.level:0;
+      Rewards.grant(rewards);
+      if(entry&&entry.level>lvlBefore)leveledUp=true}
+    this.lastRewards=rewards;
+    this.state='RESULT';
+    if(typeof Screens!=='undefined'&&Screens.result)Screens.result(rewards,won);
+    else{
+      document.getElementById('resultTitle').textContent=won?'VICTORY':'DEFEATED';
+      const hpLine=winner.def.name+' wins with '+Math.round(100*winner.hp/winner.maxHp)+'% health.';
+      const rewardLine=rewards?(leveledUp?'LEVEL UP!':this.rewardsText(rewards)):'';
+      document.getElementById('resultLine').textContent=rewardLine?hpLine+'  '+rewardLine:hpLine;
+      this.show('result',true);this.show('btns',false)}},
   // Freeze p1 into a named pose for screenshotting (tests/harness.py --pose). Maps a pose key to the
   // Fighter state/moveName/f (and, where poseFor divides by it, stun) that Rig.poseFor resolves back
   // to that same key. G.sim=true stops the wall-clock loop from stepping the sim, so the frame holds.
@@ -3002,7 +3114,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // counting down every 4th tick above (f.step() itself is a no-op once over, per Fight.step's own
     // guard) instead of bailing out on the very next tick's `if(this.state!=='FIGHT')return`. Only
     // once it hits 0 do we actually leave FIGHT for RESULT.
-    if(f.over&&f.slowmo<=0)this.showResult(f.winner)},
+    if(f.over&&f.slowmo<=0)this.onFightEnd(f.winner.side===1)},
   // Detects a fighter's moveName transitioning into s1/s2/s3 this tick (the sim itself never
   // references Audio/G, so this has to be watched from outside) and plays that special's recipe
   // plus an announcer line. s3 is excluded here: it gets its recipe + announcer line once from
@@ -3712,12 +3824,17 @@ Test.add('G.startFight({...,playerBuffs}) applies to p1 via the same Buffs.apply
   eq(G.fight.p2.buffs.length,0,'playerBuffs must never leak onto p2');
   G.toTitle()});
 Test.add('G.startFight({floor,node:"boss"}) resolves the boss encounter and sets G.encounter.boss',()=>{
+  // Task 4.4: {floor,node} now spends energy through Quest.start, which requires the node to be
+  // 'open' -- floor 2's boss doesn't exist in Meta.defaults() (only floor 1 is created), so it's
+  // opened by hand here rather than relying on default save state.
+  Save.data=Meta.defaults();Save.data.floors[2]={nodes:['done','done','done','done','done'],boss:'open'};
   G.startFight({floor:2,node:'boss'});
   ok(G.encounter&&G.encounter.boss,'G.encounter.boss must be true');
   eq(G.fight.p2.def.id,'mother_rat');
   ok(!threw(()=>Render.frame(G.fight)),'Render.frame must not throw for a boss fight (boss plate)');
   G.toTitle()});
 Test.add('G.startFight({floor,node}) resolves a numeric node index to that floor\'s node encounter',()=>{
+  Save.data=Meta.defaults(); // floor 1 node 0 starts 'open' with full energy, so Quest.start succeeds
   G.startFight({floor:1,node:0});
   eq(G.fight.p2.def.id,'goblin');ok(G.encounter&&!G.encounter.boss);
   G.toTitle()});
@@ -4108,5 +4225,118 @@ Test.add('Arena.record: a loss resets streak to 0 and leaves best/gold alone',()
   Save.data=Meta.defaults();Save.data.arena={best:5,streak:4};Save.data.gold=50;
   Arena.record(false);
   eq(Save.data.arena.streak,0);eq(Save.data.arena.best,5);eq(Save.data.gold,50)});
+// Task 4.4: Fight integration (roster stats, quest/arena bookkeeping) ---------------------------
+Test.add('G.startFight derives p1 hp/atk from the champ roster entry, sets G.champ, and the HUD label reflects it',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster.carl={stars:3,rank:2,level:5,xp:0,shards:0};
+  G.startFight({encounter:'f1_goblin',champ:'carl'});
+  const expect=Stats.derive(CHAMPS.carl,Save.data.roster.carl);
+  eq(G.fight.p1.maxHp,expect.hp,'p1 maxHp must come from Stats.derive');
+  eq(G.fight.p1.def.atk,expect.atk,'p1 atk must come from Stats.derive');
+  eq(G.champ,'carl');
+  Render.frame(G.fight);
+  eq(Render.hudCache().p1SubLabel,'LVL 5 ★★★','cached HUD sub-label, not pixels');
+  G.toTitle()});
+Test.add('a non-roster p1 def (a mob/boss put in p1 for debug/test purposes) falls back to base stats, unscaled',()=>{
+  Save.data=Meta.defaults(); // only carl is owned
+  G.startFight({p1:'donut'});
+  eq(G.fight.p1.maxHp,CHAMPS.donut.hp);eq(G.fight.p1.def.atk,CHAMPS.donut.atk);
+  G.toTitle()});
+Test.add('G.mode is quest for {floor,node} or a plain quest encounter id, arena via G.startArena, exhibition otherwise',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0});eq(G.mode,'quest');G.toTitle();
+  Save.data=Meta.defaults();
+  G.startFight({encounter:'f1_goblin'});eq(G.mode,'quest');G.toTitle();
+  Save.data=Meta.defaults();
+  G.startArena();eq(G.mode,'arena');G.toTitle();
+  G.startFight({p2:'donut'});eq(G.mode,'exhibition');G.toTitle()});
+// "The sugar" (45_encounter.js's own term) is specifically the {floor,node} option object -- a plain
+// {encounter:ID} start must stay ungated so tests/batch.py's --encounter win-rate sweeps (dozens of
+// restart-on-KO fights against one id) and docs/ARENA.md's --encounter screenshot recipes, both
+// pre-existing and unaware of energy, keep working unmodified.
+Test.add('a plain {encounter:ID} quest fight does not spend energy; only the {floor,node} sugar does',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({encounter:'f1_goblin'});
+  eq(G.mode,'quest');eq(Save.data.energy.n,10,'a plain encounter id must not spend energy');
+  G.toTitle();
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0});
+  eq(Save.data.energy.n,9,'the {floor,node} sugar must spend 1 energy via Quest.start');
+  G.toTitle()});
+Test.add('G.startFight({floor,node}) refuses without starting a fight when energy is empty, leaving G.state/G.fight unchanged',()=>{
+  Save.data=Meta.defaults();Save.data.energy.n=0;
+  G.toTitle();
+  const stateBefore=G.state,fightBefore=G.fight;
+  const r=G.startFight({floor:1,node:0});
+  eq(r,false,'a refused quest start must return false');
+  eq(G.state,stateBefore,'G.state must be unchanged');
+  eq(G.fight,fightBefore,'G.fight must be unchanged')});
+Test.add('G.startFight({floor,node}) refuses a locked node the same way',()=>{
+  Save.data=Meta.defaults(); // node 1 starts locked
+  const stateBefore=G.state;
+  eq(G.startFight({floor:1,node:1}),false);
+  eq(G.state,stateBefore)});
+Test.add('scripted KO in quest mode completes the node, opens the next one, grants rewards once, and shows VICTORY with the reward line',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0,ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  eq(G.mode,'quest');eq(Save.data.energy.n,9,'Quest.start must have spent 1 energy at fight start');
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(document.getElementById('resultTitle').textContent,'VICTORY');
+  const f=Quest.floor(1);
+  eq(f.nodes[0].state,'done','the fought node must be marked done');
+  eq(f.nodes[1].state,'open','the next node must unlock');
+  const expectRewards=Rewards.forNode(1,0);
+  eq(JSON.stringify(G.lastRewards),JSON.stringify(expectRewards),'G.lastRewards must equal Rewards.forNode(1,0)');
+  const line=document.getElementById('resultLine').textContent;
+  ok(line.includes('+'+expectRewards.gold+' G'),'reward line must show gold: '+line);
+  ok(line.includes('+'+expectRewards.iso+' ISO'),'reward line must show iso: '+line);
+  ok(line.includes('+'+expectRewards.xp+' XP'),'reward line must show xp: '+line);
+  const goldAfterFirst=Save.data.gold;
+  for(let i=0;i<50;i++)G.tick(); // tick() is a no-op once G.state!=='FIGHT'
+  eq(Save.data.gold,goldAfterFirst,'rewards must be granted exactly once per fight, not per tick');
+  G.toTitle();G.sim=false});
+Test.add('a quest loss keeps the node open, does not refund energy, and shows DEFEATED with no rewards',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0,ctrl2:AI.make('basic',9),seed:3});
+  eq(Save.data.energy.n,9);
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600;i++)G.tick();
+  ok(G.fight.over,'the fight must have ended');
+  eq(G.state,'RESULT');
+  eq(document.getElementById('resultTitle').textContent,'DEFEATED');
+  eq(Quest.floor(1).nodes[0].state,'open','a loss must not complete the node');
+  eq(Save.data.energy.n,9,'energy spent at start is not refunded on a loss');
+  eq(G.lastRewards,null);
+  G.toTitle();G.sim=false});
+Test.add('FIGHT AGAIN in quest mode re-spends energy through the sugar',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0,ctrl2:AI.make('basic',9),seed:5});
+  eq(Save.data.energy.n,9);
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600;i++)G.tick(); // loss: node 0 stays open
+  eq(G.state,'RESULT');
+  document.getElementById('again').click();
+  eq(G.mode,'quest');
+  eq(Save.data.energy.n,8,'FIGHT AGAIN must re-spend energy via Quest.start, not skip the gate');
+  G.toTitle();G.sim=false});
+Test.add('G.startArena starts the Arena.start() encounter for the current streak with G.mode arena',()=>{
+  Save.data=Meta.defaults();Save.data.arena.streak=3; // Arena.start() sequence test: streak 3 -> shaman/t2
+  G.startArena();
+  eq(G.mode,'arena');
+  eq(G.fight.p2.def.id,'shaman');
+  eq(G.encounter.name,'ARENA');
+  G.toTitle()});
+Test.add('a scripted arena win records the streak/gold via Arena.record and never touches quest floor state',()=>{
+  Save.data=Meta.defaults();Save.data.arena={best:0,streak:0};Save.data.gold=0;
+  G.startArena({ctrl1:Ctrl.script([L(0)]),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Save.data.arena.streak,1);eq(Save.data.arena.best,1);eq(Save.data.gold,60);
+  eq(G.lastRewards,null,'arena wins go through Arena.record, not Rewards.forNode');
+  eq(Quest.floor(1).nodes[0].state,'open','arena must never touch quest floor state');
+  G.toTitle();G.sim=false});
 
 </script></body></html>

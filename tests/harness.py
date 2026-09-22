@@ -16,7 +16,7 @@ from playwright.sync_api import sync_playwright
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INDEX = 'file://' + os.path.join(ROOT, 'index.html')
 
-def build_soak_js(seed, p1n, p2n, ain, ctrl_expr, ticks, enc='', probes=()):
+def build_soak_js(seed, p1n, p2n, ain, ctrl_expr, ticks, enc='', probes=(), pre=''):
     """The one restart-on-KO soak loop, shared by run_matrix_cell and the plain `--sim` path: a
     single in-page evaluate() that starts a fight, steps it G.tick() at a time for `ticks` sim
     frames, and restarts on KO (a fresh seed each time) the instant G.state hits RESULT so a KO
@@ -24,7 +24,9 @@ def build_soak_js(seed, p1n, p2n, ain, ctrl_expr, ticks, enc='', probes=()):
     expression for p1's controller (it's built inside `start=seed=>...`, so it may reference that
     closure's `seed` param to get a fresh Ctrl.random() draw per restart). `probes` are raw JS
     expressions sampled once every 60 ticks (one simulated second) into a returned {expr: [...]}
-    map, matching the old per-second Python-side sampling cadence.
+    map, matching the old per-second Python-side sampling cadence. `pre` is raw JS spliced in once,
+    before the loop starts (Task 4.4: `--floor`/`--node` soak runs pass `G.debugEnergy(999)` here so
+    a quest fight's real Quest.start energy spend, taken once per restart, can't refuse mid-soak).
 
     Also returns `koTicks`: the number of G.tick() calls spent with G.fight.over already true (the
     KO slow-mo grace period G.tick keeps counting down every 4th tick before flipping to RESULT).
@@ -34,7 +36,7 @@ def build_soak_js(seed, p1n, p2n, ain, ctrl_expr, ticks, enc='', probes=()):
     """
     probe_init = ','.join('%s:[]' % json.dumps(e) for e in probes)
     probe_push = ''.join('probes[%s].push(%s);' % (json.dumps(e), e) for e in probes)
-    return ("(()=>{G.sim=true;let s=%d,fights=1,framesTotal=0,p1wins=0,ticks=%d,koTicks=0;"
+    return ("(()=>{G.sim=true;%s let s=%d,fights=1,framesTotal=0,p1wins=0,ticks=%d,koTicks=0;"
             "const probes={%s};"
             "const start=seed=>G.startFight({seed,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s%s});"
             "start(s);"
@@ -46,7 +48,7 @@ def build_soak_js(seed, p1n, p2n, ain, ctrl_expr, ticks, enc='', probes=()):
             "s++;fights++;start(s)}}"
             "framesTotal+=G.fight.frame;"
             "return{fights,framesTotal,p1wins,probes,koTicks}})()"
-            ) % (seed, ticks, probe_init, p1n, p2n, ain, ctrl_expr, enc, probe_push)
+            ) % (pre, seed, ticks, probe_init, p1n, p2n, ain, ctrl_expr, enc, probe_push)
 
 def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
     """One soak cell: a fresh page, p1 on Ctrl.random(seed), p2 on AI.make(ain). The whole
@@ -133,6 +135,13 @@ def main():
     ap.add_argument('--player-buffs', default=None,
                      help="comma list of buff ids applied to p1 via G.startFight's playerBuffs "
                           "(fix-wave item 5's player-side buff path)")
+    ap.add_argument('--champ', default=None,
+                     help="roster champion id for G.startFight's champ option (Task 4.4: Stats.derive "
+                          "overrides p1's hp/atk from Save.data.roster[champ] when owned)")
+    ap.add_argument('--reset-save', action='store_true',
+                     help="clear localStorage and re-run Save.load() before starting, so the run "
+                          "begins from Meta.defaults() (full energy, floor 1 node 0 open, only carl "
+                          "owned) instead of whatever a previous run left in this browser profile")
     ap.add_argument('--cinematic', action='store_true',
                      help="run G.debugCinematic() (starts its own fight, arms an s3, sim-steps past "
                           "the card trigger, advances FX) and screenshot; skips the normal --p2/--ai "
@@ -189,6 +198,10 @@ def main():
         pg.on('console', lambda m: console.append(m.text) if m.type == 'error' else None)
         pg.goto(INDEX)
         pg.wait_for_function('typeof G!=="undefined"')
+        if a.reset_save:
+            # Save.load() re-migrates from (now-empty) localStorage, landing on Meta.defaults() --
+            # done before any G.startFight() call below so quest energy/lock state starts clean.
+            pg.evaluate('localStorage.clear();Save.load()')
         if a.pre:
             pg.evaluate(a.pre)
         out = {'errors': errors, 'console_errors': console}
@@ -218,6 +231,8 @@ def main():
             enc = ",encounter:'%s'" % a.encounter if a.encounter else ''
         if a.player_buffs:
             enc += ",playerBuffs:%s" % json.dumps(a.player_buffs.split(','))
+        if a.champ:
+            enc += ",champ:'%s'" % a.champ
         pg.evaluate("G.sim=%s;G.startFight({seed:%d,p1:'%s',p2:'%s',ai:'%s',ctrl1:%s%s})"
                     % ('true' if a.sim else 'false', a.seed, a.p1, a.p2, a.ai, ctrl, enc))
         if a.pose:
@@ -236,7 +251,12 @@ def main():
             # instant G.state hits RESULT (not at the next 60-tick/probe boundary as the old
             # per-second Python loop did), and samples --probe expressions once per simulated second.
             ctrl_expr = 'Ctrl.random(seed)' if a.bot == 'random' else 'Ctrl.idle()'
-            js = build_soak_js(a.seed, a.p1, a.p2, a.ai, ctrl_expr, int(a.seconds * 60), enc, a.probe)
+            # A --floor/--node soak restarts through G.startFight's real {floor,node} sugar every
+            # KO, which spends 1 real Quest.start energy per restart (Task 4.4) -- topped up once
+            # before the loop so a long soak can't run the node/energy dry mid-run and start
+            # refusing (the smallest fix: G.debugEnergy is a debug-only hook made for this).
+            pre = 'G.debugEnergy(999);' if a.floor is not None else ''
+            js = build_soak_js(a.seed, a.p1, a.p2, a.ai, ctrl_expr, int(a.seconds * 60), enc, a.probe, pre)
             r = pg.evaluate(js)
             out['frames_total'] = r['framesTotal']
             out['fights'] = r['fights']

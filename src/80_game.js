@@ -44,10 +44,23 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // {encounter:'f1_goblin'|{...}} resolves via Encounter.resolve, stores the result on G.encounter
   // (the HUD's floor line reads it), and clones the enemy def here (never inside Fight) so p2's
   // hp/atk carry the encounter's multipliers without mutating the shared DEFS entry.
+  //
+  // Task 4.4: roster/quest/arena integration. `champ` (default Save.data.active) picks the roster
+  // entry whose Stats.derive(hp,atk) overrides p1's def -- o.p1 (a raw DEFS id, used by tests/debug
+  // to put a mob/boss in p1) still wins for WHICH def becomes p1 when given; the derive only ever
+  // applies when that resolved id is actually owned in the roster (mobs/bosses aren't), matching the
+  // Phase 4 ruling "fall back to base stats for non-roster p1 defs". G.mode is 'quest' whenever
+  // {floor,node} or a plain quest-encounter id was used, 'arena' only via the explicit o.mode
+  // G.startArena() sugar passes, else 'exhibition'. Energy is spent (via Quest.start, refusing --
+  // unchanged state -- when locked/empty) only by the {floor,node} sugar itself: a *plain*
+  // {encounter:'f1_goblin'} id is still labeled G.mode='quest' for onFightEnd/HUD purposes but
+  // spends no energy, so tests/batch.py's --encounter win-rate sweeps (dozens of restart-on-KO
+  // fights against one encounter id) and docs/ARENA.md's --encounter screenshot recipes keep
+  // working unmodified -- "the sugar" (45_encounter.js's own term for {floor,node}) is the one and
+  // only gate.
   startFight(o={}){const seed=o.seed||this.seed;
     this.lastFightOpts=o; // FIGHT AGAIN replays these (minus seed) so a custom p2/ai isn't lost
     let p2def=DEFS[o.p2||'donut'],ai=o.ai||'basic';
-    this.encounter=null;
     // {floor,node} sugar: node is an index into FLOORS[floor-1].nodes, or the string 'boss' for
     // that floor's boss encounter. Resolved to an encounter id up front so the block below (which
     // already knows how to turn an encounter id into p2def+ai+G.encounter) handles it exactly like
@@ -58,11 +71,42 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       if(!fl)throw new Error('unknown floor: '+o.floor);
       encSrc=o.node==='boss'?fl.boss:fl.nodes[o.node];
       if(!encSrc)throw new Error('unknown floor node: floor '+o.floor+' node '+o.node)}
+    // questTarget = {floor,node} for Quest.complete/Quest.start, resolved either straight off the
+    // {floor,node} sugar above, or by finding which FLOORS node/boss a plain encounter id names.
+    let questTarget=null;
+    if(o.floor!==undefined)questTarget={floor:o.floor,node:o.node};
+    else if(typeof encSrc==='string'){
+      for(const fl of FLOORS){
+        const idx=fl.nodes.indexOf(encSrc);
+        if(idx>=0){questTarget={floor:fl.floor,node:idx};break}
+        if(fl.boss===encSrc){questTarget={floor:fl.floor,node:'boss'};break}}}
+    const mode=o.mode||(questTarget?'quest':'exhibition');
+    // Only the {floor,node} sugar spends energy/checks the lock -- see the block comment above for
+    // why a plain encounter id must not. A refusal leaves every G.* fight property (state, fight,
+    // encounter, mode, champ) exactly as it was; nothing below this point has run yet.
+    if(o.floor!==undefined){
+      const id=Quest.start(questTarget.floor,questTarget.node);
+      if(!id){this.refuseQuest(questTarget.floor,questTarget.node);return false}}
+    this.mode=mode;this.questTarget=questTarget;
     if(encSrc){
-      const enc=Encounter.resolve(encSrc);this.encounter=enc;
+      // Arena encounters (o.mode==='arena', built by Arena.start() via G.startArena()) arrive
+      // already fully resolved -- same {enemy,tier,hpMul,atkMul,buffIds,buffs,boss} shape
+      // Encounter.resolve itself produces -- so they're used as-is; routing them back through
+      // Encounter.resolve would misread its already-resolved `buffs` (objects) as raw buff ids.
+      const enc=mode==='arena'?encSrc:Encounter.resolve(encSrc);
+      this.encounter=enc;
       p2def=Object.assign({},enc.enemy,{hp:Math.round(enc.enemy.hp*enc.hpMul),atk:Math.round(enc.enemy.atk*enc.atkMul)});
-      ai=enc.tier}
-    this.fight=new Fight({seed,p1:DEFS[o.p1||'carl'],p2:p2def,clock:o.clock,
+      ai=enc.tier
+    }else this.encounter=null;
+    // champ: the roster entry id whose derived stats override p1's hp/atk. o.p1 wins for identity
+    // when given (tests/debug putting a mob/boss in p1); otherwise it defaults through champ to the
+    // active roster champion.
+    const champ=o.champ||o.p1||Save.data.active;
+    this.champ=champ;
+    let p1def=DEFS[champ];
+    const rosterEntry=Save.data.roster[champ];
+    if(rosterEntry){const d=Stats.derive(p1def,rosterEntry);p1def=Object.assign({},p1def,{hp:d.hp,atk:d.atk})}
+    this.fight=new Fight({seed,p1:p1def,p2:p2def,clock:o.clock,
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
     // ids, not enc.buffs' resolved objects, so the sim's Buffs.apply does its own resolution instead
     // of trusting a reference that passed through the encounter/presentation layer.
@@ -135,14 +179,64 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     else if(t==='parry'){Audio.recipes.parry();Audio.announce('parry',this.fight.presRng)}
     else if(t==='miss'){if(b&&b.state==='DASH')Audio.recipes.dash()}
     else if(t==='ko'){Audio.recipes.ko();Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}},
+  // Arena sugar: draws the next Arena.start() encounter for the current streak and starts it with
+  // mode:'arena' (never gated by Quest.start/energy -- Phase 4 ruling 4, "arena costs no energy").
+  startArena(o={}){return this.startFight(Object.assign({},o,{encounter:Arena.start(),mode:'arena'}))},
+  // A refused Quest.start (energy empty, or the node isn't 'open') toasts why instead of silently
+  // doing nothing -- reads Quest.floor directly rather than trusting Quest.canStart's single boolean
+  // so the message can tell the two refusal reasons apart.
+  refuseQuest(floor,node){
+    const f=Quest.floor(floor);
+    const n=f&&(node==='boss'?f.boss:f.nodes[node]);
+    this.say(!n||n.state!=='open'?'That node is locked.':'Not enough energy.')},
+  // Debug/test-only energy override (mirrors debugPose/debugCinematic's role): lets a harness soak
+  // loop that restarts many quest fights in a row (tests/harness.py --sim --floor/--node) top energy
+  // up once instead of hitting Quest.start's refusal mid-run. Never called from real gameplay code.
+  debugEnergy(n){Save.data.energy.n=n;Save.put()},
+  // Formats a Rewards.grant-shaped object into the #result overlay's reward line, e.g.
+  // "+100 G  +20 ISO  +30 XP" -- only the currencies/xp actually present are shown.
+  rewardsText(r){
+    const parts=[];
+    if(r.gold)parts.push('+'+r.gold+' G');
+    if(r.iso)parts.push('+'+r.iso+' ISO');
+    if(r.xp)parts.push('+'+r.xp+' XP');
+    if(r.units)parts.push('+'+r.units+' UNITS');
+    return parts.join('  ')},
   // Called from tick() once the KO slow-mo has fully counted down (fight.slowmo hits 0). Split out
   // of onEvent('ko',...) because the KO event fires synchronously inside the same f.step() that ends
   // the fight, well before slow-mo has had a chance to play; flipping state here on the frame it
   // actually happens (RESULT is set from tick(), not from Fight's own onEvent callback).
-  showResult(winner){
-    this.state='RESULT';document.getElementById('resultTitle').textContent=winner.side===1?'VICTORY':'DEFEATED';
-    document.getElementById('resultLine').textContent=winner.def.name+' wins with '+Math.round(100*winner.hp/winner.maxHp)+'% health.';
-    this.show('result',true);this.show('btns',false)},
+  //
+  // Task 4.4: the meta/rewards bookkeeping a fight's result feeds back into Save.data, run exactly
+  // once per fight (tick()'s own f.over&&f.slowmo<=0 guard only ever reaches this once -- the next
+  // tick() call bails out on `this.state!=='FIGHT'`). 'quest' completes the node/boss fought (a win
+  // only) and grants that node's Rewards.forNode; 'arena' records the streak; 'exhibition' does
+  // neither. G.lastRewards mirrors whatever was granted (null on a loss, or in 'arena'/'exhibition')
+  // for tests. Screens.result (arriving in Task 4.5) takes over rendering the overlay once it
+  // exists; until then this fills the existing #result DOM directly.
+  onFightEnd(won){
+    const winner=this.fight.winner;
+    let rewards=null;
+    if(this.mode==='quest'&&this.questTarget){
+      const{floor,node}=this.questTarget;
+      Quest.complete(floor,node,won);
+      if(won)rewards=Rewards.forNode(floor,node)
+    }else if(this.mode==='arena')Arena.record(won);
+    let leveledUp=false;
+    if(rewards){
+      const entry=Save.data.roster[Save.data.active];
+      const lvlBefore=entry?entry.level:0;
+      Rewards.grant(rewards);
+      if(entry&&entry.level>lvlBefore)leveledUp=true}
+    this.lastRewards=rewards;
+    this.state='RESULT';
+    if(typeof Screens!=='undefined'&&Screens.result)Screens.result(rewards,won);
+    else{
+      document.getElementById('resultTitle').textContent=won?'VICTORY':'DEFEATED';
+      const hpLine=winner.def.name+' wins with '+Math.round(100*winner.hp/winner.maxHp)+'% health.';
+      const rewardLine=rewards?(leveledUp?'LEVEL UP!':this.rewardsText(rewards)):'';
+      document.getElementById('resultLine').textContent=rewardLine?hpLine+'  '+rewardLine:hpLine;
+      this.show('result',true);this.show('btns',false)}},
   // Freeze p1 into a named pose for screenshotting (tests/harness.py --pose). Maps a pose key to the
   // Fighter state/moveName/f (and, where poseFor divides by it, stun) that Rig.poseFor resolves back
   // to that same key. G.sim=true stops the wall-clock loop from stepping the sim, so the frame holds.
@@ -219,7 +313,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // counting down every 4th tick above (f.step() itself is a no-op once over, per Fight.step's own
     // guard) instead of bailing out on the very next tick's `if(this.state!=='FIGHT')return`. Only
     // once it hits 0 do we actually leave FIGHT for RESULT.
-    if(f.over&&f.slowmo<=0)this.showResult(f.winner)},
+    if(f.over&&f.slowmo<=0)this.onFightEnd(f.winner.side===1)},
   // Detects a fighter's moveName transitioning into s1/s2/s3 this tick (the sim itself never
   // references Audio/G, so this has to be watched from outside) and plays that special's recipe
   // plus an announcer line. s3 is excluded here: it gets its recipe + announcer line once from

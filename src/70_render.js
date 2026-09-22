@@ -33,7 +33,10 @@ const Render={ctx:canvas.getContext('2d'),
     return this._hudCache={title,titleRightEdge,chevrons,cellW,cellH,gap,total,
       // Floor line text is rebuilt only when the label string changes (once per fight/encounter, not
       // per frame): cached on a fixed-size canvas keyed by the last label drawn onto it.
-      floorCanvas:mk(400,16),floorLabel:null}},
+      floorCanvas:mk(400,16),floorLabel:null,
+      // p1's "LVL n ★★★" sub-label, same cached-canvas-keyed-by-string pattern as floorLine just
+      // above; p1SubLabel is the composite string tests assert against instead of reading pixels.
+      p1SubCanvas:mk(140,14),p1SubLabel:null}},
   floorLine(c,label){
     const hc=this.hudCache();
     if(hc.floorLabel!==label){
@@ -41,6 +44,21 @@ const Render={ctx:canvas.getContext('2d'),
       fc.font='11px ui-monospace,monospace';fc.fillStyle='#ccc';fc.textAlign='center';fc.letterSpacing='1px';
       fc.fillText(label,hc.floorCanvas.width/2,12);hc.floorLabel=label}
     c.drawImage(hc.floorCanvas,W/2-hc.floorCanvas.width/2,80)},
+  // p1's sub-label under their name: "LVL n" in grey plus a gold ★-per-star string, sized to the
+  // roster entry's stars. hud() passes the champion's own level/stars (Save.data.roster[G.champ]);
+  // p2 has no roster entry to read so it keeps the plain hardcoded 'LVL 1' hud() already drew.
+  p1Sub(c,x,y,level,stars){
+    const hc=this.hudCache();
+    const label='LVL '+level+' '+'★'.repeat(Math.max(0,stars));
+    if(hc.p1SubLabel!==label){
+      const cv=hc.p1SubCanvas,sc=cv.getContext('2d');sc.clearRect(0,0,cv.width,cv.height);
+      sc.textAlign='left';sc.textBaseline='alphabetic';sc.font='10px ui-monospace,monospace';
+      const lvlText='LVL '+level;
+      sc.fillStyle='#bbb';sc.fillText(lvlText,0,10);
+      const w=sc.measureText(lvlText+' ').width;
+      sc.fillStyle='#f4c542';sc.fillText('★'.repeat(Math.max(0,stars)),w,10);
+      hc.p1SubLabel=label}
+    c.drawImage(hc.p1SubCanvas,x,y-10)},
   // Quad looks have no legLen/torsoLen (see LOOKS.donut/grub/mother_rat in 68_rig.js) — hipH+neckLen
   // stands in for legLen+torsoLen as "how tall the body's base is off the ground before the head".
   overlayY(F){const l=lookFor(F.def),h=l.rig==='quad'?(l.hipH+l.neckLen):(l.legLen+l.torsoLen);
@@ -146,7 +164,7 @@ const Render={ctx:canvas.getContext('2d'),
     c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(p1x+1,15,54,54);c.strokeRect(p2x+1,15,54,54);
     c.textBaseline='alphabetic';
     c.font='bold 14px ui-monospace,monospace';c.textAlign='left';c.fillStyle='#fff';c.fillText(a.def.name,p1barX,25);
-    c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p1barX,39);
+    {const entry=Save.data.roster[G.champ];this.p1Sub(c,p1barX,39,entry?entry.level:1,entry?entry.stars:1)}
     c.font='bold 14px ui-monospace,monospace';c.textAlign='right';c.fillStyle='#fff';c.fillText(b.def.name,p2barX+barW,25);
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39);
     if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW,b.def.name);
@@ -162,7 +180,7 @@ const Render={ctx:canvas.getContext('2d'),
     this.pauseGlyph(c);
     // Floor line: reads G.encounter (a plain fight without one shows an exhibition label instead).
     // floorLine() only redraws its offscreen text when the label string itself changes.
-    this.floorLine(c,G.encounter?('FLOOR '+G.encounter.floor+' • '+G.encounter.name):'EXHIBITION • DOORWAY');
+    this.floorLine(c,G.encounter?(G.encounter.floor!=null?('FLOOR '+G.encounter.floor+' • '+G.encounter.name):G.encounter.name):'EXHIBITION • DOORWAY');
     if(a.combo>1)this.combo(c,56,190,a.combo+' HITS',-6,'#f4c542','left');
     if(b.combo>1)this.combo(c,W-56,190,b.combo+' HITS',6,'#f66','right');
     this.chevrons(c,a.power);

@@ -646,12 +646,17 @@ Test.add('G.startFight({...,playerBuffs}) applies to p1 via the same Buffs.apply
   eq(G.fight.p2.buffs.length,0,'playerBuffs must never leak onto p2');
   G.toTitle()});
 Test.add('G.startFight({floor,node:"boss"}) resolves the boss encounter and sets G.encounter.boss',()=>{
+  // Task 4.4: {floor,node} now spends energy through Quest.start, which requires the node to be
+  // 'open' -- floor 2's boss doesn't exist in Meta.defaults() (only floor 1 is created), so it's
+  // opened by hand here rather than relying on default save state.
+  Save.data=Meta.defaults();Save.data.floors[2]={nodes:['done','done','done','done','done'],boss:'open'};
   G.startFight({floor:2,node:'boss'});
   ok(G.encounter&&G.encounter.boss,'G.encounter.boss must be true');
   eq(G.fight.p2.def.id,'mother_rat');
   ok(!threw(()=>Render.frame(G.fight)),'Render.frame must not throw for a boss fight (boss plate)');
   G.toTitle()});
 Test.add('G.startFight({floor,node}) resolves a numeric node index to that floor\'s node encounter',()=>{
+  Save.data=Meta.defaults(); // floor 1 node 0 starts 'open' with full energy, so Quest.start succeeds
   G.startFight({floor:1,node:0});
   eq(G.fight.p2.def.id,'goblin');ok(G.encounter&&!G.encounter.boss);
   G.toTitle()});
@@ -1042,3 +1047,116 @@ Test.add('Arena.record: a loss resets streak to 0 and leaves best/gold alone',()
   Save.data=Meta.defaults();Save.data.arena={best:5,streak:4};Save.data.gold=50;
   Arena.record(false);
   eq(Save.data.arena.streak,0);eq(Save.data.arena.best,5);eq(Save.data.gold,50)});
+// Task 4.4: Fight integration (roster stats, quest/arena bookkeeping) ---------------------------
+Test.add('G.startFight derives p1 hp/atk from the champ roster entry, sets G.champ, and the HUD label reflects it',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster.carl={stars:3,rank:2,level:5,xp:0,shards:0};
+  G.startFight({encounter:'f1_goblin',champ:'carl'});
+  const expect=Stats.derive(CHAMPS.carl,Save.data.roster.carl);
+  eq(G.fight.p1.maxHp,expect.hp,'p1 maxHp must come from Stats.derive');
+  eq(G.fight.p1.def.atk,expect.atk,'p1 atk must come from Stats.derive');
+  eq(G.champ,'carl');
+  Render.frame(G.fight);
+  eq(Render.hudCache().p1SubLabel,'LVL 5 ★★★','cached HUD sub-label, not pixels');
+  G.toTitle()});
+Test.add('a non-roster p1 def (a mob/boss put in p1 for debug/test purposes) falls back to base stats, unscaled',()=>{
+  Save.data=Meta.defaults(); // only carl is owned
+  G.startFight({p1:'donut'});
+  eq(G.fight.p1.maxHp,CHAMPS.donut.hp);eq(G.fight.p1.def.atk,CHAMPS.donut.atk);
+  G.toTitle()});
+Test.add('G.mode is quest for {floor,node} or a plain quest encounter id, arena via G.startArena, exhibition otherwise',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0});eq(G.mode,'quest');G.toTitle();
+  Save.data=Meta.defaults();
+  G.startFight({encounter:'f1_goblin'});eq(G.mode,'quest');G.toTitle();
+  Save.data=Meta.defaults();
+  G.startArena();eq(G.mode,'arena');G.toTitle();
+  G.startFight({p2:'donut'});eq(G.mode,'exhibition');G.toTitle()});
+// "The sugar" (45_encounter.js's own term) is specifically the {floor,node} option object -- a plain
+// {encounter:ID} start must stay ungated so tests/batch.py's --encounter win-rate sweeps (dozens of
+// restart-on-KO fights against one id) and docs/ARENA.md's --encounter screenshot recipes, both
+// pre-existing and unaware of energy, keep working unmodified.
+Test.add('a plain {encounter:ID} quest fight does not spend energy; only the {floor,node} sugar does',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({encounter:'f1_goblin'});
+  eq(G.mode,'quest');eq(Save.data.energy.n,10,'a plain encounter id must not spend energy');
+  G.toTitle();
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0});
+  eq(Save.data.energy.n,9,'the {floor,node} sugar must spend 1 energy via Quest.start');
+  G.toTitle()});
+Test.add('G.startFight({floor,node}) refuses without starting a fight when energy is empty, leaving G.state/G.fight unchanged',()=>{
+  Save.data=Meta.defaults();Save.data.energy.n=0;
+  G.toTitle();
+  const stateBefore=G.state,fightBefore=G.fight;
+  const r=G.startFight({floor:1,node:0});
+  eq(r,false,'a refused quest start must return false');
+  eq(G.state,stateBefore,'G.state must be unchanged');
+  eq(G.fight,fightBefore,'G.fight must be unchanged')});
+Test.add('G.startFight({floor,node}) refuses a locked node the same way',()=>{
+  Save.data=Meta.defaults(); // node 1 starts locked
+  const stateBefore=G.state;
+  eq(G.startFight({floor:1,node:1}),false);
+  eq(G.state,stateBefore)});
+Test.add('scripted KO in quest mode completes the node, opens the next one, grants rewards once, and shows VICTORY with the reward line',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0,ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  eq(G.mode,'quest');eq(Save.data.energy.n,9,'Quest.start must have spent 1 energy at fight start');
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(document.getElementById('resultTitle').textContent,'VICTORY');
+  const f=Quest.floor(1);
+  eq(f.nodes[0].state,'done','the fought node must be marked done');
+  eq(f.nodes[1].state,'open','the next node must unlock');
+  const expectRewards=Rewards.forNode(1,0);
+  eq(JSON.stringify(G.lastRewards),JSON.stringify(expectRewards),'G.lastRewards must equal Rewards.forNode(1,0)');
+  const line=document.getElementById('resultLine').textContent;
+  ok(line.includes('+'+expectRewards.gold+' G'),'reward line must show gold: '+line);
+  ok(line.includes('+'+expectRewards.iso+' ISO'),'reward line must show iso: '+line);
+  ok(line.includes('+'+expectRewards.xp+' XP'),'reward line must show xp: '+line);
+  const goldAfterFirst=Save.data.gold;
+  for(let i=0;i<50;i++)G.tick(); // tick() is a no-op once G.state!=='FIGHT'
+  eq(Save.data.gold,goldAfterFirst,'rewards must be granted exactly once per fight, not per tick');
+  G.toTitle();G.sim=false});
+Test.add('a quest loss keeps the node open, does not refund energy, and shows DEFEATED with no rewards',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0,ctrl2:AI.make('basic',9),seed:3});
+  eq(Save.data.energy.n,9);
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600;i++)G.tick();
+  ok(G.fight.over,'the fight must have ended');
+  eq(G.state,'RESULT');
+  eq(document.getElementById('resultTitle').textContent,'DEFEATED');
+  eq(Quest.floor(1).nodes[0].state,'open','a loss must not complete the node');
+  eq(Save.data.energy.n,9,'energy spent at start is not refunded on a loss');
+  eq(G.lastRewards,null);
+  G.toTitle();G.sim=false});
+Test.add('FIGHT AGAIN in quest mode re-spends energy through the sugar',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({floor:1,node:0,ctrl2:AI.make('basic',9),seed:5});
+  eq(Save.data.energy.n,9);
+  G.fight.p1.hp=1;G.sim=true;
+  for(let i=0;i<600;i++)G.tick(); // loss: node 0 stays open
+  eq(G.state,'RESULT');
+  document.getElementById('again').click();
+  eq(G.mode,'quest');
+  eq(Save.data.energy.n,8,'FIGHT AGAIN must re-spend energy via Quest.start, not skip the gate');
+  G.toTitle();G.sim=false});
+Test.add('G.startArena starts the Arena.start() encounter for the current streak with G.mode arena',()=>{
+  Save.data=Meta.defaults();Save.data.arena.streak=3; // Arena.start() sequence test: streak 3 -> shaman/t2
+  G.startArena();
+  eq(G.mode,'arena');
+  eq(G.fight.p2.def.id,'shaman');
+  eq(G.encounter.name,'ARENA');
+  G.toTitle()});
+Test.add('a scripted arena win records the streak/gold via Arena.record and never touches quest floor state',()=>{
+  Save.data=Meta.defaults();Save.data.arena={best:0,streak:0};Save.data.gold=0;
+  G.startArena({ctrl1:Ctrl.script([L(0)]),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Save.data.arena.streak,1);eq(Save.data.arena.best,1);eq(Save.data.gold,60);
+  eq(G.lastRewards,null,'arena wins go through Arena.record, not Rewards.forNode');
+  eq(Quest.floor(1).nodes[0].state,'open','arena must never touch quest floor state');
+  G.toTitle();G.sim=false});
