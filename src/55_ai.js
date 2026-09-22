@@ -1,12 +1,19 @@
 // AI.TIERS: the five difficulty tiers (t1..t5) — see the Phase 3 plan's frozen interfaces.
 // `attack` was retuned for Task 3.6's balance pass (see docs/ARENA.md's "AI numbers changed" table):
-// t3 .09->.25, t4 .12->.35, t5 .15->.5, t1/t2 left at their frozen values. Everything else in this
-// table is unchanged from the frozen interfaces. Before this pass, t3-t5 rolled an attack so rarely
+// t3 .09->.25, t4 .12->.35, t5 .15->.65 (fix-wave item 8 corrected this comment — the shipped value,
+// and the one docs/ARENA.md/the 3.6 commit message both already agreed on, has always been .65; this
+// comment alone still said .5). t1/t2's `attack` left at their frozen values. t5.react is also not
+// at its frozen value (2 here, frozen at 3 — untouched by this comment fix, just noted so "everything
+// else is unchanged" isn't taken to include it). Before the 3.6 pass, t3-t5 rolled an attack so rarely
 // (once every ~7-30 idle frames even at cd===0) that tests/batch.py's scripted --bot auto opponent —
 // which reacts to every visible medium/heavy and chains every light it lands — beat every tier at a
 // nearly flat 77-100% win rate with no real difficulty curve; see 55_ai.js's `comboFollow` for the
 // paired behavior change (a landed attack now chases its own chain) that makes the higher attack
 // rate actually punishing instead of just spammier.
+// Fix-wave item 8: Ctrl.competent (the bot every tier here is measured against) learned to close
+// distance with a medium and occasionally mix in a heavy (30_input.js) — re-checked the tier gate
+// afterward and the curve held (monotone non-increasing, t1 100% >=80%, t5 23.3% <=30%) without
+// retuning any AI_TIERS field; see docs/ARENA.md's fix-wave batch tables for the exact numbers.
 const AI_TIERS={
   t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0},
   t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2},

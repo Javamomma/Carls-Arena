@@ -420,6 +420,60 @@ well past what the tier curve alone predicts (t4 70%, t5 10%), which is the inte
 "raid boss" checkpoint, not a batch-gate failure (the gate only covers the `--ai` tier sweep, not the
 per-node table — see tests/batch.py's own `--no-floors` flag to skip it).
 
+## Fix-wave batch win-rate tables (2026-09-22, items 1/2/8)
+
+Supersedes the Phase 3 table above, which predates the *STEP special-scaling fix (item 1), the boss
+stat retunes (item 2), and Ctrl.competent's closing-distance/heavy-mixup behavior (item 8) — all three
+together are what the boss numbers below depend on (see the boss-tuning notes further down for why
+items 1+2 alone weren't enough). `python3 tests/batch.py --n 30 --p1 carl --ai t1,t2,t3,t4,t5`:
+
+```
+tier           fights  winrate%  avglen(s)  stalled 
+t1             30      100.0     3.84       0       
+t2             30      93.3      5.06       0       
+t3             30      73.3      5.18       0       
+t4             30      53.3      5.31       0       
+t5             30      23.3      3.23       0       
+# OK: monotone non-increasing, t1=100.0 (>=80), last=23.3 (<=30)
+
+# per-floor-node/boss win rates (carl vs auto, n=30 each)
+encounter      fights  winrate%  avglen(s)  stalled 
+f1_goblin      30      100.0     1.53       0       
+f1_skel        30      100.0     1.47       0       
+f1_hob         30      83.3      9.09       0       
+f1_shaman      30      100.0     1.46       0       
+f1_goblin2     30      100.0     1.49       0       
+f1_grull       30      16.7      14.58      0       
+f2_grub        30      100.0     2.91       0       
+f2_skel2       30      100.0     2.28       0       
+f2_shaman2     30      96.7      1.65       0       
+f2_hob2        30      63.3      7.04       0       
+f2_grub2       30      96.7      3.03       0       
+f2_mother      30      16.7      9.65       0       
+```
+
+Tier gate: monotone non-increasing, t1 100% (>=80), t5 23.3% (<=30) — held without retuning any
+AI_TIERS field once Ctrl.competent learned to close distance/mix in heavies (checked at both n=20,
+30% exactly at the ceiling, and n=30, 23.3%, comfortably under it).
+
+Both bosses now land in the 10-35% target band (16.7% at n=30, 20-25% at n=20 across repeat runs) —
+see the boss-tuning notes below for how items 1/2/8 interact and why item 2's original atk-only
+retune (Grull 60, Mother Rat 50) wasn't enough on its own.
+
+### Boss tuning notes
+
+Item 2's first pass (Grull hp 1600->1300/atk 70->60, Mother Rat atk 62->50, regen 0.0005->0.00017/
+frame) was tuned before items 1 and 8 landed, and was explicitly documented as provisional pending
+both. Once item 1 (specials actually fire) and item 8 (Ctrl.competent closes distance and mixes in
+heavies) were both in, Grull was *still* a near-wall (0-10% at n=20/30) and Mother Rat unchanged at
+0%. A log breakdown of a lost `f1_grull` fight explained why: Carl landed only 4 hits total (2 light1,
+2 heavy-via-mixup) in an 8s loss where Grull landed 11 — the bot's own reactive/chain-continuation
+offense is comparatively weak against a react:5/punish:.8 tank even once it can reliably reach him
+and doesn't idle outside range. Both bosses' `atk` were retuned further once items 1/8 were in (per
+item 2's own deferred plan): Grull 60->42, Mother Rat atk 50->35 + hp 1400->1100 (close to the final
+review's own alternate, "rat atk 46 + hp 1100") — both land the competent bot in the 10-35% band, with
+Mother Rat ending well below full hp rather than a near-untouched win.
+
 ## AI numbers changed (Task 3.6)
 
 `src/55_ai.js`'s `AI_TIERS.attack` (chance per idle decision, at `cd===0`, of throwing a spontaneous

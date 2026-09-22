@@ -76,20 +76,41 @@ const Ctrl={
   // signature symmetry with the other seeded controllers (Ctrl.random, AI.make); the exact same
   // (fight, me, foe) state always yields the exact same intent, for any seed, which is what the
   // batch tool's "Ctrl.competent is deterministic" test checks. Priority order per call:
-  //   1. finish a light chain already open (Fighter.act's own recovery+chain+landed window)
-  //   2. otherwise, if busy, do nothing (can't act)
-  //   3. react to a visible medium/heavy: block once its startup clock has run REACT frames (leaves
+  //   1. continue holding a heavy already armed by step 8 below (charge moves need intent.heavy held
+  //      every frame — see Fighter.act's CHARGE branch — checked ahead of the busy() gate the same
+  //      way AI.make's decideHeavy 'hold' phase does, since CHARGE itself counts as busy)
+  //   2. finish a light chain already open (Fighter.act's own recovery+chain+landed window)
+  //   3. otherwise, if busy, do nothing (can't act)
+  //   4. react to a visible medium/heavy: block once its startup clock has run REACT frames (leaves
   //      the move's last couple of startup frames as a buffer, mirroring the AI tiers' 'react' field)
-  //   4. bail out of a telegraphed heavy charge while low on hp
-  //   5. fire the strongest special affordable
-  //   6. otherwise chain lights whenever in light range
-  competent:seed=>{const REACT=6,LOW_HP=0.3;return{next(fight,me,foe){
+  //   5. bail out of a telegraphed heavy charge while low on hp
+  //   6. fire the strongest special affordable
+  //   7. chain lights whenever in light range
+  //   8. Fix-wave item 8: every 5th time the foe enters blockstun (a mix-up, not spam — counted on
+  //      the rising edge of BLOCKSTUN so one long blockstun window only counts once), arm a heavy
+  //      instead of continuing the light chain
+  //   9. Fix-wave item 8: close distance with a medium (its own startup dash covers real ground) when
+  //      out of light range and the foe isn't mid-attack, on a 40-frame cooldown — the bot used to
+  //      just stand there outside light range forever, which is why intercept/medium-punish never
+  //      fired in the run that certified the tiers (final review, Important) and the monotone curve
+  //      was driven almost entirely by `attack`.
+  competent:seed=>{const REACT=6,LOW_HP=0.3,CLOSE_CD=40,MIXUP_EVERY=5;
+    let closeCd=0,openings=0,wasBlockstun=false,heavyHold=0;
+    return{next(fight,me,foe){
     const it=Ctrl.EMPTY();
+    if(heavyHold>0){heavyHold--;it.heavy=true;return it}
     if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){it.light=true;return it}
     if(me.busy())return it;
     if(foe.state==='ATTACK'&&(foe.moveName==='medium'||foe.moveName==='heavy')&&foe.f>=REACT){it.block=true;return it}
     if(foe.state==='CHARGE'&&foe.moveName==='heavy'&&me.hp/me.maxHp<LOW_HP){it.dashBack=true;return it}
     if(me.power>=100){it.special=me.power>=300?3:me.power>=200?2:1;return it}
+    if(closeCd>0)closeCd--;
+    const foeBlockstun=foe.state==='BLOCKSTUN';
+    if(foeBlockstun&&!wasBlockstun){
+      wasBlockstun=true;openings++;
+      if(openings%MIXUP_EVERY===0){heavyHold=me.moveDef('heavy').charge+1;it.heavy=true;return it}}
+    else if(!foeBlockstun)wasBlockstun=false;
     const dist=Math.abs(foe.x-me.x)-me.width,lightRange=me.moveDef('light1').range+20;
     if(dist<lightRange){it.light=true;return it}
+    if(foe.state!=='ATTACK'&&closeCd===0){it.medium=true;closeCd=CLOSE_CD;return it}
     return it}}}};

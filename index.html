@@ -251,22 +251,43 @@ const Ctrl={
   // signature symmetry with the other seeded controllers (Ctrl.random, AI.make); the exact same
   // (fight, me, foe) state always yields the exact same intent, for any seed, which is what the
   // batch tool's "Ctrl.competent is deterministic" test checks. Priority order per call:
-  //   1. finish a light chain already open (Fighter.act's own recovery+chain+landed window)
-  //   2. otherwise, if busy, do nothing (can't act)
-  //   3. react to a visible medium/heavy: block once its startup clock has run REACT frames (leaves
+  //   1. continue holding a heavy already armed by step 8 below (charge moves need intent.heavy held
+  //      every frame — see Fighter.act's CHARGE branch — checked ahead of the busy() gate the same
+  //      way AI.make's decideHeavy 'hold' phase does, since CHARGE itself counts as busy)
+  //   2. finish a light chain already open (Fighter.act's own recovery+chain+landed window)
+  //   3. otherwise, if busy, do nothing (can't act)
+  //   4. react to a visible medium/heavy: block once its startup clock has run REACT frames (leaves
   //      the move's last couple of startup frames as a buffer, mirroring the AI tiers' 'react' field)
-  //   4. bail out of a telegraphed heavy charge while low on hp
-  //   5. fire the strongest special affordable
-  //   6. otherwise chain lights whenever in light range
-  competent:seed=>{const REACT=6,LOW_HP=0.3;return{next(fight,me,foe){
+  //   5. bail out of a telegraphed heavy charge while low on hp
+  //   6. fire the strongest special affordable
+  //   7. chain lights whenever in light range
+  //   8. Fix-wave item 8: every 5th time the foe enters blockstun (a mix-up, not spam — counted on
+  //      the rising edge of BLOCKSTUN so one long blockstun window only counts once), arm a heavy
+  //      instead of continuing the light chain
+  //   9. Fix-wave item 8: close distance with a medium (its own startup dash covers real ground) when
+  //      out of light range and the foe isn't mid-attack, on a 40-frame cooldown — the bot used to
+  //      just stand there outside light range forever, which is why intercept/medium-punish never
+  //      fired in the run that certified the tiers (final review, Important) and the monotone curve
+  //      was driven almost entirely by `attack`.
+  competent:seed=>{const REACT=6,LOW_HP=0.3,CLOSE_CD=40,MIXUP_EVERY=5;
+    let closeCd=0,openings=0,wasBlockstun=false,heavyHold=0;
+    return{next(fight,me,foe){
     const it=Ctrl.EMPTY();
+    if(heavyHold>0){heavyHold--;it.heavy=true;return it}
     if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.move.chain&&me.landed){it.light=true;return it}
     if(me.busy())return it;
     if(foe.state==='ATTACK'&&(foe.moveName==='medium'||foe.moveName==='heavy')&&foe.f>=REACT){it.block=true;return it}
     if(foe.state==='CHARGE'&&foe.moveName==='heavy'&&me.hp/me.maxHp<LOW_HP){it.dashBack=true;return it}
     if(me.power>=100){it.special=me.power>=300?3:me.power>=200?2:1;return it}
+    if(closeCd>0)closeCd--;
+    const foeBlockstun=foe.state==='BLOCKSTUN';
+    if(foeBlockstun&&!wasBlockstun){
+      wasBlockstun=true;openings++;
+      if(openings%MIXUP_EVERY===0){heavyHold=me.moveDef('heavy').charge+1;it.heavy=true;return it}}
+    else if(!foeBlockstun)wasBlockstun=false;
     const dist=Math.abs(foe.x-me.x)-me.width,lightRange=me.moveDef('light1').range+20;
     if(dist<lightRange){it.light=true;return it}
+    if(foe.state!=='ATTACK'&&closeCd===0){it.medium=true;closeCd=CLOSE_CD;return it}
     return it}}}};
 
 // All frame counts at 60 Hz. dash = px the attacker advances during startup. push = px the defender is shoved on hit.
@@ -317,15 +338,22 @@ const BOSSES={
   // s3 override + buffs are his boss-signature mechanics per Phase 3 ruling #4 (a mob def with
   // boss:true, a bigger rig, a unique S3, and one signature buff — no boss-only engine).
   // Fix-wave item 2: hp 1600->1300, atk 70->60 (armorUp kept) — both bosses were a hard 0/20 vs
-  // Ctrl.competent before this pass (see docs/ARENA.md's boss balance notes for the before/after
-  // batch tables); tuned to land the competent bot in the 10-35% band once items 1 and 8 both land.
-  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:60,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
+  // Ctrl.competent before this pass. Not enough on its own: item 1's special fix and item 8's
+  // closing-distance/heavy-mixup fix both landed and Grull was STILL a near-wall (10% at n=20, mostly
+  // 0-10% at n=30) — Carl's own competent-bot offense turned out weak against a react:5/punish:.8
+  // tank even once it could reach him, landing only ~4 hits total in an 8s loss while Grull landed
+  // ~11 (see docs/ARENA.md's fix-wave boss notes for the log breakdown). atk retuned further, 60->42,
+  // once items 1/8 were in (per item 2's own deferred plan) — lands 16.7-25% (n=30/n=20) in the
+  // 10-35% target band.
+  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:42,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
     boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
   // 47_buffs.js, since disabling it entirely still left her a 20/20 wall — her offense, not the
-  // heal, was the problem).
-  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1400,atk:50,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.3,rig:'quad',
+  // heal, was the problem). Same story as Grull above: atk 50 alone was still a 0/20 wall even with
+  // items 1/8 in. Retuned to atk 35 + hp 1400->1100 (close to the final review's own alternate, "rat
+  // atk 46 + hp 1100") once items 1/8 landed — 16.7-25% (n=30/n=20), ending well below full hp.
+  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1100,atk:35,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.3,rig:'quad',
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
@@ -525,13 +553,20 @@ class Fighter{
 
 // AI.TIERS: the five difficulty tiers (t1..t5) — see the Phase 3 plan's frozen interfaces.
 // `attack` was retuned for Task 3.6's balance pass (see docs/ARENA.md's "AI numbers changed" table):
-// t3 .09->.25, t4 .12->.35, t5 .15->.5, t1/t2 left at their frozen values. Everything else in this
-// table is unchanged from the frozen interfaces. Before this pass, t3-t5 rolled an attack so rarely
+// t3 .09->.25, t4 .12->.35, t5 .15->.65 (fix-wave item 8 corrected this comment — the shipped value,
+// and the one docs/ARENA.md/the 3.6 commit message both already agreed on, has always been .65; this
+// comment alone still said .5). t1/t2's `attack` left at their frozen values. t5.react is also not
+// at its frozen value (2 here, frozen at 3 — untouched by this comment fix, just noted so "everything
+// else is unchanged" isn't taken to include it). Before the 3.6 pass, t3-t5 rolled an attack so rarely
 // (once every ~7-30 idle frames even at cd===0) that tests/batch.py's scripted --bot auto opponent —
 // which reacts to every visible medium/heavy and chains every light it lands — beat every tier at a
 // nearly flat 77-100% win rate with no real difficulty curve; see 55_ai.js's `comboFollow` for the
 // paired behavior change (a landed attack now chases its own chain) that makes the higher attack
 // rate actually punishing instead of just spammier.
+// Fix-wave item 8: Ctrl.competent (the bot every tier here is measured against) learned to close
+// distance with a medium and occasionally mix in a heavy (30_input.js) — re-checked the tier gate
+// afterward and the curve held (monotone non-increasing, t1 100% >=80%, t5 23.3% <=30%) without
+// retuning any AI_TIERS field; see docs/ARENA.md's fix-wave batch tables for the exact numbers.
 const AI_TIERS={
   t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0},
   t2:{react:14,attack:.04,block:.5, parry:.1, dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2},
@@ -3343,13 +3378,45 @@ Test.add('Ctrl.competent is deterministic per seed',()=>{
   eq(JSON.stringify(f1.log),JSON.stringify(f2.log),'same matchup must reproduce the exact same fight log');
   ok(f1.log.length>0,'the fight actually did something')});
 Test.add('Ctrl.competent blocks a foe\'s medium once its startup clock passes REACT frames',()=>{
-  // Kept at the fighters' default spacing (out of light range) so the bot has no reason to
-  // commit to its own light chain first — this isolates the reactive-block behavior on its own.
-  const f=mkFight({ctrl1:Ctrl.competent(1),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});
-  run(f,7);
-  eq(f.p1.state,'BLOCK','p1 should be guarding by frame 7 of a foe medium (startup 10)')});
+  // Foe is walked into ATTACK by hand and given a short head start before p1's own controller ever
+  // gets a decision — Fighter.tick's ATTACK case advances a move's phases regardless of the foe's own
+  // future intents, so ctrl2 can go inert (Ctrl.idle()) from here. This sidesteps fix-wave item 8's
+  // own proactive closing-distance medium (30_input.js): without a head start, p1's very first
+  // decision (made from the pre-act snapshot, before foe's own script has run even once) would see
+  // foe still IDLE and is guarded on foe.state!=='ATTACK', so it would try to close distance with its
+  // own medium before the foe's is ever visible — a real simultaneous-decision limit, not a bug, but
+  // not what this test means to isolate. Once foe.state is already ATTACK the closing guard
+  // correctly holds off, exactly like the old "out of range, nothing else applies" idle case did.
+  const f=mkFight({ctrl1:Ctrl.competent(1),ctrl2:Ctrl.idle()});
+  f.p2.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
+  for(let i=0;i<4;i++)f.p2.tick();
+  run(f,3);
+  eq(f.p1.state,'BLOCK','p1 should be guarding once foe\'s medium startup clock passes REACT frames')});
 Test.add('Ctrl.competent chains lights once in range and idle',()=>{
   const f=mkFight({ctrl1:Ctrl.competent(2)});closeIn(f);run(f,20);
   ok(f.log.some(e=>e.type==='hit'&&e.who===1),'p1 landed at least one light from range')});
+// Fix-wave item 8: the competent bot used to just stand there outside light range forever if nothing
+// else applied — which is why intercept/medium-punish never fired in the run that certified the AI
+// tiers (final review, Important). It now closes with a medium (its own startup dash covers ground)
+// whenever it's out of range and the foe isn't already attacking.
+Test.add('Ctrl.competent closes distance with a medium when out of range and the foe isn\'t attacking',()=>{
+  const f=mkFight({ctrl1:Ctrl.competent(3),ctrl2:Ctrl.idle()}); // default spacing: out of light range
+  run(f,1);
+  eq(f.p1.state,'ATTACK');eq(f.p1.moveName,'medium')});
+// Fix-wave item 8: every 5th time the foe enters blockstun (a mix-up, not spam — counted on the
+// rising edge of BLOCKSTUN so one long blockstun window only counts once), the bot arms a heavy
+// instead of continuing its normal offense.
+Test.add('Ctrl.competent mixes in a heavy on the 5th distinct blockstun opening',()=>{
+  const ctrl=Ctrl.competent(4),f=mkFight({ctrl1:ctrl});closeIn(f);
+  const me=f.p1,foe=f.p2;let heavyFires=0;
+  for(let opening=1;opening<=5;opening++){
+    foe.setState('BLOCKSTUN',0);foe.stun=1;
+    const it=ctrl.next(f,me,foe);
+    if(opening<5)ok(!it.heavy,'opening '+opening+' must not arm a heavy yet');
+    else{ok(it.heavy,'the 5th opening must arm a heavy');heavyFires++}
+    foe.setState('IDLE',0);
+    ctrl.next(f,me,foe)} // a real call while foe reads IDLE — the rising-edge reset the controller
+                          // itself needs to see before the next opening counts as a NEW one
+  eq(heavyFires,1)});
 
 </script></body></html>

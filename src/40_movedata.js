@@ -46,15 +46,22 @@ const BOSSES={
   // s3 override + buffs are his boss-signature mechanics per Phase 3 ruling #4 (a mob def with
   // boss:true, a bigger rig, a unique S3, and one signature buff — no boss-only engine).
   // Fix-wave item 2: hp 1600->1300, atk 70->60 (armorUp kept) — both bosses were a hard 0/20 vs
-  // Ctrl.competent before this pass (see docs/ARENA.md's boss balance notes for the before/after
-  // batch tables); tuned to land the competent bot in the 10-35% band once items 1 and 8 both land.
-  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:60,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
+  // Ctrl.competent before this pass. Not enough on its own: item 1's special fix and item 8's
+  // closing-distance/heavy-mixup fix both landed and Grull was STILL a near-wall (10% at n=20, mostly
+  // 0-10% at n=30) — Carl's own competent-bot offense turned out weak against a react:5/punish:.8
+  // tank even once it could reach him, landing only ~4 hits total in an 8s loss while Grull landed
+  // ~11 (see docs/ARENA.md's fix-wave boss notes for the log breakdown). atk retuned further, 60->42,
+  // once items 1/8 were in (per item 2's own deferred plan) — lands 16.7-25% (n=30/n=20) in the
+  // 10-35% target band.
+  grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:42,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',
     boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
   // 47_buffs.js, since disabling it entirely still left her a 20/20 wall — her offense, not the
-  // heal, was the problem).
-  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1400,atk:50,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.3,rig:'quad',
+  // heal, was the problem). Same story as Grull above: atk 50 alone was still a 0/20 wall even with
+  // items 1/8 in. Retuned to atk 35 + hp 1400->1100 (close to the final review's own alternate, "rat
+  // atk 46 + hp 1100") once items 1/8 landed — 16.7-25% (n=30/n=20), ending well below full hp.
+  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1100,atk:35,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.3,rig:'quad',
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};

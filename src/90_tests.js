@@ -658,11 +658,43 @@ Test.add('Ctrl.competent is deterministic per seed',()=>{
   eq(JSON.stringify(f1.log),JSON.stringify(f2.log),'same matchup must reproduce the exact same fight log');
   ok(f1.log.length>0,'the fight actually did something')});
 Test.add('Ctrl.competent blocks a foe\'s medium once its startup clock passes REACT frames',()=>{
-  // Kept at the fighters' default spacing (out of light range) so the bot has no reason to
-  // commit to its own light chain first — this isolates the reactive-block behavior on its own.
-  const f=mkFight({ctrl1:Ctrl.competent(1),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});
-  run(f,7);
-  eq(f.p1.state,'BLOCK','p1 should be guarding by frame 7 of a foe medium (startup 10)')});
+  // Foe is walked into ATTACK by hand and given a short head start before p1's own controller ever
+  // gets a decision — Fighter.tick's ATTACK case advances a move's phases regardless of the foe's own
+  // future intents, so ctrl2 can go inert (Ctrl.idle()) from here. This sidesteps fix-wave item 8's
+  // own proactive closing-distance medium (30_input.js): without a head start, p1's very first
+  // decision (made from the pre-act snapshot, before foe's own script has run even once) would see
+  // foe still IDLE and is guarded on foe.state!=='ATTACK', so it would try to close distance with its
+  // own medium before the foe's is ever visible — a real simultaneous-decision limit, not a bug, but
+  // not what this test means to isolate. Once foe.state is already ATTACK the closing guard
+  // correctly holds off, exactly like the old "out of range, nothing else applies" idle case did.
+  const f=mkFight({ctrl1:Ctrl.competent(1),ctrl2:Ctrl.idle()});
+  f.p2.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
+  for(let i=0;i<4;i++)f.p2.tick();
+  run(f,3);
+  eq(f.p1.state,'BLOCK','p1 should be guarding once foe\'s medium startup clock passes REACT frames')});
 Test.add('Ctrl.competent chains lights once in range and idle',()=>{
   const f=mkFight({ctrl1:Ctrl.competent(2)});closeIn(f);run(f,20);
   ok(f.log.some(e=>e.type==='hit'&&e.who===1),'p1 landed at least one light from range')});
+// Fix-wave item 8: the competent bot used to just stand there outside light range forever if nothing
+// else applied — which is why intercept/medium-punish never fired in the run that certified the AI
+// tiers (final review, Important). It now closes with a medium (its own startup dash covers ground)
+// whenever it's out of range and the foe isn't already attacking.
+Test.add('Ctrl.competent closes distance with a medium when out of range and the foe isn\'t attacking',()=>{
+  const f=mkFight({ctrl1:Ctrl.competent(3),ctrl2:Ctrl.idle()}); // default spacing: out of light range
+  run(f,1);
+  eq(f.p1.state,'ATTACK');eq(f.p1.moveName,'medium')});
+// Fix-wave item 8: every 5th time the foe enters blockstun (a mix-up, not spam — counted on the
+// rising edge of BLOCKSTUN so one long blockstun window only counts once), the bot arms a heavy
+// instead of continuing its normal offense.
+Test.add('Ctrl.competent mixes in a heavy on the 5th distinct blockstun opening',()=>{
+  const ctrl=Ctrl.competent(4),f=mkFight({ctrl1:ctrl});closeIn(f);
+  const me=f.p1,foe=f.p2;let heavyFires=0;
+  for(let opening=1;opening<=5;opening++){
+    foe.setState('BLOCKSTUN',0);foe.stun=1;
+    const it=ctrl.next(f,me,foe);
+    if(opening<5)ok(!it.heavy,'opening '+opening+' must not arm a heavy yet');
+    else{ok(it.heavy,'the 5th opening must arm a heavy');heavyFires++}
+    foe.setState('IDLE',0);
+    ctrl.next(f,me,foe)} // a real call while foe reads IDLE — the rising-edge reset the controller
+                          // itself needs to see before the next opening counts as a NEW one
+  eq(heavyFires,1)});
