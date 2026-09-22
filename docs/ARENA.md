@@ -4,6 +4,15 @@ Rubric table lands in Phase 5 (same format as Carls-Dash docs/PARITY.md: criteri
 
 ## Progress log
 
+- 2026-09-22 — Task 4.6: Phase 4 close-out. `tests/harness.py --e2e` (crystals → roster → quest →
+  rewards → level-up → arena, headless) exits 0 for seeds 1, 2, 3 and for `--e2e --seed 1 --loops 20`
+  (a 20-cycle menu+fight soak), all with zero page/console errors and zero assertion errors. Boss
+  re-check at n=30 (`tests/batch.py`): `f1_grull` 13.3%, `f2_mother` 16.7%, both inside the 10-35%
+  target band — no retune triggered. `--perf`'s JSON gained a top-level `perf:{ms_per_frame,ms_step,
+  ms_render}` object (the controller's gate previously read `d.get('perf')` as `None`). Roster
+  screen's `.cards` now centers vertically instead of pinning to the top with dead space below at
+  1-2 champions (`docs/shots/p4-roster.png` regenerated at 1 champion; new `p4-roster-4.png` at 4).
+  See "Phase 4 exit" below for the full table. Unit tests: 201 passing.
 - 2026-09-21 16:19 — Phase 1 complete. Unit tests: 26 passing. Soaks: 4 x 300 s (basic/brawl x seeds 1,2) clean. Screenshot verified renderer output: two colored fighters, doorway structure, green health bars, gold power segments, timer, special move buttons, and combo counter. Six gameplay control checks from Task 1.7 Step 3 (light chains, medium closes distance, heavy charges, block/parry timing, dash evasion, special button) remain unverified pending human hand-play in browser.
 - 2026-09-21 — Final-review fix wave for Phases 0-1: (1) two-thumb touch tracked per zone via a pointer Map so a second finger can no longer steal or clear the other's hold, fixing block drop and stuck-heavy; (2) `Fight.step` now detects both sides' hits against pre-resolve state before applying either, so a mutual trade lands both hits instead of only p1's; (3) `Audio.*` calls removed from `Fight` and dispatched from `G.onEvent` per event type, keeping the sim free of presentation-layer calls; (4) `tests/harness.py --sim` now restarts the fight on KO and reports a running `frames_total`/`fights` across the soak, failing under 90% of the requested duration, instead of idling through the rest of the budget after an early KO; (6) keyboard actions no longer queue while `G.state!=='FIGHT'`, fixing delayed inputs and stuck heavy after resuming from pause; (7) `AI.make` throws on an unknown profile instead of silently falling back to basic. Unit tests: 32 passing. Soaks re-run under the new `frames_total` rule (all exit 0, threshold 16200 of 18000): basic/seed1 `frames_total` 16636 (`fights` 17), basic/seed2 `frames_total` 16612 (`fights` 18), brawl/seed1 `frames_total` 16363 (`fights` 20), brawl/seed2 `frames_total` 16400 (`fights` 19).
 - 2026-09-21 — Task 2.8: added the `brute` AI profile (slow `react`, heavy-happy) and a heavy-charge-hold behavior in `src/55_ai.js`, gated on the `p.heavy>0` short-circuit so `dummy`/`basic`/`brawl` draw the identical rng sequence they always did (the naive version broke the seeded 60s soak by inserting an unconditional extra `rng.next()` per decision, shifting every downstream roll). `ENCOUNTERS.f1_hob` now uses tier `'brute'`. Added `tests/harness.py --matrix`, which runs the full 36-cell soak (see below) as a single in-page evaluate() per cell (JS-side restart-on-KO loop) so a KO is caught the very next tick instead of at the next Python-side poll, keeping every cell's `frames_total` comfortably over the 90% floor. Unit tests: 61 passing.
@@ -559,3 +568,128 @@ Task 3.5: round 1 re-review — 1,2 addressed; new Important: win pose lowers hu
 Task 3.6: implementer DONE (caab728..7c46406, 6 commits). Concern: bosses 0/30 vs Ctrl.competent. Ruling: bosses must be beatable by the competent bot at roughly 10-35% — folded into the Phase 3 fix wave — cost if wrong: bosses feel easier than a raid wall. Heavy wind-up capped at 118° by the pin test (accepted).
 Rulings for the wave: per-frame zoom cap from the current pose (restores the 175° heavy and big-rig S3 punch-in); EDGE_PAD 260 with quads trimmed to fit and the carve-out deleted; regen default 0.00017/frame (≈1%/s) with the test updated; boss stats per the review's measured bands (Grull hp 1300 atk 60; Mother Rat atk 50); t5 attack trimmed toward a reading tier while keeping the gate monotone; Fighter owns wasKnockedDown — cost if wrong: another balance pass in Phase 4.
 Fix wave re-review: 9/10 addressed + most of 10; residual: Grull palette claim unsubstantiated. Ruling (parked): Grull reads distinct from the goblin in p3-floor1-boss.png (olive, horns, club, trousers, size); `def.color` is dead data on every def → Phase 5 cleanup removes or plumbs it — cost if wrong: a boss that looks a little like a mob.
+
+## Phase 4 exit (2026-09-22)
+
+| Criterion | Status | Verification |
+|---|---|---|
+| Unit tests ≥ 130 | 201 passing, 0 failing | `python3 tests/harness.py --unit` |
+| `--e2e` exits 0 for seeds 1-3 | all three exit 0 | `python3 tests/harness.py --e2e --seed {1,2,3}` |
+| `--e2e --loops 20` (menu+fight soak) exits 0, no console/page errors | exits 0, 0/0 errors | `python3 tests/harness.py --e2e --seed 1 --loops 20` |
+| `--sim`/`--matrix` still green | both exit 0 | `python3 tests/harness.py --sim --seconds 60`; `python3 tests/harness.py --matrix` (216 cells) |
+| `--perf` under the 6 ms gate, JSON has a top-level `perf` object | `ms_per_frame` 0.095, `perf:{...}` present | `python3 tests/harness.py --perf 600` |
+| Both floor bosses land in the 10-35% win-rate band at n=30 | `f1_grull` 13.3%, `f2_mother` 16.7% | `python3 tests/batch.py --n 30 --p1 carl --encounter {f1_grull,f2_mother}` |
+| Screens shots reviewed | title/map/roster/roster-4/crystal/shop/arena all viewed, coherent | `docs/shots/p4-*.png` |
+| Roster layout: no dead space at 1-2 champions | `.cards` centers vertically; 4 champions still fit with no scroll | `docs/shots/p4-roster.png`, `p4-roster-4.png` |
+
+Full detail on Tasks 4.1-4.5 is in `.superpowers/sdd/2026-09-22-phase4-meta/progress.md` and each
+task's own report; this section covers Task 4.6's close-out work only (the earlier tasks landed
+without a docs/ARENA.md update, so Phase 4 gets one consolidated entry here rather than five).
+
+### `--e2e` summaries (Task 4.6)
+
+Each seed: reset save → seed `Save.data.seed` → `G.debugGrant({gold:1200})` → 2x
+`Crystal.open('basic')` → `Roster.setActive('carl')` → floor 1's 5 nodes then the boss via the real
+`{floor,node}` `G.startFight` sugar with `Ctrl.competent` (up to 5 attempts per node, energy
+refilled via `G.debugEnergy(999)` between attempts) → one `Roster.levelUp('carl')` → 3
+`G.startArena()` fights. Every win is checked against an independently-computed
+`Rewards.forNode(floor,node)` (gold/iso/xp deltas, xp tracked through a cumulative-earned-xp helper
+so a mid-run level-up doesn't look like a shortfall), an energy decrease, and the node/next-node
+state flip. A node exhausting all 5 attempts without a win (only ever the boss, in this data — every
+regular node's own win rate is 63-100% per the batch table below) is recorded as `{attempts:5,
+won:false}` and is not itself an error; it just means nothing further chains off that node this run.
+No seed hit a page or console error, and no seed hit an assertion error.
+
+| seed | exit | crystals (champId/stars/dup) | nodes 1/0-1/4 | boss (attempts) | level-up | arena (wins/streak/best) | gold/iso/units after |
+|---|---|---|---|---|---|---|---|
+| 1 | 0 | katia★1 (new), carl★1 (dup, 1 shard) | 5/5 won, 1 attempt each | won @1 | carl → LVL 3 | 3/3, streak 3, best 3 | 1760 / 100 / 50 |
+| 2 | 0 | carl★1 (dup, 1 shard), katia★1 (new) | 5/5 won, 1 attempt each | **lost all 5** | carl → LVL 3 | 3/3, streak 3, best 3 | 1460 / 80 / 0 |
+| 3 | 0 | katia★1 (new), donut★1 (new) | 5/5 won, 1 attempt each | won @1 | carl → LVL 3 | 3/3, streak 3, best 3 | 1760 / 100 / 50 |
+
+Seed 2's boss loss-out is expected variance, not a bug: `f1_grull`'s own measured win rate against
+`Ctrl.competent` is 13.3% at n=30 (see the balance re-check below), so `P(≥1 win in 5 independent
+attempts) ≈ 1-(1-.133)^5 ≈ 53%` — a coin flip per seed. `--e2e` only asserts against a win's actual
+reward/state deltas, never demands the boss be won within the retry budget, precisely because that
+number is a real gameplay difficulty (documented, in-band) and not a test-harness defect; forcing it
+to always succeed would mean either raising the retry budget past what the brief asked for or lying
+about the boss's difficulty. Seed 2's units stayed at 0 (no boss win → no `Rewards.forNode` units
+bonus) while seeds 1/3 banked 50 from the winning boss clear — itself a live assertion the harness
+already makes (the gold/iso/xp *delta* check on every win), just not one that shows up unless you
+compare seeds.
+
+### `--e2e --seed 1 --loops 20` (menu+fight soak)
+
+Exit 0. 0 page errors, 0 summary errors. Ran to completion in well under a second of real wall
+time (`G.sim=true` steps ticks synchronously with no wall-clock delay — the "≈10 minutes" in the
+task brief is simulated in-game time covered by ~46 fights total across the 5 nodes + boss + 3
+arena fights + 20 loops' worth of node/arena fights, not the harness's own runtime). Each loop
+renders `Screens.title/map/roster/arena` (a menu-browsing cycle), then runs one real quest fight at
+whatever node `Quest.floor` currently reports `'open'` (never a `'done'` one, so a loop never hits
+`{floor,node}` sugar's own refusal) and one `G.startArena()` fight. Post-loop state: roster `carl`
+reached LVL 5 (30 extra winnable-node xp grants across the loops), arena streak/best both climbed to
+5, currencies ended at 6800 gold / 340 iso / 150 units — all from real `Rewards.grant`/`Arena.record`
+calls, no debug shortcuts beyond the energy top-up.
+
+### Balance re-check (Task 4.6, item 2)
+
+```
+$ python3 tests/batch.py --n 30 --p1 carl --encounter f1_grull
+encounter      fights  winrate%  avglen(s)  stalled
+f1_grull       30      13.3      14.58      0
+
+$ python3 tests/batch.py --n 30 --p1 carl --encounter f2_mother
+encounter      fights  winrate%  avglen(s)  stalled
+f2_mother      30      16.7      9.60       0
+```
+
+Both land inside the 10-35% target band (13.3% and 16.7%), so neither retune trigger in the task
+brief fires (Mother Rat's was "if under 10% at n=30"; it's at 16.7%). The progress ledger had flagged
+a quick n=10 Mother Rat run coming back 0/10 against the fix-wave table's own 5/30 as "variance worth
+re-checking here" — the n=30 re-check confirms it was variance, not a regression: 16.7% matches the
+fix-wave table's number exactly. No code change to `grull`/`mother_rat`'s stats; a short comment
+recording this re-check was added next to each in `src/40_movedata.js`. The full per-floor-node/boss
+table (unaffected, included for completeness) is unchanged from the fix-wave table above.
+
+### `--perf` JSON shape (Task 4.6, item 3)
+
+`python3 tests/harness.py --perf 600` now prints:
+
+```json
+{
+ "ms_per_frame": 0.0945,
+ "ms_step": 0.00767,
+ "ms_render": 0.08683,
+ "perf": {
+  "ms_per_frame": 0.0945,
+  "ms_step": 0.00767,
+  "ms_render": 0.08683
+ }
+}
+```
+
+The three timing numbers are unchanged (still well under the 6 ms gate); they're now also nested
+under a top-level `perf` key, which is what the controller's gate was actually reading (`d.get
+('perf')`, previously always `None`) — the flat keys are kept so anything else already reading them
+is unaffected. Documented in the module docstring's `--perf` example.
+
+### Roster layout (Task 4.6, item 4)
+
+`.cards` (`src/00_head.html`) was `justify-content:flex-start`, which pinned 1-2 champion cards to
+the top of the panel with a large empty gap below (see the old `docs/shots/p4-roster.png`, a single
+`CARL` card floating at the top of an otherwise-empty ROSTER screen). Changed to
+`justify-content:center`; a single card now sits mid-panel, and 4 champions still stack top-to-bottom
+with no scroll (unchanged from the fix-round-1 single-column-card layout). `docs/shots/p4-roster.png`
+regenerated at 1 champion (`--reset-save --screen roster`); new `docs/shots/p4-roster-4.png` added at
+4 champions (`--reset-save --pre "Save.data.roster.katia=...;Save.data.roster.donut=...;
+Save.data.roster.mongo=...;Save.put()" --screen roster`). Both reviewed: readable at 854x480, no
+overlap with the BACK button, action buttons still real 44px+ touch targets.
+
+## Phase 4 execution rulings (2026-09-22, from the SDD ledger)
+
+Ruling: same execution shape as Phases 2-3 (sonnet implementers, file-based sonnet reviews, haiku scoped re-reviews, opus final review, one fix wave + scoped rounds as needed); exact trailer verified before each package; no controller commits while an implementer runs.
+Ruling: Meta wall-clock is confined to `Energy.now` (injectable); everything else in `Meta` draws from `RNG(Save.data.seed++)` so meta tests stay deterministic.
+Task 4.1 (Save v2 + migration): review — Important (migration not persisted), Minor (two energy caps). Fix round 1 dispatched and re-reviewed clean (commits f0a4d6c..11b829b).
+Tasks 4.2-4.3 (Stats/Crystal/Quest/Rewards, batched — both pure logic in `12_meta.js` with exact numeric tests, no UI): implementer DONE, review clean (commits 11b829b..28afd17; 169 tests). Rulings: `Save.data.pity` added to defaults (accepted); boss uses `k = nodes.length` for the gold ramp (accepted).
+Task 4.4 (roster/quest/arena wired into `G.startFight`/`onFightEnd`): review — Important (bare `{encounter:id}` fights were farming quest rewards for free). Ruling: `G.mode` is `'quest'` only when the fight actually went through `{floor,node}` sugar and `Quest.start` succeeded; a bare encounter id is `'exhibition'` (no rewards, no energy). Fix round 1 dispatched and re-reviewed clean (commits 28afd17..6a9b00c).
+Task 4.5 (screens: title/map/roster/crystal/shop/arena): review — Critical (title buttons unbound at boot), Important (`.ftab`/roster-action touch targets under 44px). Ruling: bind title screen at boot; touch-sized tabs and roster actions; `Meta.buyIso` replaces a `Rewards.grant` reuse for the ISO pack. Fix round 1 dispatched and re-reviewed clean (commits 6a9b00c..be7337b).
+Task 4.6 (this task, folded with the Mother Rat n=30 re-check, `--perf` JSON key, and the roster empty-space layout): `--e2e`/`--loops` per the frozen interface; boss re-check confirmed in-band (no retune); `--perf`'s `perf` key added; `.cards` centered — cost if wrong: a harness that can't certify the full Phase 4 loop, or a balance/perf gate the controller can't actually read.

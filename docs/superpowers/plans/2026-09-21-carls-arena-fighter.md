@@ -54,7 +54,7 @@
 | 1 | Core fight loop: input, moves, block/parry/dash, specials, timer, KO, basic AI, unit tests | 2-3 | 1.2M | Full tasks | Done |
 | 2 | Feel and champions: camera, procedural sprites, hitstop/shake/particles, sfx, crit/armor, 4 champions, S3 cinematic | 3-4 | 1.5-2M | Task list + interfaces + exit tests | Done (2026-09-21; see `docs/ARENA.md` "Phase 2 exit") |
 | 3 | AI tiers, node buffs, encounters, 8 champions, batch win-rate tool | 3 | 1-1.5M | Task list + interfaces + exit tests | Done (2026-09-22; see `docs/ARENA.md` "Phase 3 exit") |
-| 4 | Meta: roster, crystals, quest map, rewards, arena streak | 5-6 | 2-3M | Task list + interfaces + exit tests | Not started |
+| 4 | Meta: roster, crystals, quest map, rewards, arena streak | 5-6 | 2-3M | Task list + interfaces + exit tests | Done (2026-09-22; see `docs/ARENA.md` "Phase 4 exit") |
 | 5 | Broadcast layer, tutorial, settings, perf, rubric, Pages deploy | 3-4 | 1-1.5M | Task list + exit tests | Not started |
 
 Phases 2-5 get their own bite-sized plan file (same format as Phase 1) at the start of that phase, written against the interfaces frozen here. Do not start a later phase until the earlier phase's exit criteria pass.
@@ -1055,11 +1055,28 @@ Tasks: 4.1 save v2 + migration test; 4.2 stat derivation (monotone tests); 4.3 c
 
 Exit: end-to-end headless script exits 0; 10-minute soak through menus and fights clean; token estimate 2-3M.
 
+**Done 2026-09-22** — see the dedicated `docs/superpowers/plans/2026-09-22-phase4-meta.md` for the
+frozen interfaces this phase actually shipped against (they superseded the sketch above — notably
+`Save.data` v2's actual shape, `Quest`/`Rewards`/`Roster`/`Arena` as separate namespaces around
+`Meta`, and the quest map as the existing `FLOORS`/`ENCOUNTERS` tables rather than a new `Quest.map`
+JSON), and `docs/ARENA.md`'s "Phase 4 exit" table for the numbers. Landed: `Save.migrate()` v1→v2;
+`Stats.derive`/`Crystal.open` (pity-gated) with distribution/pity tests; `Quest`/`Rewards`/`Roster`/
+`Arena` in `src/12_meta.js`; title/map/roster/crystal/shop/arena screens (`src/85_screens.js`);
+`tests/harness.py --e2e`/`--loops` (crystals → roster → quest → rewards → level-up → arena, headless,
+green for 3 seeds and a 20-loop soak). 201 unit tests, `--matrix`/`--sim`/`--perf` all green, both
+floor bosses re-checked in the 10-35% win-rate band at n=30.
+
 # Phase 5: Broadcast and release (plan file first)
 
 Tasks: 5.1 viewers score + style multipliers (parry x1.5, 5-hit x2, S3 x3) + peak in result; 5.2 announcer packs per champion; 5.3 sponsor perks (permanent, bought with gold, e.g. +1 parry frame, +5% power gain); 5.4 share card (canvas to PNG, `navigator.share` with clipboard fallback as in Carls-Dash `shareRun`); 5.5 daily arena seed from the date; 5.6 settings (reduce motion, haptics via `navigator.vibrate`, left-handed layout mirror); 5.7 tutorial fight with scripted prompts; 5.8 portrait "rotate your phone" overlay; 5.9 perf pass (sprite cache, ≤4 ms per frame on a mid phone measured with `performance.now()` around `stepFrame`+`Render.frame`); 5.10 fill the ARENA.md rubric (one row per Phase 1-5 exit criterion with a verification command) and turn on GitHub Pages.
 
 Exit: rubric all DONE; Pages URL live; token estimate 1-1.5M.
+
+**Plan file:** `docs/superpowers/plans/2026-09-22-phase5-broadcast-release.md` is already written
+against Phase 4 as it actually shipped (its own frozen interfaces build directly on `Save.data`,
+`G.startFight`, `Screens.*`, and the `Meta`/`Quest`/`Rewards`/`Roster`/`Arena` namespaces above, all
+unchanged by Task 4.6) — that file's rulings/interfaces/tasks supersede the sketch immediately above;
+this outline is kept only as the original pre-Phase-4 estimate.
 
 ---
 
