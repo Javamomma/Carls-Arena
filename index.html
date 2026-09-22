@@ -1481,6 +1481,33 @@ Test.add('mob defs have hp/atk/scale and resolve through DEFS',()=>{ok(DEFS.gobl
 Test.add('hitstop is per move',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.hitstop,MOVES.light1.hitstop);ok(MOVES.heavy.hitstop>MOVES.light1.hitstop&&MOVES.s3.hitstop>MOVES.heavy.hitstop)});
 Test.add('a hit queues spark, popup and shake fx; a block queues dust',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);const kinds=f.fx.map(e=>e.kind);ok(kinds.includes('spark')&&kinds.includes('popup')&&kinds.includes('shake'),kinds.join());const g=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(g);run(g,15);ok(g.fx.some(e=>e.kind==='dust'))});
 Test.add('KO starts slow-mo and G steps the sim every 4th tick during it',()=>{const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);f.p2.hp=1;run(f,5);ok(f.over&&f.slowmo>0);const before=f.slowmo;G.fight=f;G.state='FIGHT';G._tickN=0;for(let i=0;i<8;i++)G.tick();eq(f.slowmo,before-2);G.fight=null;G.state='TITLE'});
+Test.add('a parry works again after PARRY_LOCKOUT expires',()=>{
+  const lightF=PARRY_LOCKOUT+10,blockF=lightF+2;
+  const f=mkFight({ctrl1:Ctrl.script([L(lightF)]),
+    ctrl2:Ctrl.script([{f:blockF,until:blockF+40,intent:{block:true}}])});
+  closeIn(f);
+  f.p2.parryLock=PARRY_LOCKOUT; // simulate a lockout armed right at fight start (e.g. an earlier missed parry)
+  run(f,PARRY_LOCKOUT+1); // idle it out — parryLock ticks down once per Fighter.tick(), unconditionally
+  eq(f.p2.parryLock,0,'lockout must have fully expired');
+  run(f,15); // the scripted light now lands with p2's block already pressed inside PARRY_WINDOW
+  eq(f.log[f.log.length-1].type,'parry','block pressed inside the window after lockout expiry must parry again')});
+Test.add('every look renders every pose without throwing',()=>{
+  for(const id in LOOKS){const look=LOOKS[id];
+    for(const key in POSES){const j=Rig.solve(look,key,0.5,1);
+      for(const b of Rig.bones)ok(j[b]&&isFinite(j[b].x)&&isFinite(j[b].y),id+'/'+key+'/'+b)}}
+  // Render.frame on a live fight with each def as p1, via an offscreen G.fight swapped in and
+  // restored afterward, must not throw for any def x current pose.
+  const savedFight=G.fight,savedState=G.state;
+  try{
+    for(const id in DEFS){
+      const f=mkFight({p1:DEFS[id]});
+      G.fight=f;G.state='FIGHT';
+      ok(!threw(()=>Render.frame(f)),'Render.frame must not throw for p1='+id)}
+  }finally{G.fight=savedFight;G.state=savedState}});
+Test.add('sim files contain no DOM or presentation identifiers',()=>{
+  for(const f of [Fight,Fighter])
+    ok(!/document|canvas|Audio\.|FX\.|Render\.|Stage\./.test(f.toString()),(f.name||'?')+' must stay presentation-free');
+  ok(!/document|canvas|Audio\.|FX\.|Render\.|Stage\./.test(AI.make.toString()),'AI.make must stay presentation-free')});
 Test.add('FX and camera advance per tick, not per render',()=>{
   G.startFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
   FX.reset();FX.push({kind:'spark',x:0,y:0,n:4,col:'#fff'});
