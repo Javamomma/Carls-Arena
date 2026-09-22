@@ -175,9 +175,139 @@ const Crystal={
       result={champId,stars,dup:false}}
     Save.put();
     return result}};
-// Reserved for later Task 4.3; kept as empty objects now so 12_meta.js is the single place Meta's
-// namespace is declared and Task 4.3 only ever adds to these, never redeclares them.
-const Quest={},Rewards={},Roster={},Arena={};
+// Quest/Rewards/Roster/Arena reference FLOORS/ENCOUNTERS/DEFS/BUFFS (45_encounter.js/47_buffs.js,
+// concatenated after this file) and G is never touched here — same later-file-from-earlier-file,
+// no-DOM pattern as Crystal above.
+const Quest={
+  // Read floor n's current playable state: Phase 3's static FLOORS def merged with Save.data's
+  // per-node progress. null when either side is missing — an as-yet-uncreated floor (Save.data),
+  // or a floor number FLOORS itself never defined (only 1-2 exist today).
+  floor(n){
+    const def=FLOORS[n-1];
+    const save=Save.data.floors[n];
+    if(!def||!save)return null;
+    return{floor:n,name:def.name,
+      nodes:def.nodes.map((id,i)=>({id,state:save.nodes[i],enc:id})),
+      boss:{id:def.boss,state:save.boss,enc:def.boss}}},
+  canStart(n,k){
+    const f=Quest.floor(n);
+    if(!f)return false;
+    const node=k==='boss'?f.boss:f.nodes[k];
+    if(!node||node.state!=='open')return false;
+    return Save.data.energy.n>=1},
+  start(n,k){
+    if(!Quest.canStart(n,k))return null;
+    const f=Quest.floor(n);
+    const node=k==='boss'?f.boss:f.nodes[k];
+    if(!Energy.spend(1))return null;
+    Save.put();
+    return node.id},
+  // A win flips the node/boss just fought to 'done' and unlocks what's next: the following node,
+  // or — off the last node — the boss. A boss win additionally creates floor n+1 (node 0 open,
+  // everything else locked) the first time, but only when FLOORS actually defines that next floor
+  // (Phase 3 ships floors 1-2 today; finishing floor 2's boss is a dead end until a future floor
+  // lands). A loss changes nothing here — Quest.start already spent the energy on the attempt.
+  complete(n,k,won){
+    if(!won)return false;
+    const save=Save.data.floors[n];
+    if(!save)return false;
+    if(k==='boss'){
+      save.boss='done';
+      if(FLOORS[n]&&!Save.data.floors[n+1]){
+        const nextDef=FLOORS[n];
+        Save.data.floors[n+1]={nodes:nextDef.nodes.map((_,i)=>i===0?'open':'locked'),boss:'locked'}}}
+    else{
+      if(!save.nodes||save.nodes[k]===undefined)return false;
+      save.nodes[k]='done';
+      if(k+1<save.nodes.length){
+        if(save.nodes[k+1]==='locked')save.nodes[k+1]='open'}
+      else if(save.boss==='locked')save.boss='open'}
+    Save.put();
+    return true}};
+const Rewards={
+  // gold/iso/xp scale with the floor number; gold also nudges up with node position within the
+  // floor (0-3 for the four early nodes) so later nodes pay a bit more than earlier ones. A boss
+  // uses the position just past the last regular node (def.nodes.length, 5 today) for that same
+  // gold term, so its base gold continues the node ramp before the boss-only units/catalyst bonus
+  // is layered on top.
+  forNode(n,k){
+    const def=FLOORS[n-1];
+    if(!def)throw new Error('unknown floor: '+n);
+    const isBoss=k==='boss';
+    const idx=isBoss?def.nodes.length:k;
+    const r={gold:100*n+40*idx,iso:20*n,xp:30*n};
+    if(isBoss){
+      r.units=50*n;
+      const enemyId=ENCOUNTERS[def.boss].enemy;
+      r.cats={};
+      r.cats[DEFS[enemyId].cls]=1}
+    return r},
+  // Currencies/catalysts apply unconditionally; xp applies to the active champion, levelling it up
+  // (Stats.xpToLevel per level, consumed on each level-up) while level stays under its rank's cap —
+  // any xp left over once the cap is hit (mid-grant or already-capped) is kept on the entry, not
+  // discarded, so a later rank-up can spend straight into it.
+  grant(r){
+    Save.data.gold=(Save.data.gold||0)+(r.gold||0);
+    Save.data.iso=(Save.data.iso||0)+(r.iso||0);
+    Save.data.units=(Save.data.units||0)+(r.units||0);
+    if(r.cats)for(const c in r.cats)Save.data.cats[c]=(Save.data.cats[c]||0)+r.cats[c];
+    const entry=Save.data.roster[Save.data.active];
+    if(entry&&r.xp){
+      entry.xp+=r.xp;
+      const cap=Stats.caps.level(entry.rank);
+      while(entry.level<cap&&entry.xp>=Stats.xpToLevel(entry.level+1)){
+        entry.xp-=Stats.xpToLevel(entry.level+1);
+        entry.level++}}
+    Save.put()}};
+const Roster={
+  levelUp(id){
+    const entry=Save.data.roster[id];
+    if(!entry)return false;
+    if(entry.level>=Stats.caps.level(entry.rank))return false;
+    const cost=10*entry.level;
+    if((Save.data.iso||0)<cost)return false;
+    Save.data.iso-=cost;
+    entry.level++;
+    Save.put();
+    return true},
+  rankUp(id){
+    const entry=Save.data.roster[id];
+    if(!entry)return false;
+    if(entry.rank>=entry.stars)return false;
+    const cls=CHAMPS[id].cls;
+    const cost=entry.rank;
+    if((Save.data.cats[cls]||0)<cost)return false;
+    Save.data.cats[cls]-=cost;
+    entry.rank++;
+    Save.put();
+    return true},
+  setActive(id){
+    if(!Save.data.roster[id])return false;
+    Save.data.active=id;
+    Save.put();
+    return true}};
+const Arena={
+  // Endless mode: no energy cost, streak (Save.data.arena.streak) drives everything. Enemy cycles
+  // through this fixed 7-mob list (mobs and both floor bosses, reused as arena opponents); tier
+  // climbs one AI_TIERS step every 2 streak wins, capped at t5; hp scales linearly with streak.
+  // atk is left at the def's own value (atkMul 1) — only hp is specified to scale here.
+  ENEMIES:['goblin','skeleton','hobgoblin','shaman','grub','grull','mother_rat'],
+  start(){
+    const s=Save.data.arena.streak;
+    const enemy=DEFS[Arena.ENEMIES[s%Arena.ENEMIES.length]];
+    const tiers=['t1','t2','t3','t4','t5'];
+    const tier=tiers[Math.min(4,Math.floor(s/2))];
+    const buffIds=enemy.buffs||[];
+    return{floor:null,name:'ARENA',enemy,tier,hpMul:1+.08*s,atkMul:1,
+      buffIds,buffs:buffIds.map(id=>BUFFS[id]),boss:!!enemy.boss}},
+  record(won){
+    const a=Save.data.arena;
+    if(won){
+      a.streak+=1;
+      if(a.streak>a.best)a.best=a.streak;
+      Save.data.gold=(Save.data.gold||0)+60*a.streak}
+    else a.streak=0;
+    Save.put()}};
 
 const Save={key:'carlsArena.v1',data:null,
   load(){let raw=null;try{raw=JSON.parse(localStorage.getItem(this.key))}catch(e){raw=null}
@@ -3825,5 +3955,158 @@ Test.add('Crystal.open advances Save.data.seed by one per open, so consecutive o
   eq(Save.data.seed,s0+1);
   Crystal.open('basic');
   eq(Save.data.seed,s0+2)});
+// Task 4.3: Quest floors, rewards, roster progression, arena state -----------------------------
+Test.add('Quest.floor(1) reads node states from Meta.defaults()',()=>{
+  Save.data=Meta.defaults();
+  const f=Quest.floor(1);
+  eq(f.floor,1);eq(f.name,'THE DEPTHS');
+  eq(f.nodes.length,5);
+  eq(f.nodes[0].state,'open');eq(f.nodes[1].state,'locked');
+  eq(f.nodes[0].id,'f1_goblin');
+  eq(f.boss.state,'locked');eq(f.boss.id,'f1_grull')});
+Test.add('Quest.floor returns null for a floor not yet created or not in FLOORS',()=>{
+  Save.data=Meta.defaults();
+  eq(Quest.floor(2),null); // not created yet
+  eq(Quest.floor(99),null)}); // FLOORS doesn't define it
+Test.add('Quest.canStart is true only for an open node with energy, false for locked or no energy',()=>{
+  Save.data=Meta.defaults();
+  ok(Quest.canStart(1,0));
+  ok(!Quest.canStart(1,1),'node 1 starts locked');
+  ok(!Quest.canStart(1,'boss'),'boss starts locked');
+  Save.data.energy.n=0;
+  ok(!Quest.canStart(1,0),'no energy left')});
+Test.add('Quest.start spends 1 energy and returns the node encounter id; refuses a locked node unchanged',()=>{
+  Save.data=Meta.defaults();
+  const e0=Save.data.energy.n;
+  const id=Quest.start(1,0);
+  eq(id,'f1_goblin');
+  eq(Save.data.energy.n,e0-1);
+  const before=JSON.stringify(Save.data);
+  eq(Quest.start(1,1),null,'node 1 is locked');
+  eq(JSON.stringify(Save.data),before,'a refusal must change nothing')});
+Test.add('Quest.start refuses (unchanged) when energy is empty',()=>{
+  Save.data=Meta.defaults();Save.data.energy.n=0;
+  const before=JSON.stringify(Save.data);
+  eq(Quest.start(1,0),null);
+  eq(JSON.stringify(Save.data),before)});
+Test.add('Quest.complete(1,0,true) marks node 0 done and opens node 1',()=>{
+  Save.data=Meta.defaults();
+  ok(Quest.complete(1,0,true));
+  const f=Quest.floor(1);
+  eq(f.nodes[0].state,'done');eq(f.nodes[1].state,'open')});
+Test.add('Quest.complete on a loss changes nothing',()=>{
+  Save.data=Meta.defaults();
+  const before=JSON.stringify(Save.data);
+  eq(Quest.complete(1,0,false),false);
+  eq(JSON.stringify(Save.data),before)});
+Test.add('Quest.complete on the last node opens the boss',()=>{
+  Save.data=Meta.defaults();
+  for(let i=0;i<5;i++){Save.data.floors[1].nodes[i]='open';Quest.complete(1,i,true)}
+  eq(Quest.floor(1).boss.state,'open')});
+Test.add('Quest.complete(1,"boss",true) creates floor 2 with node 0 open',()=>{
+  Save.data=Meta.defaults();
+  Save.data.floors[1].boss='open';
+  ok(Quest.complete(1,'boss',true));
+  eq(Quest.floor(1).boss.state,'done');
+  const f2=Quest.floor(2);
+  ok(f2,'floor 2 must now exist');
+  eq(f2.nodes[0].state,'open');
+  for(let i=1;i<5;i++)eq(f2.nodes[i].state,'locked');
+  eq(f2.boss.state,'locked')});
+Test.add('Quest.complete on floor 2\'s boss does not create a floor 3 (FLOORS only has 2 floors)',()=>{
+  Save.data=Meta.defaults();
+  Save.data.floors[2]={nodes:['done','done','done','done','done'],boss:'open'};
+  ok(Quest.complete(2,'boss',true));
+  eq(Quest.floor(2).boss.state,'done');
+  eq(Save.data.floors[3],undefined)});
+Test.add('Rewards.forNode gives gold/iso/xp scaled by floor and node position',()=>{
+  const r0=Rewards.forNode(1,0);
+  eq(r0.gold,100*1+40*0);eq(r0.iso,20);eq(r0.xp,30);
+  ok(!('units' in r0));ok(!('cats' in r0));
+  const r3=Rewards.forNode(1,3);
+  eq(r3.gold,100*1+40*3)});
+Test.add('Rewards.forNode boss adds units and one catalyst of the enemy class',()=>{
+  const r=Rewards.forNode(1,'boss');
+  eq(r.iso,20);eq(r.xp,30);eq(r.units,50);
+  eq(DEFS.grull.cls,'tank');
+  eq(r.cats.tank,1)});
+Test.add('Rewards.grant applies currencies/cats and xp to the active champion',()=>{
+  Save.data=Meta.defaults();
+  Rewards.grant({gold:10,iso:5,units:2,cats:{tank:1},xp:0});
+  eq(Save.data.gold,10);eq(Save.data.iso,5);eq(Save.data.units,2);eq(Save.data.cats.tank,1)});
+Test.add('Rewards.grant xp levels the active champion up via Stats.xpToLevel',()=>{
+  Save.data=Meta.defaults(); // carl: level 1, rank 1 -> cap 10
+  Rewards.grant({xp:Stats.xpToLevel(2)}); // exactly enough for one level
+  eq(Save.data.roster.carl.level,2);eq(Save.data.roster.carl.xp,0)});
+Test.add('Rewards.grant xp can chain multiple level-ups in one grant, keeping the remainder',()=>{
+  Save.data=Meta.defaults();
+  const cost=Stats.xpToLevel(2)+Stats.xpToLevel(3)+7;
+  Rewards.grant({xp:cost});
+  eq(Save.data.roster.carl.level,3);eq(Save.data.roster.carl.xp,7)});
+Test.add('Rewards.grant xp stops levelling at the rank cap, keeping excess xp',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster.carl.level=Stats.caps.level(1); // already at rank-1's cap (10)
+  Rewards.grant({xp:9999});
+  eq(Save.data.roster.carl.level,Stats.caps.level(1));
+  eq(Save.data.roster.carl.xp,9999,'excess xp is kept, not discarded')});
+Test.add('Roster.levelUp charges 10*level iso, refuses at cap or when short (unchanged)',()=>{
+  Save.data=Meta.defaults();Save.data.iso=10;
+  ok(Roster.levelUp('carl'));
+  eq(Save.data.roster.carl.level,2);eq(Save.data.iso,0);
+  const before=JSON.stringify(Save.data);
+  eq(Roster.levelUp('carl'),false,'short on iso');
+  eq(JSON.stringify(Save.data),before);
+  Save.data.roster.carl.level=Stats.caps.level(1);Save.data.iso=9999;
+  const before2=JSON.stringify(Save.data);
+  eq(Roster.levelUp('carl'),false,'at the level cap');
+  eq(JSON.stringify(Save.data),before2)});
+Test.add('Roster.rankUp charges rank catalysts of the champion class, refuses when rank>=stars or short',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster.carl.stars=3; // rank(1) < stars(3), so a rank-up is legal
+  Save.data.cats.brawler=1; // carl is cls:'brawler'; cost = current rank = 1
+  ok(Roster.rankUp('carl'));
+  eq(Save.data.roster.carl.rank,2);eq(Save.data.cats.brawler,0);
+  const before=JSON.stringify(Save.data);
+  eq(Roster.rankUp('carl'),false,'short on catalysts');
+  eq(JSON.stringify(Save.data),before);
+  Save.data.roster.carl.rank=Save.data.roster.carl.stars;Save.data.cats.brawler=9999;
+  const before2=JSON.stringify(Save.data);
+  eq(Roster.rankUp('carl'),false,'rank >= stars');
+  eq(JSON.stringify(Save.data),before2)});
+Test.add('Roster.setActive switches active, refuses an unowned/unknown champion (unchanged)',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster.katia={stars:1,rank:1,level:1,xp:0,shards:0};
+  ok(Roster.setActive('katia'));eq(Save.data.active,'katia');
+  const before=JSON.stringify(Save.data);
+  eq(Roster.setActive('mongo'),false,'mongo is not yet owned');
+  eq(JSON.stringify(Save.data),before);
+  eq(Roster.setActive('nope'),false)});
+Test.add('Arena.start() enemy/tier/hpMul sequence for streak 0..8',()=>{
+  const expect=[
+    ['goblin','t1',1.00],['skeleton','t1',1.08],['hobgoblin','t2',1.16],['shaman','t2',1.24],
+    ['grub','t3',1.32],['grull','t3',1.40],['mother_rat','t4',1.48],['goblin','t4',1.56],
+    ['skeleton','t5',1.64]];
+  for(let s=0;s<expect.length;s++){
+    Save.data=Meta.defaults();Save.data.arena.streak=s;
+    const enc=Arena.start();
+    const[enemyId,tier,hpMul]=expect[s];
+    eq(enc.enemy.id,enemyId,'streak '+s+' enemy');
+    eq(enc.tier,tier,'streak '+s+' tier');
+    ok(Math.abs(enc.hpMul-hpMul)<1e-9,'streak '+s+' hpMul '+enc.hpMul)}});
+Test.add('Arena.start() tier caps at t5 for streaks well past the curve',()=>{
+  Save.data=Meta.defaults();Save.data.arena.streak=40;
+  eq(Arena.start().tier,'t5')});
+Test.add('Arena.record: a win increments streak, tracks best, and grants 60*streak gold',()=>{
+  Save.data=Meta.defaults();Save.data.arena={best:0,streak:2};Save.data.gold=0;
+  Arena.record(true);
+  eq(Save.data.arena.streak,3);eq(Save.data.arena.best,3);eq(Save.data.gold,180)});
+Test.add('Arena.record: best only rises, never falls, on a win below the prior best',()=>{
+  Save.data=Meta.defaults();Save.data.arena={best:10,streak:2};
+  Arena.record(true);
+  eq(Save.data.arena.streak,3);eq(Save.data.arena.best,10)});
+Test.add('Arena.record: a loss resets streak to 0 and leaves best/gold alone',()=>{
+  Save.data=Meta.defaults();Save.data.arena={best:5,streak:4};Save.data.gold=50;
+  Arena.record(false);
+  eq(Save.data.arena.streak,0);eq(Save.data.arena.best,5);eq(Save.data.gold,50)});
 
 </script></body></html>

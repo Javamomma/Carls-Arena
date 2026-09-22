@@ -122,6 +122,136 @@ const Crystal={
       result={champId,stars,dup:false}}
     Save.put();
     return result}};
-// Reserved for later Task 4.3; kept as empty objects now so 12_meta.js is the single place Meta's
-// namespace is declared and Task 4.3 only ever adds to these, never redeclares them.
-const Quest={},Rewards={},Roster={},Arena={};
+// Quest/Rewards/Roster/Arena reference FLOORS/ENCOUNTERS/DEFS/BUFFS (45_encounter.js/47_buffs.js,
+// concatenated after this file) and G is never touched here — same later-file-from-earlier-file,
+// no-DOM pattern as Crystal above.
+const Quest={
+  // Read floor n's current playable state: Phase 3's static FLOORS def merged with Save.data's
+  // per-node progress. null when either side is missing — an as-yet-uncreated floor (Save.data),
+  // or a floor number FLOORS itself never defined (only 1-2 exist today).
+  floor(n){
+    const def=FLOORS[n-1];
+    const save=Save.data.floors[n];
+    if(!def||!save)return null;
+    return{floor:n,name:def.name,
+      nodes:def.nodes.map((id,i)=>({id,state:save.nodes[i],enc:id})),
+      boss:{id:def.boss,state:save.boss,enc:def.boss}}},
+  canStart(n,k){
+    const f=Quest.floor(n);
+    if(!f)return false;
+    const node=k==='boss'?f.boss:f.nodes[k];
+    if(!node||node.state!=='open')return false;
+    return Save.data.energy.n>=1},
+  start(n,k){
+    if(!Quest.canStart(n,k))return null;
+    const f=Quest.floor(n);
+    const node=k==='boss'?f.boss:f.nodes[k];
+    if(!Energy.spend(1))return null;
+    Save.put();
+    return node.id},
+  // A win flips the node/boss just fought to 'done' and unlocks what's next: the following node,
+  // or — off the last node — the boss. A boss win additionally creates floor n+1 (node 0 open,
+  // everything else locked) the first time, but only when FLOORS actually defines that next floor
+  // (Phase 3 ships floors 1-2 today; finishing floor 2's boss is a dead end until a future floor
+  // lands). A loss changes nothing here — Quest.start already spent the energy on the attempt.
+  complete(n,k,won){
+    if(!won)return false;
+    const save=Save.data.floors[n];
+    if(!save)return false;
+    if(k==='boss'){
+      save.boss='done';
+      if(FLOORS[n]&&!Save.data.floors[n+1]){
+        const nextDef=FLOORS[n];
+        Save.data.floors[n+1]={nodes:nextDef.nodes.map((_,i)=>i===0?'open':'locked'),boss:'locked'}}}
+    else{
+      if(!save.nodes||save.nodes[k]===undefined)return false;
+      save.nodes[k]='done';
+      if(k+1<save.nodes.length){
+        if(save.nodes[k+1]==='locked')save.nodes[k+1]='open'}
+      else if(save.boss==='locked')save.boss='open'}
+    Save.put();
+    return true}};
+const Rewards={
+  // gold/iso/xp scale with the floor number; gold also nudges up with node position within the
+  // floor (0-3 for the four early nodes) so later nodes pay a bit more than earlier ones. A boss
+  // uses the position just past the last regular node (def.nodes.length, 5 today) for that same
+  // gold term, so its base gold continues the node ramp before the boss-only units/catalyst bonus
+  // is layered on top.
+  forNode(n,k){
+    const def=FLOORS[n-1];
+    if(!def)throw new Error('unknown floor: '+n);
+    const isBoss=k==='boss';
+    const idx=isBoss?def.nodes.length:k;
+    const r={gold:100*n+40*idx,iso:20*n,xp:30*n};
+    if(isBoss){
+      r.units=50*n;
+      const enemyId=ENCOUNTERS[def.boss].enemy;
+      r.cats={};
+      r.cats[DEFS[enemyId].cls]=1}
+    return r},
+  // Currencies/catalysts apply unconditionally; xp applies to the active champion, levelling it up
+  // (Stats.xpToLevel per level, consumed on each level-up) while level stays under its rank's cap —
+  // any xp left over once the cap is hit (mid-grant or already-capped) is kept on the entry, not
+  // discarded, so a later rank-up can spend straight into it.
+  grant(r){
+    Save.data.gold=(Save.data.gold||0)+(r.gold||0);
+    Save.data.iso=(Save.data.iso||0)+(r.iso||0);
+    Save.data.units=(Save.data.units||0)+(r.units||0);
+    if(r.cats)for(const c in r.cats)Save.data.cats[c]=(Save.data.cats[c]||0)+r.cats[c];
+    const entry=Save.data.roster[Save.data.active];
+    if(entry&&r.xp){
+      entry.xp+=r.xp;
+      const cap=Stats.caps.level(entry.rank);
+      while(entry.level<cap&&entry.xp>=Stats.xpToLevel(entry.level+1)){
+        entry.xp-=Stats.xpToLevel(entry.level+1);
+        entry.level++}}
+    Save.put()}};
+const Roster={
+  levelUp(id){
+    const entry=Save.data.roster[id];
+    if(!entry)return false;
+    if(entry.level>=Stats.caps.level(entry.rank))return false;
+    const cost=10*entry.level;
+    if((Save.data.iso||0)<cost)return false;
+    Save.data.iso-=cost;
+    entry.level++;
+    Save.put();
+    return true},
+  rankUp(id){
+    const entry=Save.data.roster[id];
+    if(!entry)return false;
+    if(entry.rank>=entry.stars)return false;
+    const cls=CHAMPS[id].cls;
+    const cost=entry.rank;
+    if((Save.data.cats[cls]||0)<cost)return false;
+    Save.data.cats[cls]-=cost;
+    entry.rank++;
+    Save.put();
+    return true},
+  setActive(id){
+    if(!Save.data.roster[id])return false;
+    Save.data.active=id;
+    Save.put();
+    return true}};
+const Arena={
+  // Endless mode: no energy cost, streak (Save.data.arena.streak) drives everything. Enemy cycles
+  // through this fixed 7-mob list (mobs and both floor bosses, reused as arena opponents); tier
+  // climbs one AI_TIERS step every 2 streak wins, capped at t5; hp scales linearly with streak.
+  // atk is left at the def's own value (atkMul 1) — only hp is specified to scale here.
+  ENEMIES:['goblin','skeleton','hobgoblin','shaman','grub','grull','mother_rat'],
+  start(){
+    const s=Save.data.arena.streak;
+    const enemy=DEFS[Arena.ENEMIES[s%Arena.ENEMIES.length]];
+    const tiers=['t1','t2','t3','t4','t5'];
+    const tier=tiers[Math.min(4,Math.floor(s/2))];
+    const buffIds=enemy.buffs||[];
+    return{floor:null,name:'ARENA',enemy,tier,hpMul:1+.08*s,atkMul:1,
+      buffIds,buffs:buffIds.map(id=>BUFFS[id]),boss:!!enemy.boss}},
+  record(won){
+    const a=Save.data.arena;
+    if(won){
+      a.streak+=1;
+      if(a.streak>a.best)a.best=a.streak;
+      Save.data.gold=(Save.data.gold||0)+60*a.streak}
+    else a.streak=0;
+    Save.put()}};
