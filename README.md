@@ -86,6 +86,52 @@ to emulate, so unlike the touch swipe-and-hold this skips straight to the heavy 
 `L` (hold) heavy, `A`/`D` dash back, `S` (hold) block, `1`/`2`/`3` fire that special, `Space` starts
 a fight from the title screen, `P` pauses.
 
+## Combat
+
+### Chaining
+
+Landing an opening light or medium from neutral opens a five-node combo chain: release and press
+again during the move's own recovery window to continue it, light or medium in any order, for up to
+four more hits. The chain always ends on node 5 — whatever move lands there decides the **ender**:
+
+- **Light ender** — no bonus. A chain that ends on a light plays out exactly like a plain light hit.
+- **Medium ender** — shoves the foe back and knocks them down.
+- **Heavy ender** (in-combo only) — on the fourth hit specifically, swipe right and keep holding
+  through that hit's own recovery instead of releasing for a plain fifth node: release any time before
+  the recovery ends for the usual medium finisher above, or hold right up to when it ends for a
+  shorter, quicker in-combo heavy instead. Landing it fires your champion's own **signature effect**
+  (Carl: fury on himself; Donut: weakness on the foe; Katia: bleed on the foe; Mongo: armor break on
+  the foe) — mobs and bosses have no signature effect of their own.
+
+### Intercept and dexterity
+
+Two reads, offense and defense, both tier-agnostic (they trigger off live fight state, not who's
+throwing the hit):
+
+- **Intercept** — land a hit on a foe who's still in the *startup* of their own dash-in (a medium's
+  track, or a light's step-in) and it counts as an intercept: **x1.5 damage**, **+15 power**, its own
+  heavier hitstop, camera punch-in and directional shake, and an INTERCEPT! popup.
+- **Dexterity** — dash back (swipe left, or hold through into block) so that your i-frames cover the
+  exact moment a foe's hit would've connected, and it whiffs clean through you instead: **+20% crit
+  chance for your next hits** (a timed buff, refreshed rather than stacked by a second dodge), an
+  afterimage fx, and its own event.
+
+### Status effects
+
+Eight timed, stacking effects a move (or a champion's own signature) can apply — badges show on the
+HUD for whoever's holding one:
+
+| Effect | What it does |
+|---|---|
+| **Bleed** | Damage over time, up to 5 stacks |
+| **Stun** | Locks the holder in place for a beat (reuses the parry-stun state) |
+| **Armor break** | Lowers the holder's armor, up to 3 stacks |
+| **Fury** | Raises the holder's own outgoing damage, up to 5 stacks |
+| **Power gain** | Slowly banks power over time |
+| **Power burn** | An instant hit: drains a chunk of the holder's own banked power as damage |
+| **Regen** | Heals over time, up to 3 stacks |
+| **Weakness** | Lowers the holder's own outgoing damage, up to 3 stacks |
+
 ## Development
 
 - Edit files in `src/`, then `python3 tools/build.py` writes `index.html`. Never hand-edit

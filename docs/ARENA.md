@@ -1316,3 +1316,206 @@ reclaim the headroom `.node`'s 40→44px bump used up at that size.
 - **f2_mother out of band after the RNG warm-up (46.7%, band 10-35%).** Ruling: retune the boss's stats, not the seeds — hp 1100→1350, atk 35→36. Measured n=30: 23.3% (seed-base 1), 13.3% (seed-base 101); f1_grull unchanged at 20.0%. Rejected: atk-only bumps (1250/38 → 3.3%, 1100/40 → 6.7% on base 101).
 - **Item 8 "no scrolling".** Ruling: the bar is "every control reachable at 844×390 with no clipping"; the path (map), shop, and settings lists legitimately scroll (2/1/2 controls scrolled-out, none clipped, `--phone-check` fails on clipping and page errors). Zero-scroll on those three screens would cost the lists their readable row height.
 - Fix-wave gate on the close-out commit: build --check; unit 366/0; matrix 216 cells; e2e; tutorial; screens-smoke; phone-check screenErrors []; tier gate n=30 pass; doors 1-3 100/100/100, f1_hob 46.7, bosses 20.0 / 23.3.
+
+## Phase 7 exit (2026-09-22)
+
+Tasks 7.1-7.5, commits `ca0989a..4b8d5ae` (`97d381c` is the plan doc, immediately before Task 7.1)
+on `main`. Full-branch verification below is a fresh re-run at Task 7.5's own final commit, not a
+copy of each task's own report numbers.
+
+### Exit table
+
+| Task | Commit(s) | Tests added | What shipped |
+|---|---|---|---|
+| 7.1 Effects | `ca0989a` | 366→388 (+22) | Timed, stacking status effects (`EFFECTS`/`Effects`, `src/48_effects.js`): bleed, stun, armorBreak, fury, powerGain, powerBurn, regen, weakness, and the `mod` plumbing (`atkMul`/`armorDelta`/`critDelta`) later tasks build on |
+| 7.2 Combo grammar | `e2e95f0`, `208b90c`, `77f9e00`, `eb5ffb6` | 388→407 (+19) | The frozen five-node `CHAIN` grammar (openers, per-node `chainDmg`, three enders incl. the shortened in-combo heavy carrying `def.sigEffect`), `Fighter.chainNode` replacing the old fixed light1-5/medium ladder, AI t3+ learning the mixed M-L-L-L-M follow (`comboMix`), the in-combo heavy ender's swipe-and-hold gesture (two fix rounds to make it reachable and to decide it at the node-4 window's own natural close), and the AI/boss tier-gate retune the new grammar's DPS jump required |
+| 7.3 Intercept/dexterity | `9362bd2` | 407→415 (+8) | `intercept` (a hit landing on a foe mid-dash-in-startup: x1.5 dmg, +15 power, its own hitstop/event) and `dexterity` (a dash-back through an active hitbox with i-frames still up: +20% crit via `Effects`, its own event) — both tier-agnostic rules read off live fighter state, not an AI-tier flag — plus medium's dash-in effective startup capped at 14 frames at any gap |
+| 7.4 Hit feel | `b11df23`, `e8b8328`, `fe4dd49` | 415→430 (+15), 430→430 (+0), 430→435 (+5) | The `HITFEEL` table (per-class shake/punch magnitudes, intercept override), directional camera shake, punch-in zoom, per-class impact fx (dust ring/arc slash/caster ring), intercept time dilation, per-node hit audio, and a fix round wiring the table into `Fight.resolve` itself (it shipped once already referenced but not read) |
+| 7.5 Balance and close-out | `4c0549c`, `70b9abf`, `10139ce`, `4b8d5ae` | 435→441 (+6), 441→442 (+1), 442→443 (+1), 443→443 (+0) | `Ctrl.competent` (the tier-gate's own yardstick bot) learns the mixed M-L-L-L-M chain and a dash-back read against a foe's medium; intercept's dmg/power/event gated to once per attacking move instance (7.3 review follow-up); `HITFEEL.<class>.stop` locked to `MOVES.*.hitstop` (7.4 review follow-up); AI t4 and the hobgoblin/mother_rat mobs retuned back into their frozen bands; this section |
+
+**Phase 7 exit criteria:** effects, grammar, intercept/dexterity, hit feel shipped with tests (above);
+gates green (below); this is the final whole-branch review pass. Not yet pushed — see the task report
+for `git push` status at hand-off.
+
+### Ctrl.competent learns the grammar (Task 7.5 ruling)
+
+The fixed win-rate yardstick bot every `AI_TIERS` entry is measured against (`tests/batch.py --bot
+auto`, `Ctrl.competent` in `src/30_input.js`) predates the combo grammar and intercept/dexterity by
+several tasks, so the tier gate it was certifying no longer actually exercised what it was gating.
+Two additions, both deterministic (no new rng draws — `Ctrl.competent` has never rolled dice, and
+still doesn't):
+
+- **Mixed M-L-L-L-M chain.** A medium-opened chain (the bot's own "close distance" opener) now
+  follows light-light-light-medium — the frozen grammar's own node-5 ender (push+knockdown) — instead
+  of the old flat all-light follow every node. A light-opened chain is unchanged (still all-light
+  through node 5): the frozen interface only asks for the mixed pattern specifically when the opener
+  really was a medium, the same scope `AI.make`'s own `comboPlanFor` uses for `comboMix` tiers.
+- **Dash-back read.** A foe's medium dash-in is read exactly `DASH_READ_LEAD` (2) frames before its
+  hitbox would go active and dashed through for a real `dexterity` dodge (zero damage, +20% crit for
+  the bot's own next hits) instead of merely blocked (chip damage only). Checked ahead of the plain
+  block-react so it wins that frame's decision outright — block may still have fired on earlier
+  frames of the same startup (BLOCK doesn't count as `busy()`, so switching from holding block into
+  DASH is a normal `act()` transition, not an interruption) — verified empirically across the full
+  effective-startup range (base 10 through the 14-frame dash-in cap, both a fixed-gap and a real
+  moving dash-in) to land the dodge reliably, not a single seed pick.
+
+**This makes the bot measurably harder to beat, in the AI's favor, not the bot's** — every AI tier's
+own medium-based offense (its primary approach/damage tool at every tier) is now denied outright a
+large share of the time instead of merely chipping, at the cost of one committed ~12-frame DASH
+window of the bot's own offense per successful read. Straight AI buffs push the wrong direction (they
+make the AI *harder*, which lowers the bot's win rate *further* below the passing tiers' own targets);
+the retune in the exit table's own Task 7.5 row nerfs t4 and lowers two mobs' atk instead — see
+`src/55_ai.js`/`src/40_movedata.js`'s own comments for the full reasoning and the before/after numbers
+in the tables below.
+
+### t1/t2 fight logs diverged from `eb5ffb6` by design (Task 7.3 ruling, recorded here)
+
+Once `intercept`/`dexterity` shipped (`9362bd2`, Task 7.3), fight logs for every tier — including t1
+and t2, whose own `AI_TIERS.intercept` field is 0 and .1 respectively — are no longer expected to stay
+byte-identical to `eb5ffb6` (Task 7.2's own final commit, immediately before intercept/dexterity
+existed at all). This is **by design, not a regression**: both mechanics are tier-agnostic rules read
+off live fighter state (whoever's hit lands on a foe mid-dash-in-startup gets the intercept bonus;
+whoever dashes back through an active hitbox with i-frames up gets the dexterity dodge) — an AI
+tier's own `intercept` field only gates that tier's *own offensive* read (`AI.make`'s
+`decideIntercept`), not whether that tier can itself *be* intercepted or dodge via a foe's dash-back.
+A t1/t2 fight can therefore land (or dodge) an intercept exactly as any other tier's fight can, which
+changes the resulting log even though nothing about t1/t2's own decision-making changed. What *was*
+preserved: each tier's own RNG-draw sequence (which `r.next()`/`r.int()` calls happen, in what order,
+off `AI.make`'s single shared stream) is unchanged — only the outcome those draws land into differs,
+since intercept/dexterity are resolved in `Fight.resolve` off live state, never by consuming rng of
+their own.
+
+### Full gate (re-run at commit `4b8d5ae`, before this section's own commit)
+
+| Command | Result |
+|---|---|
+| `python3 tools/build.py --check` | exit 0 |
+| `python3 tools/build.py` | wrote `index.html` (839,103 bytes, 22 parts) |
+| `python3 tests/harness.py --unit` | 443 pass, 0 fail, 0 page/console errors |
+| `python3 tests/harness.py --matrix` | 216/216 cells, 0 errors, ~21s wall time |
+| `python3 tests/harness.py --e2e --seed 7` | 0 page errors, 0 summary errors; all floor-1 doors + boss won |
+| `python3 tests/harness.py --tutorial` | steps `[1,2,3,4]` in order, `tutorialDone` true, +300 gold, 0 errors |
+| `python3 tests/harness.py --screens-smoke` | 0 errors on all 9 screens, final state `RESULT` |
+| `python3 tests/harness.py --phone-check` | every button ≥44px and inside the viewport in both attack-button states; no clipping |
+| `python3 tests/harness.py --perf 600` | `ms_per_frame` 0.098 (`ms_step` 0.0075, `ms_render` 0.091) — well under the 6ms gate |
+
+### Batch win-rate tables
+
+**Before (base `fe4dd49`, pre-Task-7.5, `Ctrl.competent` not yet grammar-aware), n=30, seed-base 1:**
+
+```
+tier           fights  winrate%  avglen(s)
+t1             30      100.0     2.12
+t2             30      86.7      3.03
+t3             30      66.7      2.92
+t4             30      56.7      3.83
+t5             30      23.3      3.52
+# OK: monotone non-increasing, t1=100.0 (>=80), last=23.3 (<=30)
+
+f1_goblin      30      100.0              (target: doors 1-3 >= 85%)
+f1_skel        30      100.0
+f1_goblin2     30      96.7
+f1_hob         30      56.7               (target: 40-70%)
+f1_grull       30      26.7               (target: bosses 10-35%)
+f2_mother      30      20.0
+```
+
+**After (final, `4b8d5ae`), n=30, seed-base 1:**
+
+```
+tier           fights  winrate%  avglen(s)
+t1             30      100.0     3.02
+t2             30      70.0      3.88
+t3             30      50.0      3.70
+t4             30      36.7      4.29
+t5             30      23.3      3.67
+# OK: monotone non-increasing, t1=100.0 (>=80), last=23.3 (<=30)
+
+f1_goblin      30      100.0
+f1_skel        30      100.0
+f1_goblin2     30      96.7
+f1_hob         30      63.3
+f1_grull       30      26.7
+f2_mother      30      20.0
+```
+
+**After, n=60, seed-base 1:**
+
+```
+tier           fights  winrate%
+t1             60      100.0
+t2             60      66.7
+t3             60      45.0
+t4             60      40.0
+t5             60      21.7
+# OK: monotone non-increasing, t1=100.0 (>=80), last=21.7 (<=30)
+
+f1_goblin      60      98.3
+f1_skel        60      98.3
+f1_goblin2     60      96.7
+f1_hob         60      66.7
+f1_grull       60      20.0
+f2_mother      60      28.3
+```
+
+**After, n=30 and n=60, seed-base 101 (the gate's second required seed base):**
+
+```
+                n=30                    n=60
+tier           winrate%                winrate%
+t1             100.0                   100.0
+t2             56.7                    63.3
+t3             56.7                    48.3
+t4             33.3                    30.0
+t5             13.3                    21.7
+# both: OK, monotone non-increasing, t1=100.0 (>=80), last<=30
+
+f1_goblin      86.7                    91.7
+f1_skel        93.3                    95.0
+f1_goblin2     86.7                    90.0
+f1_hob         46.7                    50.0
+f1_grull       13.3                    16.7
+f2_mother      23.3                    30.0
+```
+
+Every required combination — tier sweep monotone with t1≥80/t5≤30 at n=30 and n=60, both seed bases 1
+and 101; doors 1-3 ≥85%; f1_hob in 40-70%; f1_grull and f2_mother in 10-35% — passes. The tier-sweep
+values dropped across the board (competent got measurably harder to beat, per the ruling above) but
+stayed comfortably inside every required band; t4 and t5 sit closer together than the pre-7.5 table
+(a real, necessary consequence of nerfing t4 specifically to restore separation, not a design
+regression — the door/boss numbers the actual campaign uses are what matters, and those all sit
+mid-band with real margin).
+
+### `--n 30`/`--n 60` full floor sweep (seed-base 1, informational — every non-gated node)
+
+```
+                    n=30    n=60
+f1_shaman           83.3    83.3   (informational only, per Task 6.1's own ruling)
+f2_grub             83.3    78.3
+f2_skel2            90.0    90.0
+f2_shaman2          66.7    70.0
+f2_hob2             56.7    61.7
+f2_grub2            80.0    78.3
+```
+
+No node collapsed to a near-0/near-100 wall; nothing here needed a retune.
+
+### Rulings (Task 7.5)
+
+- **`Ctrl.competent` must learn the grammar.** Covered above ("Ctrl.competent learns the grammar").
+- **Doors 1-3 ≥85%, f1_hob 40-70%, bosses 10-35%, tier sweep monotone with t5≤30% at n=30 and n=60
+  (seed bases 1 and 101).** All four tier-sweep combinations and all six gated encounters pass — see
+  the batch win-rate tables above.
+- **README gets a Combat section** (chain, three enders, intercept, dexterity, status effects) —
+  shipped this task, placed after the controls section; see `README.md`.
+- **(7.3 review) A batch of seeded fights (t3 vs `Ctrl.competent`) must emit at least one `intercept`
+  and one `dexterity` event.** `src/90_tests.js`'s `'a batch of seeded Ctrl.competent vs AI t3 fights
+  produces at least one real intercept and one real dexterity event'` sweeps 30 seeds and asserts both
+  — shipped in `4c0549c`.
+- **(7.3 review) Gate intercept's dmg/power/event to once per move (the `last` sub-hit precedent used
+  by hitstop).** `Fighter.interceptedThisMove` (reset in `startMove`, consulted/set in
+  `Fight.resolve`) gates all three together off one flag — shipped in `70b9abf`, regression test
+  included.
+- **(7.4 review) `HITFEEL.<class>.stop` must equal the matching `MOVES.*.hitstop` for light, medium,
+  heavy, s1, s2, s3.** Test-only commit `10139ce` (every value already matched; no source change
+  needed).
