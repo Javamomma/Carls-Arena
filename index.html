@@ -1901,11 +1901,15 @@ const Stage={cache:{},
     return this.cache[themeId]=st},
   draw(c,cam,frame,st){
     for(const L of st.layers){const off=(cam.x-STAGE_W/2)*(1-L.parallax);c.drawImage(L.canvas,off,0)}
+    // Release pass (art item 4): "one notch warmer" -- every stop pulled toward red/orange and away
+    // from the paler yellow-white the fix-wave art pass originally tuned (each channel nudged down,
+    // green more than blue so the hue itself shifts warm, not just dims), plus a touch more glow
+    // alpha so the warmth actually reads at a glance. Radius/flicker timing unchanged.
     for(let i=0;i<st.torches.length;i++){const t=st.torches[i],flick=((frame*7+i*13)%17)/17,rad=52+12*flick;
       const g=c.createRadialGradient(t.x,t.y,0,t.x,t.y,rad);
-      g.addColorStop(0,`rgba(255,205,130,${.6+.25*flick})`);g.addColorStop(.45,`rgba(255,140,60,${.35+.15*flick})`);g.addColorStop(1,'rgba(255,120,40,0)');
+      g.addColorStop(0,`rgba(255,185,105,${.66+.25*flick})`);g.addColorStop(.45,`rgba(255,120,45,${.4+.16*flick})`);g.addColorStop(1,'rgba(255,95,25,0)');
       c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
-      c.fillStyle=`rgba(255,${210+Math.floor(20*flick)},150,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
+      c.fillStyle=`rgba(255,${192+Math.floor(20*flick)},130,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
 const Camera={
   // Anchor moved .62 -> .74 (round 1) -> .90 (fix round 2): at zoom 1.0 a character's SCREEN size
   // is anchor-independent (world px == screen px at zoom 1), so this doesn't cost any of round 1's
@@ -3256,6 +3260,23 @@ const Render={ctx:canvas.getContext('2d'),
     // ±width/2, and the .82 x-scale above carries straight into main-canvas pixels since this
     // offscreen canvas is later drawn at (0,0) unscaled — see bossPlate's own comment.
     const titleRightEdge=W/2+(tc.measureText('FIGHTER').width/2)*.82;
+    tc.restore();
+    // Release pass (art item 4): a subtle dark plate behind the title with a thin gold outline,
+    // matching the rendition's heavier title treatment — drawn BEFORE the text (below it, per the
+    // brief's own "behind") in this same offscreen canvas's unscaled/final coordinate space, sized
+    // off titleRightEdge above (already computed in final on-canvas pixels — see its own comment)
+    // so the plate always hugs the actual glyph width regardless of any future font/string change,
+    // the same measurement bossPlate's own clamp already relies on.
+    {const halfW=titleRightEdge-W/2,padX=16,plateW=(halfW+padX)*2,plateH=34,plateX=W/2-plateW/2,plateY=12;
+      tc.save();tc.fillStyle='rgba(8,9,15,.55)';
+      if(tc.roundRect){tc.beginPath();tc.roundRect(plateX,plateY,plateW,plateH,6);tc.fill()}
+      else tc.fillRect(plateX,plateY,plateW,plateH);
+      tc.strokeStyle='rgba(244,197,66,.7)';tc.lineWidth=1.5;
+      if(tc.roundRect){tc.beginPath();tc.roundRect(plateX+.75,plateY+.75,plateW-1.5,plateH-1.5,5.5);tc.stroke()}
+      else tc.strokeRect(plateX+.75,plateY+.75,plateW-1.5,plateH-1.5);
+      tc.restore()}
+    tc.save();tc.translate(W/2,30);tc.scale(.82,1.12);tc.textAlign='center';tc.lineWidth=4;tc.strokeStyle='#000';
+    tc.font='900 24px ui-monospace,monospace';
     tc.strokeText('FIGHTER',0,0);tc.fillStyle='#f4c542';tc.fillText('FIGHTER',0,0);tc.restore();
     // Chevron cells: the only thing that varies per frame is how many of the 3 cells are "filled"
     // (0..3), so bake all four variants once instead of rebuilding each skewed polygon path per frame.
@@ -3354,18 +3375,39 @@ const Render={ctx:canvas.getContext('2d'),
   // Pause glyph rect in canvas space; G.hitPause tests pointerdown against this same rect, and
   // pauseGlyph below draws to it, so hit-test and visual stay in lockstep with a single source.
   pauseRect:{x:W/2-18,y:38,w:36,h:24},
-  hpBar(c,x,y,w,h,pct,col){
+  // Release pass (art item 4): both HP bars used to be a plain rectangle with a flat black stroke.
+  // The rendition tapers each bar's INNER edge (the one toward the title/center, away from that
+  // side's own portrait) to a point at vertical center, like a ribbon/pennant, framed in gold rather
+  // than black. barPath traces that shape (or a plain rect when no bevel side is given, so any other
+  // caller that never passes one keeps the old rectangular hit/measure shape exactly); hpBar/
+  // hpBarGrad clip their fills to it and stroke it in gold, but never change the (x,y,w,h) box itself
+  // — bossPlate/buffBadges/the "n / maxHp" text all still key off the same p1barX/p2barX/barW/barH
+  // hud() already computed, so no layout number any test pins moves.
+  barPath(c,x,y,w,h,bevel){
+    const skew=14;
+    c.beginPath();
+    if(bevel==='right'){ // p1: tapers toward the title (the bar's right/inner edge)
+      c.moveTo(x,y);c.lineTo(x+w-skew,y);c.lineTo(x+w,y+h/2);c.lineTo(x+w-skew,y+h);c.lineTo(x,y+h)}
+    else if(bevel==='left'){ // p2: tapers toward the title (the bar's left/inner edge)
+      c.moveTo(x+w,y);c.lineTo(x+skew,y);c.lineTo(x,y+h/2);c.lineTo(x+skew,y+h);c.lineTo(x+w,y+h)}
+    else c.rect(x,y,w,h);
+    c.closePath()},
+  hpBar(c,x,y,w,h,pct,col,bevel){
+    this.barPath(c,x,y,w,h,bevel);c.save();c.clip();
     c.fillStyle='#1a1a1a';c.fillRect(x,y,w,h);
     c.fillStyle=col;c.fillRect(x,y,w*clamp(pct,0,1),h);
-    c.strokeStyle='#000';c.lineWidth=1.5;c.strokeRect(x+.75,y+.75,w-1.5,h-1.5)},
+    c.restore();
+    this.barPath(c,x,y,w,h,bevel);c.strokeStyle='#f4c542';c.lineWidth=1.75;c.stroke()},
   // p2's fill drains from the bar's right edge (matches "right" in the rendition) and is a
   // red(low)->orange(full) gradient across the filled span, not a flat color like p1's green.
-  hpBarGrad(c,x,y,w,h,pct){
+  hpBarGrad(c,x,y,w,h,pct,bevel){
+    this.barPath(c,x,y,w,h,bevel);c.save();c.clip();
     c.fillStyle='#1a1a1a';c.fillRect(x,y,w,h);
     const fw=w*clamp(pct,0,1),fx=x+w-fw;
     if(fw>0){const g=c.createLinearGradient(fx,0,fx+fw,0);g.addColorStop(0,'#c62828');g.addColorStop(1,'#ffa726');
       c.fillStyle=g;c.fillRect(fx,y,fw,h)}
-    c.strokeStyle='#000';c.lineWidth=1.5;c.strokeRect(x+.75,y+.75,w-1.5,h-1.5)},
+    c.restore();
+    this.barPath(c,x,y,w,h,bevel);c.strokeStyle='#f4c542';c.lineWidth=1.75;c.stroke()},
   // 1-letter code per buff id, for the small gold badge squares under the enemy hp bar.
   BUFF_CODES:{regen:'R',armorUp:'A',powerGain:'P',unblockableSpecials:'U',degen:'D',thorns:'T'},
   // buffs is an array of resolved BUFFS objects (from G.encounter.buffs — presentation reads the
@@ -3412,6 +3454,16 @@ const Render={ctx:canvas.getContext('2d'),
     c.lineTo(r.x,r.y+rr);c.arcTo(r.x,r.y,r.x+rr,r.y,rr);c.closePath();c.fill();c.stroke();
     c.fillStyle='#fff';const cx=r.x+r.w/2,cy=r.y+r.h/2,bw=3,bh=12,gap=4;
     c.fillRect(cx-gap-bw,cy-bh/2,bw,bh);c.fillRect(cx+gap,cy-bh/2,bw,bh)},
+  // Release pass (art item 4): a faint radial darkening toward the corners -- pure screen-space
+  // decoration (no world/HUD coordinates read), cheap enough to rebuild every frame (one
+  // createRadialGradient + one fillRect, same cost class as the S3 card's own screen-space draws)
+  // rather than needing its own hudCache entry. Fully transparent through the inner ~35% of the
+  // frame height so it never touches the HUD bars/portraits near the top edge, only deepens toward
+  // the far corners, and tops out at .28 alpha -- "faint", not a stylized dark frame.
+  vignette(c){
+    const g=c.createRadialGradient(W/2,H/2,H*.35,W/2,H/2,H*.78);
+    g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,.28)');
+    c.save();c.fillStyle=g;c.fillRect(0,0,W,H);c.restore()},
   combo(c,x,y,text,deg,col,align){
     c.save();c.translate(x,y);c.rotate(D(deg));c.textAlign=align;c.textBaseline='alphabetic';
     c.font='900 26px ui-monospace,monospace';c.lineWidth=3;c.strokeStyle='#000';c.strokeText(text,0,0);
@@ -3433,8 +3485,8 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='bold 14px ui-monospace,monospace';c.textAlign='right';c.fillStyle='#fff';c.fillText(b.def.name,p2barX+barW,25);
     c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39);
     if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW,b.def.name);
-    this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22');
-    this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp);
+    this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22','right');
+    this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp,'left');
     if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);
     c.font='bold 12px ui-monospace,monospace';c.fillStyle='#fff';c.textAlign='center';
     c.fillText(Math.max(0,Math.round(a.hp))+' / '+a.maxHp,p1barX+barW/2,48+barH-4);
@@ -3468,6 +3520,10 @@ const Render={ctx:canvas.getContext('2d'),
     FX.draw(c,cam,fr);
     c.setTransform(1,0,0,1,0,0);
     if(FX.flash>0){c.globalAlpha=Math.min(1,FX.flash/6);c.fillStyle='#fff';c.fillRect(0,0,W,H);c.globalAlpha=1}
+    // Release pass (art item 4): a faint vignette over the game scene, screen-space so it never
+    // shifts with camera zoom/shake -- drawn here (after the scene/flash, before the HUD) so it
+    // frames the fight itself without ever darkening the HUD text/bars on top of it.
+    this.vignette(c);
     if(f)this.hud(c,f);
     // S3 cinematic card: drawn last, in screen space (transform already reset above), so it sits
     // over the HUD and is immune to camera zoom/shake.

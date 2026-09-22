@@ -102,11 +102,15 @@ const Stage={cache:{},
     return this.cache[themeId]=st},
   draw(c,cam,frame,st){
     for(const L of st.layers){const off=(cam.x-STAGE_W/2)*(1-L.parallax);c.drawImage(L.canvas,off,0)}
+    // Release pass (art item 4): "one notch warmer" -- every stop pulled toward red/orange and away
+    // from the paler yellow-white the fix-wave art pass originally tuned (each channel nudged down,
+    // green more than blue so the hue itself shifts warm, not just dims), plus a touch more glow
+    // alpha so the warmth actually reads at a glance. Radius/flicker timing unchanged.
     for(let i=0;i<st.torches.length;i++){const t=st.torches[i],flick=((frame*7+i*13)%17)/17,rad=52+12*flick;
       const g=c.createRadialGradient(t.x,t.y,0,t.x,t.y,rad);
-      g.addColorStop(0,`rgba(255,205,130,${.6+.25*flick})`);g.addColorStop(.45,`rgba(255,140,60,${.35+.15*flick})`);g.addColorStop(1,'rgba(255,120,40,0)');
+      g.addColorStop(0,`rgba(255,185,105,${.66+.25*flick})`);g.addColorStop(.45,`rgba(255,120,45,${.4+.16*flick})`);g.addColorStop(1,'rgba(255,95,25,0)');
       c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
-      c.fillStyle=`rgba(255,${210+Math.floor(20*flick)},150,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
+      c.fillStyle=`rgba(255,${192+Math.floor(20*flick)},130,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
 const Camera={
   // Anchor moved .62 -> .74 (round 1) -> .90 (fix round 2): at zoom 1.0 a character's SCREEN size
   // is anchor-independent (world px == screen px at zoom 1), so this doesn't cost any of round 1's
