@@ -108,9 +108,11 @@ four more hits. The chain always ends on node 5 — whatever move lands there de
 Two reads, offense and defense, both tier-agnostic (they trigger off live fight state, not who's
 throwing the hit):
 
-- **Intercept** — land a hit on a foe who's still in the *startup* of their own dash-in (a medium's
-  track, or a light's step-in) and it counts as an intercept: **x1.5 damage**, **+15 power**, its own
-  heavier hitstop, camera punch-in and directional shake, and an INTERCEPT! popup.
+- **Intercept** — land a hit on a foe who's still in the *startup* of any light or medium (a medium's
+  own track dash-in counts, and so does a light's flat startup dash — a light doesn't have to actually
+  be stepping in from range for this to trigger, a point-blank jab is just as interceptable) and it
+  counts as an intercept: **x1.5 damage**, **+15 power**, its own heavier hitstop, camera punch-in and
+  directional shake, and an INTERCEPT! popup.
 - **Dexterity** — dash back (swipe left, or hold through into block) so that your i-frames cover the
   exact moment a foe's hit would've connected, and it whiffs clean through you instead: **+20% crit
   chance for your next hits** (a timed buff, refreshed rather than stacked by a second dodge), an
@@ -118,19 +120,24 @@ throwing the hit):
 
 ### Status effects
 
-Eight timed, stacking effects a move (or a champion's own signature) can apply — badges show on the
-HUD for whoever's holding one:
+Nine timed, stacking effect ids exist (eight below, plus dexterity — see "Intercept and dexterity"
+above). Today, only four are actually reachable in a fight, and only one way: the in-combo heavy
+ender's signature effect (see "Chaining" above) — Carl applies fury to himself, Donut applies
+weakness to the foe, Katia applies bleed to the foe, Mongo applies armor break to the foe. Stun, power
+gain, power burn and regen are fully wired (`Effects.apply`/`.tick`/`.mods`, HUD badges, timed
+expiry) but have no producer yet — no move or champion kit applies them — because Phase 9's champion
+kits are what will hand them out. Badges show on the HUD for whoever's holding a live effect:
 
-| Effect | What it does |
-|---|---|
-| **Bleed** | Damage over time, up to 5 stacks |
-| **Stun** | Locks the holder in place for a beat (reuses the parry-stun state) |
-| **Armor break** | Lowers the holder's armor, up to 3 stacks |
-| **Fury** | Raises the holder's own outgoing damage, up to 5 stacks |
-| **Power gain** | Slowly banks power over time |
-| **Power burn** | An instant hit: drains a chunk of the holder's own banked power as damage |
-| **Regen** | Heals over time, up to 3 stacks |
-| **Weakness** | Lowers the holder's own outgoing damage, up to 3 stacks |
+| Effect | What it does | Reachable today? |
+|---|---|---|
+| **Fury** | Raises the holder's own outgoing damage, up to 5 stacks | Yes — Carl's heavy-ender signature |
+| **Weakness** | Lowers the holder's own outgoing damage, up to 3 stacks | Yes — Donut's heavy-ender signature |
+| **Bleed** | Damage over time, up to 5 stacks | Yes — Katia's heavy-ender signature |
+| **Armor break** | Lowers the holder's armor, up to 3 stacks | Yes — Mongo's heavy-ender signature |
+| **Stun** | Locks the holder in place for a beat (reuses the parry-stun state) | Phase 9 |
+| **Power gain** | Slowly banks power over time | Phase 9 |
+| **Power burn** | An instant hit: drains a chunk of the holder's own banked power as damage | Phase 9 |
+| **Regen** | Heals over time, up to 3 stacks | Phase 9 |
 
 ## Development
 

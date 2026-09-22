@@ -1519,3 +1519,16 @@ No node collapsed to a near-0/near-100 wall; nothing here needed a retune.
 - **(7.4 review) `HITFEEL.<class>.stop` must equal the matching `MOVES.*.hitstop` for light, medium,
   heavy, s1, s2, s3.** Test-only commit `10139ce` (every value already matched; no source change
   needed).
+
+### Phase 7 fix wave (final-review follow-up)
+
+- **(final review M7) `e.source`, `Effects.has`/`Effects.stacks`/`Effects.clear`, and
+  `HITFEEL.<class>.stop` have no production reader today.** All three are deliberate Phase 9 API
+  surface, not oversights: `e.source` is frozen so a future kit can attribute an effect to the
+  champion/move that applied it (a badge tooltip, a "removed by" log line); `Effects.has`/`.stacks`
+  are the read side of the same frozen interface `Effects.apply`/`.tick`/`.mods` already have callers
+  for, waiting on a consumer (an AI read, a kit's own conditional) rather than a producer; `Effects.clear`
+  gained its own caller in this fix wave (`Fight.finish`, M6 above) but was already frozen for a
+  future per-effect dispel. `HITFEEL.<class>.stop` is a drift alarm, not a hitstop source (see the
+  7.4-review bullet above) — it earns its keep by staying in the test suite, not by being read at
+  runtime. No fix needed; this note is the "one-line note in ARENA.md" M7 asked for.
