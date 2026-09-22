@@ -5,6 +5,7 @@
   python3 tests/harness.py --sim --seconds 60 --bot random --ai basic --seed 7
   python3 tests/harness.py --seconds 20 --shot /tmp/fight.png --eval 'G.fight.p1.hp'
   python3 tests/harness.py --sim --seconds 30 --probe 'G.fight.p1.combo'
+  python3 tests/harness.py --matrix                                  # AI/content soak matrix; exit 1 on any error
 
 Exit 1 on any page error, console error, or if the game never left TITLE.
 """
@@ -13,6 +14,64 @@ from playwright.sync_api import sync_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INDEX = 'file://' + os.path.join(ROOT, 'index.html')
+
+def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
+    """One soak cell: a fresh page, p1 on Ctrl.random(seed), p2 on AI.make(ain). The whole
+    restart-on-KO loop runs as a single in-page evaluate() so a KO is caught the very next tick
+    (no batch-boundary waste), keeping frames_total honest and 36 cells fast in one round trip
+    each (plus the initial page load)."""
+    pg = b.new_page(viewport={'width': 854, 'height': 480})
+    cell_errors = []
+    pg.on('pageerror', lambda e: cell_errors.append(str(e)))
+    pg.on('console', lambda m: cell_errors.append(m.text) if m.type == 'error' else None)
+    pg.goto(INDEX)
+    pg.wait_for_function('typeof G!=="undefined"')
+    js = ("(()=>{G.sim=true;let s=%d,fights=1,framesTotal=0,p1wins=0,ticks=%d;"
+          "const start=seed=>G.startFight({seed,p1:'%s',p2:'%s',ai:'%s',ctrl1:Ctrl.random(seed)});"
+          "start(s);"
+          "for(let i=0;i<ticks;i++){G.tick();"
+          "if(G.state==='RESULT'){framesTotal+=G.fight.frame;"
+          "if(G.fight.winner&&G.fight.winner.side===1)p1wins++;"
+          "s++;fights++;start(s)}}"
+          "framesTotal+=G.fight.frame;"
+          "return{fights,framesTotal,p1wins}})()"
+          ) % (seed, int(sim_seconds * 60), p1n, p2n, ain)
+    r = pg.evaluate(js)
+    pg.close()
+    return {'p1': p1n, 'p2': p2n, 'ai': ain, 'seed': seed, 'fights': r['fights'], 'p1wins': r['p1wins'],
+            'frames_total': r['framesTotal'], 'errors': len(cell_errors),
+            'req_frames': sim_seconds * 60}
+
+def run_matrix():
+    P1S, P2S, AIS, SEEDS = ['carl', 'katia'], ['goblin', 'hobgoblin', 'carl'], ['basic', 'brawl', 'brute'], [1, 2]
+    cells = [(p1n, p2n, ain, sd) for p1n in P1S for p2n in P2S for ain in AIS for sd in SEEDS]
+    sim_seconds = 120
+    rows = []
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        for i, (p1n, p2n, ain, sd) in enumerate(cells):
+            t0 = time.time()
+            row = run_matrix_cell(b, p1n, p2n, ain, sd, sim_seconds)
+            row['wall'] = time.time() - t0
+            rows.append(row)
+            if i == 0 and row['wall'] > 40:
+                print('# first cell took %.1fs wall (> 40s); reducing remaining cells to 60s sim'
+                      % row['wall'], file=sys.stderr)
+                sim_seconds = 60
+        b.close()
+    hdr = '%-6s %-10s %-6s %-5s %-7s %-7s %-13s %-7s' % (
+        'p1', 'p2', 'ai', 'seed', 'fights', 'p1wins', 'frames_total', 'errors')
+    lines = [hdr]
+    bad = False
+    for r in rows:
+        lines.append('%-6s %-10s %-6s %-5d %-7d %-7d %-13d %-7d' % (
+            r['p1'], r['p2'], r['ai'], r['seed'], r['fights'], r['p1wins'], r['frames_total'], r['errors']))
+        if r['errors'] or r['frames_total'] < r['req_frames'] * 0.9:
+            bad = True
+    total_wall = sum(r['wall'] for r in rows)
+    print('\n'.join(lines))
+    print('# %d cells, %.1fs total wall time' % (len(rows), total_wall))
+    return 1 if bad else 0
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -35,7 +94,15 @@ def main():
                           "the card trigger, advances FX) and screenshot; skips the normal --p2/--ai "
                           "startFight below entirely so it never races G.debugCinematic()'s own "
                           "G.startFight() call")
+    ap.add_argument('--matrix', action='store_true',
+                     help="soak p1 in {carl,katia} x p2 in {goblin,hobgoblin,carl} x ai in "
+                          "{basic,brawl,brute} x seed in {1,2} (36 cells), each restart-on-KO --sim "
+                          "for 120s of simulated frames (auto-reduced to 60s if the first cell's wall "
+                          "time exceeds 40s); prints a table and exits 1 on any page/console error or "
+                          "a frames shortfall in any cell")
     a = ap.parse_args()
+    if a.matrix:
+        sys.exit(run_matrix())
     errors, console = [], []
     with sync_playwright() as p:
         b = p.chromium.launch()

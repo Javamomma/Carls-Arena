@@ -181,3 +181,9 @@ Test.add('medium as a combo ender pushes the defender out of light range',()=>{
   eq(dx-dx2,90-MOVES.medium.push,'ender push (90) vs normal push ('+MOVES.medium.push+') differential; dx='+dx+' dx2='+dx2)});
 Test.add('S3 freezes the sim for the cinematic then lands all hits',()=>{const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;run(f,21);ok(f.cinematic>0,'cinematic armed');const hpBefore=f.p2.hp;run(f,30);eq(f.p2.hp,hpBefore,'frozen');f.cinematic=0;run(f,120);eq(f.log.filter(e=>e.type==='hit').length,4)});
 Test.add('G.tick decrements cinematic without stepping the sim',()=>{const f=mkFight();f.cinematic=5;const fr=f.frame;G.fight=f;G.state='FIGHT';G.tick();eq(f.cinematic,4);eq(f.frame,fr);G.fight=null;G.state='TITLE'});
+Test.add('brute profile exists and prefers heavies',()=>{ok(AI.profiles.brute);ok(AI.profiles.brute.heavy>=.5)});
+Test.add('brute AI lands a heavy on an idle target within 600 frames',()=>{
+  let landed=false;
+  const f=mkFight({ctrl2:AI.make('brute',13),onEvent:(type,a)=>{if(type==='hit'&&a&&a.side===-1&&a.moveName==='heavy')landed=true}});
+  closeIn(f);run(f,600);
+  ok(landed,'brute AI should land at least one heavy on an idle p1 within 600 frames')});
