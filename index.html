@@ -51,9 +51,72 @@ function RNG(seed){let s=(seed>>>0)||0x9e3779b9;return{
   int(n){return Math.floor(this.next()*n)},
   pick(a){return a[this.int(a.length)]}}}
 
+'use strict';
+// Meta: the pure data layer for Phase 4 (roster, crystals, quests, rewards, arena, energy). No
+// DOM references live here — screens (85_screens.js, later tasks) read/write through these
+// functions only. Meta randomness (crystals, later tasks) draws from RNG(Save.data.seed++); wall
+// clock only ever enters through Energy.now, which is injectable for deterministic tests.
+const Meta={
+  defaults(){
+    return{v:2,seed:1,gold:0,units:0,iso:0,
+      cats:{brawler:0,rogue:0,caster:0,tank:0,beast:0,trickster:0},
+      roster:{carl:{stars:1,rank:1,level:1,xp:0,shards:0}},
+      active:'carl',
+      floors:{1:{nodes:['open','locked','locked','locked','locked'],boss:'locked'}},
+      energy:{n:10,max:10,ts:0},
+      arena:{best:0,streak:0},
+      mute:false,settings:{},stats:{fights:0,wins:0}}},
+  // v1 -> v2: keep gold/units/mute/settings, everything else starts fresh (including roster, which
+  // v1 saves never meaningfully populated). v2 -> v2: fill in any keys/sub-keys a save from an
+  // earlier Phase 4 build is missing, in place, without discarding what's already there. Anything
+  // else (null, a non-object, or an unrecognized v) resets to defaults().
+  migrate(data){
+    if(!data||typeof data!=='object')return Meta.defaults();
+    if(data.v===1){
+      const d=Meta.defaults();
+      d.gold=data.gold||0;d.units=data.units||0;d.mute=!!data.mute;
+      d.settings=data.settings&&typeof data.settings==='object'?data.settings:{};
+      return d}
+    if(data.v===2){
+      const d=Meta.defaults();
+      for(const k in d)if(!(k in data))data[k]=d[k];
+      for(const k in d.cats)if(!(k in data.cats))data.cats[k]=d.cats[k];
+      for(const k in d.energy)if(!(k in data.energy))data.energy[k]=d.energy[k];
+      for(const k in d.arena)if(!(k in data.arena))data.arena[k]=d.arena[k];
+      for(const k in d.stats)if(!(k in data.stats))data.stats[k]=d.stats[k];
+      if(!data.roster||typeof data.roster!=='object'||!Object.keys(data.roster).length)data.roster=d.roster;
+      return data}
+    return Meta.defaults()}};
+const Stats={
+  caps:{stars:[1,5],rank:stars=>stars,level:rank=>10*rank},
+  xpToLevel(level){return 40*level},
+  clampEntry(entry){
+    entry.stars=clamp(entry.stars,Stats.caps.stars[0],Stats.caps.stars[1]);
+    entry.rank=clamp(entry.rank,1,Stats.caps.rank(entry.stars));
+    entry.level=clamp(entry.level,1,Stats.caps.level(entry.rank));
+    return entry},
+  derive(def,entry){
+    const mul=(1+.25*(entry.stars-1))*(1+.10*(entry.rank-1))*(1+.01*(entry.level-1));
+    return{hp:Math.round(def.hp*mul),atk:Math.round(def.atk*mul)}}};
+const Energy={
+  now:()=>Date.now(),
+  max:10,
+  tick(){
+    const e=Save.data.energy;
+    const regen=Math.min(Math.floor((Energy.now()-e.ts)/360000),e.max-e.n);
+    if(regen>0){e.n+=regen;e.ts+=regen*360000}
+    return e.n},
+  spend(n){
+    const e=Save.data.energy;
+    if(e.n<n)return false;
+    e.n-=n;return true}};
+// Reserved for later Phase 4 tasks (4.2+); kept as empty objects now so 12_meta.js is the single
+// place Meta's namespace is declared and later tasks only ever add to these, never redeclare them.
+const Crystal={},Quest={},Rewards={},Roster={},Arena={};
+
 const Save={key:'carlsArena.v1',data:null,
-  load(){try{this.data=JSON.parse(localStorage.getItem(this.key))||null}catch(e){this.data=null}
-    if(!this.data)this.data={v:1,gold:0,units:0,roster:{},mute:false,settings:{}}},
+  load(){let raw=null;try{raw=JSON.parse(localStorage.getItem(this.key))}catch(e){raw=null}
+    this.data=Meta.migrate(raw)},
   put(){try{localStorage.setItem(this.key,JSON.stringify(this.data))}catch(e){}}};
 Save.load();
 
@@ -3523,5 +3586,78 @@ Test.add('Ctrl.competent mixes in a heavy on the 5th distinct blockstun opening'
     ctrl.next(f,me,foe)} // a real call while foe reads IDLE — the rising-edge reset the controller
                           // itself needs to see before the next opening counts as a NEW one
   eq(heavyFires,1)});
+
+// Task 4.1: Meta data layer (save v2, migrate, stats, energy) ------------------------------------
+Test.add('Meta.defaults has every top-level key and carl at 1-star/1-rank/1-level',()=>{
+  const d=Meta.defaults();
+  for(const k of ['v','seed','gold','units','iso','cats','roster','active','floors','energy','arena','mute','settings','stats'])
+    ok(k in d,k+' missing');
+  eq(d.v,2);eq(d.active,'carl');
+  eq(d.roster.carl.stars,1);eq(d.roster.carl.rank,1);eq(d.roster.carl.level,1)});
+Test.add('Meta.migrate upgrades a v1 save, keeping gold/units/mute/settings and adding roster',()=>{
+  const v2=Meta.migrate({v:1,gold:5,units:2,roster:{},mute:true,settings:{}});
+  eq(v2.v,2);eq(v2.gold,5);eq(v2.units,2);eq(v2.mute,true);
+  eq(v2.roster.carl.stars,1);eq(v2.roster.carl.rank,1);eq(v2.roster.carl.level,1)});
+Test.add('Meta.migrate fills missing keys on a v2 save without discarding what is there',()=>{
+  const d=Meta.migrate({v:2,gold:9});
+  eq(d.gold,9);ok('energy' in d);ok('roster' in d);eq(d.roster.carl.stars,1)});
+Test.add('Meta.migrate falls back to defaults for null/garbage',()=>{
+  const def=JSON.stringify(Meta.defaults());
+  eq(JSON.stringify(Meta.migrate(null)),def);
+  eq(JSON.stringify(Meta.migrate('nonsense')),def);
+  eq(JSON.stringify(Meta.migrate(42)),def);
+  eq(JSON.stringify(Meta.migrate({foo:'bar'})),def)});
+Test.add('Stats.derive computes hp/atk at base stars/rank/level',()=>{
+  const s=Stats.derive(CHAMPS.carl,{stars:1,rank:1,level:1});
+  eq(s.hp,1000);eq(s.atk,60)});
+Test.add('Stats.derive is monotone: more stars, rank, or level never decreases hp',()=>{
+  const base=Stats.derive(CHAMPS.carl,{stars:1,rank:1,level:1}).hp;
+  ok(Stats.derive(CHAMPS.carl,{stars:2,rank:1,level:1}).hp>base,'stars increases hp');
+  const rBase=Stats.derive(CHAMPS.carl,{stars:2,rank:1,level:1}).hp;
+  ok(Stats.derive(CHAMPS.carl,{stars:2,rank:2,level:1}).hp>rBase,'rank increases hp');
+  const lBase=Stats.derive(CHAMPS.carl,{stars:5,rank:5,level:1}).hp;
+  ok(Stats.derive(CHAMPS.carl,{stars:5,rank:5,level:50}).hp>lBase,'level increases hp')});
+Test.add('Stats.clampEntry enforces stars/rank/level caps',()=>{
+  const hi=Stats.clampEntry({stars:9,rank:9,level:9999});
+  eq(hi.stars,5);eq(hi.rank,5);eq(hi.level,50);
+  const lo=Stats.clampEntry({stars:0,rank:0,level:0});
+  eq(lo.stars,1);eq(lo.rank,1);eq(lo.level,1)});
+Test.add('Stats.xpToLevel(3) is 120',()=>{eq(Stats.xpToLevel(3),120)});
+Test.add('Energy.tick regens over injected time, leaves partial progress, and caps at max',()=>{
+  const origNow=Energy.now;
+  try{
+    Save.data.energy={n:0,ts:0,max:10};
+    Energy.now=()=>12*60*1000; // 12 minutes = 2 intervals of 6
+    Energy.tick();
+    eq(Save.data.energy.n,2);eq(Save.data.energy.ts,12*60*1000);
+    Save.data.energy={n:9,ts:0,max:10};
+    Energy.now=()=>60*60*1000; // would be 10 intervals; only 1 needed to hit max
+    Energy.tick();
+    eq(Save.data.energy.n,10)
+  }finally{Energy.now=origNow}});
+Test.add('Energy.spend fails and changes nothing when short, succeeds when enough',()=>{
+  Save.data.energy={n:0,ts:0,max:10};
+  eq(Energy.spend(1),false);eq(Save.data.energy.n,0);
+  Save.data.energy={n:10,ts:0,max:10};
+  eq(Energy.spend(3),true);eq(Save.data.energy.n,7)});
+Test.add('Save.load migrates an existing v1 localStorage value without throwing',()=>{
+  const backup=localStorage.getItem(Save.key);
+  try{
+    localStorage.setItem(Save.key,JSON.stringify({v:1,gold:5,units:2,roster:{},mute:true,settings:{x:1}}));
+    Save.load();
+    eq(Save.data.v,2);eq(Save.data.gold,5);eq(Save.data.units,2);eq(Save.data.mute,true);
+    eq(Save.data.roster.carl.stars,1)
+  }finally{
+    if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
+    Save.load()}});
+Test.add('Save.put/load round-trips a v2 save',()=>{
+  const backup=localStorage.getItem(Save.key);
+  try{
+    Save.data=Meta.defaults();Save.data.gold=42;Save.data.roster.carl.stars=3;
+    Save.put();Save.load();
+    eq(Save.data.gold,42);eq(Save.data.roster.carl.stars,3);eq(Save.data.v,2)
+  }finally{
+    if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
+    Save.load()}});
 
 </script></body></html>

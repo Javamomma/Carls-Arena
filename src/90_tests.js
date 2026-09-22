@@ -715,3 +715,76 @@ Test.add('Ctrl.competent mixes in a heavy on the 5th distinct blockstun opening'
     ctrl.next(f,me,foe)} // a real call while foe reads IDLE — the rising-edge reset the controller
                           // itself needs to see before the next opening counts as a NEW one
   eq(heavyFires,1)});
+
+// Task 4.1: Meta data layer (save v2, migrate, stats, energy) ------------------------------------
+Test.add('Meta.defaults has every top-level key and carl at 1-star/1-rank/1-level',()=>{
+  const d=Meta.defaults();
+  for(const k of ['v','seed','gold','units','iso','cats','roster','active','floors','energy','arena','mute','settings','stats'])
+    ok(k in d,k+' missing');
+  eq(d.v,2);eq(d.active,'carl');
+  eq(d.roster.carl.stars,1);eq(d.roster.carl.rank,1);eq(d.roster.carl.level,1)});
+Test.add('Meta.migrate upgrades a v1 save, keeping gold/units/mute/settings and adding roster',()=>{
+  const v2=Meta.migrate({v:1,gold:5,units:2,roster:{},mute:true,settings:{}});
+  eq(v2.v,2);eq(v2.gold,5);eq(v2.units,2);eq(v2.mute,true);
+  eq(v2.roster.carl.stars,1);eq(v2.roster.carl.rank,1);eq(v2.roster.carl.level,1)});
+Test.add('Meta.migrate fills missing keys on a v2 save without discarding what is there',()=>{
+  const d=Meta.migrate({v:2,gold:9});
+  eq(d.gold,9);ok('energy' in d);ok('roster' in d);eq(d.roster.carl.stars,1)});
+Test.add('Meta.migrate falls back to defaults for null/garbage',()=>{
+  const def=JSON.stringify(Meta.defaults());
+  eq(JSON.stringify(Meta.migrate(null)),def);
+  eq(JSON.stringify(Meta.migrate('nonsense')),def);
+  eq(JSON.stringify(Meta.migrate(42)),def);
+  eq(JSON.stringify(Meta.migrate({foo:'bar'})),def)});
+Test.add('Stats.derive computes hp/atk at base stars/rank/level',()=>{
+  const s=Stats.derive(CHAMPS.carl,{stars:1,rank:1,level:1});
+  eq(s.hp,1000);eq(s.atk,60)});
+Test.add('Stats.derive is monotone: more stars, rank, or level never decreases hp',()=>{
+  const base=Stats.derive(CHAMPS.carl,{stars:1,rank:1,level:1}).hp;
+  ok(Stats.derive(CHAMPS.carl,{stars:2,rank:1,level:1}).hp>base,'stars increases hp');
+  const rBase=Stats.derive(CHAMPS.carl,{stars:2,rank:1,level:1}).hp;
+  ok(Stats.derive(CHAMPS.carl,{stars:2,rank:2,level:1}).hp>rBase,'rank increases hp');
+  const lBase=Stats.derive(CHAMPS.carl,{stars:5,rank:5,level:1}).hp;
+  ok(Stats.derive(CHAMPS.carl,{stars:5,rank:5,level:50}).hp>lBase,'level increases hp')});
+Test.add('Stats.clampEntry enforces stars/rank/level caps',()=>{
+  const hi=Stats.clampEntry({stars:9,rank:9,level:9999});
+  eq(hi.stars,5);eq(hi.rank,5);eq(hi.level,50);
+  const lo=Stats.clampEntry({stars:0,rank:0,level:0});
+  eq(lo.stars,1);eq(lo.rank,1);eq(lo.level,1)});
+Test.add('Stats.xpToLevel(3) is 120',()=>{eq(Stats.xpToLevel(3),120)});
+Test.add('Energy.tick regens over injected time, leaves partial progress, and caps at max',()=>{
+  const origNow=Energy.now;
+  try{
+    Save.data.energy={n:0,ts:0,max:10};
+    Energy.now=()=>12*60*1000; // 12 minutes = 2 intervals of 6
+    Energy.tick();
+    eq(Save.data.energy.n,2);eq(Save.data.energy.ts,12*60*1000);
+    Save.data.energy={n:9,ts:0,max:10};
+    Energy.now=()=>60*60*1000; // would be 10 intervals; only 1 needed to hit max
+    Energy.tick();
+    eq(Save.data.energy.n,10)
+  }finally{Energy.now=origNow}});
+Test.add('Energy.spend fails and changes nothing when short, succeeds when enough',()=>{
+  Save.data.energy={n:0,ts:0,max:10};
+  eq(Energy.spend(1),false);eq(Save.data.energy.n,0);
+  Save.data.energy={n:10,ts:0,max:10};
+  eq(Energy.spend(3),true);eq(Save.data.energy.n,7)});
+Test.add('Save.load migrates an existing v1 localStorage value without throwing',()=>{
+  const backup=localStorage.getItem(Save.key);
+  try{
+    localStorage.setItem(Save.key,JSON.stringify({v:1,gold:5,units:2,roster:{},mute:true,settings:{x:1}}));
+    Save.load();
+    eq(Save.data.v,2);eq(Save.data.gold,5);eq(Save.data.units,2);eq(Save.data.mute,true);
+    eq(Save.data.roster.carl.stars,1)
+  }finally{
+    if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
+    Save.load()}});
+Test.add('Save.put/load round-trips a v2 save',()=>{
+  const backup=localStorage.getItem(Save.key);
+  try{
+    Save.data=Meta.defaults();Save.data.gold=42;Save.data.roster.carl.stars=3;
+    Save.put();Save.load();
+    eq(Save.data.gold,42);eq(Save.data.roster.carl.stars,3);eq(Save.data.v,2)
+  }finally{
+    if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
+    Save.load()}});
