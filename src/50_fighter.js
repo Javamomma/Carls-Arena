@@ -48,4 +48,4 @@ class Fighter{
       case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
       case'HITSTUN':case'BLOCKSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
       case'KNOCKDOWN':if(this.f>=KNOCKDOWN.frames){this.inv=KNOCKDOWN.inv;this.setState('IDLE')}break}
-    this.x=clamp(this.x,this.width/2+8,STAGE_W-this.width/2-8)}}
+    this.x=clamp(this.x,EDGE_PAD,STAGE_W-EDGE_PAD)}}

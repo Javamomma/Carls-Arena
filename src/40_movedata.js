@@ -25,3 +25,10 @@ const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',
 const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,POWER_MAX=300,PARRY_LOCKOUT=20,CRIT_MUL_DEFAULT=1.6;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
 const STAGE_W=1400;
+// Wall clamp half-width for Fighter.tick's x clamp. Wider than the old width/2+8 inset (32px) so a
+// fighter pinned at the wall stays fully on screen: the rig can reach shoulderW/2+armLen+limb past
+// the fighter's x, which is ~86px for Carl and ~108px for a scaled-up hobgoblin. A camera margin
+// can't fix this alone because the parallax-1.0 floor layer is drawn exactly STAGE_W wide, so
+// letting the camera past its own limit would expose blank canvas past the stage edge; this has to
+// be a sim-side constant (Fighter stays independent of Rig) instead.
+const EDGE_PAD=110;
