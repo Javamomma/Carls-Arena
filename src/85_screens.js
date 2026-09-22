@@ -400,8 +400,17 @@ const Screens={
     // FIGHT AGAIN replays the exact same options (G.lastFightOpts) -- meaningless right after a
     // quest win, since that node is now 'done' and Quest.start would just refuse it; hidden then,
     // shown for every other outcome (a quest loss, any exhibition/arena result).
+    // Fix-wave item 2 (final review, Important): hidden for ANY tutorial-mode result, win or loss --
+    // G.lastFightOpts for a tutorial fight is {encounter:'tutorial',mode:'tutorial',
+    // ctrl2:Ctrl.tutorialDummy(...),playerBuffs:[...,'noKo']}, and FIGHT AGAIN's own handler (G.init,
+    // 80_game.js) always calls startFight(opts) directly, never G.startTutorial(opts) -- so it never
+    // runs Tutorial.reset(), replaying the fight with Tutorial.state already at step 4/"FINISH HIM"
+    // pinned on screen from frame one and p2.guardActive already false. Hidden rather than rerouted
+    // (ruling: CONTINUE already lands on the map -- Screens._origin is set to {name:'map',...} by
+    // every path that starts the tutorial -- so the map's own TUTORIAL button is the one correct way
+    // to replay it).
     const again=document.getElementById('again');
-    again.style.display=(won&&G.mode==='quest')?'none':'';
+    again.style.display=(G.mode==='tutorial'||(won&&G.mode==='quest'))?'none':'';
     const cont=document.getElementById('resultTitleBtn');
     cont.textContent='CONTINUE';
     cont.onclick=()=>G.backToOrigin()}};

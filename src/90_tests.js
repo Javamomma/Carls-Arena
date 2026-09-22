@@ -2422,6 +2422,27 @@ Test.add('the result screen shows a TUTORIAL COMPLETE line on a tutorial win',()
   ok(document.getElementById('resultLine').textContent.includes('TUTORIAL COMPLETE'),
     'result line: '+document.getElementById('resultLine').textContent);
   G.toTitle();G.sim=false});
+// Fix-wave item 2 (final review, Important): FIGHT AGAIN used to stay visible after a tutorial win and
+// replay it via the plain startFight(lastFightOpts) path (G.init's 'again' handler), never
+// Tutorial.reset() -- Tutorial.state was still at step===steps.length ("FINISH HIM" pinned on screen
+// from frame one) and p2.guardActive already false on the replay. #again is now hidden for the
+// duration of the RESULT screen whenever the fight that just ended was G.mode==='tutorial'; CONTINUE
+// (#resultTitleBtn) still routes through G.backToOrigin(), which lands on the map (floor 1) since
+// Screens._origin is set to {name:'map',args:[...]} by every path that starts the tutorial (a fresh
+// save's CAMPAIGN button, and the map's own .node.tutorial row).
+Test.add('after a scripted tutorial completion, FIGHT AGAIN is hidden and CONTINUE routes to the map',()=>{
+  Save.data=Meta.defaults();
+  Screens._origin={name:'map',args:[1]}; // mirrors CAMPAIGN's own origin-set-then-startTutorial pattern
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=Tutorial.steps.length;G.fight.p2.guardActive=false; // every step already taught -- the dummy is now killable
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT','the tutorial fight must reach a natural KO result');
+  eq(document.getElementById('again').style.display,'none','FIGHT AGAIN must be hidden after a tutorial win');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'map','CONTINUE must route to the map after a tutorial win');
+  eq(Screens._floor,1);
+  G.toTitle();G.sim=false});
 Test.add('#tutorialPrompt shows the current step\'s prompt text during a tutorial fight, and hides once the tutorial ends',()=>{
   Save.data=Meta.defaults();
   G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
