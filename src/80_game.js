@@ -56,6 +56,12 @@ const Tutorial={
       // instead of this object directly.
       if(this.state.step>=this.steps.length&&fight.p2)fight.p2.guardActive=false}}};
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
+  // Fix-wave item 5 (final review, Minor): the page's own ?atlas=1 URL override, computed once here
+  // (location.search doesn't change without a navigation) -- the exact same regex Atlas.load's own
+  // `enabled` check already uses (68_rig.js) to decide whether to fetch at all. Rig.draw's atlas
+  // short-circuit reads this alongside Save.data.settings.useAtlas so a query-string override still
+  // works even with the settings toggle off, matching Atlas.load's own "OR" semantics.
+  atlasQuery:/(?:^|[?&])atlas=1(?:&|$)/.test(location.search),
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
   cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
   zoomCap:1.12,cineZoomCap:1.28, // per-fight caps on Camera.update's target zoom; recomputed in startFight from

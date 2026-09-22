@@ -2872,8 +2872,17 @@ const Rig={
     // exactly the "missing files fall back to the rig silently" contract (Ruling #4). Only short-
     // circuits when this fighter's CURRENT pose key has frames in the manifest -- a partial atlas
     // (some poses covered, not others) still lets the rig path fill in whatever's missing.
+    // Fix-wave item 5 (final review, Minor): the short-circuit used to only ever check ATLAS[lookId]
+    // -- once a sheet loaded, it kept drawing from it for the rest of the session even after the
+    // player flipped USE SPRITE ATLAS back off (settings), since Rig.draw never re-checked it. Now
+    // also requires the atlas to currently be enabled -- the same two conditions Atlas.load's own
+    // `enabled` check already gates the FETCH on (Save.data.settings.useAtlas, or G.atlasQuery, the
+    // page's own ?atlas=1 override, computed once at load in G, 80_game.js) -- so turning the setting
+    // off mid-session falls straight back to the FK rig path on the very next frame, with the
+    // already-cached ATLAS[lookId] entry left alone (turning it back on needs no re-fetch).
     const lookId=F.def&&F.def.id,atlas=lookId&&ATLAS[lookId];
-    if(atlas&&atlas.meta&&atlas.meta.poses){
+    const atlasEnabled=!!(Save.data&&Save.data.settings&&Save.data.settings.useAtlas)||G.atlasQuery;
+    if(atlasEnabled&&atlas&&atlas.meta&&atlas.meta.poses){
       const{key,t01}=this.poseFor(F);
       if(atlas.meta.poses[key]){this._drawAtlasFrame(c,F,cam,frame,atlas,key,t01);return}}
     const look0=lookFor(F.def);
@@ -3706,6 +3715,12 @@ const Tutorial={
       // instead of this object directly.
       if(this.state.step>=this.steps.length&&fight.p2)fight.p2.guardActive=false}}};
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
+  // Fix-wave item 5 (final review, Minor): the page's own ?atlas=1 URL override, computed once here
+  // (location.search doesn't change without a navigation) -- the exact same regex Atlas.load's own
+  // `enabled` check already uses (68_rig.js) to decide whether to fetch at all. Rig.draw's atlas
+  // short-circuit reads this alongside Save.data.settings.useAtlas so a query-string override still
+  // works even with the settings toggle off, matching Atlas.load's own "OR" semantics.
+  atlasQuery:/(?:^|[?&])atlas=1(?:&|$)/.test(location.search),
   frameNow:0,_sayAt:-999, // mirrors fight.frame (updated in tick()); gates G.say to one line per 90 frames
   cinemFocus:null, // the attacking Fighter to punch the camera in on, set from the 'card' fx while fight.cinematic>0
   zoomCap:1.12,cineZoomCap:1.28, // per-fight caps on Camera.update's target zoom; recomputed in startFight from
@@ -5051,10 +5066,13 @@ function mkSyntheticAtlas(){
     img.onload=()=>resolve({img,meta:{frame:{w:2,h:2,anchorX:1,anchorY:2},poses:{idle:[[0,0],[2,0]]}}});
     img.onerror=reject;
     img.src=oc.toDataURL()})}
-Test.add('Rig.draw takes the atlas path (spy on Rig._drawAtlasFrame) when ATLAS[lookId] has the pose',async()=>{
+Test.add('Rig.draw takes the atlas path (spy on Rig._drawAtlasFrame) when ATLAS[lookId] has the pose and the atlas is enabled',async()=>{
   const atlas=await mkSyntheticAtlas();
-  const savedAtlas=ATLAS.carl,savedHook=Rig._drawAtlasFrame;
+  const savedAtlas=ATLAS.carl,savedHook=Rig._drawAtlasFrame,savedUseAtlas=Save.data.settings.useAtlas;
   ATLAS.carl=atlas;
+  // Fix-wave item 5: Rig.draw's short-circuit now also requires the atlas to be currently enabled
+  // (Save.data.settings.useAtlas||G.atlasQuery), not just a populated ATLAS[lookId] entry.
+  Save.data.settings.useAtlas=true;
   const calls=[];
   Rig._drawAtlasFrame=function(...args){calls.push(args);return savedHook.apply(this,args)};
   const c=document.createElement('canvas').getContext('2d');
@@ -5064,7 +5082,27 @@ Test.add('Rig.draw takes the atlas path (spy on Rig._drawAtlasFrame) when ATLAS[
     eq(calls.length,1,'the atlas hook should fire exactly once');
     eq(calls[0][5],'idle','pose key passed through');
     eq(calls[0][6],0,'t01 passed through (idle at f=0 is t01=0)')
-  }finally{Rig._drawAtlasFrame=savedHook;if(savedAtlas===undefined)delete ATLAS.carl;else ATLAS.carl=savedAtlas}});
+  }finally{Rig._drawAtlasFrame=savedHook;Save.data.settings.useAtlas=savedUseAtlas;
+    if(savedAtlas===undefined)delete ATLAS.carl;else ATLAS.carl=savedAtlas}});
+// Fix-wave item 5 (final review, Minor): turning USE SPRITE ATLAS off mid-session used to do nothing
+// -- Rig.draw read ATLAS[lookId] and never re-checked the setting, so a cached sheet kept drawing
+// while the toggle read OFF. With an ATLAS entry present but the setting off (and no ?atlas=1
+// override), Rig.draw must now fall back to the ordinary FK rig path instead of the atlas one.
+Test.add('Rig.draw falls back to the FK rig path when ATLAS[lookId] has the pose but the atlas is disabled',async()=>{
+  const atlas=await mkSyntheticAtlas();
+  const savedAtlas=ATLAS.carl,savedHook=Rig._drawAtlasFrame,savedUseAtlas=Save.data.settings.useAtlas,
+    savedQuery=G.atlasQuery;
+  ATLAS.carl=atlas;
+  Save.data.settings.useAtlas=false;G.atlasQuery=false;
+  const calls=[];
+  Rig._drawAtlasFrame=function(...args){calls.push(args)}; // spy only -- must never be called
+  const c=document.createElement('canvas').getContext('2d');
+  const F={x:0,def:{id:'carl',scale:1},face:1,state:'IDLE',f:0,dx:0};
+  try{
+    ok(!threw(()=>Rig.draw(c,F,{x:0,zoom:1},0)),'Rig.draw must not throw on the FK fallback path');
+    eq(calls.length,0,'the atlas hook must not fire while the setting is off and no ?atlas=1 override is present')
+  }finally{Rig._drawAtlasFrame=savedHook;Save.data.settings.useAtlas=savedUseAtlas;G.atlasQuery=savedQuery;
+    if(savedAtlas===undefined)delete ATLAS.carl;else ATLAS.carl=savedAtlas}});
 Test.add('Rig._drawAtlasFrame picks frame 0 at t01=0 and frame 1 at t01=1 (via each frame\'s sheet x)',async()=>{
   const atlas=await mkSyntheticAtlas();
   const c=document.createElement('canvas').getContext('2d');

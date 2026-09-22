@@ -224,10 +224,13 @@ function mkSyntheticAtlas(){
     img.onload=()=>resolve({img,meta:{frame:{w:2,h:2,anchorX:1,anchorY:2},poses:{idle:[[0,0],[2,0]]}}});
     img.onerror=reject;
     img.src=oc.toDataURL()})}
-Test.add('Rig.draw takes the atlas path (spy on Rig._drawAtlasFrame) when ATLAS[lookId] has the pose',async()=>{
+Test.add('Rig.draw takes the atlas path (spy on Rig._drawAtlasFrame) when ATLAS[lookId] has the pose and the atlas is enabled',async()=>{
   const atlas=await mkSyntheticAtlas();
-  const savedAtlas=ATLAS.carl,savedHook=Rig._drawAtlasFrame;
+  const savedAtlas=ATLAS.carl,savedHook=Rig._drawAtlasFrame,savedUseAtlas=Save.data.settings.useAtlas;
   ATLAS.carl=atlas;
+  // Fix-wave item 5: Rig.draw's short-circuit now also requires the atlas to be currently enabled
+  // (Save.data.settings.useAtlas||G.atlasQuery), not just a populated ATLAS[lookId] entry.
+  Save.data.settings.useAtlas=true;
   const calls=[];
   Rig._drawAtlasFrame=function(...args){calls.push(args);return savedHook.apply(this,args)};
   const c=document.createElement('canvas').getContext('2d');
@@ -237,7 +240,27 @@ Test.add('Rig.draw takes the atlas path (spy on Rig._drawAtlasFrame) when ATLAS[
     eq(calls.length,1,'the atlas hook should fire exactly once');
     eq(calls[0][5],'idle','pose key passed through');
     eq(calls[0][6],0,'t01 passed through (idle at f=0 is t01=0)')
-  }finally{Rig._drawAtlasFrame=savedHook;if(savedAtlas===undefined)delete ATLAS.carl;else ATLAS.carl=savedAtlas}});
+  }finally{Rig._drawAtlasFrame=savedHook;Save.data.settings.useAtlas=savedUseAtlas;
+    if(savedAtlas===undefined)delete ATLAS.carl;else ATLAS.carl=savedAtlas}});
+// Fix-wave item 5 (final review, Minor): turning USE SPRITE ATLAS off mid-session used to do nothing
+// -- Rig.draw read ATLAS[lookId] and never re-checked the setting, so a cached sheet kept drawing
+// while the toggle read OFF. With an ATLAS entry present but the setting off (and no ?atlas=1
+// override), Rig.draw must now fall back to the ordinary FK rig path instead of the atlas one.
+Test.add('Rig.draw falls back to the FK rig path when ATLAS[lookId] has the pose but the atlas is disabled',async()=>{
+  const atlas=await mkSyntheticAtlas();
+  const savedAtlas=ATLAS.carl,savedHook=Rig._drawAtlasFrame,savedUseAtlas=Save.data.settings.useAtlas,
+    savedQuery=G.atlasQuery;
+  ATLAS.carl=atlas;
+  Save.data.settings.useAtlas=false;G.atlasQuery=false;
+  const calls=[];
+  Rig._drawAtlasFrame=function(...args){calls.push(args)}; // spy only -- must never be called
+  const c=document.createElement('canvas').getContext('2d');
+  const F={x:0,def:{id:'carl',scale:1},face:1,state:'IDLE',f:0,dx:0};
+  try{
+    ok(!threw(()=>Rig.draw(c,F,{x:0,zoom:1},0)),'Rig.draw must not throw on the FK fallback path');
+    eq(calls.length,0,'the atlas hook must not fire while the setting is off and no ?atlas=1 override is present')
+  }finally{Rig._drawAtlasFrame=savedHook;Save.data.settings.useAtlas=savedUseAtlas;G.atlasQuery=savedQuery;
+    if(savedAtlas===undefined)delete ATLAS.carl;else ATLAS.carl=savedAtlas}});
 Test.add('Rig._drawAtlasFrame picks frame 0 at t01=0 and frame 1 at t01=1 (via each frame\'s sheet x)',async()=>{
   const atlas=await mkSyntheticAtlas();
   const c=document.createElement('canvas').getContext('2d');

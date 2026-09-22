@@ -924,8 +924,17 @@ const Rig={
     // exactly the "missing files fall back to the rig silently" contract (Ruling #4). Only short-
     // circuits when this fighter's CURRENT pose key has frames in the manifest -- a partial atlas
     // (some poses covered, not others) still lets the rig path fill in whatever's missing.
+    // Fix-wave item 5 (final review, Minor): the short-circuit used to only ever check ATLAS[lookId]
+    // -- once a sheet loaded, it kept drawing from it for the rest of the session even after the
+    // player flipped USE SPRITE ATLAS back off (settings), since Rig.draw never re-checked it. Now
+    // also requires the atlas to currently be enabled -- the same two conditions Atlas.load's own
+    // `enabled` check already gates the FETCH on (Save.data.settings.useAtlas, or G.atlasQuery, the
+    // page's own ?atlas=1 override, computed once at load in G, 80_game.js) -- so turning the setting
+    // off mid-session falls straight back to the FK rig path on the very next frame, with the
+    // already-cached ATLAS[lookId] entry left alone (turning it back on needs no re-fetch).
     const lookId=F.def&&F.def.id,atlas=lookId&&ATLAS[lookId];
-    if(atlas&&atlas.meta&&atlas.meta.poses){
+    const atlasEnabled=!!(Save.data&&Save.data.settings&&Save.data.settings.useAtlas)||G.atlasQuery;
+    if(atlasEnabled&&atlas&&atlas.meta&&atlas.meta.poses){
       const{key,t01}=this.poseFor(F);
       if(atlas.meta.poses[key]){this._drawAtlasFrame(c,F,cam,frame,atlas,key,t01);return}}
     const look0=lookFor(F.def);
