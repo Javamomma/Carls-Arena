@@ -97,3 +97,119 @@ Ruling: walk is presentation-only — Fighter records dx per tick (derived, dete
 Ruling: f1_hob tier 'brute' is correct; the Phase 2 plan's 'brawl' is the defect (note added to plan in the wave).
 Ruling: fix-wave commits carried 'Claude Sonnet 5' trailers; rewritten to Fable 5.1 via filter-branch (unpushed history) — cost if wrong: none. Re-review package: review-fixwave-p2.diff
 Fix wave re-review: items 1-5,7,8 addressed; item 6 left 3 Important (heads off-canvas at max zoom, toast bisects heads, EDGE_PAD undersized). Ruling: one more scoped round (round 2) because these are player-visible breakages from the art pass — cost if wrong: an extra review cycle. Round 2 dispatched to impl-fixwave-p2, FIX_BASE 81d9e6d
+
+## Phase 3 progress log
+
+- 2026-09-22 — Tasks 3.1-3.5 (AI tiers/behaviours, buffs framework, floors/encounters/bosses, the
+  quadruped and big rig kinds, the full roster) landed with no entries added here; see
+  `docs/superpowers/plans/2026-09-21-phase3-ai-encounters.md` for their frozen interfaces and
+  `git log` for the individual commits (`feat: AI tiers t1-t5 ...` through
+  `feat: big rig for Mongo and Grull`).
+- 2026-09-22 — Task 3.6: Phase 3 close-out. `tests/batch.py` (new) sweeps `AI.TIERS` t1..t5, and by
+  default every `FLOORS` node/boss, against a new scripted `Ctrl.competent` bot (`src/30_input.js`):
+  blocks a foe's medium/heavy once its startup clock passes 6 frames, chains lights in range, dashes
+  back from a telegraphed heavy charge under 30% hp, fires the strongest affordable special.
+  Balance pass to make the gate (monotone win rate, t1 >= 80%, last tier <= 30%) hold against that
+  bot: `AI.TIERS.attack` retuned for t3/t4/t5, and `AI.make` given a general `comboFollow` behaviour
+  (a landed attack — not just a punish — now chases its own chain), gated on `p.punish` so t1 stays
+  inert; see "AI numbers changed" below. Final batch (n=30): monotone, t1 100%, t5 10% — gate green.
+  `AI.make`'s `next()` refactored into six named per-behaviour functions (`decideHeavy`, `decideBait`,
+  `decidePunish`, `decideIntercept`, `decideBlock`, `decideAttack`) sharing one state object; verified
+  rng-for-rng identical to the pre-refactor version (`--matrix` and the batch table compared
+  byte-for-byte, differing only in wall-clock timing). `Fighter` gained `wasKnockedDown`, set on
+  entering `KNOCKDOWN` and self-clearing one tick after get-up i-frames actually expire, replacing
+  `AI.make`'s old inv-edge heuristic that only avoided misfiring on a plain dash-back because
+  `DASH_BACK.inv` (8) happens to be less than `DASH_BACK.frames` (12) — a coincidence of those two
+  constants, not a real invariant. Fixed: `Render.bossPlate`'s left edge no longer overlaps the
+  "FIGHTER" title (now clamped to `hudCache().titleRightEdge+8`, measured via `measureText` rather
+  than an eyeballed constant); `tests/harness.py --floor` without `--node` now exits 2 with a usage
+  error instead of an uncaught `TypeError`; `ENCOUNTERS.f1_goblin`/`f1_hob` switched from a literal
+  `hpMul`/`atkMul` of `1` to `floorMul(1)` (numerically identical, just consistent with every other
+  floor-1 entry); two ambiguous "fix round N" comments in `src/40_movedata.js` now name which
+  phase/task they belong to. `POSES.heavy`'s `rShoulder` (`src/68_rig.js`) was raised from an
+  over-trimmed 96 back to 118 — the largest value that still keeps the "pin the zoom cap at exactly
+  1.12/1.28" test green — so the wind-up reads as distinct from the light jab again (see "AI numbers
+  changed" below for why 96 happened and why 118 is a hard ceiling, not an aesthetic choice). Unit
+  tests: 114 passing.
+
+## Phase 3 exit (2026-09-22)
+
+| Criterion | Status | Verification |
+|---|---|---|
+| Unit tests ≥ 85 pass | 114 passing, 0 failing | `python3 tests/harness.py --unit` |
+| Soak matrix clean (36 cells) | 36/36 cells, 0 errors | `python3 tests/harness.py --matrix` |
+| Batch win-rate gate (monotone, t1 ≥ 80%, last tier ≤ 30%) | t1 100% / t2 93.3% / t3 80% / t4 70% / t5 10%, monotone non-increasing | `python3 tests/batch.py --n 30 --p1 carl --ai t1,t2,t3,t4,t5` |
+| Screenshot set present | `docs/shots/p3-*` (donut idle/light1/heavy/s3/hit, mongo idle/heavy/s3, grub, grull, mother, quads, floor1-boss, floor2-boss) | see the batch/shot commands below |
+
+## Phase 3 batch win-rate tables (2026-09-22)
+
+Bot is `Ctrl.competent` (`src/30_input.js`), `--bot auto` (the default): reacts to a visible
+medium/heavy, chains lights in range, dashes from a telegraphed heavy charge under 30% hp, and fires
+the strongest affordable special. p1 is Carl against a neutral `donut`-stat opponent for the tier
+sweep, and against each real floor encounter (its own tier/enemy/hp·atk multipliers) for the node
+sweep — `python3 tests/batch.py --n 30 --p1 carl --ai t1,t2,t3,t4,t5`:
+
+```
+tier           fights  winrate%  avglen(s)  stalled
+t1             30      100.0     5.64       0
+t2             30      93.3      6.60       0
+t3             30      80.0      8.43       0
+t4             30      70.0      8.84       0
+t5             30      10.0      6.11       0
+# OK: monotone non-increasing, t1=100.0 (>=80), last=10.0 (<=30)
+
+# per-floor-node/boss win rates (carl vs auto, n=30 each)
+encounter      fights  winrate%  avglen(s)  stalled
+f1_goblin      30      100.0     2.11       0
+f1_skel        30      100.0     2.06       0
+f1_hob         30      93.3      21.17      0
+f1_shaman      30      100.0     2.86       0
+f1_goblin2     30      100.0     2.72       0
+f1_grull       30      0.0       15.94      0
+f2_grub        30      100.0     6.00       0
+f2_skel2       30      100.0     2.91       0
+f2_shaman2     30      100.0     2.82       0
+f2_hob2        30      96.7      10.17      0
+f2_grub2       30      100.0     5.83       0
+f2_mother      30      0.0       7.14       0
+```
+
+Every floor-1 node before the boss, and every floor-2 node before the boss, is easy for a
+`Ctrl.competent`-level player (93-100%); both bosses (`f1_grull`, `f2_mother`) are 0% — their
+combined hp lead (1600/1610 vs. donut's 820 baseline) and signature buff (`armorUp`/`regen`) put them
+well past what the tier curve alone predicts (t4 70%, t5 10%), which is the intended shape for a
+"raid boss" checkpoint, not a batch-gate failure (the gate only covers the `--ai` tier sweep, not the
+per-node table — see tests/batch.py's own `--no-floors` flag to skip it).
+
+## AI numbers changed (Task 3.6)
+
+`src/55_ai.js`'s `AI_TIERS.attack` (chance per idle decision, at `cd===0`, of throwing a spontaneous
+light/medium):
+
+| tier | before | after |
+|---|---|---|
+| t1 | .03 | .03 (unchanged) |
+| t2 | .04 | .04 (unchanged) |
+| t3 | .09 | .25 |
+| t4 | .12 | .35 |
+| t5 | .15 | .65 (and `react` 3→2) |
+
+Before this pass, t3-t5 rolled an attack so rarely that `--bot auto` beat every tier at a flat
+77-100% win rate with no real difficulty curve — the tier table's `block`/`parry`/`punish` numbers
+were already high enough to counter a scripted opponent, but the tiers almost never got to use them
+because they almost never attacked. Paired with the retune (not a number, a behaviour): `AI.make`'s
+punish-only chain follow-through (`punishFollow`, Task 3.1) generalized into `comboFollow`, which also
+chases a landed *spontaneous* attack, gated on `p.punish>0` (same monotonic knob, t1 stays inert) —
+without it, `--bot auto` blocked or dodged everything past a bare `light1` and ate the rest of any
+chain for free. Every other `AI_TIERS` field is unchanged from the frozen Phase 3 interfaces.
+
+`src/68_rig.js`'s `POSES.heavy` `rShoulder` (t:0 keyframe, the wind-up): the frozen Phase 3 interfaces
+never pinned this number, but its history moved twice without a screenshot check each time — 175
+(original) → 128 (Task 3.5 fix round 2, documented) → 96 (the "pin ordinary-pair caps" commit,
+undocumented, over-trimmed). At 96 the wind-up read as a level forward reach nearly identical to
+`light3`'s own peak shoulder angle (95). Binary-searched back up to 118, the largest value that still
+keeps the `'carl/hobgoblin/katia/donut/goblin pairings pin the zoom cap at exactly 1.12/1.28'` test
+green (119 fails it) — a hard ceiling set by Carl's own reach against the dynamic zoom cap
+(`Rig.extent`), not an aesthetic choice. A more vertical wind-up would need either a shorter reach
+elsewhere in this pose or slack in the 1.12/1.28 pin itself; flagged here as a concern rather than
+silently reworked, since loosening that pin is outside this task's scope.

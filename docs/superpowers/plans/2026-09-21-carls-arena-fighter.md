@@ -53,7 +53,7 @@
 | 0 | Repo, build, harness, title-to-fight state machine | 1 | 0.3M | Full tasks | Done |
 | 1 | Core fight loop: input, moves, block/parry/dash, specials, timer, KO, basic AI, unit tests | 2-3 | 1.2M | Full tasks | Done |
 | 2 | Feel and champions: camera, procedural sprites, hitstop/shake/particles, sfx, crit/armor, 4 champions, S3 cinematic | 3-4 | 1.5-2M | Task list + interfaces + exit tests | Done (2026-09-21; see `docs/ARENA.md` "Phase 2 exit") |
-| 3 | AI tiers, node buffs, encounters, 8 champions, batch win-rate tool | 3 | 1-1.5M | Task list + interfaces + exit tests | Not started |
+| 3 | AI tiers, node buffs, encounters, 8 champions, batch win-rate tool | 3 | 1-1.5M | Task list + interfaces + exit tests | Done (2026-09-22; see `docs/ARENA.md` "Phase 3 exit") |
 | 4 | Meta: roster, crystals, quest map, rewards, arena streak | 5-6 | 2-3M | Task list + interfaces + exit tests | Not started |
 | 5 | Broadcast layer, tutorial, settings, perf, rubric, Pages deploy | 3-4 | 1-1.5M | Task list + exit tests | Not started |
 
@@ -1025,7 +1025,29 @@ Tasks: 3.1 tiers with intercept (medium into a dash-in) and bait (heavy feint th
 
 Exit: batch table checked in `docs/ARENA.md`; token estimate 1-1.5M.
 
+**Done 2026-09-22** — see the dedicated `docs/superpowers/plans/2026-09-21-phase3-ai-encounters.md`
+for the frozen interfaces this phase actually shipped against, and `docs/ARENA.md`'s "Phase 3 exit"
+table for the numbers. Landed: `AI.TIERS` t1..t5 (aliases `dummy/basic/brawl/brute` preserved) with
+`intercept`/`bait`/`punish` behaviours; `src/47_buffs.js`'s `BUFFS` table and `Fight` hooks; two
+authored floors (`FLOORS`, `ENCOUNTERS` in `src/45_encounter.js`, `G.startFight({floor,node})`) with
+two bosses (`boss:true` defs, a bigger rig, a unique S3, one signature buff each); the full roster
+(`donut`/`mongo`/`skeleton`/`shaman`/`grub`/`grull`/`mother_rat` in `src/40_movedata.js`'s `DEFS`)
+including the quad (`RigQuad`) and big (`RigBig`) rig kinds in `src/68_rig.js`; `tests/batch.py`'s
+win-rate tool. 114 unit tests, 36/36-cell soak matrix clean, batch gate green (monotone, t1 100%,
+t5 10%).
+
 # Phase 4: Meta (plan file first)
+
+Already in place from Phase 3, for this phase's quest map to build on directly instead of inventing
+its own content model: `FLOORS`/`ENCOUNTERS` (`src/45_encounter.js`) already give two floors of nodes
++ bosses with per-floor hp/atk scaling (`floorMul`) and `G.startFight({floor,node})` sugar; `DEFS`
+(`src/40_movedata.js`) already has the full roster (8 champions/mobs/bosses across `CHAMPS`/`MOBS`/
+`BOSSES`) with `rig`/`scale`/`moves` overrides; `BUFFS` (`src/47_buffs.js`) already gives node
+modifiers (`regen`, `armorUp`, `powerGain`, `unblockableSpecials`, `degen`, `thorns`) that a quest
+node's rewards or a future perk shop can reuse as-is. The quest map below is a UI/progression layer
+over these — `Quest.map`'s nodes should reference existing `ENCOUNTERS` ids rather than duplicating
+enemy/buff data, and `energy`/`quests` in `Save.data` gate *access* to nodes that already fully
+resolve through `Encounter.resolve`/`G.startFight`.
 
 Interfaces: `Save.data` v2 `{roster:{id:{stars,rank,level,xp}}, gold, units, iso, cats:{cls:n}, quests:{act1:{nodes:{id:'locked|open|done'}}}, energy:{n,ts}, arena:{best}}` with a `Save.migrate()`; `Stats.derive(def, stars, rank, level) -> {hp, atk}`; `Crystal.open(kind, rng) -> {champId, stars}` with pity in `Save`; `Quest.map` JSON (3 chapters x 6 nodes, edges, encounter ids, rewards); DOM overlays `roster`, `map`, `crystal`, `shop` following the Carls-Dash `renderShop` pattern.
 
