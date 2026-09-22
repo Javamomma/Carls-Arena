@@ -179,11 +179,18 @@ const Crystal={
   // warm-up draw above), seeded from Save.data.seed++ so every open — including a pity-forced one
   // — advances the save's random stream exactly once. Refusing for cost never touches the seed or
   // pity counter: nothing about the save changes on a refusal.
-  open(kind){
+  // Task 6.4: opts.free (default falsy) skips the cost check/deduction entirely -- used by the
+  // tutorial's own free completion crystal (G.onFightEnd, 80_game.js: Crystal.open('basic',{free:true}))
+  // so a fresh save with 0 gold still gets it. Every other line (the RNG draw, pity, roster/dup
+  // handling, Save.put()) runs exactly as a paid open would -- a free pull still advances
+  // Save.data.seed and the pity counter like any other, it just never touches gold/units.
+  open(kind,opts){
+    const free=!!(opts&&opts.free);
     const k=Crystal.KINDS[kind];
     if(!k)throw new Error('unknown crystal kind: '+kind);
-    for(const c in k.cost)if((Save.data[c]||0)<k.cost[c])return null;
-    for(const c in k.cost)Save.data[c]-=k.cost[c];
+    if(!free){
+      for(const c in k.cost)if((Save.data[c]||0)<k.cost[c])return null;
+      for(const c in k.cost)Save.data[c]-=k.cost[c]}
     const rng=Crystal.rng(Save.data.seed++);
     let stars=Crystal.rollTier(k.odds,rng);
     if(!Save.data.pity)Save.data.pity={};

@@ -250,6 +250,42 @@ try{
 }catch(e){push(String(e&&e.stack||e))}
 return summary})()""" % (seed, seed, seed, seed)
 
+def build_tutorial_shot_js(which, seed):
+    """Task 6.4: freezes one deterministic tutorial frame for docs/shots/p6-tutorial-{1,3,shield}.png.
+    Drives the exact same deterministic Ctrl.tutorialBot(seed) run build_tutorial_js plays to
+    completion, but stops early at the frame that actually proves the thing each shot needs:
+      '1'      -- a few ticks into lesson 1 (SPAR plate + 'LESSON 1 / 4' banner, dummy still passive,
+                  same "quick start-and-freeze" the old --tutorial --shot p5 screenshot used).
+      '3'      -- the exact frame Ctrl.tutorialDummy's own windup fx fires during lesson 3 (the red
+                  wind-up flash a player must react to by holding block, per the frozen interface).
+      'shield' -- the exact frame Tutorial.tick pushes the shieldDown fx (lesson 4 done, the HP bar
+                  about to return).
+    '3' and 'shield' are detected by spying on the real FX.push (not a re-derived condition, e.g.
+    polling Tutorial.state.step or FX.list), so the frozen frame is guaranteed to have that fx at
+    life 0 (freshly added, full alpha/glow) right when the screenshot is taken."""
+    if which == '1':
+        body = "closeIn(G.fight);for(let i=0;i<10;i++)G.tick();"
+    else:
+        kind = 'windup' if which == '3' else 'shieldDown'
+        body = (
+            "let fired=false;const origPush=FX.push.bind(FX);"
+            "FX.push=ev=>{if(ev.kind==='%s')fired=true;return origPush(ev)};"
+            "let t=0;while(!fired&&t<3000){G.tick();t++}FX.push=origPush;"
+        ) % kind
+    return r"""(()=>{
+G.sim=true;
+const summary={which:'%s',seed:%d,errors:[]};
+const push=m=>summary.errors.push(m);
+try{
+  Save.data.seed=%d;Save.put();
+  const ok=G.startTutorial({seed:%d,ctrl1:Ctrl.tutorialBot(%d)});
+  if(ok===false)push('G.startTutorial refused');
+  %s
+  summary.step=Tutorial.state.step;
+  summary.frame=G.fight?G.fight.frame:-1;
+}catch(e){push(String(e&&e.stack||e))}
+return summary})()""" % (which, seed, seed, seed, seed, body)
+
 def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
     """One soak cell: a fresh page, p1 on Ctrl.random(seed), p2 on AI.make(ain). The whole
     restart-on-KO loop runs as a single in-page evaluate() so a KO is caught the very next tick
@@ -397,6 +433,16 @@ def main():
                           "exact shape) and exits 1 on any assertion/page/console error; combine with "
                           "--shot for an early (step 1, before any light lands) screenshot of a live "
                           "fight frame with #tutorialPrompt visible")
+    ap.add_argument('--tutorial-shot', default=None, choices=['1', '3', 'shield'],
+                     help="Task 6.4: reset the save and play ENCOUNTERS.tutorial headless via the same "
+                          "deterministic Ctrl.tutorialBot(seed), but stop at the exact deterministic "
+                          "frame each of docs/shots/p6-tutorial-{1,3,shield}.png needs: '1' a few ticks "
+                          "into lesson 1 (SPAR plate + 'LESSON 1 / 4' banner, dummy still passive); "
+                          "'3' the frame Ctrl.tutorialDummy's own windup fx fires during lesson 3 (the "
+                          "red wind-up flash); 'shield' the frame Tutorial.tick pushes the shieldDown fx "
+                          "(lesson 4 done, 'SHIELD DOWN'). '3'/'shield' are detected by spying on the "
+                          "real FX.push (not a re-derived condition), so the frozen frame always has "
+                          "that fx at life 0. Combine with --shot to write the PNG.")
     ap.add_argument('--screens-smoke', action='store_true',
                      help="Task 5.6: reset the save, visit every screen in turn (title, map, roster, "
                           "crystal, shop, arena, settings), then play one real quest fight through to "
@@ -543,6 +589,24 @@ def main():
         out = {'page_errors': tut_errors, 'summary': r}
         print(json.dumps(out, indent=1))
         sys.exit(1 if tut_errors or r.get('errors') else 0)
+    if a.tutorial_shot:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page(viewport={'width': 854, 'height': 480})
+            shot_errors = []
+            pg.on('pageerror', lambda e: shot_errors.append(str(e)))
+            pg.on('console', lambda m: shot_errors.append(m.text) if m.type == 'error' else None)
+            pg.goto(INDEX)
+            pg.wait_for_function('typeof G!=="undefined"')
+            pg.evaluate('localStorage.clear();Save.load()')
+            js = build_tutorial_shot_js(a.tutorial_shot, a.seed)
+            r = pg.evaluate(js)
+            if a.shot:
+                pg.screenshot(path=a.shot)
+            b.close()
+        out = {'page_errors': shot_errors, 'summary': r}
+        print(json.dumps(out, indent=1))
+        sys.exit(1 if shot_errors or r.get('errors') else 0)
     if a.screens_smoke:
         with sync_playwright() as p:
             b = p.chromium.launch()

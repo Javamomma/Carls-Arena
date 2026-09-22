@@ -234,6 +234,25 @@ const Render={ctx:canvas.getContext('2d'),
     c.moveTo(cx-w,cy+h);c.lineTo(cx-w,cy+h*.2);c.lineTo(cx-w*.5,cy+h*.6);
     c.lineTo(cx,cy-h*.4);c.lineTo(cx+w*.5,cy+h*.6);c.lineTo(cx+w,cy+h*.2);c.lineTo(cx+w,cy+h);
     c.closePath();c.fill();c.stroke()},
+  // Task 6.4: the tutorial's own SPAR plate -- replaces p2's entire HP bar area (not just a badge)
+  // for as long as p2.guardActive is true, so "the shield state is visible at all times" (a shield
+  // glyph plus 'SPAR', in the tutorial's own teal-green, matching .node.tutorial's own palette in
+  // 00_head.html) -- see hud() below for the guardActive branch that calls this instead of
+  // hpBarGrad/the numeric hp text, and skips this (and draws the real bar) the instant guardActive
+  // clears on lesson 4's 'SHIELD DOWN'. x/y/w/h mirror hpBar's own box exactly (never a new layout
+  // number), so nothing else in the HUD has to move around it.
+  sparPlate(c,x,y,w,h){
+    c.save();
+    c.fillStyle='#0d1a14';c.fillRect(x,y,w,h);
+    c.strokeStyle='#7fd18a';c.lineWidth=1.75;c.strokeRect(x+.75,y+.75,w-1.5,h-1.5);
+    const cx=x+22,cy=y+h/2,sw=8,sh=8;
+    c.fillStyle='#7fd18a';c.strokeStyle='#000';c.lineWidth=1;
+    c.beginPath();
+    c.moveTo(cx,cy-sh);c.lineTo(cx+sw,cy-sh*.4);c.lineTo(cx+sw,cy+sh*.3);c.lineTo(cx,cy+sh);
+    c.lineTo(cx-sw,cy+sh*.3);c.lineTo(cx-sw,cy-sh*.4);c.closePath();c.fill();c.stroke();
+    c.fillStyle='#7fd18a';c.font='bold 13px ui-monospace,monospace';c.textAlign='center';c.textBaseline='middle';
+    c.fillText('SPAR',x+w/2+sw,cy);
+    c.restore()},
   pauseGlyph(c){const r=this.pauseRect,rr=6;
     c.fillStyle='rgba(0,0,0,.4)';c.strokeStyle='#f4c542';c.lineWidth=1.5;
     c.beginPath();c.moveTo(r.x+rr,r.y);c.lineTo(r.x+r.w-rr,r.y);c.arcTo(r.x+r.w,r.y,r.x+r.w,r.y+rr,rr);
@@ -271,14 +290,23 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='bold 14px ui-monospace,monospace';c.textAlign='left';c.fillStyle='#fff';c.fillText(a.def.name,p1barX,25);
     {const entry=Save.data.roster[G.champ];this.p1Sub(c,p1barX,39,entry?entry.level:1,entry?entry.stars:1)}
     c.font='bold 14px ui-monospace,monospace';c.textAlign='right';c.fillStyle='#fff';c.fillText(b.def.name,p2barX+barW,25);
-    c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39);
+    // Task 6.4: while p2.guardActive (the tutorial's dummy, every lesson until 'SHIELD DOWN'), the
+    // sub-label under the name reads 'TRAINING DUMMY — CANNOT BE KO'D' instead of the plain 'LVL 1' —
+    // the shield's own presentation always trumps the level line, never shown together.
+    if(b.guardActive){c.font='9px ui-monospace,monospace';c.fillStyle='#7fd18a';
+      c.fillText('TRAINING DUMMY — CANNOT BE KO\'D',p2barX+barW,39)}
+    else{c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39)}
     if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW,b.def.name);
     this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22','right');
-    this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp,'left');
+    // Task 6.4: the SPAR plate REPLACES p2's whole HP bar area (glyph+'SPAR', sparPlate above) while
+    // guardActive -- the real numeric bar/text only return once the shield actually clears (lesson 4's
+    // 'SHIELD DOWN'), so a first-time player is never shown a fake/frozen enemy hp reading mid-lesson.
+    if(b.guardActive)this.sparPlate(c,p2barX,48,barW,barH);
+    else this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp,'left');
     if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);
     c.font='bold 12px ui-monospace,monospace';c.fillStyle='#fff';c.textAlign='center';
     c.fillText(Math.max(0,Math.round(a.hp))+' / '+a.maxHp,p1barX+barW/2,48+barH-4);
-    c.fillText(Math.max(0,Math.round(b.hp))+' / '+b.maxHp,p2barX+barW/2,48+barH-4);
+    if(!b.guardActive)c.fillText(Math.max(0,Math.round(b.hp))+' / '+b.maxHp,p2barX+barW/2,48+barH-4);
     // Title (a horizontal squeeze approximates a condensed face without loading a web font) + pause.
     // Baked into an offscreen canvas by hudCache(): it never changes, so this is one drawImage.
     c.drawImage(this.hudCache().title,0,0);

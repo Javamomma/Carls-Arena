@@ -19,10 +19,14 @@ const Tutorial={
   // STALL_FRAMES is how long the last step (POWER) is given before `stalled` flips true and an extra
   // hint layers onto the prompt -- see tick()'s own comment for why only that step gets one.
   STALL_FRAMES:900,_stepFrames:0,stalled:false,
+  // Task 6.4 (frozen prompt text): rewritten for the whole-canvas gestures -- lessons 1-2 also point
+  // at the real BLOCK/PUNCH/KICK buttons ("(or tap PUNCH)"/"(or tap KICK)"), which G.startTutorial/
+  // Tutorial.tick (below) force on (G.forceButtons) for exactly those two lessons, per the plan
+  // ruling "Lessons 1-2 force the attack buttons on... so prompts can also say 'or tap PUNCH / KICK'".
   steps:[
-    {prompt:'TAP PUNCH — land 3 light hits',done:()=>Tutorial._lights>=3},
-    {prompt:'SWIPE RIGHT / KICK — land a medium',done:()=>Tutorial._medium},
-    {prompt:'HOLD BLOCK, release just before the hit to PARRY — parry once',done:()=>Tutorial._parried},
+    {prompt:'TAP to punch — land 3 hits (or tap PUNCH)',done:()=>Tutorial._lights>=3},
+    {prompt:'SWIPE RIGHT to kick (or tap KICK)',done:()=>Tutorial._medium},
+    {prompt:'HOLD to block, release as the hit lands to PARRY',done:()=>Tutorial._parried},
     {prompt:'POWER — fire a special',
       done:fight=>!!(fight&&fight.p1&&(fight.p1.moveName==='s1'||fight.p1.moveName==='s2'||fight.p1.moveName==='s3'))}],
   reset(){
@@ -71,11 +75,25 @@ const Tutorial={
       this.state.done[step]=true;this._flash=30;this.state.step++;
       this._stepFrames=0;this.stalled=false;
       this.prompt=this.state.step<this.steps.length?this.steps[this.state.step].prompt:'FINISH HIM';
+      // Task 6.4 (controller ruling, Task 6.2): lesson 2 ("SWIPE RIGHT to kick") starts with the
+      // dummy backed off to ~260px so the kick's own range-tracking dash-in (MOVES.medium.track)
+      // actually has ground to cover -- lesson 1 leaves it close (see G.startTutorial's own spawn),
+      // so without this the dummy would still be sitting inside light range when lesson 2 begins.
+      if(this.state.step===1&&fight.p2)fight.p2.x=fight.p1.x+260;
+      // Task 6.4: BLOCK/PUNCH/KICK are only forced on for lessons 1-2 (set true by G.startTutorial,
+      // reset here the instant lesson 3 begins) -- from lesson 3 on, the player's own showButtons
+      // setting is all that's left deciding it (G.applySettings ORs forceButtons with the setting).
+      if(this.state.step===2&&typeof G!=='undefined'){G.forceButtons=false;G.applySettings()}
       // Release pass: clears the p2 dummy's own guardActive flag (not a Tutorial-side read) the
       // instant every step is done, so BUFFS.tutorialGuard (47_buffs.js) stops capping damage and
       // "FINISH HIM" is a real natural KO -- see that buff's comment for why it reads holder state
-      // instead of this object directly.
-      if(this.state.step>=this.steps.length&&fight.p2)fight.p2.guardActive=false}}};
+      // instead of this object directly. Task 6.4: also pushes the 'shieldDown' fx (72_fx.js: a white
+      // flash + 'SHIELD DOWN' text) on the exact same frame, so the shield's release is a visible
+      // beat, not a silent flag flip -- the HP bar (Render.hud, gated on this same guardActive read)
+      // returns starting the very next frame this draws.
+      if(this.state.step>=this.steps.length&&fight.p2){
+        fight.p2.guardActive=false;
+        fight.fx.push({kind:'shieldDown',x:fight.p2.x,y:FLOOR-160})}}}};
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   // Fix-wave item 5 (final review, Minor): the page's own ?atlas=1 URL override, computed once here
   // (location.search doesn't change without a navigation) -- the exact same regex Atlas.load's own
@@ -150,16 +168,19 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     el.style.fontSize='13px';
     const lh=parseFloat(getComputedStyle(el).lineHeight)||1;
     if(Math.round(el.scrollHeight/lh)>2)el.style.fontSize='12px'},
-  // Task 5.3: #tutorialPrompt's position, same off-canvas-rect technique positionToast already uses
-  // (so it tracks the canvas box exactly through any letterboxing), pinned to canvas-local y=112 --
-  // just under HUD_LINE (104), clear of both the floor line/viewers counter above it and the
-  // fighters themselves below it.
+  // Task 5.3/6.4: #tutorialPrompt's position, same off-canvas-rect technique positionToast already
+  // uses (so it tracks the canvas box exactly through any letterboxing). Task 6.4 moved it from
+  // canvas-local y=112 to y=132 to make room for #tutorialLesson (the 'LESSON n / 4' banner) right
+  // above it at y=108 -- both still comfortably clear of HUD_LINE (104, the viewers counter's own
+  // bottom edge) above them and the fighters themselves below.
   positionTutorialPrompt(){
-    const r=canvas.getBoundingClientRect(),el=document.getElementById('tutorialPrompt');
-    if(!el)return;
+    const r=canvas.getBoundingClientRect(),el=document.getElementById('tutorialPrompt'),
+      lesson=document.getElementById('tutorialLesson');
     const sy=r.height/H;
+    if(lesson){lesson.style.left=(r.left+r.width/2)+'px';lesson.style.top=(r.top+108*sy)+'px'}
+    if(!el)return;
     el.style.left=(r.left+r.width/2)+'px';
-    el.style.top=(r.top+112*sy)+'px'},
+    el.style.top=(r.top+132*sy)+'px'},
   // Called once per tutorial-mode tick (see tick() below): mirrors Tutorial.prompt/._flash onto the
   // DOM overlay every frame -- cheap (a textContent/classList write only, no layout work beyond what
   // positionTutorialPrompt already did once at fit()) and simpler than trying to diff for changes,
@@ -170,6 +191,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     el.classList.add('show');
     el.classList.toggle('flash',Tutorial._flash>0);
     el.textContent=Tutorial.prompt;
+    // Task 6.4: the 'LESSON n / 4' banner -- n is state.step+1, clamped to steps.length so it still
+    // reads 'LESSON 4 / 4' (not 5 / 4) during the "FINISH HIM" window after step 4 completes but
+    // before the fight's own natural KO ends it.
+    const lesson=document.getElementById('tutorialLesson');
+    if(lesson){lesson.classList.add('show');
+      lesson.textContent='LESSON '+Math.min(Tutorial.state.step+1,Tutorial.steps.length)+' / '+Tutorial.steps.length}
     // Fix-wave item 6 (final review, Minor): pulses #btnPower once Tutorial.stalled (POWER step idle
     // past STALL_FRAMES) -- see Tutorial.tick's own comment. Toggled every tutorial-mode tick, same
     // as .flash just above, and cleared automatically the instant Tutorial.stalled goes back to false
@@ -177,6 +204,8 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     const pwr=document.getElementById('btnPower');
     if(pwr)pwr.classList.toggle('pulse',Tutorial.stalled)},
   hideTutorialPrompt(){const el=document.getElementById('tutorialPrompt');if(el)el.classList.remove('show');
+    // Task 6.4: #tutorialLesson hides alongside #tutorialPrompt -- same lifetime, same caller.
+    const lesson=document.getElementById('tutorialLesson');if(lesson)lesson.classList.remove('show');
     // Fix-wave item 6: also clears any pulse left over from a previous tutorial run -- mirrors the
     // comment on this function's only other caller-relevant state (Tutorial.prompt itself).
     const pwr=document.getElementById('btnPower');if(pwr)pwr.classList.remove('pulse')},
@@ -383,7 +412,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // defaulted true on the Fighter, since it only ever means something for a tutorial's own dummy.
     if(started!==false&&this.fight){
       this.fight.p2.buffs=(this.fight.p2.buffs||[]).concat(BUFFS.tutorialGuard);
-      this.fight.p2.guardActive=true}
+      this.fight.p2.guardActive=true;
+      // Task 6.4 (controller ruling, Task 6.2): lesson 1 spawns the dummy WITHIN light range (a tap
+      // must connect) -- 150px is comfortably inside light1's stepIn-assisted reach (see
+      // Fighter.setupDash), unlike the default 320px neutral spawn every other fight starts at.
+      this.fight.p2.x=this.fight.p1.x+150;
+      // Task 6.4: forces BLOCK/PUNCH/KICK on for lesson 1 (and lesson 2, until Tutorial.tick's own
+      // step===2 transition turns it back off) so the "(or tap PUNCH)"/"(or tap KICK)" prompts point
+      // at real, visible buttons regardless of the player's own showButtons setting.
+      this.forceButtons=true;this.applySettings()}
     return started},
   // Fix-wave item 4: a fighter's current pose's own top (Rig.topAt), scaled by its def.scale — the
   // per-frame counterpart to the per-fight Rig.extent worst-case calc above, read by tick() every
@@ -596,10 +633,19 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // Screens.renderResult) records whether THIS particular win is the one that granted it, so a
       // replay still shows the completion line without falsely claiming another +300 gold.
       this.tutorialJustGranted=!Save.data.tutorialDone;
+      // Task 6.4: this.tutorialFreeCrystal mirrors tutorialJustGranted's own "only the run that
+      // actually granted it" story -- null on a replay (Screens.renderResult reads it to show the
+      // pull's own result line only on the win that earned it, and Screens.renderMap reads
+      // tutorialJustGranted, not this, to decide whether to pulse DOOR 1). Crystal.open('basic',
+      // {free:true}) skips the cost entirely (12_meta.js) -- a fresh save has 0 gold at this point, and
+      // the +300 gold grant just below happens in the same branch, so ordering here doesn't matter for
+      // affordability either way; free just makes it explicit and immune to a future cost retune.
+      this.tutorialFreeCrystal=null;
       if(!Save.data.tutorialDone){
         Save.data.tutorialDone=true;
         Save.data.gold=(Save.data.gold||0)+300;
-        Save.put()}}
+        Save.put();
+        this.tutorialFreeCrystal=Crystal.open('basic',{free:true})}}
     let leveledUp=false;
     if(rewards){
       // Fix round 1: reads this.champ (the champion who actually fought), not Save.data.active --
@@ -673,10 +719,16 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // used by the pause menu's QUIT and the result overlay's CONTINUE button.
   toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
+    // Task 6.4: an unconditional reset, so leaving the tutorial mid-lesson (before Tutorial.tick's own
+    // step===2 transition ever turns it back off) can never leave BLOCK/PUNCH/KICK stuck forced-on
+    // over some other, later screen or fight. A no-op (still calls applySettings, cheap) when it was
+    // already false.
+    this.forceButtons=false;this.applySettings();
     if(typeof Screens!=='undefined')Screens.show('title');
     else{this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)}},
   backToOrigin(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
+    this.forceButtons=false;this.applySettings(); // Task 6.4: see toTitle's own comment
     if(typeof Screens!=='undefined')Screens.toOrigin();else this.toTitle()},
   // Fix round 1 (controller review, Critical): the title screen's own buttons only ever get their
   // onclick bound inside Screens.renderTitle(), which only runs when some Screens.* function

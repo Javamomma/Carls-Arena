@@ -107,6 +107,14 @@ body.left-handed #powerPicker{right:auto;left:14px}
    44px instead of the path's 320px-wide/40px-tall shape. */
 .node.tutorial{border-color:#7fd18a;color:#7fd18a;background:#182018;
   width:auto;max-width:none;min-height:44px;padding:6px 16px;margin-left:6px}
+/* Task 6.4: CONTINUE off a first-time tutorial win lands on the map with DOOR 1 highlighted -- a
+   single one-shot pulse (never looping, unlike .cbtn.pulse's tutorial stall hint) so it reads as
+   "start here" without nagging on every later map visit. Screens.renderMap adds/consumes this class
+   (G.tutorialJustGranted) itself; nothing else ever sets or clears it. */
+@keyframes doorPulse{0%{box-shadow:0 0 0 0 rgba(244,197,66,.7)}70%{box-shadow:0 0 0 14px rgba(244,197,66,0)}100%{box-shadow:0 0 0 0 rgba(244,197,66,0)}}
+.node.next{animation:doorPulse 1s ease-out 1}
+@media (prefers-reduced-motion:reduce){.node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,66,.7)}}
+body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,66,.7)}
 .energy{display:flex;gap:4px;justify-content:center;margin:3px 0}
 .pip{width:14px;height:14px;border-radius:3px;background:#2a2a2a;border:1px solid #555}
 .pip.full{background:#f4c542;border-color:#f4c542}
@@ -208,6 +216,16 @@ body.left-handed #powerPicker{right:auto;left:14px}
   box-shadow:0 2px 8px rgba(0,0,0,.4);z-index:1}
 #tutorialPrompt.show{display:block}
 #tutorialPrompt.flash{background:#8cf4c5}
+/* Task 6.4: the 'LESSON n / 4' banner -- positioned in JS (G.positionTutorialPrompt, same
+   off-canvas-rect technique as #tutorialPrompt/#toast) directly above #tutorialPrompt, both still
+   clear of HUD_LINE (canvas y=104, the viewers counter's own bottom edge) so neither ever overlaps
+   it. Deliberately smaller/quieter than #tutorialPrompt itself (the prompt is the instruction; this
+   is just progress) -- gold-on-dark instead of #tutorialPrompt's solid gold pill. */
+#tutorialLesson{position:fixed;transform:translateX(-50%);font-size:10px;font-weight:bold;
+  letter-spacing:1.5px;color:#f4c542;background:rgba(10,11,18,.72);border:1px solid rgba(244,197,66,.6);
+  border-radius:10px;padding:3px 10px;text-align:center;white-space:nowrap;pointer-events:none;
+  display:none;z-index:1}
+#tutorialLesson.show{display:block}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
 <button id="btnBlock" class="cbtn atkbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
@@ -296,7 +314,9 @@ body.left-handed #powerPicker{right:auto;left:14px}
 <div id="toast"></div>
 <!-- Task 5.3: the tutorial's own prompt pill (G.positionTutorialPrompt/syncTutorialPrompt/
      hideTutorialPrompt, 80_game.js) -- same "plain DOM element outside the overlay list" pattern as
-     #toast just above. -->
+     #toast just above. Task 6.4: #tutorialLesson (the 'LESSON n / 4' banner) sits right above it,
+     positioned/shown/hidden by those same three functions. -->
+<div id="tutorialLesson"></div>
 <div id="tutorialPrompt"></div>
 </div><script>
 
@@ -495,11 +515,18 @@ const Crystal={
   // warm-up draw above), seeded from Save.data.seed++ so every open — including a pity-forced one
   // — advances the save's random stream exactly once. Refusing for cost never touches the seed or
   // pity counter: nothing about the save changes on a refusal.
-  open(kind){
+  // Task 6.4: opts.free (default falsy) skips the cost check/deduction entirely -- used by the
+  // tutorial's own free completion crystal (G.onFightEnd, 80_game.js: Crystal.open('basic',{free:true}))
+  // so a fresh save with 0 gold still gets it. Every other line (the RNG draw, pity, roster/dup
+  // handling, Save.put()) runs exactly as a paid open would -- a free pull still advances
+  // Save.data.seed and the pity counter like any other, it just never touches gold/units.
+  open(kind,opts){
+    const free=!!(opts&&opts.free);
     const k=Crystal.KINDS[kind];
     if(!k)throw new Error('unknown crystal kind: '+kind);
-    for(const c in k.cost)if((Save.data[c]||0)<k.cost[c])return null;
-    for(const c in k.cost)Save.data[c]-=k.cost[c];
+    if(!free){
+      for(const c in k.cost)if((Save.data[c]||0)<k.cost[c])return null;
+      for(const c in k.cost)Save.data[c]-=k.cost[c]}
     const rng=Crystal.rng(Save.data.seed++);
     let stars=Crystal.rollTier(k.odds,rng);
     if(!Save.data.pity)Save.data.pity={};
@@ -1137,21 +1164,35 @@ const Ctrl={
     if(dist<lightRange){it.light=true;return it}
     if(foe.state!=='ATTACK'&&closeCd===0){it.medium=true;closeCd=CLOSE_CD;return it}
     return it}}},
-  // Task 5.3: the tutorial's own dummy AI -- stands in for AI.make(enc.tier,...) as ctrl2
+  // Task 5.3/6.4: the tutorial's own dummy AI -- stands in for AI.make(enc.tier,...) as ctrl2
   // (G.startTutorial passes this directly, bypassing AI.make/AI_TIERS entirely) so the goblin's one
-  // scripted attack (step 3's "parry it" prompt needs a real medium to react to) never depends on
-  // rng: a blind frame-countdown, not a probability roll, so two fresh instances are byte-identical
-  // forever (see the determinism test in 90_tests.js). Otherwise fully passive (never blocks, dashes,
-  // or specials) -- it only ever throws a medium, once every 90 frames of NOT being busy (holding
-  // the countdown rather than spending it while mid-move/stunned, so a hit that interrupts a pending
-  // swing just delays it instead of losing it). `seed` is accepted only for signature symmetry with
-  // every other seeded controller (Ctrl.random/Ctrl.competent/AI.make) -- never actually used.
-  tutorialDummy:seed=>{let cd=90;
+  // scripted attack (lesson 3's "release just before the hit lands to PARRY" prompt needs a real
+  // medium to react to) never depends on rng: a blind frame-countdown, not a probability roll, so two
+  // fresh instances are byte-identical forever (see the determinism test in 90_tests.js). `seed` is
+  // accepted only for signature symmetry with every other seeded controller (Ctrl.random/
+  // Ctrl.competent/AI.make) -- never actually used.
+  // Task 6.4 (frozen ruling, owner playtest note "the goblin didn't really die until it started to
+  // beat me up"): completely inert -- reads Tutorial.state.step and returns Ctrl.EMPTY() outright --
+  // until Tutorial.state.step reaches 2 (lesson 3, "HOLD to block... PARRY"); a first-time player is
+  // never hit before being taught to block. Never approaches (no dash/movement intent anywhere in
+  // this controller, at any step) -- G.startTutorial/Tutorial.tick own the dummy's position directly
+  // (the lesson-1 spawn distance and the lesson-2 back-off), never this controller. From lesson 3 on,
+  // throws a medium once every 90 frames of NOT being busy (holding the countdown rather than
+  // spending it while mid-move/stunned, so a hit that interrupts a pending swing just delays it
+  // instead of losing it) -- and, 30 frames before that medium fires (cd hitting 30), pushes a
+  // 'windup' fx (72_fx.js: a red flash at the dummy's own position) directly onto fight.fx, the same
+  // "a controller may reach into fight.fx" latitude Fight.checkCinematic itself uses for the S3 card
+  // -- legitimate here because Ctrl.* lives outside the sim boundary (see this file's own header).
+  // `windup` resets to false the instant the medium actually fires so the very next 90-frame cycle
+  // gets its own fresh flash.
+  tutorialDummy:seed=>{let cd=90,windup=false;
     return{next(fight,me,foe){
       const it=Ctrl.EMPTY();
+      if(Tutorial.state.step<2)return it; // no attacks before lesson 3, no exceptions
       if(me.busy())return it;
+      if(!windup&&cd<=30){windup=true;if(fight)fight.fx.push({kind:'windup',x:me.x,y:FLOOR-140})}
       if(cd>0){cd--;return it}
-      it.medium=true;cd=90;return it}}},
+      it.medium=true;cd=90;windup=false;return it}}},
   // Task 5.3: tests/harness.py's --tutorial flag scripts this as p1 -- a deterministic bot that plays
   // the four tutorial steps in the order the prompts ask for (reading Tutorial.state.step, the same
   // live global G's own tick() reads), then finishes the dummy off with lights once every step is
@@ -1491,10 +1532,17 @@ const BUFFS={
     // G.startTutorial sets true right after layering this buff on, and that Tutorial.tick clears the
     // instant its own step counter reaches steps.length ("FINISH HIM") -- so this hook only ever reads
     // the holder it was already given, exactly like armorUp/thorns/secondWind do.
+    // Task 6.4: also marks ref.capped=true the instant a cap actually bites (never when dmg was
+    // already under holder.hp -- an ordinary hit that just happened to land on a healthy dummy must
+    // not read as "capped") -- Fight.resolve (60_fight.js) forwards this onto the hit's own popup fx
+    // as `muted`, which Render/FX (70_render.js/72_fx.js) draws grey instead of the usual gold/red,
+    // per the frozen "capped popups drawn grey" interface. Purely a ref-side flag (like ref.dmg
+    // itself), so this hook stays a pure function of its own arguments -- no global Tutorial read.
     onHit(fight,att,def,ref,holder){
       if(holder!==def)return; // only ever meaningful for the dummy defending, never attacking
       if(!holder.guardActive)return; // FINISH HIM already fired (or this holder was never guarded): no cap
-      if(ref.dmg>=holder.hp)ref.dmg=Math.max(0,holder.hp-1)}}};
+      if(ref.dmg>=holder.hp){ref.dmg=Math.max(0,holder.hp-1);ref.capped=true}}}};
+
 const Buffs={
   // Resolves ids[] to BUFFS objects and sets holder.buffs (replacing whatever was there). Called
   // once at fight/encounter setup, never per frame, so there's no per-frame allocation on the hot
@@ -2015,7 +2063,11 @@ class Fight{
     // an intermediate multi-hit leaves any hitstop already armed by a same-frame mutual trade alone.
     if(!m.hits||last)this.hitstop=m.hitstop;
     this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:crit?'#ff5a4a':'#ffd86b'});
-    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit});
+    // Task 6.4: BUFFS.tutorialGuard (47_buffs.js) sets ref.capped=true the instant it actually
+    // clamped this hit's dmg -- forwarded onto the popup fx as `muted`, which FX/Render draw grey
+    // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
+    // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
+    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
     this.fx.push({kind:'shake',amt:m.hitstop});
     this.emit('hit',att,def,dmg,att.moveName)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
@@ -3715,6 +3767,25 @@ const Render={ctx:canvas.getContext('2d'),
     c.moveTo(cx-w,cy+h);c.lineTo(cx-w,cy+h*.2);c.lineTo(cx-w*.5,cy+h*.6);
     c.lineTo(cx,cy-h*.4);c.lineTo(cx+w*.5,cy+h*.6);c.lineTo(cx+w,cy+h*.2);c.lineTo(cx+w,cy+h);
     c.closePath();c.fill();c.stroke()},
+  // Task 6.4: the tutorial's own SPAR plate -- replaces p2's entire HP bar area (not just a badge)
+  // for as long as p2.guardActive is true, so "the shield state is visible at all times" (a shield
+  // glyph plus 'SPAR', in the tutorial's own teal-green, matching .node.tutorial's own palette in
+  // 00_head.html) -- see hud() below for the guardActive branch that calls this instead of
+  // hpBarGrad/the numeric hp text, and skips this (and draws the real bar) the instant guardActive
+  // clears on lesson 4's 'SHIELD DOWN'. x/y/w/h mirror hpBar's own box exactly (never a new layout
+  // number), so nothing else in the HUD has to move around it.
+  sparPlate(c,x,y,w,h){
+    c.save();
+    c.fillStyle='#0d1a14';c.fillRect(x,y,w,h);
+    c.strokeStyle='#7fd18a';c.lineWidth=1.75;c.strokeRect(x+.75,y+.75,w-1.5,h-1.5);
+    const cx=x+22,cy=y+h/2,sw=8,sh=8;
+    c.fillStyle='#7fd18a';c.strokeStyle='#000';c.lineWidth=1;
+    c.beginPath();
+    c.moveTo(cx,cy-sh);c.lineTo(cx+sw,cy-sh*.4);c.lineTo(cx+sw,cy+sh*.3);c.lineTo(cx,cy+sh);
+    c.lineTo(cx-sw,cy+sh*.3);c.lineTo(cx-sw,cy-sh*.4);c.closePath();c.fill();c.stroke();
+    c.fillStyle='#7fd18a';c.font='bold 13px ui-monospace,monospace';c.textAlign='center';c.textBaseline='middle';
+    c.fillText('SPAR',x+w/2+sw,cy);
+    c.restore()},
   pauseGlyph(c){const r=this.pauseRect,rr=6;
     c.fillStyle='rgba(0,0,0,.4)';c.strokeStyle='#f4c542';c.lineWidth=1.5;
     c.beginPath();c.moveTo(r.x+rr,r.y);c.lineTo(r.x+r.w-rr,r.y);c.arcTo(r.x+r.w,r.y,r.x+r.w,r.y+rr,rr);
@@ -3752,14 +3823,23 @@ const Render={ctx:canvas.getContext('2d'),
     c.font='bold 14px ui-monospace,monospace';c.textAlign='left';c.fillStyle='#fff';c.fillText(a.def.name,p1barX,25);
     {const entry=Save.data.roster[G.champ];this.p1Sub(c,p1barX,39,entry?entry.level:1,entry?entry.stars:1)}
     c.font='bold 14px ui-monospace,monospace';c.textAlign='right';c.fillStyle='#fff';c.fillText(b.def.name,p2barX+barW,25);
-    c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39);
+    // Task 6.4: while p2.guardActive (the tutorial's dummy, every lesson until 'SHIELD DOWN'), the
+    // sub-label under the name reads 'TRAINING DUMMY — CANNOT BE KO'D' instead of the plain 'LVL 1' —
+    // the shield's own presentation always trumps the level line, never shown together.
+    if(b.guardActive){c.font='9px ui-monospace,monospace';c.fillStyle='#7fd18a';
+      c.fillText('TRAINING DUMMY — CANNOT BE KO\'D',p2barX+barW,39)}
+    else{c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39)}
     if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW,b.def.name);
     this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22','right');
-    this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp,'left');
+    // Task 6.4: the SPAR plate REPLACES p2's whole HP bar area (glyph+'SPAR', sparPlate above) while
+    // guardActive -- the real numeric bar/text only return once the shield actually clears (lesson 4's
+    // 'SHIELD DOWN'), so a first-time player is never shown a fake/frozen enemy hp reading mid-lesson.
+    if(b.guardActive)this.sparPlate(c,p2barX,48,barW,barH);
+    else this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp,'left');
     if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);
     c.font='bold 12px ui-monospace,monospace';c.fillStyle='#fff';c.textAlign='center';
     c.fillText(Math.max(0,Math.round(a.hp))+' / '+a.maxHp,p1barX+barW/2,48+barH-4);
-    c.fillText(Math.max(0,Math.round(b.hp))+' / '+b.maxHp,p2barX+barW/2,48+barH-4);
+    if(!b.guardActive)c.fillText(Math.max(0,Math.round(b.hp))+' / '+b.maxHp,p2barX+barW/2,48+barH-4);
     // Title (a horizontal squeeze approximates a condensed face without loading a web font) + pause.
     // Baked into an offscreen canvas by hudCache(): it never changes, so this is one drawImage.
     c.drawImage(this.hudCache().title,0,0);
@@ -3803,8 +3883,8 @@ const Render={ctx:canvas.getContext('2d'),
 // every sim tick via FX.pushAll) and never touches Fight/Fighter state. Spread uses its own seeded
 // RNG, keyed off the current fight frame and particle index, never Math.random, so --sim
 // screenshots reproduce identically frame for frame.
-const FX={list:[],shake:0,flash:0,card:null,
-  reset(){this.list.length=0;this.shake=0;this.flash=0;this.card=null},
+const FX={list:[],shake:0,flash:0,card:null,shieldDown:null,
+  reset(){this.list.length=0;this.shake=0;this.flash=0;this.card=null;this.shieldDown=null},
   _seed(i){const fr=(G.fight&&G.fight.frame)||0;return((fr*97+i*131+1)>>>0)||1},
   push(ev){
     switch(ev.kind){
@@ -3817,7 +3897,30 @@ const FX={list:[],shake:0,flash:0,card:null,
           this.list.push({kind:'dust',x:ev.x,y:ev.y,vx:Math.cos(ang)*spd,vy:-Math.abs(Math.sin(ang))*spd-.2,life:0,max:24,col:'#cbb89a'})}
         break;
       case'popup':
-        this.list.push({kind:'popup',x:ev.x,y:ev.y,text:ev.text,col:ev.col||'#fff',big:!!ev.big,life:0,max:40});
+        // Task 6.4: `muted` (Fight.resolve, forwarding BUFFS.tutorialGuard's ref.capped) draws grey
+        // instead of the pushed col -- see draw() below. Stored alongside col (never overwriting it)
+        // so a test can still see what color a hit WOULD have been.
+        this.list.push({kind:'popup',x:ev.x,y:ev.y,text:ev.text,col:ev.col||'#fff',big:!!ev.big,muted:!!ev.muted,life:0,max:40});
+        break;
+      // Task 6.4: the tutorial dummy's own wind-up tell (Ctrl.tutorialDummy, 30_input.js) -- a brief
+      // red glow at the dummy's own position, pushed exactly 30 frames before its scripted medium
+      // fires (lesson 3's "release just before the hit lands to PARRY" cue). Never gated by
+      // reduceMotion (it's the one signal a first-time player needs to react to, not a flourish).
+      case'windup':
+        this.list.push({kind:'windup',x:ev.x,y:ev.y,life:0,max:ev.frames||30});
+        break;
+      // Task 6.4: the tutorial's own "SHIELD DOWN" moment -- Tutorial.tick pushes this the instant
+      // every lesson is done and clears p2.guardActive, so the HP bar's return and the dummy actually
+      // becoming killable are marked by one unmistakable beat instead of a silent state flip. The
+      // white flash still respects reduceMotion (same as every other 'flash'); the text itself is a
+      // dedicated screen-space overlay (drawScreen below, like the S3 card) rather than a world-space
+      // list particle -- Render.frame draws the flash rectangle AFTER FX.draw()'s particles but
+      // BEFORE drawScreen(), so a world-space 'SHIELD DOWN' text would sit UNDER the flash and go
+      // briefly invisible at exactly the moment it fires (the flash starts at full opacity); this
+      // stays legible (stroked, drawn after the flash) through the whole beat, reduceMotion or not.
+      case'shieldDown':
+        if(!Save.data.settings.reduceMotion)this.flash=Math.max(this.flash,ev.frames||10);
+        this.shieldDown={t:0,frames:50};
         break;
       // Task 5.4: Save.data.settings.reduceMotion zeroes camera shake and screen flash (the two
       // motion-heavy FX) while leaving every other kind — sparks, dust, damage popups, the S3 card —
@@ -3846,14 +3949,20 @@ const FX={list:[],shake:0,flash:0,card:null,
     // Card runs on its own clock (advanced only here, from the wall-clock/screenshot render loop),
     // independent of fight.cinematic (G.tick decrements that once per sim tick); both count down
     // from the same 72-frame duration so they empty out together under normal play.
-    if(this.card){this.card.t++;if(this.card.t>=this.card.frames)this.card=null}},
+    if(this.card){this.card.t++;if(this.card.t>=this.card.frames)this.card=null}
+    if(this.shieldDown){this.shieldDown.t++;if(this.shieldDown.t>=this.shieldDown.frames)this.shieldDown=null}},
   draw(c,cam,frame){
     for(const p of this.list){
       if(p.kind==='spark'){c.globalAlpha=Math.max(0,1-p.life/p.max);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,2.5,0,Math.PI*2);c.fill()}
       else if(p.kind==='dust'){c.globalAlpha=Math.max(0,(1-p.life/p.max)*.5);c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,3+p.life*.12,0,Math.PI*2);c.fill()}
-      else if(p.kind==='popup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);c.fillStyle=p.col;
+      else if(p.kind==='popup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
+        // Task 6.4: a capped (muted) hit always reads grey, regardless of what col it was pushed
+        // with (crit/normal) -- the frozen "capped popups drawn grey" interface.
+        c.fillStyle=p.muted?'#888':p.col;
         c.font=(p.big?'bold 26px ':'bold 16px ')+'ui-monospace,monospace';c.textAlign='center';
-        c.fillText(p.text,p.x,p.y-t*30)}}
+        c.fillText(p.text,p.x,p.y-t*30)}
+      else if(p.kind==='windup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t*.6);
+        c.strokeStyle='#ff3b3b';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,16+16*t,0,Math.PI*2);c.stroke()}}
     c.globalAlpha=1},
   // Screen-space overlay for the S3 cinematic card: darken, a diagonal gold band that sweeps in
   // from the left over the first 12 frames, holds, then sweeps out to the right over the last 12.
@@ -3867,21 +3976,32 @@ const FX={list:[],shake:0,flash:0,card:null,
   // round 1. The DOM on-screen buttons sit in their own stacking context above the canvas either
   // way, but the band is kept clear of that row too for a clean read.
   drawScreen(c,frame){
-    if(!this.card)return;
-    const cd=this.card,t=cd.t,frames=cd.frames,slide=12,bandH=150,centerY=H*.52,angle=-8*Math.PI/180;
-    c.save();c.setTransform(1,0,0,1,0,0);
-    c.globalAlpha=.55;c.fillStyle='#000';c.fillRect(0,0,W,H);
-    c.globalAlpha=1;
-    const enter=Math.min(1,t/slide),exit=t>frames-slide?Math.min(1,(t-(frames-slide))/slide):0;
-    const offsetX=-W*(1-enter)+W*exit,cx=W/2+offsetX;
-    c.save();c.translate(cx,centerY);c.rotate(angle);
-    c.fillStyle='#f4c542';c.fillRect(-(W/2+120),-bandH/2,W+240,bandH);
-    c.strokeStyle='#8a6a12';c.lineWidth=3;c.strokeRect(-(W/2+120),-bandH/2,W+240,bandH);
-    c.textAlign='center';c.fillStyle='#1a1208';
-    c.font='900 44px ui-monospace,monospace';c.fillText(cd.name,0,-8);
-    c.font='bold 18px ui-monospace,monospace';c.fillText('SPECIAL 3',0,26);
-    c.restore();
-    c.restore()}};
+    if(this.card){
+      const cd=this.card,t=cd.t,frames=cd.frames,slide=12,bandH=150,centerY=H*.52,angle=-8*Math.PI/180;
+      c.save();c.setTransform(1,0,0,1,0,0);
+      c.globalAlpha=.55;c.fillStyle='#000';c.fillRect(0,0,W,H);
+      c.globalAlpha=1;
+      const enter=Math.min(1,t/slide),exit=t>frames-slide?Math.min(1,(t-(frames-slide))/slide):0;
+      const offsetX=-W*(1-enter)+W*exit,cx=W/2+offsetX;
+      c.save();c.translate(cx,centerY);c.rotate(angle);
+      c.fillStyle='#f4c542';c.fillRect(-(W/2+120),-bandH/2,W+240,bandH);
+      c.strokeStyle='#8a6a12';c.lineWidth=3;c.strokeRect(-(W/2+120),-bandH/2,W+240,bandH);
+      c.textAlign='center';c.fillStyle='#1a1208';
+      c.font='900 44px ui-monospace,monospace';c.fillText(cd.name,0,-8);
+      c.font='bold 18px ui-monospace,monospace';c.fillText('SPECIAL 3',0,26);
+      c.restore();
+      c.restore()}
+    // Task 6.4: the tutorial's "SHIELD DOWN" text -- screen-space, drawn here (after Render.frame's
+    // own flash rectangle and HUD) specifically so the accompanying white flash (pushed alongside
+    // this, see push() above) can never wash it out: stroked white-on-black for contrast against
+    // either a bright flash or the dark dungeon scene, fading out over its own 50-frame lifetime.
+    if(this.shieldDown){
+      const sd=this.shieldDown,t=Math.max(0,1-sd.t/sd.frames);
+      c.save();c.setTransform(1,0,0,1,0,0);c.globalAlpha=t;
+      c.textAlign='center';c.font='900 40px ui-monospace,monospace';c.lineWidth=5;
+      c.strokeStyle='#000';c.strokeText('SHIELD DOWN',W/2,H*.42);
+      c.fillStyle='#fff';c.fillText('SHIELD DOWN',W/2,H*.42);
+      c.restore()}}};
 
 // Task 5.3: the Floor 0 tutorial's own presentation/meta state machine. Lives here (not a sim file)
 // since step 4 reaches directly into the live Fighter (fight.p1.power) the same way G.debugPose/
@@ -3904,10 +4024,14 @@ const Tutorial={
   // STALL_FRAMES is how long the last step (POWER) is given before `stalled` flips true and an extra
   // hint layers onto the prompt -- see tick()'s own comment for why only that step gets one.
   STALL_FRAMES:900,_stepFrames:0,stalled:false,
+  // Task 6.4 (frozen prompt text): rewritten for the whole-canvas gestures -- lessons 1-2 also point
+  // at the real BLOCK/PUNCH/KICK buttons ("(or tap PUNCH)"/"(or tap KICK)"), which G.startTutorial/
+  // Tutorial.tick (below) force on (G.forceButtons) for exactly those two lessons, per the plan
+  // ruling "Lessons 1-2 force the attack buttons on... so prompts can also say 'or tap PUNCH / KICK'".
   steps:[
-    {prompt:'TAP PUNCH — land 3 light hits',done:()=>Tutorial._lights>=3},
-    {prompt:'SWIPE RIGHT / KICK — land a medium',done:()=>Tutorial._medium},
-    {prompt:'HOLD BLOCK, release just before the hit to PARRY — parry once',done:()=>Tutorial._parried},
+    {prompt:'TAP to punch — land 3 hits (or tap PUNCH)',done:()=>Tutorial._lights>=3},
+    {prompt:'SWIPE RIGHT to kick (or tap KICK)',done:()=>Tutorial._medium},
+    {prompt:'HOLD to block, release as the hit lands to PARRY',done:()=>Tutorial._parried},
     {prompt:'POWER — fire a special',
       done:fight=>!!(fight&&fight.p1&&(fight.p1.moveName==='s1'||fight.p1.moveName==='s2'||fight.p1.moveName==='s3'))}],
   reset(){
@@ -3956,11 +4080,25 @@ const Tutorial={
       this.state.done[step]=true;this._flash=30;this.state.step++;
       this._stepFrames=0;this.stalled=false;
       this.prompt=this.state.step<this.steps.length?this.steps[this.state.step].prompt:'FINISH HIM';
+      // Task 6.4 (controller ruling, Task 6.2): lesson 2 ("SWIPE RIGHT to kick") starts with the
+      // dummy backed off to ~260px so the kick's own range-tracking dash-in (MOVES.medium.track)
+      // actually has ground to cover -- lesson 1 leaves it close (see G.startTutorial's own spawn),
+      // so without this the dummy would still be sitting inside light range when lesson 2 begins.
+      if(this.state.step===1&&fight.p2)fight.p2.x=fight.p1.x+260;
+      // Task 6.4: BLOCK/PUNCH/KICK are only forced on for lessons 1-2 (set true by G.startTutorial,
+      // reset here the instant lesson 3 begins) -- from lesson 3 on, the player's own showButtons
+      // setting is all that's left deciding it (G.applySettings ORs forceButtons with the setting).
+      if(this.state.step===2&&typeof G!=='undefined'){G.forceButtons=false;G.applySettings()}
       // Release pass: clears the p2 dummy's own guardActive flag (not a Tutorial-side read) the
       // instant every step is done, so BUFFS.tutorialGuard (47_buffs.js) stops capping damage and
       // "FINISH HIM" is a real natural KO -- see that buff's comment for why it reads holder state
-      // instead of this object directly.
-      if(this.state.step>=this.steps.length&&fight.p2)fight.p2.guardActive=false}}};
+      // instead of this object directly. Task 6.4: also pushes the 'shieldDown' fx (72_fx.js: a white
+      // flash + 'SHIELD DOWN' text) on the exact same frame, so the shield's release is a visible
+      // beat, not a silent flag flip -- the HP bar (Render.hud, gated on this same guardActive read)
+      // returns starting the very next frame this draws.
+      if(this.state.step>=this.steps.length&&fight.p2){
+        fight.p2.guardActive=false;
+        fight.fx.push({kind:'shieldDown',x:fight.p2.x,y:FLOOR-160})}}}};
 const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:false,seed:1,cam:{x:STAGE_W/2,zoom:1},_tickN:0,
   // Fix-wave item 5 (final review, Minor): the page's own ?atlas=1 URL override, computed once here
   // (location.search doesn't change without a navigation) -- the exact same regex Atlas.load's own
@@ -4035,16 +4173,19 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     el.style.fontSize='13px';
     const lh=parseFloat(getComputedStyle(el).lineHeight)||1;
     if(Math.round(el.scrollHeight/lh)>2)el.style.fontSize='12px'},
-  // Task 5.3: #tutorialPrompt's position, same off-canvas-rect technique positionToast already uses
-  // (so it tracks the canvas box exactly through any letterboxing), pinned to canvas-local y=112 --
-  // just under HUD_LINE (104), clear of both the floor line/viewers counter above it and the
-  // fighters themselves below it.
+  // Task 5.3/6.4: #tutorialPrompt's position, same off-canvas-rect technique positionToast already
+  // uses (so it tracks the canvas box exactly through any letterboxing). Task 6.4 moved it from
+  // canvas-local y=112 to y=132 to make room for #tutorialLesson (the 'LESSON n / 4' banner) right
+  // above it at y=108 -- both still comfortably clear of HUD_LINE (104, the viewers counter's own
+  // bottom edge) above them and the fighters themselves below.
   positionTutorialPrompt(){
-    const r=canvas.getBoundingClientRect(),el=document.getElementById('tutorialPrompt');
-    if(!el)return;
+    const r=canvas.getBoundingClientRect(),el=document.getElementById('tutorialPrompt'),
+      lesson=document.getElementById('tutorialLesson');
     const sy=r.height/H;
+    if(lesson){lesson.style.left=(r.left+r.width/2)+'px';lesson.style.top=(r.top+108*sy)+'px'}
+    if(!el)return;
     el.style.left=(r.left+r.width/2)+'px';
-    el.style.top=(r.top+112*sy)+'px'},
+    el.style.top=(r.top+132*sy)+'px'},
   // Called once per tutorial-mode tick (see tick() below): mirrors Tutorial.prompt/._flash onto the
   // DOM overlay every frame -- cheap (a textContent/classList write only, no layout work beyond what
   // positionTutorialPrompt already did once at fit()) and simpler than trying to diff for changes,
@@ -4055,6 +4196,12 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     el.classList.add('show');
     el.classList.toggle('flash',Tutorial._flash>0);
     el.textContent=Tutorial.prompt;
+    // Task 6.4: the 'LESSON n / 4' banner -- n is state.step+1, clamped to steps.length so it still
+    // reads 'LESSON 4 / 4' (not 5 / 4) during the "FINISH HIM" window after step 4 completes but
+    // before the fight's own natural KO ends it.
+    const lesson=document.getElementById('tutorialLesson');
+    if(lesson){lesson.classList.add('show');
+      lesson.textContent='LESSON '+Math.min(Tutorial.state.step+1,Tutorial.steps.length)+' / '+Tutorial.steps.length}
     // Fix-wave item 6 (final review, Minor): pulses #btnPower once Tutorial.stalled (POWER step idle
     // past STALL_FRAMES) -- see Tutorial.tick's own comment. Toggled every tutorial-mode tick, same
     // as .flash just above, and cleared automatically the instant Tutorial.stalled goes back to false
@@ -4062,6 +4209,8 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     const pwr=document.getElementById('btnPower');
     if(pwr)pwr.classList.toggle('pulse',Tutorial.stalled)},
   hideTutorialPrompt(){const el=document.getElementById('tutorialPrompt');if(el)el.classList.remove('show');
+    // Task 6.4: #tutorialLesson hides alongside #tutorialPrompt -- same lifetime, same caller.
+    const lesson=document.getElementById('tutorialLesson');if(lesson)lesson.classList.remove('show');
     // Fix-wave item 6: also clears any pulse left over from a previous tutorial run -- mirrors the
     // comment on this function's only other caller-relevant state (Tutorial.prompt itself).
     const pwr=document.getElementById('btnPower');if(pwr)pwr.classList.remove('pulse')},
@@ -4268,7 +4417,15 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // defaulted true on the Fighter, since it only ever means something for a tutorial's own dummy.
     if(started!==false&&this.fight){
       this.fight.p2.buffs=(this.fight.p2.buffs||[]).concat(BUFFS.tutorialGuard);
-      this.fight.p2.guardActive=true}
+      this.fight.p2.guardActive=true;
+      // Task 6.4 (controller ruling, Task 6.2): lesson 1 spawns the dummy WITHIN light range (a tap
+      // must connect) -- 150px is comfortably inside light1's stepIn-assisted reach (see
+      // Fighter.setupDash), unlike the default 320px neutral spawn every other fight starts at.
+      this.fight.p2.x=this.fight.p1.x+150;
+      // Task 6.4: forces BLOCK/PUNCH/KICK on for lesson 1 (and lesson 2, until Tutorial.tick's own
+      // step===2 transition turns it back off) so the "(or tap PUNCH)"/"(or tap KICK)" prompts point
+      // at real, visible buttons regardless of the player's own showButtons setting.
+      this.forceButtons=true;this.applySettings()}
     return started},
   // Fix-wave item 4: a fighter's current pose's own top (Rig.topAt), scaled by its def.scale — the
   // per-frame counterpart to the per-fight Rig.extent worst-case calc above, read by tick() every
@@ -4481,10 +4638,19 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // Screens.renderResult) records whether THIS particular win is the one that granted it, so a
       // replay still shows the completion line without falsely claiming another +300 gold.
       this.tutorialJustGranted=!Save.data.tutorialDone;
+      // Task 6.4: this.tutorialFreeCrystal mirrors tutorialJustGranted's own "only the run that
+      // actually granted it" story -- null on a replay (Screens.renderResult reads it to show the
+      // pull's own result line only on the win that earned it, and Screens.renderMap reads
+      // tutorialJustGranted, not this, to decide whether to pulse DOOR 1). Crystal.open('basic',
+      // {free:true}) skips the cost entirely (12_meta.js) -- a fresh save has 0 gold at this point, and
+      // the +300 gold grant just below happens in the same branch, so ordering here doesn't matter for
+      // affordability either way; free just makes it explicit and immune to a future cost retune.
+      this.tutorialFreeCrystal=null;
       if(!Save.data.tutorialDone){
         Save.data.tutorialDone=true;
         Save.data.gold=(Save.data.gold||0)+300;
-        Save.put()}}
+        Save.put();
+        this.tutorialFreeCrystal=Crystal.open('basic',{free:true})}}
     let leveledUp=false;
     if(rewards){
       // Fix round 1: reads this.champ (the champion who actually fought), not Save.data.active --
@@ -4558,10 +4724,16 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // used by the pause menu's QUIT and the result overlay's CONTINUE button.
   toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
+    // Task 6.4: an unconditional reset, so leaving the tutorial mid-lesson (before Tutorial.tick's own
+    // step===2 transition ever turns it back off) can never leave BLOCK/PUNCH/KICK stuck forced-on
+    // over some other, later screen or fight. A no-op (still calls applySettings, cheap) when it was
+    // already false.
+    this.forceButtons=false;this.applySettings();
     if(typeof Screens!=='undefined')Screens.show('title');
     else{this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)}},
   backToOrigin(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
+    this.forceButtons=false;this.applySettings(); // Task 6.4: see toTitle's own comment
     if(typeof Screens!=='undefined')Screens.toOrigin();else this.toTitle()},
   // Fix round 1 (controller review, Critical): the title screen's own buttons only ever get their
   // onclick bound inside Screens.renderTitle(), which only runs when some Screens.* function
@@ -4905,14 +5077,20 @@ const Screens={
       // Fix-wave item 6: a non-'open' node is disabled -- it used to be a live button that looked
       // and clicked exactly like an open one, silently refusing (via a toast an overlay painted
       // over) instead of visibly blocking the click in the first place.
+      // Task 6.4 (frozen interface: "CONTINUE → map with DOOR 1 highlighted, .node.next pulsing
+      // once"): DOOR 1 (floor 1, node 0) only, only on the very map render right after a first-time
+      // tutorial completion (G.tutorialJustGranted -- G.onFightEnd sets it, cleared the instant it's
+      // consumed here so it never pulses again on a later map visit or a tutorial replay).
+      const highlightDoor1=n===1&&G.tutorialJustGranted;
       f.nodes.forEach((node,i)=>{
         const b=document.createElement('button');
-        b.className='node '+node.state;
+        b.className='node '+node.state+(i===0&&highlightDoor1?' next':'');
         b.appendChild(Screens.doorStack('DOOR '+(i+1),node.enc));
         b.disabled=node.state!=='open';
         b.onclick=()=>{Screens._origin={name:'map',args:[n]};
           G.startFight({floor:n,node:i,champ:Save.data.active})};
         path.appendChild(b)});
+      if(highlightDoor1)G.tutorialJustGranted=false;
       const boss=document.createElement('button');
       boss.className='node boss '+f.boss.state;
       boss.appendChild(Screens.doorStack('BOSS',f.boss.enc));
@@ -5158,7 +5336,14 @@ const Screens={
     // suffix only appears on the run that actually granted it (G.tutorialJustGranted).
     if(won&&G.mode==='tutorial'){
       const t='TUTORIAL COMPLETE'+(G.tutorialJustGranted?' — +300 GOLD':'');
-      line=line?line+'  '+t:t}
+      line=line?line+'  '+t:t;
+      // Task 6.4: on a first completion only, the free basic crystal G.onFightEnd already opened
+      // (G.tutorialFreeCrystal, Crystal.open('basic',{free:true})) gets the exact same result-line
+      // text the standalone crystal screen's own reveal shows (Screens.resultText) -- "NEW CHAMPION:
+      // KATIA 2★" for a fresh pull, or the dup/shards line if it happened to roll an already-owned
+      // champion. Never shown on a replay (tutorialJustGranted false, tutorialFreeCrystal null).
+      if(G.tutorialJustGranted&&G.tutorialFreeCrystal)
+        line=line+'  '+Screens.resultText(G.tutorialFreeCrystal)}
     // Task 5.1: the ratings recap -- shown for every fight (win or loss), independent of rewards,
     // since viewers accrue off the fight itself, not off the quest/arena outcome.
     if(this._peakViewers!=null)line=(line?line+'  ':'')+'PEAK VIEWERS '+Render.fmtViewers(this._peakViewers);
@@ -7964,13 +8149,57 @@ Test.add('G.startTutorial applies the noKo buff to p1, and a realistic (atkMul .
   ok(G.fight&&G.fight.p1.hp>G.fight.p1.maxHp*0.5,
     'the tutorial\'s own atkMul must keep the goblin\'s damage far too small to meaningfully threaten the player');
   G.toTitle();G.sim=false});
-Test.add('Ctrl.tutorialDummy is deterministic (two fresh instances match exactly) and eventually throws a medium',()=>{
+// Task 6.4: Ctrl.tutorialDummy now reads Tutorial.state.step and stays completely inert before
+// lesson 3 (index 2) -- amended from its Task 5.3 version (which threw a medium unconditionally from
+// frame 1) to match the frozen ruling "a first-time player is never hit before being taught to
+// block". Tutorial.state.step is set to 2 here so the rest of this test (determinism, eventually
+// throwing a medium) still exercises the same behavior the pre-6.4 version checked, just gated.
+Test.add('Ctrl.tutorialDummy is deterministic (two fresh instances match exactly) and eventually throws a medium, once Tutorial.state.step reaches lesson 3',()=>{
+  Tutorial.reset();Tutorial.state.step=2;
   const c1=Ctrl.tutorialDummy(),c2=Ctrl.tutorialDummy();
   const me={busy:()=>false,state:'IDLE',moveName:null};
   const seq1=[],seq2=[];
   for(let i=0;i<200;i++){seq1.push(JSON.stringify(c1.next(null,me,me)));seq2.push(JSON.stringify(c2.next(null,me,me)))}
   eq(JSON.stringify(seq1),JSON.stringify(seq2),'two fresh instances must be identical (deterministic, no rng)');
   ok(seq1.some(s=>JSON.parse(s).medium),'the dummy must throw a medium at some point')});
+// Task 6.4 (frozen ruling): before lesson 3, the dummy must never throw a medium (or anything else),
+// and must never push a windup fx either -- regardless of how many frames it's given.
+Test.add('Ctrl.tutorialDummy stays completely inert (no attacks, no fx) before Tutorial.state.step reaches lesson 3',()=>{
+  Tutorial.reset(); // step 0
+  const c=Ctrl.tutorialDummy();
+  const me={busy:()=>false,state:'IDLE',moveName:null,x:800};
+  const fight={fx:[]};
+  for(let i=0;i<600;i++){
+    const it=c.next(fight,me,me);
+    ok(!it.medium&&!it.light&&!it.heavy&&!it.block&&!it.dashBack,
+      'must never press any intent before lesson 3 (frame '+i+'): '+JSON.stringify(it))}
+  eq(fight.fx.length,0,'must never push a windup fx before lesson 3 either')});
+// Task 6.4 (frozen interface): "at step 3 it winds up with a red flash 30 frames before each medium,
+// every 90 frames". Driven the same way as the two tests above (a raw controller loop, not a real
+// Fight), so the exact frame offset between the pushed fx and the medium intent can be measured
+// directly rather than inferred from a full sim run.
+Test.add('Ctrl.tutorialDummy pushes a windup fx exactly 30 frames before each medium, once lesson 3 is reached',()=>{
+  Tutorial.reset();Tutorial.state.step=2;
+  const c=Ctrl.tutorialDummy();
+  const me={busy:()=>false,state:'IDLE',moveName:null,x:800};
+  const fight={fx:[]};
+  let windupAtFrame=-1,mediumAtFrame=-1;
+  for(let i=0;i<150&&mediumAtFrame<0;i++){
+    const it=c.next(fight,me,me);
+    if(fight.fx.length&&windupAtFrame<0)windupAtFrame=i;
+    if(it.medium)mediumAtFrame=i}
+  ok(windupAtFrame>=0,'a windup fx must have been pushed before the medium fired');
+  eq(fight.fx[0].kind,'windup');
+  eq(mediumAtFrame-windupAtFrame,30,'the windup must fire exactly 30 frames before the medium');
+  // A second cycle: cadence between medium throws stays 90 frames, and a fresh windup fires again.
+  fight.fx.length=0;
+  let secondWindupAt=-1,secondMediumAt=-1;
+  for(let i=0;i<150&&secondMediumAt<0;i++){
+    const it=c.next(fight,me,me);
+    if(fight.fx.length&&secondWindupAt<0)secondWindupAt=i;
+    if(it.medium)secondMediumAt=i}
+  eq(secondMediumAt,90,'the next medium must fire exactly 90 frames after the previous one');
+  eq(secondMediumAt-secondWindupAt,30,'the second windup must also lead its medium by exactly 30 frames')});
 Test.add('BUFFS.tutorialGuard caps incoming damage so a defending holder can\'t drop below 1 hp while holder.guardActive is set, and stops capping once cleared',()=>{
   // Release pass: this buff now reads only holder.guardActive (plain Fighter state), not the global
   // Tutorial object -- see BUFFS.tutorialGuard's own comment (47_buffs.js) and the sim-purity scan
@@ -8077,5 +8306,189 @@ Test.add('#tutorialPrompt shows the current step\'s prompt text during a tutoria
   ok(!document.getElementById('tutorialPrompt').classList.contains('show'),
     '#tutorialPrompt must hide once the tutorial ends');
   G.sim=false});
+// ---- Task 6.4: tutorial spar mode -----------------------------------------------------------
+Test.add('a genuinely idle player is never hit by the tutorial dummy before lesson 3 is reached (600 frames)',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.tutorialDummy()});
+  G.sim=true;
+  for(let i=0;i<600;i++)G.tick();
+  const enemyHits=G.fight.log.filter(e=>e.type==='hit'&&e.who===-1);
+  eq(enemyHits.length,0,'the dummy must never land a hit before the player is taught to block: '+JSON.stringify(enemyHits));
+  eq(Tutorial.state.step,0,'sanity: a genuinely idle player must still be stuck on lesson 1');
+  G.toTitle();G.sim=false});
+Test.add('the tutorial spawns the dummy exactly 150px from the player for lesson 1 (within light range) -- a tap connects within 8 frames',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.script([L(0,0)]),ctrl2:Ctrl.idle()});
+  const gap=Math.abs(G.fight.p2.x-G.fight.p1.x);
+  eq(gap,150,'lesson 1 must spawn the dummy exactly 150px from the player');
+  G.sim=true;
+  let landedAt=-1;
+  for(let i=0;i<8&&landedAt<0;i++){G.tick();if(Tutorial._lights>0)landedAt=i}
+  ok(landedAt>=0&&landedAt<8,'a light thrown at frame 1 must land within 8 frames (lights so far: '+Tutorial._lights+')');
+  G.toTitle();G.sim=false});
+Test.add('lesson 2 (a landed medium) backs the dummy off to 260px so the kick\'s dash-in has ground to cover',()=>{
+  Tutorial.reset();
+  const p1={x:540},p2={x:690,guardActive:true};
+  const f={p1,p2,fx:[]};
+  Tutorial._lights=3;Tutorial.tick(f); // completes lesson 1 -> enters lesson 2
+  eq(Tutorial.state.step,1);
+  eq(p2.x,p1.x+260,'the dummy must back off to exactly 260px at the start of lesson 2');
+  Tutorial.reset()});
+Test.add('G.forceButtons is forced on for lessons 1-2 and turns back off from lesson 3 onward',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  eq(G.forceButtons,true,'lesson 1 must force the attack buttons on');
+  ok(document.body.classList.contains('show-atk'),'body.show-atk must be set while forced on');
+  Tutorial.state.step=1;
+  eq(G.forceButtons,true,'lesson 2 must still force the attack buttons on (unchanged by lesson 1->2)');
+  Tutorial._medium=true;
+  Tutorial.tick(G.fight); // lands the medium -- advances lesson 2 -> lesson 3
+  eq(Tutorial.state.step,2,'sanity: must have advanced into lesson 3');
+  eq(G.forceButtons,false,'lesson 3 must turn the forced buttons back off');
+  G.toTitle();
+  eq(G.forceButtons,false,'leaving the tutorial must never leave the buttons stuck forced-on');
+  G.sim=false});
+Test.add('#tutorialLesson shows LESSON n / 4 for the current step, clamps at 4 during FINISH HIM, and hides once the tutorial ends',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  G.sim=true;G.tick();
+  const el=document.getElementById('tutorialLesson');
+  ok(el,'#tutorialLesson must exist');
+  eq(el.textContent,'LESSON 1 / 4');
+  ok(el.classList.contains('show'));
+  Tutorial.state.step=2;G.tick();
+  eq(el.textContent,'LESSON 3 / 4');
+  Tutorial.state.step=Tutorial.steps.length;G.tick();
+  eq(el.textContent,'LESSON 4 / 4','must clamp at 4 / 4, never overshoot during FINISH HIM');
+  G.toTitle();
+  ok(!document.getElementById('tutorialLesson').classList.contains('show'),
+    '#tutorialLesson must hide once the tutorial ends');
+  G.sim=false});
+Test.add('completing lesson 4 pushes a shieldDown fx and clears p2.guardActive on the same tick',()=>{
+  Tutorial.reset();Tutorial.state.step=3;
+  const p1={power:0,state:'IDLE',moveName:null};
+  const p2={guardActive:true,x:900};
+  const f={p1,p2,fx:[]};
+  Tutorial.tick(f); // arms power:100 for the POWER step
+  eq(p1.power,100);
+  p1.state='ATTACK';p1.moveName='s1';
+  Tutorial.tick(f);
+  eq(Tutorial.state.step,4,'firing the special must complete lesson 4');
+  eq(p2.guardActive,false,'guardActive must clear the instant lesson 4 completes');
+  const sd=f.fx.find(e=>e.kind==='shieldDown');
+  ok(sd,'a shieldDown fx must be pushed: '+JSON.stringify(f.fx));
+  eq(sd.x,p2.x,'the shieldDown fx must be positioned at the dummy');
+  Tutorial.reset()});
+Test.add('the HUD shows the SPAR plate and the "cannot be KO\'d" label while p2.guardActive, and the normal name/hp bar once it clears',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  G.sim=true;G.tick();
+  ok(G.fight.p2.guardActive,'sanity: the dummy must start guarded');
+  const c=Render.ctx,origFillText=c.fillText.bind(c);
+  let calls=[];
+  c.fillText=(text,x,y)=>{calls.push(text);return origFillText(text,x,y)};
+  Render.hud(c,G.fight);
+  c.fillText=origFillText;
+  ok(calls.includes('SPAR'),'the SPAR label must be drawn while guardActive: '+JSON.stringify(calls));
+  ok(calls.some(t=>t.includes('CANNOT BE KO')),
+    'the "cannot be KO\'d" label must be drawn while guardActive: '+JSON.stringify(calls));
+  const p2hpLabel=Math.max(0,Math.round(G.fight.p2.hp))+' / '+G.fight.p2.maxHp;
+  ok(!calls.includes(p2hpLabel),'the numeric p2 hp label must not be drawn while guardActive');
+  G.fight.p2.guardActive=false;
+  calls=[];
+  c.fillText=(text,x,y)=>{calls.push(text);return origFillText(text,x,y)};
+  Render.hud(c,G.fight);
+  c.fillText=origFillText;
+  ok(!calls.includes('SPAR'),'the SPAR label must not draw once guardActive clears');
+  ok(calls.includes(p2hpLabel),'the numeric p2 hp label must return once guardActive clears: '+JSON.stringify(calls));
+  G.toTitle();G.sim=false});
+Test.add('a hit actually capped by BUFFS.tutorialGuard sets ref.capped, and Fight.resolve forwards it onto the popup fx as muted',()=>{
+  const capped={hp:5,guardActive:true};
+  const ref1={dmg:20};
+  BUFFS.tutorialGuard.onHit(null,{},capped,ref1,capped);
+  ok(ref1.capped,'ref.capped must be set when the hit was actually capped');
+  const notCapped={hp:500,guardActive:true};
+  const ref2={dmg:20};
+  BUFFS.tutorialGuard.onHit(null,{},notCapped,ref2,notCapped);
+  ok(!ref2.capped,'ref.capped must stay unset when nothing was actually capped');
+  // Integration: a real capped hit during a live tutorial fight must push a muted popup fx.
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  G.fight.p2.hp=2; // one more full-strength light would exceed this -- must get capped, not KO
+  closeIn(G.fight);G.sim=true;
+  const calls=[];
+  const origPush=FX.push.bind(FX);
+  FX.push=ev=>{calls.push(ev);return origPush(ev)};
+  for(let i=0;i<60&&!calls.some(e=>e.kind==='popup'&&e.muted);i++)G.tick();
+  FX.push=origPush;
+  ok(calls.some(e=>e.kind==='popup'&&e.muted),
+    'a capped hit must push a muted popup fx: '+JSON.stringify(calls.filter(e=>e.kind==='popup')));
+  ok(G.fight.p2.hp>=1,'the dummy must never have actually dropped below 1 hp from the capped hit');
+  G.toTitle();G.sim=false});
+Test.add('a muted popup always renders grey, regardless of what color it was pushed with',()=>{
+  FX.reset();
+  FX.push({kind:'popup',x:1,y:1,text:'4',col:'#ff4444',big:true,muted:true});
+  const p=FX.list[FX.list.length-1];
+  eq(p.muted,true);eq(p.col,'#ff4444','the original col must still be stored, just overridden at draw time');
+  // A duck-typed fake context: FX.draw's popup branch only ever reads/writes globalAlpha/fillStyle/
+  // font/textAlign and calls fillText -- a plain object exercising exactly those is enough to observe
+  // what color it actually draws with, without touching Render.ctx (the live canvas) at all.
+  const c={fillStyle:null,globalAlpha:1,font:'',textAlign:'',fillText(){}};
+  FX.draw(c,{x:0,zoom:1},0);
+  eq(c.fillStyle,'#888','a muted popup must render grey (#888), not its own pushed col');
+  FX.reset();
+  FX.push({kind:'popup',x:1,y:1,text:'4',col:'#ffd86b',big:false,muted:false});
+  const c2={fillStyle:null,globalAlpha:1,font:'',textAlign:'',fillText(){}};
+  FX.draw(c2,{x:0,zoom:1},0);
+  eq(c2.fillStyle,'#ffd86b','an un-muted popup must still render its own pushed col');
+  FX.reset()});
+Test.add('Crystal.open(kind,{free:true}) skips the cost check/deduction entirely; a normal open still refuses without funds',()=>{
+  Save.data=Meta.defaults();Save.data.gold=0;Save.data.units=0;
+  const refused=Crystal.open('basic');
+  eq(refused,null,'a normal (non-free) open must still be refused for lack of gold');
+  const r=Crystal.open('basic',{free:true});
+  ok(r,'a free open must never be refused for lack of gold');
+  eq(Save.data.gold,0,'a free open must not deduct any cost');
+  ok(CHAMPS[r.champId],'a free open must still resolve to a real champion');
+  eq(Save.data.gold,0,'still no gold spent after resolving the pull')});
+Test.add('completing the tutorial for the first time opens one free basic crystal (roster grows to 2, no cost deducted), and does not repeat on replay',()=>{
+  Save.data=Meta.defaults();
+  eq(Object.keys(Save.data.roster).length,1,'sanity: a fresh save starts with exactly 1 champion');
+  const goldBefore=Save.data.gold||0;
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=Tutorial.steps.length;G.fight.p2.guardActive=false;
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  ok(G.tutorialFreeCrystal,'G.tutorialFreeCrystal must record the free pull\'s own result');
+  eq(Object.keys(Save.data.roster).length,2,'the free crystal pull must add exactly one new champion');
+  eq(Save.data.gold,goldBefore+300,'the free crystal must cost nothing on top of the +300 gold grant');
+  ok(document.getElementById('resultLine').textContent.includes(Screens.resultText(G.tutorialFreeCrystal)),
+    'the crystal\'s own result line must appear on the result screen: '+document.getElementById('resultLine').textContent);
+  G.toTitle();
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=Tutorial.steps.length;G.fight.p2.guardActive=false;
+  closeIn(G.fight);G.fight.p2.hp=1;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  ok(!G.tutorialFreeCrystal,'G.tutorialFreeCrystal must be null on a replay');
+  eq(Object.keys(Save.data.roster).length,2,'a replay must not grant a second free crystal');
+  G.toTitle();G.sim=false});
+Test.add('CONTINUE off a first-time tutorial win lands on the map with DOOR 1 (.node.next) highlighted, once, never on a later visit',()=>{
+  Save.data=Meta.defaults();
+  Screens._origin={name:'map',args:[1]};
+  G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
+  Tutorial.state.step=Tutorial.steps.length;G.fight.p2.guardActive=false;
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400;i++)G.tick();
+  eq(G.state,'RESULT');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'map');
+  const doors=document.querySelectorAll('#mapPath .node:not(.boss)');
+  ok(doors[0].classList.contains('next'),'DOOR 1 must be highlighted right after a first-time tutorial win');
+  Screens.map(1); // a later visit to the same map must not still be pulsing
+  const doors2=document.querySelectorAll('#mapPath .node:not(.boss)');
+  ok(!doors2[0].classList.contains('next'),'the highlight must be consumed after one map render, not linger');
+  G.toTitle();G.sim=false});
 
 </script></body></html>

@@ -175,21 +175,35 @@ const Ctrl={
     if(dist<lightRange){it.light=true;return it}
     if(foe.state!=='ATTACK'&&closeCd===0){it.medium=true;closeCd=CLOSE_CD;return it}
     return it}}},
-  // Task 5.3: the tutorial's own dummy AI -- stands in for AI.make(enc.tier,...) as ctrl2
+  // Task 5.3/6.4: the tutorial's own dummy AI -- stands in for AI.make(enc.tier,...) as ctrl2
   // (G.startTutorial passes this directly, bypassing AI.make/AI_TIERS entirely) so the goblin's one
-  // scripted attack (step 3's "parry it" prompt needs a real medium to react to) never depends on
-  // rng: a blind frame-countdown, not a probability roll, so two fresh instances are byte-identical
-  // forever (see the determinism test in 90_tests.js). Otherwise fully passive (never blocks, dashes,
-  // or specials) -- it only ever throws a medium, once every 90 frames of NOT being busy (holding
-  // the countdown rather than spending it while mid-move/stunned, so a hit that interrupts a pending
-  // swing just delays it instead of losing it). `seed` is accepted only for signature symmetry with
-  // every other seeded controller (Ctrl.random/Ctrl.competent/AI.make) -- never actually used.
-  tutorialDummy:seed=>{let cd=90;
+  // scripted attack (lesson 3's "release just before the hit lands to PARRY" prompt needs a real
+  // medium to react to) never depends on rng: a blind frame-countdown, not a probability roll, so two
+  // fresh instances are byte-identical forever (see the determinism test in 90_tests.js). `seed` is
+  // accepted only for signature symmetry with every other seeded controller (Ctrl.random/
+  // Ctrl.competent/AI.make) -- never actually used.
+  // Task 6.4 (frozen ruling, owner playtest note "the goblin didn't really die until it started to
+  // beat me up"): completely inert -- reads Tutorial.state.step and returns Ctrl.EMPTY() outright --
+  // until Tutorial.state.step reaches 2 (lesson 3, "HOLD to block... PARRY"); a first-time player is
+  // never hit before being taught to block. Never approaches (no dash/movement intent anywhere in
+  // this controller, at any step) -- G.startTutorial/Tutorial.tick own the dummy's position directly
+  // (the lesson-1 spawn distance and the lesson-2 back-off), never this controller. From lesson 3 on,
+  // throws a medium once every 90 frames of NOT being busy (holding the countdown rather than
+  // spending it while mid-move/stunned, so a hit that interrupts a pending swing just delays it
+  // instead of losing it) -- and, 30 frames before that medium fires (cd hitting 30), pushes a
+  // 'windup' fx (72_fx.js: a red flash at the dummy's own position) directly onto fight.fx, the same
+  // "a controller may reach into fight.fx" latitude Fight.checkCinematic itself uses for the S3 card
+  // -- legitimate here because Ctrl.* lives outside the sim boundary (see this file's own header).
+  // `windup` resets to false the instant the medium actually fires so the very next 90-frame cycle
+  // gets its own fresh flash.
+  tutorialDummy:seed=>{let cd=90,windup=false;
     return{next(fight,me,foe){
       const it=Ctrl.EMPTY();
+      if(Tutorial.state.step<2)return it; // no attacks before lesson 3, no exceptions
       if(me.busy())return it;
+      if(!windup&&cd<=30){windup=true;if(fight)fight.fx.push({kind:'windup',x:me.x,y:FLOOR-140})}
       if(cd>0){cd--;return it}
-      it.medium=true;cd=90;return it}}},
+      it.medium=true;cd=90;windup=false;return it}}},
   // Task 5.3: tests/harness.py's --tutorial flag scripts this as p1 -- a deterministic bot that plays
   // the four tutorial steps in the order the prompts ask for (reading Tutorial.state.step, the same
   // live global G's own tick() reads), then finishes the dummy off with lights once every step is

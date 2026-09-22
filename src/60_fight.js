@@ -109,7 +109,11 @@ class Fight{
     // an intermediate multi-hit leaves any hitstop already armed by a same-frame mutual trade alone.
     if(!m.hits||last)this.hitstop=m.hitstop;
     this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:crit?'#ff5a4a':'#ffd86b'});
-    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit});
+    // Task 6.4: BUFFS.tutorialGuard (47_buffs.js) sets ref.capped=true the instant it actually
+    // clamped this hit's dmg -- forwarded onto the popup fx as `muted`, which FX/Render draw grey
+    // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
+    // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
+    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
     this.fx.push({kind:'shake',amt:m.hitstop});
     this.emit('hit',att,def,dmg,att.moveName)}
   finish(){this.over=true;const a=this.p1,b=this.p2;

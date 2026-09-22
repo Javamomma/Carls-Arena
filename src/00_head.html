@@ -107,6 +107,14 @@ body.left-handed #powerPicker{right:auto;left:14px}
    44px instead of the path's 320px-wide/40px-tall shape. */
 .node.tutorial{border-color:#7fd18a;color:#7fd18a;background:#182018;
   width:auto;max-width:none;min-height:44px;padding:6px 16px;margin-left:6px}
+/* Task 6.4: CONTINUE off a first-time tutorial win lands on the map with DOOR 1 highlighted -- a
+   single one-shot pulse (never looping, unlike .cbtn.pulse's tutorial stall hint) so it reads as
+   "start here" without nagging on every later map visit. Screens.renderMap adds/consumes this class
+   (G.tutorialJustGranted) itself; nothing else ever sets or clears it. */
+@keyframes doorPulse{0%{box-shadow:0 0 0 0 rgba(244,197,66,.7)}70%{box-shadow:0 0 0 14px rgba(244,197,66,0)}100%{box-shadow:0 0 0 0 rgba(244,197,66,0)}}
+.node.next{animation:doorPulse 1s ease-out 1}
+@media (prefers-reduced-motion:reduce){.node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,66,.7)}}
+body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,66,.7)}
 .energy{display:flex;gap:4px;justify-content:center;margin:3px 0}
 .pip{width:14px;height:14px;border-radius:3px;background:#2a2a2a;border:1px solid #555}
 .pip.full{background:#f4c542;border-color:#f4c542}
@@ -208,6 +216,16 @@ body.left-handed #powerPicker{right:auto;left:14px}
   box-shadow:0 2px 8px rgba(0,0,0,.4);z-index:1}
 #tutorialPrompt.show{display:block}
 #tutorialPrompt.flash{background:#8cf4c5}
+/* Task 6.4: the 'LESSON n / 4' banner -- positioned in JS (G.positionTutorialPrompt, same
+   off-canvas-rect technique as #tutorialPrompt/#toast) directly above #tutorialPrompt, both still
+   clear of HUD_LINE (canvas y=104, the viewers counter's own bottom edge) so neither ever overlaps
+   it. Deliberately smaller/quieter than #tutorialPrompt itself (the prompt is the instruction; this
+   is just progress) -- gold-on-dark instead of #tutorialPrompt's solid gold pill. */
+#tutorialLesson{position:fixed;transform:translateX(-50%);font-size:10px;font-weight:bold;
+  letter-spacing:1.5px;color:#f4c542;background:rgba(10,11,18,.72);border:1px solid rgba(244,197,66,.6);
+  border-radius:10px;padding:3px 10px;text-align:center;white-space:nowrap;pointer-events:none;
+  display:none;z-index:1}
+#tutorialLesson.show{display:block}
 </style></head><body><div id="wrap"><canvas id="game" width="854" height="480"></canvas>
 <div id="btns">
 <button id="btnBlock" class="cbtn atkbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
@@ -296,6 +314,8 @@ body.left-handed #powerPicker{right:auto;left:14px}
 <div id="toast"></div>
 <!-- Task 5.3: the tutorial's own prompt pill (G.positionTutorialPrompt/syncTutorialPrompt/
      hideTutorialPrompt, 80_game.js) -- same "plain DOM element outside the overlay list" pattern as
-     #toast just above. -->
+     #toast just above. Task 6.4: #tutorialLesson (the 'LESSON n / 4' banner) sits right above it,
+     positioned/shown/hidden by those same three functions. -->
+<div id="tutorialLesson"></div>
 <div id="tutorialPrompt"></div>
 </div><script>

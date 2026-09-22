@@ -97,10 +97,17 @@ const BUFFS={
     // G.startTutorial sets true right after layering this buff on, and that Tutorial.tick clears the
     // instant its own step counter reaches steps.length ("FINISH HIM") -- so this hook only ever reads
     // the holder it was already given, exactly like armorUp/thorns/secondWind do.
+    // Task 6.4: also marks ref.capped=true the instant a cap actually bites (never when dmg was
+    // already under holder.hp -- an ordinary hit that just happened to land on a healthy dummy must
+    // not read as "capped") -- Fight.resolve (60_fight.js) forwards this onto the hit's own popup fx
+    // as `muted`, which Render/FX (70_render.js/72_fx.js) draws grey instead of the usual gold/red,
+    // per the frozen "capped popups drawn grey" interface. Purely a ref-side flag (like ref.dmg
+    // itself), so this hook stays a pure function of its own arguments -- no global Tutorial read.
     onHit(fight,att,def,ref,holder){
       if(holder!==def)return; // only ever meaningful for the dummy defending, never attacking
       if(!holder.guardActive)return; // FINISH HIM already fired (or this holder was never guarded): no cap
-      if(ref.dmg>=holder.hp)ref.dmg=Math.max(0,holder.hp-1)}}};
+      if(ref.dmg>=holder.hp){ref.dmg=Math.max(0,holder.hp-1);ref.capped=true}}}};
+
 const Buffs={
   // Resolves ids[] to BUFFS objects and sets holder.buffs (replacing whatever was there). Called
   // once at fight/encounter setup, never per frame, so there's no per-frame allocation on the hot

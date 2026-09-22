@@ -167,14 +167,20 @@ const Screens={
       // Fix-wave item 6: a non-'open' node is disabled -- it used to be a live button that looked
       // and clicked exactly like an open one, silently refusing (via a toast an overlay painted
       // over) instead of visibly blocking the click in the first place.
+      // Task 6.4 (frozen interface: "CONTINUE → map with DOOR 1 highlighted, .node.next pulsing
+      // once"): DOOR 1 (floor 1, node 0) only, only on the very map render right after a first-time
+      // tutorial completion (G.tutorialJustGranted -- G.onFightEnd sets it, cleared the instant it's
+      // consumed here so it never pulses again on a later map visit or a tutorial replay).
+      const highlightDoor1=n===1&&G.tutorialJustGranted;
       f.nodes.forEach((node,i)=>{
         const b=document.createElement('button');
-        b.className='node '+node.state;
+        b.className='node '+node.state+(i===0&&highlightDoor1?' next':'');
         b.appendChild(Screens.doorStack('DOOR '+(i+1),node.enc));
         b.disabled=node.state!=='open';
         b.onclick=()=>{Screens._origin={name:'map',args:[n]};
           G.startFight({floor:n,node:i,champ:Save.data.active})};
         path.appendChild(b)});
+      if(highlightDoor1)G.tutorialJustGranted=false;
       const boss=document.createElement('button');
       boss.className='node boss '+f.boss.state;
       boss.appendChild(Screens.doorStack('BOSS',f.boss.enc));
@@ -420,7 +426,14 @@ const Screens={
     // suffix only appears on the run that actually granted it (G.tutorialJustGranted).
     if(won&&G.mode==='tutorial'){
       const t='TUTORIAL COMPLETE'+(G.tutorialJustGranted?' — +300 GOLD':'');
-      line=line?line+'  '+t:t}
+      line=line?line+'  '+t:t;
+      // Task 6.4: on a first completion only, the free basic crystal G.onFightEnd already opened
+      // (G.tutorialFreeCrystal, Crystal.open('basic',{free:true})) gets the exact same result-line
+      // text the standalone crystal screen's own reveal shows (Screens.resultText) -- "NEW CHAMPION:
+      // KATIA 2★" for a fresh pull, or the dup/shards line if it happened to roll an already-owned
+      // champion. Never shown on a replay (tutorialJustGranted false, tutorialFreeCrystal null).
+      if(G.tutorialJustGranted&&G.tutorialFreeCrystal)
+        line=line+'  '+Screens.resultText(G.tutorialFreeCrystal)}
     // Task 5.1: the ratings recap -- shown for every fight (win or loss), independent of rewards,
     // since viewers accrue off the fight itself, not off the quest/arena outcome.
     if(this._peakViewers!=null)line=(line?line+'  ':'')+'PEAK VIEWERS '+Render.fmtViewers(this._peakViewers);
