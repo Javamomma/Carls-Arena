@@ -69,4 +69,9 @@ const STAGE_W=1400;
 // inside EDGE_PAD" test. A camera margin can't fix this alone because the parallax-1.0 floor layer
 // is drawn exactly STAGE_W wide, so letting the camera past its own limit would expose blank canvas
 // past the stage edge; this has to be a sim-side constant (Fighter stays independent of Rig) instead.
-const EDGE_PAD=220;
+// Fix-wave item 3: bumped 220->260 (pulled forward from item 9's own EDGE_PAD work) — folding the
+// drawn head into Rig.extent (see that function's own comment) pushed Mongo's reach to 234.3, past
+// the old 220 margin. 260 is item 9's own number (it fixes Donut/Mother Rat's much larger quad-rig
+// gap the same pass), so bumping it here rather than re-deriving a smaller one just for Mongo avoids
+// moving this constant twice across two commits for the same underlying (headR/reach) reason.
+const EDGE_PAD=260;

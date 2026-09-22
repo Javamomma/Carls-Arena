@@ -667,6 +667,17 @@ const Rig={
           const j=this.solve(look,key,t,1);
           const fold=(x,y)=>{if(y<minY)minY=y;const rx=Math.abs(x-offX);if(rx>maxReach)maxReach=rx};
           for(const b in j)fold(j[b].x,j[b].y);
+          // Fix-wave item 3: the head is drawn as a filled circle of radius look.headR around j.head
+          // (draw()/drawBig()/drawQuad()'s own c.arc(j.head.x,j.head.y,look.headR,...) calls), which
+          // every joint-only fold above misses entirely — j.head is the circle's CENTER, not its
+          // topmost/widest point. Deficit was 11-34px across the roster (Mongo 32.5px at his 1.25
+          // scale), enough to put his head 28px into the HUD at his pair cap. Folding the two top
+          // corners of the circle's bounding square is a deliberately cheap, slightly-conservative
+          // stand-in for the true circle bound (its exact top point is (j.head.x, j.head.y-headR),
+          // its exact side points are ((j.head.x±headR, j.head.y)) — the corners fold BOTH top and
+          // reach through the same two fold() calls without adding a third).
+          fold(j.head.x-look.headR,j.head.y-look.headR);
+          fold(j.head.x+look.headR,j.head.y-look.headR);
           for(const propId of look.props||[])
             for(const ep of this.propExtra(propId,look,j,1))fold(ep.x,ep.y)}}}
     const result={top:-minY*scale,reach:maxReach*scale};

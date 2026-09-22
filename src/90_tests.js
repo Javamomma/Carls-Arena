@@ -216,12 +216,13 @@ Test.add('every pose of every look stays under the HUD at the fight\'s zoom cap'
     // Same computation G.startFight does — mirrored here rather than calling it directly so this test
     // doesn't need a live Fight/DOM state for pairings that never actually fight each other (mongo x
     // mongo, a mirror match, is here purely to stress-test the tallest-look-on-both-sides case).
-    // Floor is 0.80, not 0.85: Mongo×Mongo (the tallest-vs-tallest stress pairing) legitimately needs
-    // 0.850 given his frozen scale:1.25 and the >=1.25x-height floor — round 1 set the floor at 0.85
-    // without headroom for float/rounding, so a routine change tipped it to 0.8504 and failed. 0.80
-    // is still a meaningfully zoomed-in shot (not "absurdly" pulled back — compare gameplay's own 1.12
-    // ceiling), just with real margin under Mongo×Mongo's own number instead of none.
-    ok(cineZoomCap>=0.80,id1+'x'+id2+' cineZoomCap '+cineZoomCap.toFixed(3)+' must not zoom out past 0.80');
+    // Floor is 0.75, not 0.80: Fix-wave item 3 folds the drawn head into Rig.extent (see that
+    // function's own comment), which raises Mongo's own worst-case top (his 'walk' pose, now his
+    // head circle included) enough that Mongo×Mongo/Mongo×Grull both land at ~0.784 — below the old
+    // 0.80 floor that was sized for the pre-head-fold ~0.850. 0.75 keeps real margin under the new
+    // number (same margin-not-zero intent as the original 0.85->0.80 move) while still reading as a
+    // meaningfully zoomed-in shot, not "absurdly" pulled back.
+    ok(cineZoomCap>=0.75,id1+'x'+id2+' cineZoomCap '+cineZoomCap.toFixed(3)+' must not zoom out past 0.75');
     const cam={x:0,zoom:cineZoomCap};
     for(const[look,sc]of[[look1,sc1],[look2,sc2]]){
       const table=look.rig==='quad'?POSES_QUAD:look.rig==='big'?POSES_BIG:POSES;
@@ -230,6 +231,9 @@ Test.add('every pose of every look stays under the HUD at the fight\'s zoom cap'
         for(const t of[0,.5,1]){
           const j=Rig.solve(look,key,t,1);
           let minY=0;for(const b in j)if(j[b].y<minY)minY=j[b].y;
+          // Fix-wave item 3: fold the drawn head (a circle of radius headR around j.head, not just
+          // its center joint) the same way Rig.extent now does — see that function's own comment.
+          if(j.head.y-look.headR<minY)minY=j.head.y-look.headR;
           for(const propId of look.props||[])
             for(const ep of Rig.propExtra(propId,look,j,1))if(ep.y<minY)minY=ep.y;
           const screen=Camera.toScreen(cam,0,FLOOR+minY*sc);
@@ -242,7 +246,16 @@ Test.add('every pose of every look stays under the HUD at the fight\'s zoom cap'
 // is exactly the class of bug Fix round 2 exists to catch (Carl's own 'heavy' wind-up did this before
 // its rShoulder was trimmed — see POSES.heavy's Fix round 2 comment — and Hobgoblin's held club did
 // too, even after 'heavy' was fixed — see the 'club' prop's Fix round 2 comment in drawBig/propExtra).
-Test.add('carl/hobgoblin/katia/donut/goblin pairings pin the zoom cap at exactly 1.12/1.28',()=>{
+// Fix-wave item 3 note: folding the drawn head into Rig.extent (see that function's own comment) makes
+// carl's own 'dash' pose (previously not the tallest anywhere) the new worst case for every pairing
+// carl is in — its own head-inclusive top now edges past what a 1.28 ratio allows, so the three carl
+// pairings below no longer pin at the cinematic ceiling; zoomCap (1.12, gameplay) still pins for all
+// four. This is exactly the "one pose taxes every frame of the fight" problem item 4 (a per-frame cap
+// sized off the pose actually on screen, not a fight-wide worst case) exists to fix — once that lands,
+// the S3 punch-in only ever samples the attacker's own s3 pose, so dash's height stops mattering to it.
+// Tracked here rather than silently loosened: donut/goblin (no carl) still pins exactly, proving the
+// mechanism itself is unchanged — only carl's own pose data is now the limiting factor.
+Test.add('carl/hobgoblin/katia/donut/goblin pairings pin the zoom cap at exactly 1.12 (1.28 pending item 4 for carl)',()=>{
   const pairs=[['carl','goblin'],['carl','hobgoblin'],['carl','katia'],['donut','goblin']];
   for(const[id1,id2]of pairs){
     const sc1=(DEFS[id1]&&DEFS[id1].scale)||1,sc2=(DEFS[id2]&&DEFS[id2].scale)||1;
@@ -250,7 +263,9 @@ Test.add('carl/hobgoblin/katia/donut/goblin pairings pin the zoom cap at exactly
     const tallestTop=Math.max(ext1.top,ext2.top);
     const ratio=(Camera.anchorY-HUD_LINE)/tallestTop;
     eq(Math.min(1.12,ratio),1.12,id1+'x'+id2+' zoomCap must pin at exactly 1.12 (tallestTop='+tallestTop.toFixed(1)+')');
-    eq(Math.min(1.28,ratio),1.28,id1+'x'+id2+' cineZoomCap must pin at exactly 1.28 (tallestTop='+tallestTop.toFixed(1)+')')}});
+    const cineCap=Math.min(1.28,ratio);
+    if(id1==='carl')ok(cineCap>1.0&&cineCap<1.28,id1+'x'+id2+' cineZoomCap '+cineCap.toFixed(4)+' expected below 1.28 (carl\'s dash pose — see comment) until item 4 lands');
+    else eq(cineCap,1.28,id1+'x'+id2+' cineZoomCap must pin at exactly 1.28 (tallestTop='+tallestTop.toFixed(1)+')')}});
 Test.add('every look\'s reach fits inside EDGE_PAD',()=>{
   // Rig.extent's reach includes prop geometry (a dagger/club/spikedclub's tip, horns, a tiara, cat
   // whiskers) on top of every joint's own FK, not just the shoulderW/armLen/limb formula this test
