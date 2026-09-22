@@ -13,6 +13,12 @@ class Fighter{
     // parry branches (covers "taking a hit resets it" -- an interrupted mid-chain recovery never gets
     // to end on its own).
     this.chainNode=0;
+    // Fix-wave item 3 (final review I3): a read-only move-instance counter, incremented once per
+    // startMove call (below) -- Input's own intent buffer (30_input.js) reads this to detect "this
+    // fighter started a new move since I queued my buffered action" without needing any write access
+    // into Fighter/Fight at all (Input only ever reads sim state). Never reset, never read by
+    // anything sim-side; purely an outward signal.
+    this.moveSeq=0;
     this.parryLock=0;this.blockPressedAt=0;this.pressTick=0;this._parried=false;this._mdCache=null;
     // Task 5.2: parryBonus widens PARRY_WINDOW by this many frames (Sponsor perk "Parry Insurance",
     // set by G.startFight from Sponsors.apply's parryWindow) -- 0 for every fighter that isn't the
@@ -85,6 +91,7 @@ class Fighter{
   // cached moveDef (used only by the in-combo heavy ender, CHAIN.enders.heavy -- see act()'s own
   // node-4 branch) so the per-fighter moveDef cache itself is never mutated or duplicated per-variant.
   startMove(name,node,overrides){
+    this.moveSeq++; // fix-wave item 3 (final review I3): once per move instance, see its own comment above
     this.move=overrides?Object.assign({},this.moveDef(name),overrides):this.moveDef(name);
     this.moveName=name;this.hits=new Set();this.landed=false;this.chainNode=node===undefined?0:node;
     this.interceptedThisMove=false;

@@ -50,7 +50,18 @@
 // withInputClock, 90_tests.js) -- only its default implementation and what its return value now means
 // (frames, not ms) changed.
 const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
-  GESTURE:{TAP_FRAMES:8,TAP_DRIFT:24,SWIPE_PX:44,SWIPE_FRAMES:16,HEAVY_HOLD_FRAMES:12,BLOCK_HOLD_FRAMES:8},
+  // Fix-wave item 3 (final review I3): drain()'s own intent buffer -- {a,left,seq} entries, one per
+  // still-alive queued action (a: the raw string this.q used to hold directly -- 'light'/'medium'/
+  // 'dashBack'/'specialN'/'powerAuto'; left: presentations remaining, GESTURE.BUFFER_FRAMES at push,
+  // decremented once per drain() call it's actually presented in; seq: this fighter's own moveSeq
+  // (Fighter.moveSeq) at the moment it was queued). See drain()'s own comment for the full mechanism.
+  _buf:[],
+  // Fix-wave item 3 (final review I3): BUFFER_FRAMES is how many sim frames a queued action (this.q,
+  // pushed by any of pointerdown/up/pointermove/keydown/bindButtons below) is held and re-presented
+  // by drain() before being dropped -- see drain()'s own comment for the exact mechanism and the drop
+  // rules. 4 frames (67ms at 60Hz) comfortably covers ordinary human press-2-frames-early jitter
+  // without reaching into the next chain window over (a light's own shortest recovery is 8 frames).
+  GESTURE:{TAP_FRAMES:8,TAP_DRIFT:24,SWIPE_PX:44,SWIPE_FRAMES:16,HEAVY_HOLD_FRAMES:12,BLOCK_HOLD_FRAMES:8,BUFFER_FRAMES:4},
   // Injectable clock (default G.frameNow, the sim's own frame counter) so tests can drive gesture
   // timing deterministically by overriding Input.now instead of racing the real sim. G is defined
   // later in the concatenated build (80_game.js) -- safe here since this arrow function's body only
@@ -196,12 +207,54 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
         P.dashFrames++;
         if(P.dashFrames>=DASH_BACK.frames){P.blockOn=true;this.held.block=true;this._log('swipeLHold')}}}
     if(this._powerT0&&!this._powerShown&&this.now()-this._powerT0>=this.POWER_HOLD_FRAMES){this._powerShown=true;document.getElementById('powerPicker').classList.add('show')}},
+  // Fix-wave item 3 (final review I3): every sim frame is an 8-frame-or-shorter window to land a
+  // chain continuation (a light's own recovery is 8 frames, 133ms at 60Hz) and drain() used to clear
+  // this.q outright every call -- a press one frame early was both dropped AND unrecoverable, ending
+  // the chain right there. Now: this.q's raw pushes are folded into this._buf (each wrapped in a
+  // {a,left,seq} entry -- see _buf's own comment above) the instant they're seen, then this.q is
+  // cleared immediately, same as always (Input.q.length===0 right after every drain() call is
+  // unchanged -- see the "Input.drain folds..." test). Every surviving _buf entry is re-presented
+  // into `it` THIS frame too, not just the frame it was pushed on, so a press that arrives up to
+  // GESTURE.BUFFER_FRAMES sim frames before act() can actually use it still lands. An entry is
+  // dropped (never presented again) the instant either drop rule fires -- f.moveSeq having ticked
+  // past the value recorded when it was queued (Fighter.moveSeq, the read-only "a new move started"
+  // signal; Input never mutates sim state, so this is the only way it can tell a frame's intent
+  // actually got used) or f.state entering HITSTUN/KNOCKDOWN/STUNNED (taking a hit must kill a
+  // buffered action outright, not let it resolve into whatever this fighter is doing once it
+  // recovers) -- or once its own BUFFER_FRAMES presentations are spent, whichever comes first. The
+  // intent contract itself (the shape of `it`, one frame's worth) is unchanged; only a buffered
+  // action's own lifetime is new.
   drain(){const it={light:false,medium:false,heavy:this.held.heavy,block:this.held.block,dashBack:false,special:0};
-    for(const a of this.q){
-      if(a==='powerAuto'){const p=G.fight?G.fight.p1.power:0;let n=0;for(let k=3;k>=1;k--)if(p>=100*k){n=k;break}it.special=n}
-      else if(a.startsWith('special'))it.special=+a[7];
-      else it[a]=true}
-    this.q.length=0;return it}};
+    const f=typeof G!=='undefined'&&G.fight&&G.fight.p1;
+    for(const a of this.q)this._buf.push({a,left:this.GESTURE.BUFFER_FRAMES,seq:f?f.moveSeq:-1});
+    this.q.length=0;
+    const kept=[];
+    for(const e of this._buf){
+      if(f&&(f.moveSeq!==e.seq||f.state==='HITSTUN'||f.state==='KNOCKDOWN'||f.state==='STUNNED'))continue;
+      // Node-4 in-combo ender special case: pointermove's own atNode4Recovery check (above) only
+      // defers medium/heavy to the release/hold decision (P.pendingEnder) when a swipe-right crosses
+      // SWIPE_PX WHILE already sitting in chainNode-4 recovery -- a swipe that crosses a few frames
+      // BEFORE that window opens takes the plain immediate-push path instead (this.q.push('medium')
+      // above), same as any other swipe, since at cross-time the window genuinely isn't open yet.
+      // Buffering now keeps that push alive long enough to actually reach the window; the instant it
+      // does (checked fresh, live, every drain() call -- not decided once at queue time), hand it off
+      // to the SAME release/hold mechanism an in-window swipe already uses (P.up()'s handler pushes
+      // 'medium' on release; tick()'s own recoveryLeft()===0 check arms held.heavy if the pointer's
+      // still down when the window naturally closes) instead of presenting a plain 'medium' outright,
+      // as long as the live pointer that produced it is still an unresolved swipe-right (P.heavyOn
+      // false -- if the pointer already released before the window opened, this._ptr is null and it
+      // just falls through to the plain medium below, exactly the frozen ruling's "otherwise as a
+      // medium"). Scoped to CHAIN.nodes-1 (not a hardcoded 4 -- see fix-wave item 4/M4) so this stays
+      // correct if CHAIN.nodes ever changes.
+      if(e.a==='medium'&&f&&f.state==='ATTACK'&&f.chainNode===CHAIN.nodes-1&&f.phase&&f.phase()==='recovery'&&f.landed&&
+         this._ptr&&this._ptr.dashDir==='R'&&!this._ptr.heavyOn){
+        this._ptr.pendingEnder=true;continue}
+      if(e.a==='powerAuto'){const p=f?f.power:0;let n=0;for(let k=3;k>=1;k--)if(p>=100*k){n=k;break}it.special=n}
+      else if(e.a.startsWith('special'))it.special=+e.a[7];
+      else it[e.a]=true;
+      e.left--;if(e.left>0)kept.push(e)}
+    this._buf=kept;
+    return it}};
 
 const Ctrl={
   EMPTY:()=>({light:false,medium:false,heavy:false,block:false,dashBack:false,special:0}),

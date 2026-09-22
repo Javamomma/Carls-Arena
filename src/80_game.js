@@ -429,7 +429,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // Broadcast.reset -- see its own comment (13_broadcast.js) for why it's stashed there once per
     // fight instead of read live.
     this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();Broadcast.reset({viewersMul:perkOpts.viewersMul});
-    Input.q.length=0;Input.held.block=false;Input.held.heavy=false;
+    // Fix-wave item 3 (final review I3): Input._buf (the intent buffer drain() re-presents from --
+    // see its own comment, 30_input.js) must reset alongside the raw queue it's folded from, or a
+    // buffered action still alive from the instant the previous fight ended could resolve into this
+    // new fight's own first frames.
+    Input.q.length=0;Input._buf.length=0;Input.held.block=false;Input.held.heavy=false;
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
     // regardless of how recently the previous fight's last toast landed.
     this.frameNow=0;this._sayAt=-999;

@@ -298,10 +298,27 @@ Test.add('AI.make punishes exactly on the frame wasKnockedDown+inv0 line up (jus
   foe.tick();
   eq(foe.wasKnockedDown,false,'Fighter.tick self-clears one tick after i-frames actually expired')});
 Test.add('t1 loses to t5 head to head over 5 seeds',()=>{let w5=0;for(let s=1;s<=5;s++){const f=mkFight({ctrl1:AI.make('t1',s),ctrl2:AI.make('t5',s+100),clock:120});run(f,7200);if(f.winner===f.p2)w5++}ok(w5>=4,'t5 wins '+w5+'/5')});
-Test.add('Input.drain folds the action queue into one intent and clears it',()=>{
-  Input.q.push('light','special2','dashBack');Input.held.block=true;const it=Input.drain();
-  eq(it.light,true);eq(it.special,2);eq(it.dashBack,true);eq(it.block,true);eq(Input.q.length,0);Input.held.block=false;
-  const it2=Input.drain();eq(it2.light,false);eq(it2.special,0);eq(it2.block,false)});
+// Fix-wave item 3 (final review I3): drain() now BUFFERS every freshly queued action for up to
+// GESTURE.BUFFER_FRAMES sim frames (re-presented on every drain() call in that window, not just the
+// one it happened to be pushed on -- see drain()'s own comment, 30_input.js), so this test's old
+// "immediately clears" name/assertion described exactly the bug I3 fixes. The raw push queue
+// (Input.q) itself is still emptied every single drain() call, immediately, same as always -- it's
+// the buffer the queue is folded into that now persists across a few frames instead of one. No live
+// G.fight here, so none of the drop rules (moveSeq bump / HITSTUN-KNOCKDOWN-STUNNED) can fire --
+// only the plain BUFFER_FRAMES age-out applies.
+Test.add('Input.drain folds the action queue into an intent, buffers it for up to GESTURE.BUFFER_FRAMES sim frames, then drops it',()=>{
+  Input.q.push('light','special2','dashBack');Input.held.block=true;
+  for(let i=0;i<Input.GESTURE.BUFFER_FRAMES;i++){
+    const it=Input.drain();
+    eq(it.light,true,'buffered light must still be presented on drain call '+i);
+    eq(it.special,2,'buffered special2 must still be presented on drain call '+i);
+    eq(it.dashBack,true,'buffered dashBack must still be presented on drain call '+i);
+    eq(it.block,true);
+    eq(Input.q.length,0,'the raw push queue itself must always be empty right after any drain() call')}
+  const after=Input.drain();
+  eq(after.light,false,'the buffer must finally drop the action once BUFFER_FRAMES presentations have elapsed');
+  eq(after.special,0);eq(after.dashBack,false);
+  Input.held.block=false});
 function withFight(fn){const prev=G.state;G.state='FIGHT';Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptr=null;
   try{fn()}finally{Input.q.length=0;Input.held.block=false;Input.held.heavy=false;Input._ptr=null;G.state=prev}}
 // Task 6.3: synthetic PointerEvents on the canvas, at a canvas-local (x,y) (defaulting to the
@@ -478,6 +495,128 @@ Test.add('gesture (real Input pipeline): a swipe-right released on the very cros
   for(let i=0;i<200&&!G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='medium');i++)G.tick();
   ok(G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='medium'),'an instantly-released swipe at node 4 must still land the medium ender');
   ok(!G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='heavy'),'must never have charged/landed a heavy instead');
+  G.toTitle();G.sim=false});
+// Fix-wave item 3 (final review I3): intent buffering. drain() (30_input.js) now re-presents a
+// queued action for up to GESTURE.BUFFER_FRAMES sim frames instead of dropping it the instant it
+// misses the exact frame act() could use it -- these five tests drive the real Input pipeline (real
+// keyboard/PointerEvents through Input.tick()/drain(), real Fighter.act()) the same way the node-4
+// ender tests above do, per the controller's own ruling that a synthetic-intent controller can't
+// reproduce this class of bug.
+function setupPlayerFight(){
+  Save.data=Meta.defaults();
+  G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  G.sim=true;G.fight.p2.x=G.fight.p1.x+58}
+function pressJ(){dispatchEvent(new KeyboardEvent('keydown',{key:'j'}))}
+// Measured/scheduled in SIM FRAMES (fight.frame), not raw G.tick() call counts -- a landed light hit
+// arms its own hitstop (MOVES.light.hitstop), and Fight.step() returns before ever reaching
+// ctrl.next()/Input.drain() while hitstop>0, so several real G.tick() calls in a row can pass with
+// NEITHER fight.frame NOR the intent buffer's own BUFFER_FRAMES countdown advancing at all. Input.now
+// itself reads G.frameNow (mirrors fight.frame, see G.tick()'s own comment), so this is also exactly
+// what GESTURE.BUFFER_FRAMES is measured against for real -- counting raw ticks here would silently
+// let hitstop's own frozen ticks pad extra "free" survival time into the buffer, which is not what
+// the frozen ruling's own "N frames early" language means.
+function tickFrames(n){const f0=G.fight.frame;while(G.fight.frame-f0<n)G.tick()}
+// Measures, empirically, how many SIM FRAMES elapse between the opener light landing and the first
+// frame where act() can read node-1's own recovery window (phase()==='recovery'&&landed at chainNode
+// 1) -- deterministic (no RNG affects move-frame timing), so this is safe to reuse as an offset in a
+// separate, freshly-started fight with the identical setup.
+function measureNode1RecoveryOpenFrames(){
+  setupPlayerFight();pressJ();G.tick(); // opener consumed this call
+  const f0=G.fight.frame;
+  while(G.fight.frame-f0<60){
+    const p1=G.fight.p1;
+    if(p1.state==='ATTACK'&&p1.phase()==='recovery'&&p1.landed&&p1.chainNode===1){const d=G.fight.frame-f0;G.toTitle();G.sim=false;return d}
+    G.tick()}
+  throw new Error('never reached chainNode-1 recovery during measurement')}
+Test.add('gesture (real Input pipeline, fix-wave I3): a light tap 2 frames before node-1\'s recovery window opens still continues the chain to node 2',()=>{
+  const openFrames=measureNode1RecoveryOpenFrames();
+  ok(openFrames>=2,'sanity: the window must open at least 2 sim frames after the opener for this test to be meaningful, got '+openFrames);
+  setupPlayerFight();pressJ();G.tick();
+  tickFrames(openFrames-2); // arrive exactly 2 sim frames before the window opens
+  pressJ(); // buffer the continuation early
+  for(let i=0;i<40&&G.fight.p1.chainNode<2;i++)G.tick();
+  eq(G.fight.p1.chainNode,2,'a light queued 2 frames early must still land as node 2 once the buffer carries it into the window');
+  G.toTitle();G.sim=false});
+Test.add('gesture (real Input pipeline, fix-wave I3): a light tap 6 frames before node-1\'s recovery window opens is too early -- the buffer has already expired and the chain does not continue',()=>{
+  const openFrames=measureNode1RecoveryOpenFrames();
+  ok(openFrames>=6,'sanity: the window must open at least 6 sim frames after the opener for this test to be meaningful, got '+openFrames);
+  setupPlayerFight();pressJ();G.tick();
+  tickFrames(openFrames-6); // arrive exactly 6 sim frames before the window opens
+  pressJ(); // queued far too early -- GESTURE.BUFFER_FRAMES(4) must have expired before the window opens
+  let sawNode2=false;
+  for(let i=0;i<40;i++){G.tick();if(G.fight.p1.chainNode===2)sawNode2=true}
+  ok(!sawNode2,'a light queued 6 frames early must never land as node 2 -- the buffer must have already expired');
+  eq(G.fight.p1.chainNode,0,'sanity: the opener must have whiffed out to a plain light with no continuation, chainNode back to 0');
+  G.toTitle();G.sim=false});
+// Drives toward chainNode-4 recovery using the exact same state-gated press logic
+// reachNode4Recovery() (above) uses, but as a single unified loop shared with the measurement helper
+// below it, so a real run can be stopped a fixed number of SIM FRAMES short of the window opening
+// (which reachNode4Recovery(), by design, cannot do -- it always returns exactly AT the window).
+function stepTowardNode4Recovery(presses){
+  const p1=G.fight.p1;
+  const canOpen=p1.state==='IDLE';
+  const canContinue=p1.state==='ATTACK'&&p1.phase()==='recovery'&&p1.landed&&p1.chainNode>=1&&p1.chainNode<CHAIN.nodes;
+  if((canOpen||canContinue)&&presses.n<4){dispatchEvent(new KeyboardEvent('keydown',{key:'j'}));presses.n++}
+  G.tick()}
+function driveTowardNode4RecoveryFrames(presses,n){const f0=G.fight.frame;while(G.fight.frame-f0<n)stepTowardNode4Recovery(presses)}
+function measureNode4RecoveryOpenFrames(){
+  setupPlayerFight();
+  const presses={n:0},f0=G.fight.frame;
+  while(G.fight.frame-f0<400){
+    const p1=G.fight.p1;
+    if(p1.state==='ATTACK'&&p1.chainNode===4&&p1.phase()==='recovery'&&p1.landed){const d=G.fight.frame-f0;G.toTitle();G.sim=false;return d}
+    stepTowardNode4Recovery(presses)}
+  throw new Error('never reached chainNode-4 recovery during measurement')}
+Test.add('gesture (real Input pipeline, fix-wave I3): a swipe crossing 2 frames before node 4\'s recovery window opens still becomes the pending ender -- released inside the window yields the medium ender',()=>{
+  const openFrames=measureNode4RecoveryOpenFrames();
+  ok(openFrames>=2,'sanity: the node-4 window must open at least 2 sim frames after this measurement point, got '+openFrames);
+  setupPlayerFight();
+  const presses={n:0};
+  driveTowardNode4RecoveryFrames(presses,openFrames-2);
+  const p1pre=G.fight.p1;
+  ok(!(p1pre.chainNode===4&&p1pre.phase()==='recovery'&&p1pre.landed),'sanity: must not have opened yet -- 2 frames early');
+  const p=tap(1,300,240);
+  p.down();p.move(360,240); // SWIPE_PX crossing, 2 frames before the node-4 window actually opens
+  eq(Input.q.includes('medium'),true,'sanity: the swipe must have taken the plain immediate-push path (not yet inside chainNode-4 recovery at cross time)');
+  // Ride forward through the window's own opening and release with runway still left.
+  for(let i=0;i<20&&G.fight.p1.recoveryLeft()>2;i++)G.tick();
+  ok(!Input.held.heavy,'sanity: held.heavy must not have armed yet -- there\'s still time left');
+  p.up();
+  for(let i=0;i<200&&!G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='medium');i++)G.tick();
+  ok(G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='medium'),'a swipe crossing 2 frames early, released inside the window, must still land the medium ender');
+  ok(!G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='heavy'),'must never have charged/landed a heavy instead');
+  G.toTitle();G.sim=false});
+Test.add('gesture (real Input pipeline, fix-wave I3): the same swipe crossing 2 frames early, held through the window close, produces the in-combo heavy ender instead',()=>{
+  const openFrames=measureNode4RecoveryOpenFrames();
+  setupPlayerFight();
+  const presses={n:0};
+  driveTowardNode4RecoveryFrames(presses,openFrames-2);
+  const p=tap(1,300,240);
+  p.down();p.move(360,240); // SWIPE_PX crossing, 2 frames before the node-4 window actually opens
+  for(let i=0;i<20&&!Input.held.heavy;i++)G.tick();
+  ok(Input.held.heavy,'held.heavy must arm as the recovery window naturally closes, exactly like an in-window swipe');
+  eq(G.fight.p1.state,'CHARGE','the in-combo heavy ender must be charging by now');
+  eq(G.fight.p1.chainNode,CHAIN.nodes,'charging counts as the chain\'s own node 5');
+  for(let i=0;i<CHAIN.enders.heavy.charge+2;i++)G.tick();
+  eq(G.fight.p1.state,'ATTACK','the charge must have auto-fired into the swing by now');
+  p.up();
+  for(let i=0;i<200&&!G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='heavy');i++)G.tick();
+  ok(G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='heavy'),'a swipe crossing 2 frames early, held through the window close, must land the in-combo heavy ender');
+  ok(!G.fight.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='medium'),'must never have landed a medium ender instead');
+  G.toTitle();G.sim=false});
+Test.add('gesture (real Input pipeline, fix-wave I3): a buffered action is dropped while the fighter is in HITSTUN -- it never fires even once the fighter recovers',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),
+    ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});
+  G.sim=true;G.fight.p2.x=G.fight.p1.x+58; // close range -- p2's medium needs little to no dash-in, lands quickly
+  for(let i=0;i<200&&G.fight.p1.state!=='HITSTUN';i++)G.tick();
+  ok(G.fight.p1.state==='HITSTUN','sanity: p1 must actually have been hit into HITSTUN');
+  const startSeq=G.fight.p1.moveSeq;
+  pressJ(); // buffer a light WHILE p1 is already in HITSTUN -- the drop rule (f.state==='HITSTUN') is
+            // checked fresh every drain() call, so a fresh queue mid-HITSTUN is exactly the case it covers
+  for(let i=0;i<60;i++)G.tick(); // ride all the way through HITSTUN, back to IDLE, well past BUFFER_FRAMES
+  eq(G.fight.p1.moveSeq,startSeq,'the buffered light must never have started a move -- queuing it mid-HITSTUN must have dropped it outright');
+  ok(G.fight.p1.state!=='ATTACK','p1 must not be mid an unexpected attack from the stale buffered light');
   G.toTitle();G.sim=false});
 Test.add('gesture (real Input pipeline): a swipe-right crossing exactly on node 4\'s last recovery frame still resolves to some ender (does not drop the input)',()=>{
   Save.data=Meta.defaults();
