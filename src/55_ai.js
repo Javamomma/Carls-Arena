@@ -148,7 +148,16 @@ const AI={
     // the rest of that hold even if the foe's own debuffs later decay back under 2 before enough
     // power is banked -- see decideSpecial's own comment for why a live-every-frame target (no latch)
     // measurably starves s3 of ever actually firing.
-    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboPlan:[],farFrames:0,approachCd:0,kitHold:undefined,kitLockS3:false};
+    // Fix-wave item 1 (I1, final review): kitHoldAge counts frames actually spent evaluating a live
+    // hold (st.cd===0, decideSpecial's own hold branch reached) -- once it hits 240, the hold is
+    // abandoned and the strongest currently-affordable special fires, regardless of target/cost. Reset
+    // to 0 whenever a fresh hold commits and whenever a special actually fires (same reset points as
+    // kitHold itself). powHist: a rolling ring of this fighter's own `power` field, one sample per
+    // simulated frame (pushed at the very top of next(), below, so it accumulates whether or not
+    // decideSpecial is even reached that frame), trimmed to the most recent 121 samples (120 frames of
+    // history) -- see powerGain120's own comment just below decideSpecial for how this feeds the
+    // rng-free reachability estimate a hold commit now requires.
+    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboPlan:[],farFrames:0,approachCd:0,kitHold:undefined,kitLockS3:false,kitHoldAge:0,powHist:[]};
     // comboPlanFor(openedMedium): the follow-through plan armed after a chain opener lands (a punish
     // medium, always openedMedium=true, or decideAttack's own spontaneous opener, medium or light
     // depending on range). Mixed tiers (p.comboMix -- t3+) only ever follow the frozen M-L-L-L-M
@@ -342,43 +351,87 @@ const AI={
     // "the foe was significantly debuffed, so this hold is for the special that punishes that," not a
     // frame-by-frame re-litigation of a condition that's already been satisfied once. Still only ever
     // fires once the full cost is actually banked; a latched target still can't jump the power queue.
-    // Task 9.5 (controller ruling, 9.4 review carry-over): a self-target S3 -- one whose kit effect
-    // lands on the ATTACKER, not the foe (move.applies has a target:'self' entry; mongo's Doorway
-    // Denial, armorUp on himself, is the only kit in the current roster shaped like this) -- can
-    // never be reached by the debuffs>=2 kitHold lock just below, since there is nothing on the FOE
-    // to count (measured: 0 real S3 throws for mongo across a 300-seed search, see the "kit usage in
-    // real (unprimed) play" test above it). Accepted reading (verdict-9.4.md): a self-buff finisher
-    // is thrown when its holder is HURT, not when the foe is debuffed -- "a tank pops armor up when
-    // he's hurt." isSelfBuffSpecial reads this generically off the move's own applies data (not a
-    // hard-coded 'mongo' id check), so any future self-target special is picked up the same way.
-    // First cut of this rule (see the task report's Deviations section) was a standalone rng-free
-    // branch checked ahead of the kitHold roll, gated on power>=300 -- provably unreachable in real
-    // play for a t3+ Mongo: kitHold commits on the very first eligible frame (power>=100) most of the
-    // time (kit .5-1), and the debuff-based lock then fires s2 (cost 200) the instant power crosses
-    // 200 every single hold, since mongo's foe never holds 2 real debuffs -- power never climbed to
-    // 300 in the first place for the standalone branch to ever see. Folded into the SAME latch the
-    // debuff check already uses instead: st.kitLockS3 (target s3, cost 300) also latches once this
-    // fighter's own hp drops to or below 60%, same "sticky once true" shape the debuff lock already
-    // has (a self-buff kit's own hp can only fall further while holding -- nothing in this roster
-    // heals a HOLDING fighter mid-hold -- so no un-latch case exists here the way the debuff clock's
-    // does). rng-free either way (no r.next() draw added), so t1/t2 (kit:0, never enter this block at
-    // all) stay bit-for-bit identical, and every other tier's own kitHold roll sequence is untouched
-    // -- this only changes which target a committed hold locks onto, never whether/when one starts.
+    // Task 9.5 (controller ruling, 9.4 review carry-over; REPLACED by fix-wave item 2 (I2) below):
+    // a self-target S3 -- one whose kit effect lands on the ATTACKER, not the foe (move.applies has a
+    // target:'self' entry; mongo's Doorway Denial, armorUp on himself, is the only kit in the current
+    // roster shaped like this) -- can never be reached by the debuffs>=2 kitHold lock just below,
+    // since there is nothing on the FOE to count (measured: 0 real S3 throws for mongo across a
+    // 300-seed search, see the "kit usage in real (unprimed) play" test above it). isSelfBuffSpecial
+    // itself is unchanged -- it still reads this generically off the move's own applies data (not a
+    // hard-coded 'mongo' id check), so any future self-target special is picked up the same way; only
+    // decideSpecial's own use of it changed (see the fix-wave comment on decideSpecial below).
     function isSelfBuffSpecial(fighter){
       const a=fighter.moveDef('s3').applies;
       return!!(a&&a.some(x=>x.target==='self'))}
+    // Fix-wave item 1 (I1, final review): powerGain120() -- a RNG-FREE estimate of this fighter's own
+    // recent power accrual rate, read off st.powHist (a rolling ring of `power` samples, one per
+    // simulated frame, pushed at the very top of next() below regardless of which waterfall phase
+    // actually runs that frame -- see st's own comment above for the full shape). The gain is simply
+    // the newest sample minus the oldest one currently held (up to 120 frames back), floored at 0 so a
+    // recent special firing (which drops power sharply) can never produce a negative "expected gain"
+    // that would make an otherwise-healthy accrual rate look unreachable. Never touches fight.rng/r --
+    // every caller of this (the hold-commit check below) stays exactly as RNG-free per-decision as the
+    // rest of decideSpecial already is.
+    function powerGain120(){
+      const h=st.powHist;
+      if(h.length<2)return 0;
+      return Math.max(0,h[h.length-1]-h[0])}
+    // Special (Task 9.4, tier.kit; fix-wave items 1+2, final review): the final review measured that
+    // an unconditional hold starves AI special usage 60-100% (t5 threw ZERO specials of any kind
+    // across 50 real champion-vs-boss fights) -- fights are short relative to power accrual, so a
+    // committed hold frequently never pays out before the fight ends. Two independent fixes, both
+    // rng-free (no new r.next() draw beyond the existing one-roll-per-opportunity kit commit below):
+    //
+    // I1 -- reachability gate + deadline. A true kit roll only actually COMMITS to holding if
+    // power + powerGain120()*4 >= 200 (the cheapest possible hold target, s2's cost -- the target
+    // itself, s2 vs s3, is still decided live below once actually holding, same as before; 200 is the
+    // floor every hold must clear to be worth attempting at all). An unreachable roll behaves exactly
+    // like a false roll -- st.kitHold=false, falls through to the untouched "strongest affordable"
+    // rule THIS SAME FRAME (a second r.next() draw, p.special -- already the existing shape for a
+    // false roll, so this doesn't introduce a new draw pattern, just reuses it for "reachable" rolls
+    // too). Once genuinely committed, a live hold that still hasn't banked its target cost after 240
+    // frames of being actually evaluated (st.cd===0 the whole time -- kitHoldAge only counts frames
+    // this branch was reached, so time spent mid-attack/charge/etc. with st.cd>0 elsewhere doesn't
+    // count against the deadline) abandons the hold and fires the strongest currently-affordable
+    // special outright, same shape the untouched fallback rule already uses.
+    //
+    // I2 -- self-buff specials never latch S3 (drops the Task 9.5 rule above entirely, per the
+    // controller ruling: it made a hurt Mongo unable to throw Bear Hug at all -- measured, AI Mongo
+    // t3-t5 vs Ctrl.competent, real throws collapsed from a base 16/25/45 to 8/6/0). A held self-buff
+    // special (isSelfBuffSpecial(me)) fires S2 the moment 200 power is banked, exactly like an
+    // ordinary non-debuffed foe-target hold does -- "fires S2 normally," no holding for S3 at all.
+    // S3 fires ONLY as an opportunistic override, checked ahead of the S2 floor every evaluated frame:
+    // if power is ALREADY >=300 (banked from a previous cycle that never got the chance to spend it,
+    // or a single frame's power gain jumping straight past 200) and this fighter's own hp is at or
+    // below 60% of max, fire S3 immediately instead of S2 -- "a tank pops armor up when he's hurt,"
+    // but never HELD for; the debuff-based kitLockS3 latch below is untouched and still governs every
+    // foe-target special exactly as before (Donut/Katia's own S3s still latch on >=2 foe debuffs).
     function decideSpecial(it,me,foe){
       if(st.cd!==0||me.power<100)return false;
-      if(st.kitHold===undefined&&p.kit>0)st.kitHold=r.next()<p.kit;
+      if(st.kitHold===undefined&&p.kit>0){
+        const rolled=r.next()<p.kit;
+        st.kitHold=rolled&&(me.power+powerGain120()*4>=200);
+        st.kitHoldAge=0}
       if(st.kitHold){
-        let debuffs=0;for(const id of PURIFIABLE)debuffs+=Effects.stacks(foe,id);
-        if(debuffs>=2)st.kitLockS3=true;
-        if(isSelfBuffSpecial(me)&&me.hp<=me.maxHp*.6)st.kitLockS3=true;
-        const target=st.kitLockS3?3:2,cost=target===3?300:200;
-        if(me.power>=cost){it.special=target;st.cd=20;st.kitHold=undefined;st.kitLockS3=false;return true}
+        st.kitHoldAge++;
+        if(isSelfBuffSpecial(me)){
+          if(me.power>=300&&me.hp<=me.maxHp*.6){it.special=3;st.cd=20;st.kitHold=undefined;st.kitLockS3=false;st.kitHoldAge=0;return true}
+          if(me.power>=200){it.special=2;st.cd=20;st.kitHold=undefined;st.kitLockS3=false;st.kitHoldAge=0;return true}
+        }else{
+          let debuffs=0;for(const id of PURIFIABLE)debuffs+=Effects.stacks(foe,id);
+          if(debuffs>=2)st.kitLockS3=true;
+          const target=st.kitLockS3?3:2,cost=target===3?300:200;
+          if(me.power>=cost){it.special=target;st.cd=20;st.kitHold=undefined;st.kitLockS3=false;st.kitHoldAge=0;return true}}
+        if(st.kitHoldAge>=240){
+          it.special=me.power>=300?3:me.power>=200?2:1;st.cd=20;st.kitHold=undefined;st.kitLockS3=false;st.kitHoldAge=0;return true}
         return false}
+      // Fix-wave item M1 (final review, Minor): st.kitLockS3=false added here too. Today the latch can
+      // only be set inside the kitHold branch above, so no stale value could actually leak through this
+      // path (it can only ever be set false-or-false, a no-op) -- but every OTHER fire path in this
+      // function now resets both flags symmetrically, closing the asymmetry the review flagged as a
+      // live trap for any future edit that sets the latch somewhere else.
       if(r.next()<p.special){
-        it.special=me.power>=300?3:me.power>=200?2:1;st.cd=20;st.kitHold=undefined;return true}
+        it.special=me.power>=300?3:me.power>=200?2:1;st.cd=20;st.kitHold=undefined;st.kitLockS3=false;return true}
       return false}
 
     // Approach (Task 6.2 -- playtest note: "the dummy never approaches", the goblin's own 320px spawn
@@ -407,6 +460,10 @@ const AI={
 
     return{next(fight,me,foe){
       const it=Ctrl.EMPTY();
+      // Fix-wave item 1 (I1): one power sample per simulated frame, unconditional (RNG-free, no cost
+      // for profiles that never read it -- kit===0 tiers/dummy just carry a never-consulted ring
+      // buffer) -- see powerGain120's own comment (decideSpecial, above) for what reads this.
+      st.powHist.push(me.power);if(st.powHist.length>121)st.powHist.shift();
       // justGotUp: the single frame the foe's real KNOCKDOWN get-up i-frames end (Fighter.wasKnockedDown
       // is scoped to KNOCKDOWN specifically — see its own comment in 50_fighter.js — so this can never
       // misfire off a plain dash-back's unrelated i-frames the way an inv-edge check alone could).
