@@ -175,7 +175,7 @@ const Screens={
       f.nodes.forEach((node,i)=>{
         const b=document.createElement('button');
         b.className='node '+node.state+(i===0&&highlightDoor1?' next':'');
-        b.appendChild(Screens.doorStack('DOOR '+(i+1),node.enc));
+        b.appendChild(Screens.doorStack('DOOR '+(i+1),node.enc,node.state));
         b.disabled=node.state!=='open';
         b.onclick=()=>{Screens._origin={name:'map',args:[n]};
           G.startFight({floor:n,node:i,champ:Save.data.active})};
@@ -183,7 +183,7 @@ const Screens={
       if(highlightDoor1)G.tutorialJustGranted=false;
       const boss=document.createElement('button');
       boss.className='node boss '+f.boss.state;
-      boss.appendChild(Screens.doorStack('BOSS',f.boss.enc));
+      boss.appendChild(Screens.doorStack('BOSS',f.boss.enc,f.boss.state));
       boss.disabled=f.boss.state!=='open';
       boss.onclick=()=>{Screens._origin={name:'map',args:[n]};
         G.startFight({floor:n,node:'boss',champ:Save.data.active})};
@@ -203,9 +203,15 @@ const Screens={
   // disables the door (still enterable; state/energy gating is the caller's own .disabled, set right
   // after this in renderMap). Every real FLOORS-referenced encounter carries a recLevel now, but this
   // stays defensive (no hint span at all) for any future node that doesn't.
-  doorStack(label,encId){
+  // Task 8.5: doorStack now wraps a door-card canvas (the arch/torch/portrait/banner illustration
+  // below) alongside its original label + REC. LVL text, in a horizontal row -- the label/hint stay
+  // plain DOM text (not baked into the canvas) so Task 6.1's own REC. LVL test keeps working
+  // unchanged and the hint stays trivially readable/testable rather than needing pixel inspection.
+  doorStack(label,encId,state){
     const stack=document.createElement('span');stack.className='doorstack';
-    const l=document.createElement('span');l.className='doorlabel';l.textContent=label;stack.appendChild(l);
+    stack.appendChild(Screens.doorCard(encId,state));
+    const text=document.createElement('span');text.className='doortext';
+    const l=document.createElement('span');l.className='doorlabel';l.textContent=label;text.appendChild(l);
     const recLevel=ENCOUNTERS[encId]&&ENCOUNTERS[encId].recLevel;
     if(recLevel!=null){
       const entry=Save.data.roster[Save.data.active];
@@ -213,8 +219,87 @@ const Screens={
       const hint=document.createElement('span');
       hint.className='reclvl'+(level<recLevel?' under':'');
       hint.textContent='REC. LVL '+recLevel;
-      stack.appendChild(hint)}
+      text.appendChild(hint)}
+    stack.appendChild(text);
     return stack},
+  // ---- Task 8.5: map door cards --------------------------------------------------------------
+  // A small procedural illustration per node -- a stone arch, a torch (Stage's own TORCH_TINT, so
+  // it reads as the same light source the in-fight stage lighting model uses), the encounter
+  // enemy's own 112px HUD bust (Rig.portrait, Task 8.1/8.2), and a floor-number banner -- replacing
+  // the old plain-text-only doorstack. Cached per node id + state (Boundaries: "no per-render redraw
+  // of every card") keyed on `encId+'|'+state`: a floor switch or a Screens.refresh() with nothing
+  // actually changed about that node hands back the exact same canvas instead of repainting it; only
+  // a real state flip (a door going open -> done on a win, or unlocking) produces a new cache entry,
+  // and the old entry for the state it left behind is simply never touched again.
+  _doorCache:{},
+  DOOR_W:80,DOOR_H:104,
+  doorCard(encId,state){
+    const key=encId+'|'+state;
+    let cnv=this._doorCache[key];
+    if(cnv)return cnv;
+    cnv=document.createElement('canvas');cnv.className='doorcard';cnv.dataset.state=state;
+    cnv.width=this.DOOR_W;cnv.height=this.DOOR_H;
+    Screens._paintDoorCard(cnv.getContext('2d'),encId,state);
+    this._doorCache[key]=cnv;
+    return cnv},
+  _paintDoorCard(c,encId,state){
+    const W=Screens.DOOR_W,H=Screens.DOOR_H,enc=ENCOUNTERS[encId],def=DEFS[enc.enemy],look=lookFor(def);
+    const locked=state==='locked',done=state==='done';
+    c.save();
+    // stone jamb + arch mouth: a plain doorway silhouette so the portrait inset reads as "standing
+    // in a doorway", not a floating headshot; a locked door's stone reads darker/flatter even before
+    // the full dim overlay below, so a quick glance (not just the lock glyph) reads "not open yet".
+    c.fillStyle='#1c1f2c';c.fillRect(0,0,W,H);
+    c.fillStyle=locked?'#14161f':'#262b40';
+    c.beginPath();c.moveTo(6,H-6);c.lineTo(6,28);c.quadraticCurveTo(6,6,W/2,6);
+    c.quadraticCurveTo(W-6,6,W-6,28);c.lineTo(W-6,H-6);c.closePath();c.fill();
+    c.strokeStyle=locked?'#000':'#3a3f56';c.lineWidth=2;c.stroke();
+    // torch: a small flame glyph on the left jamb -- skipped on a locked door (nothing's lit yet).
+    if(!locked){
+      const tx=12,ty=H-24;
+      c.fillStyle=Stage.TORCH_TINT;
+      c.beginPath();c.moveTo(tx,ty+8);c.quadraticCurveTo(tx-4,ty,tx,ty-8);
+      c.quadraticCurveTo(tx+4,ty,tx,ty+8);c.fill();
+      c.fillStyle='#6a4a2a';c.fillRect(tx-1.5,ty+6,3,10)}
+    // portrait: the encounter enemy's own 112px HUD bust, scaled down into the arch mouth -- the
+    // same bitmap Rig.portrait already builds and caches for the in-fight HUD/roster, so the door
+    // card, the roster card and the fight sprite are demonstrably the same character.
+    const port=Rig.portrait(look,112),pw=48,ph=48,px=W/2-pw/2,py=20;
+    c.drawImage(port,px,py,pw,ph);
+    // floor banner: a small ribbon across the bottom third, state-colored, showing the floor number.
+    c.fillStyle=done?'#2c4a2c':locked?'#1a1a22':'#3a2f1a';
+    c.fillRect(6,H-20,W-12,14);
+    c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(6.5,H-19.5,W-13,13);
+    c.fillStyle=done?'#8fd18a':locked?'#555':'#f4c542';
+    c.font='bold 9px ui-monospace,monospace';c.textAlign='center';c.textBaseline='middle';
+    c.fillText('F'+enc.floor,W/2,H-13);
+    // locked/done overlay, drawn last so it covers the whole card (including the corner the
+    // brightness-comparison test above samples) -- a locked door dims hard and shows a lock glyph;
+    // a cleared one tints faintly green and shows a check, without hiding the art underneath.
+    if(locked){
+      c.fillStyle='rgba(0,0,0,.55)';c.fillRect(0,0,W,H);
+      c.fillStyle='#999';c.font='16px ui-monospace,monospace';c.textAlign='center';c.textBaseline='middle';
+      c.fillText('\u{1F512}',W/2,H/2)}
+    else if(done){
+      c.fillStyle='rgba(20,40,20,.35)';c.fillRect(0,0,W,H);
+      c.strokeStyle='#7fd18a';c.lineWidth=3;c.lineCap='round';c.lineJoin='round';
+      c.beginPath();c.moveTo(W*.28,H*.5);c.lineTo(W*.44,H*.64);c.lineTo(W*.74,H*.32);c.stroke()}
+    c.restore()},
+  // Task 8.5: the roster card's own portrait+frame, one canvas combining the 112px HUD bust
+  // (Rig.portrait, Tasks 8.1/8.2) with the in-fight HUD's own class-gem ring (Render.portraitFrame/
+  // CLS_GEM, Task 8.4) so a roster champion reads with the same class identity the fight HUD gives
+  // them. PCARD_PAD leaves room for portraitFrame's own ring (which draws slightly outside the
+  // portrait's x/y/size box) and PCARD_GEM_H leaves room below that for its gem badge
+  // (Render.gemCenter sits at y+size+6, gem radius 5 -- see that function's own comment, 70_render.js).
+  PCARD_PAD:4,PCARD_GEM_H:14,
+  portraitCard(look,size,cls){
+    const PAD=Screens.PCARD_PAD,GEM_H=Screens.PCARD_GEM_H;
+    const cnv=document.createElement('canvas');cnv.className='pcard';
+    cnv.width=size+PAD*2;cnv.height=size+PAD*2+GEM_H;
+    const c=cnv.getContext('2d');
+    c.drawImage(Rig.portrait(look,size),PAD,PAD,size,size);
+    Render.portraitFrame(c,PAD,PAD,size,cls);
+    return cnv},
   // ---- roster --------------------------------------------------------------------------------
   // Fix round 1 (controller review, Important): cards are a single-column, full-width row --
   // portrait | info | a horizontal action row -- so LEVEL UP/RANK UP/SELECT can be real 44px+
@@ -224,7 +309,7 @@ const Screens={
     for(const id of Object.keys(Save.data.roster)){
       const entry=Save.data.roster[id],def=CHAMPS[id];
       const card=document.createElement('div');card.className='card'+(id===Save.data.active?' active':'');
-      const portrait=Rig.portrait(lookFor(def));
+      const portrait=Screens.portraitCard(lookFor(def),112,def.cls);
       const info=document.createElement('div');info.className='info';
       const capLvl=Stats.caps.level(entry.rank),atCap=entry.level>=capLvl;
       const xpNeed=Stats.xpToLevel(entry.level+1);

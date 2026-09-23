@@ -113,8 +113,15 @@ body.left-handed #powerPicker{right:auto;left:14px}
 /* Task 6.1: doorStack (85_screens.js) nests a door/boss button's label and its "REC. LVL n" hint in
    their own vertical stack, inside .node's existing flex row (so the boss/locked ::before icon stays
    inline with the label, unaffected) -- .reclvl is deliberately tiny/muted (informational, not a
-   warning by default); .under (level below recLevel) goes red, still never disables the door. */
-.doorstack{display:flex;flex-direction:column;align-items:center;line-height:1.3}
+   warning by default); .under (level below recLevel) goes red, still never disables the door.
+   Task 8.5: .doorstack is now a horizontal row -- the door-card canvas (arch/torch/portrait/banner)
+   on the left, the label + REC. LVL text (.doortext, the old vertical stack) on the right -- instead
+   of the label being the doorstack's only content. .node's own width/min-height (unchanged) now
+   simply grows to fit the taller row; #mapPath's existing overflow-y:auto (fix-wave item 8, below)
+   is what a full 6-row floor scrolls through when the six door cards don't all fit at once. */
+.doorstack{display:flex;flex-direction:row;align-items:center;gap:8px}
+.doortext{display:flex;flex-direction:column;align-items:flex-start;line-height:1.3}
+canvas.doorcard{width:80px;height:104px;flex:none;border-radius:4px;background:#101422}
 .reclvl{font-size:8px;letter-spacing:1px;opacity:.7;color:inherit}
 .reclvl.under{color:#e2554f;opacity:1}
 /* Task 5.3: the map's own permanently-open TUTORIAL entry -- never disabled, so it gets a distinct
@@ -144,16 +151,33 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
 /* Fix round 1: cards are a single-column, full-width row (portrait | info | action row) instead of
    a 2-column grid of tall cards -- a 2-column layout could only fit 3 stacked action buttons at
    26px each; a single wide row fits the same 3 actions SIDE BY SIDE at a real 44px+ touch height,
-   and still stacks up to 4 champions (carl/katia/donut/mongo) at 854x480 with no scroll. */
+   and used to still stack up to 4 champions (carl/katia/donut/mongo) at 854x480 with no scroll. */
 /* Task 4.6: was justify-content:flex-start, which left 1-2 champions pinned to the top of the
    panel with a large dead gap below -- centering the column instead means 1 card sits mid-panel,
    4 cards still stack top-to-bottom with no scroll (unchanged from the fix-round-1 comment above),
    and the transition between those two densities is smooth (no snap from "centered" to "top-anchored"
    at some champion-count threshold). */
-.cards{display:flex;flex-direction:column;gap:8px;overflow:hidden;flex:1;justify-content:center}
+/* Task 8.5: overflow:hidden -> overflow-y:auto. The 112px framed portrait card (Screens.portraitCard)
+   is taller than the old 52px bust, so 4 stacked champions no longer fit 854x480 without scrolling --
+   with the old overflow:hidden that silently clipped the top and bottom cards (verified: CARL's
+   name/DONUT's actions ran off both edges with overflow:hidden and no way to reach them). Same fix
+   as fix-wave item 8 already applied to .path/.setrows/#shopBody: a list that outgrows its box
+   scrolls to reach the rest instead of clipping it (the phone-layout brief's own "scrolling lists
+   allowed but no clipping" line). justify-content:center still centers a short (1-2 card) roster;
+   once content overflows, the browser's own scrollable-overflow behavior lets it be reached above
+   and below center by scrolling. */
+.cards{display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1;justify-content:center}
 .card{box-sizing:border-box;background:#181c2b;border:2px solid #333;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:10px;text-align:left}
 .card.active{border-color:#f4c542}
 .card canvas{width:52px;height:52px;flex:none;background:#101422;border-radius:4px}
+/* Task 8.5: the roster card's own portrait+frame canvas (Screens.portraitCard) carries the 112px
+   portrait plus Render.portraitFrame's ring/gem drawn around it (see that function's own padding
+   math, 85_screens.js), so its backing canvas is taller than it is wide (112+2*PAD wide,
+   112+2*PAD+GEM_H tall) -- a plain `.card canvas` width/height:52px square (above) would squash that
+   aspect. Higher specificity (.card canvas.pcard) wins the tie; display size (64x72) keeps the same
+   visual footprint class the old 52px bust had, just close to the real ~120:134 aspect instead of
+   forcing it square. */
+.card canvas.pcard{width:84px;height:94px;background:#101422}
 .card .info{flex:1 1 auto;min-width:0}
 .card .name{font-size:12px;color:#fff;font-weight:bold;letter-spacing:1px}
 .card .stars{color:#f4c542;font-size:11px;margin-left:6px}
@@ -8803,7 +8827,7 @@ const Screens={
       f.nodes.forEach((node,i)=>{
         const b=document.createElement('button');
         b.className='node '+node.state+(i===0&&highlightDoor1?' next':'');
-        b.appendChild(Screens.doorStack('DOOR '+(i+1),node.enc));
+        b.appendChild(Screens.doorStack('DOOR '+(i+1),node.enc,node.state));
         b.disabled=node.state!=='open';
         b.onclick=()=>{Screens._origin={name:'map',args:[n]};
           G.startFight({floor:n,node:i,champ:Save.data.active})};
@@ -8811,7 +8835,7 @@ const Screens={
       if(highlightDoor1)G.tutorialJustGranted=false;
       const boss=document.createElement('button');
       boss.className='node boss '+f.boss.state;
-      boss.appendChild(Screens.doorStack('BOSS',f.boss.enc));
+      boss.appendChild(Screens.doorStack('BOSS',f.boss.enc,f.boss.state));
       boss.disabled=f.boss.state!=='open';
       boss.onclick=()=>{Screens._origin={name:'map',args:[n]};
         G.startFight({floor:n,node:'boss',champ:Save.data.active})};
@@ -8831,9 +8855,15 @@ const Screens={
   // disables the door (still enterable; state/energy gating is the caller's own .disabled, set right
   // after this in renderMap). Every real FLOORS-referenced encounter carries a recLevel now, but this
   // stays defensive (no hint span at all) for any future node that doesn't.
-  doorStack(label,encId){
+  // Task 8.5: doorStack now wraps a door-card canvas (the arch/torch/portrait/banner illustration
+  // below) alongside its original label + REC. LVL text, in a horizontal row -- the label/hint stay
+  // plain DOM text (not baked into the canvas) so Task 6.1's own REC. LVL test keeps working
+  // unchanged and the hint stays trivially readable/testable rather than needing pixel inspection.
+  doorStack(label,encId,state){
     const stack=document.createElement('span');stack.className='doorstack';
-    const l=document.createElement('span');l.className='doorlabel';l.textContent=label;stack.appendChild(l);
+    stack.appendChild(Screens.doorCard(encId,state));
+    const text=document.createElement('span');text.className='doortext';
+    const l=document.createElement('span');l.className='doorlabel';l.textContent=label;text.appendChild(l);
     const recLevel=ENCOUNTERS[encId]&&ENCOUNTERS[encId].recLevel;
     if(recLevel!=null){
       const entry=Save.data.roster[Save.data.active];
@@ -8841,8 +8871,87 @@ const Screens={
       const hint=document.createElement('span');
       hint.className='reclvl'+(level<recLevel?' under':'');
       hint.textContent='REC. LVL '+recLevel;
-      stack.appendChild(hint)}
+      text.appendChild(hint)}
+    stack.appendChild(text);
     return stack},
+  // ---- Task 8.5: map door cards --------------------------------------------------------------
+  // A small procedural illustration per node -- a stone arch, a torch (Stage's own TORCH_TINT, so
+  // it reads as the same light source the in-fight stage lighting model uses), the encounter
+  // enemy's own 112px HUD bust (Rig.portrait, Task 8.1/8.2), and a floor-number banner -- replacing
+  // the old plain-text-only doorstack. Cached per node id + state (Boundaries: "no per-render redraw
+  // of every card") keyed on `encId+'|'+state`: a floor switch or a Screens.refresh() with nothing
+  // actually changed about that node hands back the exact same canvas instead of repainting it; only
+  // a real state flip (a door going open -> done on a win, or unlocking) produces a new cache entry,
+  // and the old entry for the state it left behind is simply never touched again.
+  _doorCache:{},
+  DOOR_W:80,DOOR_H:104,
+  doorCard(encId,state){
+    const key=encId+'|'+state;
+    let cnv=this._doorCache[key];
+    if(cnv)return cnv;
+    cnv=document.createElement('canvas');cnv.className='doorcard';cnv.dataset.state=state;
+    cnv.width=this.DOOR_W;cnv.height=this.DOOR_H;
+    Screens._paintDoorCard(cnv.getContext('2d'),encId,state);
+    this._doorCache[key]=cnv;
+    return cnv},
+  _paintDoorCard(c,encId,state){
+    const W=Screens.DOOR_W,H=Screens.DOOR_H,enc=ENCOUNTERS[encId],def=DEFS[enc.enemy],look=lookFor(def);
+    const locked=state==='locked',done=state==='done';
+    c.save();
+    // stone jamb + arch mouth: a plain doorway silhouette so the portrait inset reads as "standing
+    // in a doorway", not a floating headshot; a locked door's stone reads darker/flatter even before
+    // the full dim overlay below, so a quick glance (not just the lock glyph) reads "not open yet".
+    c.fillStyle='#1c1f2c';c.fillRect(0,0,W,H);
+    c.fillStyle=locked?'#14161f':'#262b40';
+    c.beginPath();c.moveTo(6,H-6);c.lineTo(6,28);c.quadraticCurveTo(6,6,W/2,6);
+    c.quadraticCurveTo(W-6,6,W-6,28);c.lineTo(W-6,H-6);c.closePath();c.fill();
+    c.strokeStyle=locked?'#000':'#3a3f56';c.lineWidth=2;c.stroke();
+    // torch: a small flame glyph on the left jamb -- skipped on a locked door (nothing's lit yet).
+    if(!locked){
+      const tx=12,ty=H-24;
+      c.fillStyle=Stage.TORCH_TINT;
+      c.beginPath();c.moveTo(tx,ty+8);c.quadraticCurveTo(tx-4,ty,tx,ty-8);
+      c.quadraticCurveTo(tx+4,ty,tx,ty+8);c.fill();
+      c.fillStyle='#6a4a2a';c.fillRect(tx-1.5,ty+6,3,10)}
+    // portrait: the encounter enemy's own 112px HUD bust, scaled down into the arch mouth -- the
+    // same bitmap Rig.portrait already builds and caches for the in-fight HUD/roster, so the door
+    // card, the roster card and the fight sprite are demonstrably the same character.
+    const port=Rig.portrait(look,112),pw=48,ph=48,px=W/2-pw/2,py=20;
+    c.drawImage(port,px,py,pw,ph);
+    // floor banner: a small ribbon across the bottom third, state-colored, showing the floor number.
+    c.fillStyle=done?'#2c4a2c':locked?'#1a1a22':'#3a2f1a';
+    c.fillRect(6,H-20,W-12,14);
+    c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(6.5,H-19.5,W-13,13);
+    c.fillStyle=done?'#8fd18a':locked?'#555':'#f4c542';
+    c.font='bold 9px ui-monospace,monospace';c.textAlign='center';c.textBaseline='middle';
+    c.fillText('F'+enc.floor,W/2,H-13);
+    // locked/done overlay, drawn last so it covers the whole card (including the corner the
+    // brightness-comparison test above samples) -- a locked door dims hard and shows a lock glyph;
+    // a cleared one tints faintly green and shows a check, without hiding the art underneath.
+    if(locked){
+      c.fillStyle='rgba(0,0,0,.55)';c.fillRect(0,0,W,H);
+      c.fillStyle='#999';c.font='16px ui-monospace,monospace';c.textAlign='center';c.textBaseline='middle';
+      c.fillText('\u{1F512}',W/2,H/2)}
+    else if(done){
+      c.fillStyle='rgba(20,40,20,.35)';c.fillRect(0,0,W,H);
+      c.strokeStyle='#7fd18a';c.lineWidth=3;c.lineCap='round';c.lineJoin='round';
+      c.beginPath();c.moveTo(W*.28,H*.5);c.lineTo(W*.44,H*.64);c.lineTo(W*.74,H*.32);c.stroke()}
+    c.restore()},
+  // Task 8.5: the roster card's own portrait+frame, one canvas combining the 112px HUD bust
+  // (Rig.portrait, Tasks 8.1/8.2) with the in-fight HUD's own class-gem ring (Render.portraitFrame/
+  // CLS_GEM, Task 8.4) so a roster champion reads with the same class identity the fight HUD gives
+  // them. PCARD_PAD leaves room for portraitFrame's own ring (which draws slightly outside the
+  // portrait's x/y/size box) and PCARD_GEM_H leaves room below that for its gem badge
+  // (Render.gemCenter sits at y+size+6, gem radius 5 -- see that function's own comment, 70_render.js).
+  PCARD_PAD:4,PCARD_GEM_H:14,
+  portraitCard(look,size,cls){
+    const PAD=Screens.PCARD_PAD,GEM_H=Screens.PCARD_GEM_H;
+    const cnv=document.createElement('canvas');cnv.className='pcard';
+    cnv.width=size+PAD*2;cnv.height=size+PAD*2+GEM_H;
+    const c=cnv.getContext('2d');
+    c.drawImage(Rig.portrait(look,size),PAD,PAD,size,size);
+    Render.portraitFrame(c,PAD,PAD,size,cls);
+    return cnv},
   // ---- roster --------------------------------------------------------------------------------
   // Fix round 1 (controller review, Important): cards are a single-column, full-width row --
   // portrait | info | a horizontal action row -- so LEVEL UP/RANK UP/SELECT can be real 44px+
@@ -8852,7 +8961,7 @@ const Screens={
     for(const id of Object.keys(Save.data.roster)){
       const entry=Save.data.roster[id],def=CHAMPS[id];
       const card=document.createElement('div');card.className='card'+(id===Save.data.active?' active':'');
-      const portrait=Rig.portrait(lookFor(def));
+      const portrait=Screens.portraitCard(lookFor(def),112,def.cls);
       const info=document.createElement('div');info.className='info';
       const capLvl=Stats.caps.level(entry.rank),atCap=entry.level>=capLvl;
       const xpNeed=Stats.xpToLevel(entry.level+1);
@@ -11929,14 +12038,29 @@ Test.add('map doors show REC. LVL n under the label, with .under when the active
 // off at the top, DOOR 1 half-hidden behind BACK (final-review-verdict.md issue 3, measured
 // scrollHeight 283 vs clientHeight 272). .node min-height dropped to 40px, .path gap to 4px, and the
 // energy row/BACK spacing tightened so a full floor's six rows actually fit.
-Test.add('the map path fits a full floor with no clipping/scroll at 854x480 (fix-wave item 3)',()=>{
+// Task 8.5 update: this test used to assert literally zero overflow (scrollHeight<=clientHeight),
+// which held while a door row was a couple lines of text. The controller's door-card ruling (real
+// arch/torch/portrait/banner art per node, .superpowers/sdd/2026-09-22-phase8-art-upgrade/
+// task-8.5-brief.md) makes each row tall enough that a full 6-row floor (5 doors + boss) no longer
+// fits an 854x480 .scr box without scrolling -- and fix-wave item 8 (see .path's own CSS comment,
+// 00_head.html) already switched .path from overflow:hidden to overflow-y:auto specifically so a
+// list that outgrows its box scrolls to reach the rest instead of clipping it, which is exactly what
+// "no clipping/scroll" always meant in the Phase 6 ruling this test's own title still cites -- a
+// *reachable* list was always the actual bar, "zero scroll" was only ever how a short list happened
+// to clear it. This asserts the real bar directly: .path must never clip (overflow:hidden) a full
+// floor, and must actually be scrollable when it doesn't fit.
+Test.add('the map path never clips a full floor -- door cards that don\'t fit scroll into view rather than being cut off (fix-wave item 3, updated for Task 8.5 door-card art)',()=>{
   Save.data=Meta.defaults();
   for(let i=0;i<5;i++)Save.data.floors[1].nodes[i]='open'; // worst case: every row rendered, none locked-thin
   Save.data.floors[1].boss='open';
   Screens.map(1);
   const path=document.getElementById('mapPath');
-  ok(path.scrollHeight<=path.clientHeight,
-    '#mapPath must not overflow: scrollHeight '+path.scrollHeight+' > clientHeight '+path.clientHeight);
+  const cs=getComputedStyle(path);
+  ok(cs.overflowY==='auto'||cs.overflowY==='scroll',
+    '#mapPath must allow scrolling (Phase 6 ruling) rather than clipping when a full floor does not fit: overflowY='+cs.overflowY);
+  ok(cs.overflowY!=='hidden','#mapPath must never clip its own content with overflow:hidden');
+  const nodeEls=[...document.querySelectorAll('#mapPath .node')];
+  eq(nodeEls.length,6,'sanity: a full floor 1 (5 doors + boss) must render all six node rows into the DOM, reachable by scroll even if not all visible at once');
   Screens.title()});
 // Fix-wave item 6 (Important): a refused node gave no visible feedback -- map buttons were never
 // `disabled`, so a locked door looked and clicked exactly like an open one, and G.refuseQuest's
@@ -14723,5 +14847,96 @@ Test.add('hud(): the enemy combo counter uses CLS_GEM[p2.def.cls] instead of a f
   c.fillText=origFillText;
   eq(seenText,'3 HITS','the enemy combo text must have caught up to the real combo by the end of the tween window');
   eq(seenColor,CLS_GEM.beast,'grub (cls beast) must draw its combo counter in CLS_GEM.beast, not a fixed color')});
+// ---- Task 8.5: door cards, roster portraits, Phase 8 close-out ---------------------------------
+// Door cards: a small procedural illustration (arch, torch, the encounter enemy's own 112px HUD
+// bust, a floor-number banner, and a locked/done overlay) replacing the old plain-text doorstack,
+// cached per node id + state (Boundaries: "no per-render redraw of every card") so a map re-render
+// never repaints a card whose encounter and state haven't changed. Roster cards: the same 112px
+// portrait (Rig.portrait, already built/cached by Tasks 8.1/8.2 -- unchanged here) framed with the
+// in-fight HUD's own class-gem ring (Render.portraitFrame/CLS_GEM, Task 8.4) via Screens.portraitCard.
+Test.add('Screens.doorCard returns a fixed-size canvas cached per encounter id + state -- a repeat call with the same key never repaints',()=>{
+  Screens._doorCache={};
+  const a=Screens.doorCard('f1_goblin','open');
+  ok(a instanceof HTMLCanvasElement,'doorCard must return a canvas');
+  ok(a.width===Screens.DOOR_W&&a.height===Screens.DOOR_H,'door card must be Screens.DOOR_W x Screens.DOOR_H');
+  const a2=Screens.doorCard('f1_goblin','open');
+  ok(a===a2,'the same encId+state must return the exact same cached canvas, not a repaint');
+  const b=Screens.doorCard('f1_goblin','locked');
+  ok(b!==a,'a different state for the same node must be its own cached canvas (locked reads differently than open)');
+  const d=Screens.doorCard('f1_goblin','done');
+  ok(d!==a&&d!==b,'"done" gets its own cached canvas too');
+  const c=Screens.doorCard('f1_skel','open');
+  ok(c!==a,'a different encounter must be its own cached canvas')});
+Test.add('Screens.doorCard paints the encounter enemy\'s own 112px portrait (Rig.portrait), not a generic placeholder',()=>{
+  Screens._doorCache={};
+  const realPortrait=Rig.portrait;
+  const calls=[];
+  Rig.portrait=function(look,size){calls.push({look,size});return realPortrait.apply(Rig,arguments)};
+  try{Screens.doorCard('f1_skel','open')}finally{Rig.portrait=realPortrait}
+  const want=lookFor(DEFS[ENCOUNTERS.f1_skel.enemy]);
+  ok(calls.some(c=>c.look===want&&c.size===112),
+    'doorCard must call Rig.portrait with the encounter enemy\'s own look at size 112, not the 56px HUD bust')});
+Test.add('Screens.doorCard dims a locked door and marks a done one, each its own cached state -- a locked card reads visibly darker than an open one',()=>{
+  Screens._doorCache={};
+  const open=Screens.doorCard('f1_goblin','open');
+  const locked=Screens.doorCard('f1_goblin','locked');
+  const done=Screens.doorCard('f1_goblin','done');
+  eq(open.dataset.state,'open');eq(locked.dataset.state,'locked');eq(done.dataset.state,'done');
+  const brightness=cnv=>{const cx=cnv.getContext('2d');const d=cx.getImageData(2,2,4,4).data;
+    let sum=0;for(let i=0;i<d.length;i+=4)sum+=d[i]+d[i+1]+d[i+2];return sum};
+  ok(brightness(locked)<brightness(open),
+    'a locked door card must read dimmer than an open one at the same corner sample (locked overlay is opaque enough to always darken it)')});
+Test.add('the map renders one door-card canvas per node (5 doors + boss), each reused (not rebuilt) across a re-render of the same floor',()=>{
+  Save.data=Meta.defaults();
+  Screens._doorCache={};
+  Screens.map(1);
+  const f=FLOORS[0];
+  const cardEls=[...document.querySelectorAll('#mapPath .node')].map(el=>el.querySelector('canvas.doorcard'));
+  eq(cardEls.length,f.nodes.length+1,'every node plus the boss must carry a door-card canvas');
+  ok(cardEls.every(Boolean),'every node must actually have a canvas.doorcard child');
+  Screens.map(1); // re-render the same floor: same node ids/states -> same cached canvases, not rebuilt
+  const cardEls2=[...document.querySelectorAll('#mapPath .node')].map(el=>el.querySelector('canvas.doorcard'));
+  cardEls.forEach((el,i)=>ok(el===cardEls2[i],'node '+i+'\'s door card must be the exact same cached canvas across a re-render'));
+  Screens.title()});
+Test.add('map doors still show REC. LVL n under the label once wrapped in a door card (fix-wave/Task 6.1 behavior preserved by Task 8.5\'s doorStack rewrite)',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster.carl.level=1;
+  Screens.map(1);
+  const f=FLOORS[0];
+  const nodeEls=[...document.querySelectorAll('#mapPath .node:not(.boss)')];
+  nodeEls.forEach((el,i)=>{
+    const enc=ENCOUNTERS[f.nodes[i]];
+    const hint=el.querySelector('.reclvl');
+    ok(hint,'door '+i+' must still show a REC. LVL hint alongside its door card');
+    eq(hint.textContent,'REC. LVL '+enc.recLevel);
+    ok(el.querySelector('canvas.doorcard'),'door '+i+' must also carry its door-card canvas')});
+  Screens.title()});
+Test.add('Screens.portraitCard draws the 112px portrait framed with Render.portraitFrame\'s class-gem ring at the champion\'s own CLS_GEM color',()=>{
+  const hex=h=>{const n=parseInt(h.slice(1),16);return[(n>>16)&255,(n>>8)&255,n&255]};
+  for(const cls of['brawler','beast']){
+    const cnv=Screens.portraitCard(LOOKS.carl,112,cls);
+    ok(cnv instanceof HTMLCanvasElement);
+    eq(cnv.width,112+Screens.PCARD_PAD*2,'portraitCard width must be the 112px portrait plus its frame padding');
+    const p=Render.gemCenter(Screens.PCARD_PAD,Screens.PCARD_PAD,112);
+    const d=cnv.getContext('2d').getImageData(Math.round(p.x),Math.round(p.y),1,1).data;
+    const want=hex(CLS_GEM[cls]);
+    eq(d[0],want[0],cls+' roster gem red channel');eq(d[1],want[1],cls+' roster gem green channel');eq(d[2],want[2],cls+' roster gem blue channel')}});
+Test.add('renderRoster builds each card\'s portrait at 112px (not the 56px HUD bust) and frames it with that champion\'s own CLS_GEM color',()=>{
+  Save.data=Meta.defaults();
+  const realPortrait=Rig.portrait;
+  const sizesSeen=[];
+  Rig.portrait=function(look,size){sizesSeen.push(size);return realPortrait.apply(Rig,arguments)};
+  try{Screens.roster()}finally{Rig.portrait=realPortrait}
+  ok(sizesSeen.includes(112),'renderRoster must request the 112px portrait for at least one card, got sizes '+JSON.stringify(sizesSeen));
+  ok(!sizesSeen.some(s=>s===56),'renderRoster must not also build the 56px HUD bust for its cards');
+  const hex=h=>{const n=parseInt(h.slice(1),16);return[(n>>16)&255,(n>>8)&255,n&255]};
+  for(const card of[...document.querySelectorAll('#rosterCards .card')]){
+    const cnv=card.querySelector('canvas.pcard');
+    ok(cnv,'every roster card must carry a canvas.pcard');
+    eq(cnv.width,112+Screens.PCARD_PAD*2,'roster portrait canvas must be sized for the 112px portrait')}
+  Screens.title()});
+// Task 8.5 close-out: the whole-branch gate this task's report cites (--unit/--matrix/--e2e/
+// --tutorial/--screens-smoke/--phone-check/--perf/batch) lives in tests/harness.py and tests/batch.py,
+// not here -- see docs/ARENA.md's "Phase 8 exit" section for the actual numbers.
 
 </script></body></html>
