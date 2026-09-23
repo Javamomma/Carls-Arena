@@ -142,21 +142,31 @@ follow-through the tutorial's third lesson teaches: **parry, then heavy.** A lan
 **x1.25 damage** and pops a PUNISH! popup. Missing the window (holding block too long without a real
 parry) locks out re-parrying for 20 frames.
 
-### Intercept and dexterity
+### Intercept, backdraft and dexterity
 
 Two reads, offense and defense, both tier-agnostic (they trigger off live fight state, not who's
-throwing the hit):
+throwing the hit), plus a bonus read for chaining together an evasive dash-back with an intercept:
 
 - **Intercept** — land a hit on a foe who's still in the *startup* of any light or medium (a medium's
   own track dash-in counts, and so does a light's flat startup dash — a light doesn't have to actually
   be stepping in from range for this to trigger, a point-blank jab is just as interceptable) and it
-  counts as an intercept: **x1.5 damage**, **+15 power**, its own heavier hitstop, camera punch-in and
-  directional shake, and an INTERCEPT! popup.
+  counts as an intercept: **+15 power**, its own heavier hitstop, camera punch-in and directional
+  shake, and an INTERCEPT! popup. The damage multiplier is keyed to the *interceptor's own move*: a
+  light gets **x1.3**, a medium **x1.8** (a heavy or special landing as the intercept — rare, since
+  nothing in this roster's AI/player flow throws one that way on purpose — falls back to a flat x1.5).
+- **Backdraft** — land an intercept within **30 frames** of your own dash-back out of an open chain
+  (MCoC's own named setup: "swipe back after your third light, then throw a medium as they dash at
+  you") and it also pops a BACKDRAFT! callout on top of the INTERCEPT! one, credited to you as the
+  interceptor.
 - **Dexterity** — dash back (swipe left, or hold through into block) so that your i-frames cover the
   exact moment a foe's hit would've connected, and it whiffs clean through you instead: **+20% crit
   chance**, until **12 frames after your next landed hit** (capped at 3s if you never land one — a
   dash-and-bank buff, not a dash-and-forget one, matching MCoC's own "dex, then commit" mastery
   wording), refreshed rather than stacked by a second dodge, plus an afterimage fx and its own event.
+  Dodging mid-way through a multi-hit special dodges every remaining sub-hit of that same special too
+  (whatever you do for the rest of it), but only banks the dexterity buff — and cancels any last-hit
+  kit effect that special was carrying (see "(dodgeable)" in the Champions section below) — if the
+  dodge actually reaches that special's own final blow.
 
 ### Status effects
 
@@ -191,10 +201,18 @@ real, shipped duration — see "Status effects" above; two of these disagree wit
 note by name (`docs/design/mcoc-comparison-notes.md`'s own footnote has the detail): Carl's S3 stun
 is 1s, not 2s, and Grull's S3 weakness is 8s, not 10s.
 
+**S1/S2** travel: thrown from neutral at any real range, they dash in (the same tracked shape a
+medium's own dash-in uses) to actually reach the foe instead of whiffing in place. **S3** is a
+committed, stationary special — it no longer travels, and it's no longer unblockable: block it and it
+still chips for double the normal rate instead of dealing full damage. A last-hit kit effect marked
+**"(dodgeable)"** below never fires if you dash back through the final blow of that special (see
+"Intercept, backdraft and dexterity" above) — and neither does a *blocked* last hit's effect, for the
+same reason (a blocked sub-hit never reaches the code path that applies it).
+
 - **Carl** (brawler) — *Spite*: below 40% hp, an uncapped Fury stack (self) builds up every 3s, up to
-  10. Heavy: 2 stacks of Armor Break. **S1, Two-Fisted** (3 hits): last hit Bleeds. **S2, Boot Party**
-  (5 hits): a blocked hit refunds 20 power. **S3, Doorway Drop** (4 hits): last hit guarantees a 1s
-  Stun. Signature: Fury (self).
+  10. Heavy: 2 stacks of Armor Break. **S1, Two-Fisted** (3 hits): last hit Bleeds (dodgeable). **S2,
+  Boot Party** (5 hits): a blocked hit refunds 20 power. **S3, Doorway Drop** (4 hits): last hit
+  guarantees a 1s Stun (dodgeable). Signature: Fury (self).
 - **Princess Donut** (caster) — *Royal Disdain*: every special she throws Weakens the foe (2 stacks
   if the foe is already debuffed). Heavy: burns 30 power. **S1, Hairball** (5 hits): every hit
   Poisons. **S2, Regal Pounce** (5 hits): last hit is Unblockable, even through a held block. **S3,
@@ -202,18 +220,19 @@ is 1s, not 2s, and Grull's S3 weakness is 8s, not 10s.
 - **Katia** (trickster) — *Understudy*: a successful parry grants +1 Crit Damage stack (self, +40%
   crit damage, 3s). Heavy: refreshes the duration of every Bleed stack already on the foe. **S1,
   Knife Work** (5 hits): every hit Bleeds. **S2, Misdirection** (5 hits): every hit is a guaranteed
-  crit. **S3, Curtain Call** (4 hits): last hit Bleeds x3 and Armor Breaks. Signature: Bleed.
+  crit. **S3, Curtain Call** (4 hits): last hit Bleeds x3 and Armor Breaks (dodgeable). Signature:
+  Bleed.
 - **Mongo** (tank) — *Immovable*: +1 Fury stack (self) per 120 consecutive frames spent blocking,
   capped at 5. Heavy, Ground Slam: knocks down even through a raised guard. **S1, Backhand** (3
-  hits): last hit Stuns. **S2, Bear Hug** (5 hits): heals him 30% of the damage each hit deals. **S3,
-  Doorway Denial** (4 hits): last hit grants himself Armor Up (+60% armor, 10s) — the AI throws this
-  one automatically once its own hp drops to 60% or below and 3 bars are banked, rather than waiting
-  for a debuffed foe the way every other champion's AI does (Mongo's own kit gives the foe nothing to
-  debuff-count). Signature: Armor Break.
+  hits): last hit Stuns (dodgeable). **S2, Bear Hug** (5 hits): heals him 30% of the damage each hit
+  deals. **S3, Doorway Denial** (4 hits): last hit grants himself Armor Up (+60% armor, 10s,
+  dodgeable) — the AI throws this one automatically once its own hp drops to 60% or below and 3 bars
+  are banked, rather than waiting for a debuffed foe the way every other champion's AI does (Mongo's
+  own kit gives the foe nothing to debuff-count). Signature: Armor Break.
 - **Grull** (boss, tank, floor 1) — *Champion of the Floor*: every 10s, purifies every debuff on
   himself and gains 3 Fury (self). Heavy, Pillar Swing: long reach, Armor Breaks the foe. **S3, Floor
-  Wipe** (3 hits): last hit Weakens the foe for 8s. Keeps a separate, permanent Armor Up buff of his
-  own (an older mechanism, not the timed effect above).
+  Wipe** (3 hits): last hit Weakens the foe for 8s (dodgeable). Keeps a separate, permanent Armor Up
+  buff of his own (an older mechanism, not the timed effect above).
 - **Mother Rat** (boss, beast, floor 2) — *Brood*: below 50% hp, gains a Power Gain stack (self) and
   her regen triples. Heavy, Tail Sweep: Bleeds the foe x3. **S3, Swarm** (6 hits): every hit heals
   her 2% of the damage it deals.
