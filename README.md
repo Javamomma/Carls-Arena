@@ -10,12 +10,25 @@ One-on-one tap-and-swipe fighter in the Dungeon Crawler Carl universe. Single HT
 |---|---|
 | ![A fight in progress, Carl vs Goblin Scavenger, gestures-only HUD](docs/shots/p2-close.png) | ![The tutorial's visible spar mode: SPAR plate, LESSON banner](docs/shots/p5-tutorial-1.png) |
 | A fight in progress — one thumb, gestures-only HUD | The tutorial's own visible sparring session |
-| ![The campaign map: doors show a REC. LVL hint](docs/shots/p4-map.png) | ![Carl vs Mother Rat, Floor 2's boss](docs/shots/p3-floor2-boss.png) |
-| The campaign map, with a REC. LVL hint under every door | Floor 2's boss fight |
+| ![The campaign map: door cards show an arch, a torch, the enemy's portrait, a floor banner and a REC. LVL hint](docs/shots/p8-map.png) | ![The roster: 112px class-framed portraits with a bronze ring and class gem](docs/shots/p8-roster.png) |
+| The campaign map — a door card per node, locked doors dimmed with a lock glyph | The roster screen, each card framed with its champion's own class gem |
 | ![An intercept: INTERCEPT! popup, camera punch-in, directional shake](docs/shots/p7-intercept.png) | ![A crit heavy: damage popup, spark burst, the new impactBlunt ring](docs/shots/p7-heavy.png) |
 | Intercepting a foe's dash-in: punch-in camera + directional shake | A landed heavy, with its own per-class impact fx |
+| ![The in-fight HUD: chevron bars, bronze class-gem portrait frames, a gold combo counter](docs/shots/p8-hud.png) | ![Carl vs Mother Rat, Floor 2's boss](docs/shots/p3-floor2-boss.png) |
+| The in-fight HUD — chevron bars, class-gem portrait frames, a tilted gold combo counter | Floor 2's boss fight |
 
 The [S3 cinematic card](docs/shots/p7-s3.png) (Carl's SPECIAL 3) rounds out `docs/shots/p7-*.png`.
+
+### Art
+
+Every fighter is a layered procedural vector body — real cloth, hair, and a face module shared by
+the fight sprite, the HUD portrait, the map's door cards, and the roster cards, so the same character
+reads the same way everywhere it appears — over a stage with torchlit depth (parallax layers, a
+per-column lighting model that tints and rim-lights whoever's standing near a torch, and floor
+falloff with distance). The HUD carries that through: chevron-capped bars, an ornate bronze
+portrait frame with a class-colored gem, and a tilted gold combo counter. None of it needs an asset
+file — see "Adding your own art" below if you'd rather draw one by hand; the sprite atlas stays
+optional and off by default either way.
 
 ## How to play
 
