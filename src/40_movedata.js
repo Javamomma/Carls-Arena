@@ -91,7 +91,10 @@ const CHAMPS={
     moves:{heavy:{applies:[{id:'armorBreak',stacks:2,on:'hit'}]},
       s1:{applies:[{id:'bleed',stacks:1,on:'last'}]},
       s2:{refundOnBlock:20},
-      s3:{applies:[{id:'stun',stacks:1,on:'last'}]}}},
+      s3:{applies:[{id:'stun',stacks:1,on:'last'}]}},
+    // Task 9.2: Spite -- see PASSIVES.spite (49_passives.js) for the actual numbers; this def only
+    // ever carries the bare id, same split every other champion/boss passive below keeps.
+    passive:{id:'spite'}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
   // and Rig.solve's 'quad' branch in 68_rig.js).
   donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',impact:'energy',
@@ -104,7 +107,9 @@ const CHAMPS={
     // still block normally, chip+blockstun) instead of the whole-move `true` every other unblockable
     // move (base MOVES.s3) keeps. See Fight.detect's own comment (60_fight.js) for the two-value flag.
     moves:{heavy:{applies:[{id:'powerBurn',stacks:1,potency:30,on:'hit'}]},
-      s2:{unblockable:'last'}}},
+      s2:{unblockable:'last'}},
+    // Task 9.2: Royal Disdain -- see PASSIVES.royalDisdain (49_passives.js).
+    passive:{id:'royalDisdain'}},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blade',
     // s1 Knife Work already overridden to 5 hits (pre-Phase-9) -- matches the kit table verbatim, so
     // each landed hit now also bleeds 1. s2 Misdirection (base MOVES.s2 hits:5, matches) crits every
@@ -114,7 +119,9 @@ const CHAMPS={
     moves:{s1:{hits:5,gap:4,dmg:1.2,applies:[{id:'bleed',stacks:1,on:'hit'}]},
       s2:{critChance:1.0},
       s3:{applies:[{id:'bleed',stacks:3,on:'last'},{id:'armorBreak',stacks:1,on:'last'}]}},
-    sigEffect:{id:'bleed',stacks:1}},
+    sigEffect:{id:'bleed',stacks:1},
+    // Task 9.2: Understudy -- see PASSIVES.understudy (49_passives.js).
+    passive:{id:'understudy'}},
   // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
   mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',impact:'blunt',
     sigEffect:{id:'armorBreak',stacks:1},
@@ -126,7 +133,9 @@ const CHAMPS={
     moves:{heavy:{ignoreBlock:'knockdown'},
       s1:{applies:[{id:'stun',stacks:1,on:'last'}]},
       s2:{healPct:0.30},
-      s3:{applies:[{id:'armorUp',stacks:1,on:'last',target:'self'}]}}}};
+      s3:{applies:[{id:'armorUp',stacks:1,on:'last',target:'self'}]}},
+    // Task 9.2: Immovable -- see PASSIVES.immovable (49_passives.js).
+    passive:{id:'immovable'}}};
 // Task 6.1, ruling 3 (playtest note: "Hobgoblin Brute is impossible to defeat" at floor 1 door 3,
 // level 1): goblin/skeleton hp raised and atk lowered exactly to the plan's given numbers (360/30,
 // 320/28) -- longer, safer early fights instead of fast trades a level-1 player can lose to a bad
@@ -203,7 +212,9 @@ const BOSSES={
   grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:50,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',impact:'blunt',
     boss:true,buffs:['armorUp'],
     moves:{heavy:{applies:[{id:'armorBreak',stacks:1,on:'hit'}]},
-      s3:{dmg:3.6,hits:3,gap:10,applies:[{id:'weakness',stacks:1,on:'last'}]}}},
+      s3:{dmg:3.6,hits:3,gap:10,applies:[{id:'weakness',stacks:1,on:'last'}]}},
+    // Task 9.2: Champion of the Floor -- see PASSIVES.championOfTheFloor (49_passives.js).
+    passive:{id:'championOfTheFloor'}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
   // 47_buffs.js, since disabling it entirely still left her a 20/20 wall — her offense, not the
@@ -237,7 +248,10 @@ const BOSSES={
   mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:50,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',impact:'blunt',
     boss:true,buffs:['regen'],
     moves:{heavy:{applies:[{id:'bleed',stacks:3,on:'hit'}]},
-      s3:{dmg:2.4,hits:6,gap:5,healPct:0.02}}}};
+      s3:{dmg:2.4,hits:6,gap:5,healPct:0.02}},
+    // Task 9.2: Brood -- see PASSIVES.brood (49_passives.js). The regen-tripling half lives in
+    // BUFFS.regen's own onFrame (47_buffs.js), which checks this same passive id live.
+    passive:{id:'brood'}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
 // Task 8.4 ruling: CLS_GEM maps a def's own cls (CHAMPS/MOBS/BOSSES above) to the portrait-frame

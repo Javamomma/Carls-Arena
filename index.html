@@ -1640,7 +1640,10 @@ const CHAMPS={
     moves:{heavy:{applies:[{id:'armorBreak',stacks:2,on:'hit'}]},
       s1:{applies:[{id:'bleed',stacks:1,on:'last'}]},
       s2:{refundOnBlock:20},
-      s3:{applies:[{id:'stun',stacks:1,on:'last'}]}}},
+      s3:{applies:[{id:'stun',stacks:1,on:'last'}]}},
+    // Task 9.2: Spite -- see PASSIVES.spite (49_passives.js) for the actual numbers; this def only
+    // ever carries the bare id, same split every other champion/boss passive below keeps.
+    passive:{id:'spite'}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
   // and Rig.solve's 'quad' branch in 68_rig.js).
   donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',impact:'energy',
@@ -1653,7 +1656,9 @@ const CHAMPS={
     // still block normally, chip+blockstun) instead of the whole-move `true` every other unblockable
     // move (base MOVES.s3) keeps. See Fight.detect's own comment (60_fight.js) for the two-value flag.
     moves:{heavy:{applies:[{id:'powerBurn',stacks:1,potency:30,on:'hit'}]},
-      s2:{unblockable:'last'}}},
+      s2:{unblockable:'last'}},
+    // Task 9.2: Royal Disdain -- see PASSIVES.royalDisdain (49_passives.js).
+    passive:{id:'royalDisdain'}},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blade',
     // s1 Knife Work already overridden to 5 hits (pre-Phase-9) -- matches the kit table verbatim, so
     // each landed hit now also bleeds 1. s2 Misdirection (base MOVES.s2 hits:5, matches) crits every
@@ -1663,7 +1668,9 @@ const CHAMPS={
     moves:{s1:{hits:5,gap:4,dmg:1.2,applies:[{id:'bleed',stacks:1,on:'hit'}]},
       s2:{critChance:1.0},
       s3:{applies:[{id:'bleed',stacks:3,on:'last'},{id:'armorBreak',stacks:1,on:'last'}]}},
-    sigEffect:{id:'bleed',stacks:1}},
+    sigEffect:{id:'bleed',stacks:1},
+    // Task 9.2: Understudy -- see PASSIVES.understudy (49_passives.js).
+    passive:{id:'understudy'}},
   // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
   mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',impact:'blunt',
     sigEffect:{id:'armorBreak',stacks:1},
@@ -1675,7 +1682,9 @@ const CHAMPS={
     moves:{heavy:{ignoreBlock:'knockdown'},
       s1:{applies:[{id:'stun',stacks:1,on:'last'}]},
       s2:{healPct:0.30},
-      s3:{applies:[{id:'armorUp',stacks:1,on:'last',target:'self'}]}}}};
+      s3:{applies:[{id:'armorUp',stacks:1,on:'last',target:'self'}]}},
+    // Task 9.2: Immovable -- see PASSIVES.immovable (49_passives.js).
+    passive:{id:'immovable'}}};
 // Task 6.1, ruling 3 (playtest note: "Hobgoblin Brute is impossible to defeat" at floor 1 door 3,
 // level 1): goblin/skeleton hp raised and atk lowered exactly to the plan's given numbers (360/30,
 // 320/28) -- longer, safer early fights instead of fast trades a level-1 player can lose to a bad
@@ -1752,7 +1761,9 @@ const BOSSES={
   grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:50,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',impact:'blunt',
     boss:true,buffs:['armorUp'],
     moves:{heavy:{applies:[{id:'armorBreak',stacks:1,on:'hit'}]},
-      s3:{dmg:3.6,hits:3,gap:10,applies:[{id:'weakness',stacks:1,on:'last'}]}}},
+      s3:{dmg:3.6,hits:3,gap:10,applies:[{id:'weakness',stacks:1,on:'last'}]}},
+    // Task 9.2: Champion of the Floor -- see PASSIVES.championOfTheFloor (49_passives.js).
+    passive:{id:'championOfTheFloor'}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
   // 47_buffs.js, since disabling it entirely still left her a 20/20 wall — her offense, not the
@@ -1786,7 +1797,10 @@ const BOSSES={
   mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:50,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',impact:'blunt',
     boss:true,buffs:['regen'],
     moves:{heavy:{applies:[{id:'bleed',stacks:3,on:'hit'}]},
-      s3:{dmg:2.4,hits:6,gap:5,healPct:0.02}}}};
+      s3:{dmg:2.4,hits:6,gap:5,healPct:0.02}},
+    // Task 9.2: Brood -- see PASSIVES.brood (49_passives.js). The regen-tripling half lives in
+    // BUFFS.regen's own onFrame (47_buffs.js), which checks this same passive id live.
+    passive:{id:'brood'}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
 // Task 8.4 ruling: CLS_GEM maps a def's own cls (CHAMPS/MOBS/BOSSES above) to the portrait-frame
@@ -1926,7 +1940,16 @@ const BUFFS={
     // healing reads as reasonable in isolation. Retuned down ~3x as part of making the boss winnable
     // (see docs/ARENA.md's boss balance notes); the interface's rate itself was the plan defect, not
     // this buff's implementation.
-    onFrame(fight,holder,foe){holder.hp=Math.min(holder.maxHp,holder.hp+holder.maxHp*0.00017)}},
+    // Task 9.2: Brood (mother_rat's own passive, 49_passives.js's PASSIVES.brood) triples this
+    // per-frame rate while active. Checked live, off holder.def.passive.id -- never off PASSIVES/
+    // Passives themselves, so this function body needs no reference to 49_passives.js at all (it
+    // loads AFTER this file in tools/build.py's filename-sort order; def.passive itself is set on
+    // mother_rat's own def in 40_movedata.js, which this file already loads after). Any future
+    // champion/boss holding both this buff and a different passive id is simply untripled -- Brood
+    // is the only passive this multiplier is scoped to.
+    onFrame(fight,holder,foe){
+      const mul=(holder.def.passive&&holder.def.passive.id==='brood')?3:1;
+      holder.hp=Math.min(holder.maxHp,holder.hp+holder.maxHp*0.00017*mul)}},
   armorUp:{id:'armorUp',
     // Incoming damage x.7 when the holder is the one defending this exchange.
     onHit(fight,att,def,ref,holder){if(holder===def)ref.dmg=Math.round(ref.dmg*0.7)}},
@@ -2248,6 +2271,138 @@ const Effects={
   purify(holder){
     for(let i=holder.effects.length-1;i>=0;i--)if(PURIFIABLE.includes(holder.effects[i].id))holder.effects.splice(i,1)}};
 
+// Task 9.2: champion/boss passive abilities -- deterministic, RNG-free, sim-side hooks that trigger
+// off fight/frame, hp, block-state and special/parry events, laid out parallel to Effects (48_effects.js)
+// but driven by these hooks instead of a move's own applies:[] list. tools/build.py concatenates
+// src/NN_* in filename order, so this file lands after 48_effects.js and before 50_fighter.js --
+// it may reference EFFECTS/Effects (already defined) at definition time, but never the Fighter class
+// (which loads after this file); every function below only ever touches a live Fighter INSTANCE
+// handed in as `fighter`/`holder` by Fight.step/Fight.resolve/Fighter.startMove at CALL time (once a
+// real fight exists), the same "load-order-safe forward touch" BUFFS.thorns already relies on from a
+// file that loads before 60_fight.js defines Fight.
+//
+// PASSIVES[id] holds the frozen params for one champion/boss's def.passive={id} (40_movedata.js just
+// carries the bare id; every actual number lives here, in one place, same "table separate from the
+// def" split CHAMPS/MOBS/BOSSES already keep for EFFECTS/BUFFS ids). Six entries, one per Phase 9
+// champion/boss signature -- see the task brief's own frozen table for the exact source of every
+// number below (nothing here was invented independent of that ruling).
+const PASSIVES={
+  spite:{hpBelow:.40,every:180,apply:{id:'fury',stacks:1,uncapped:true},ceiling:10},
+  royalDisdain:{onSpecial:{id:'weakness',stacks:1,doubleIfDebuffed:true}},
+  understudy:{onParry:{id:'critDmg',stacks:1}},
+  immovable:{whileBlocking:{every:120,apply:{id:'fury',stacks:1},max:5}},
+  championOfTheFloor:{every:1200,purify:true,apply:{id:'fury',stacks:3}},
+  brood:{hpBelow:.50,apply:{id:'powerGain',stacks:1}}};
+
+const Passives={
+  // Task 9.2 (controller ruling): a bare 1 until Phase 10 wires real sig levels -- every apply below
+  // routes through this so a later potency-scaled passive needs no new plumbing, exactly like a
+  // move's own applies:[{id,potency}] already does via Effects.apply's own `potency` option.
+  potency(champ){return 1},
+  // Shared apply path every trigger below uses: Effects.apply the real effect, then the plumbing a
+  // real passive trigger needs that a plain Effects.apply call doesn't already give it -- a
+  // {type:'passive',who,id} log/onEvent entry (Fight.emitPassive, 60_fight.js, mirrors Effects.apply's
+  // own emitEffect) and a bare {kind:'passiveBanner'} fx descriptor (presentation-only; 72_fx.js is
+  // the only place that turns it into the actual 22px gold-italic/class-gem banner -- same "sim
+  // pushes plain data, FX styles it" split Effects.apply's own effectPopup push already uses).
+  _fire(fight,holder,pid,id,stacks,uncapped){
+    Effects.apply(fight,holder,id,{stacks,potency:this.potency(holder.def),uncapped});
+    fight.emitPassive(holder,pid);
+    fight.fx.push({kind:'passiveBanner',x:holder.x,y:FLOOR-200,id:pid,cls:holder.def.cls})},
+  // Once per step per fighter, called from Fight.step right after Effects.tick (same slot). RNG-free;
+  // reads only hp/maxHp/state/power off `fighter` and fight.frame -- never fight.rng/presRng.
+  // Task 9.2 (controller ruling): fight.spar (set only for a tutorial-mode fight, G.startFight,
+  // 80_game.js) short-circuits every passive here before any condition is even read -- the ruling's
+  // own "Spite/Brood never fire in spar" ask, applied centrally so every future passive gets the same
+  // guard with no per-id opt-in (the tutorial's own dummy goblin never holds a def.passive anyway, so
+  // this is a no-op cost for every fight that isn't a tutorial).
+  tick(fight,fighter){
+    if(fight.spar)return;
+    const pd=fighter.def.passive;if(!pd)return;
+    const t=fighter._passiveT||(fighter._passiveT={});
+    switch(pd.id){
+      // Carl's Spite: below 40% hp, +1 uncapped fury stack every 180 frames spent below that
+      // threshold (the timer resets the instant hp climbs back to/above 40%, so it only ever counts
+      // continuous time spent low, never banks progress made on an earlier dip). Task 9.1 review
+      // ruling: a passive-level ceiling stops it from actually applying once the holder already holds
+      // >=10 fury stacks -- the timer itself keeps running (still resets every 180 frames) so a later
+      // purify/clear that drops the holder back under 10 lets it resume on its own next tick, with no
+      // extra bookkeeping needed here.
+      case'spite':{
+        const cfg=PASSIVES.spite;
+        if(fighter.hp/fighter.maxHp<cfg.hpBelow){
+          t.spite=(t.spite||0)+1;
+          if(t.spite>=cfg.every){
+            t.spite=0;
+            if(Effects.stacks(fighter,cfg.apply.id)<cfg.ceiling)
+              this._fire(fight,fighter,'spite',cfg.apply.id,cfg.apply.stacks,cfg.apply.uncapped)}}
+        else t.spite=0;
+        break}
+      // Mongo's Immovable: +1 fury stack every 120 frames spent in BLOCK or BLOCKSTUN (controller
+      // ruling: both states count -- a mid-block hit landing on him still counts those frames, a
+      // held guard doesn't have to go totally unhit to build stacks), capped at 5. fury's own
+      // EFFECTS.maxStacks is already 5, so the cap is enforced twice over (belt and suspenders, not a
+      // second real ceiling) -- the explicit `<cfg.max` guard still skips the apply call (and its
+      // event/banner) once capped, rather than firing a no-op Effects.apply every 120 frames forever.
+      case'immovable':{
+        const cfg=PASSIVES.immovable.whileBlocking;
+        if(fighter.state==='BLOCK'||fighter.state==='BLOCKSTUN'){
+          t.immovable=(t.immovable||0)+1;
+          if(t.immovable>=cfg.every){
+            t.immovable=0;
+            if(Effects.stacks(fighter,cfg.apply.id)<cfg.max)
+              this._fire(fight,fighter,'immovable',cfg.apply.id,cfg.apply.stacks,false)}}
+        break}
+      // Grull's Champion of the Floor: every 1200 frames (fight.frame%1200===0, controller ruling --
+      // a stateless clock, no per-fighter timer needed), purify every debuff he's currently holding
+      // then grant +3 fury. Purify runs unconditionally on the beat (not gated by whether he actually
+      // holds any debuff) -- Effects.purify is already a silent no-op when there's nothing to strip.
+      case'championOfTheFloor':{
+        const cfg=PASSIVES.championOfTheFloor;
+        if(fight.frame>0&&fight.frame%cfg.every===0){
+          Effects.purify(fighter);
+          this._fire(fight,fighter,'championOfTheFloor',cfg.apply.id,cfg.apply.stacks,false)}
+        break}
+      // Mother Rat's Brood: the instant hp crosses below 50% (edge-triggered -- fires once per
+      // crossing, not once per frame spent under it; re-arms the moment hp climbs back to/above 50%
+      // so a later dip fires again), grants one powerGain stack. The regen-tripling half of Brood
+      // lives in BUFFS.regen's own onFrame (47_buffs.js) -- it checks holder.def.passive.id itself,
+      // live, rather than reading anything off this module (see that buff's own comment for why it
+      // needs no reference to PASSIVES/Passives at all).
+      case'brood':{
+        const cfg=PASSIVES.brood;
+        const below=fighter.hp/fighter.maxHp<cfg.hpBelow;
+        if(below&&!t.broodCrossed){
+          t.broodCrossed=true;
+          this._fire(fight,fighter,'brood',cfg.apply.id,cfg.apply.stacks,false)}
+        else if(!below)t.broodCrossed=false;
+        break}}},
+  // Hook from Fight.resolve's parry branch (60_fight.js), called with the fighter who just landed the
+  // parry (the exchange's `def` -- the one who was holding block and caught the attack inside the
+  // parry window). Katia's Understudy: +1 critDmg stack (EFFECTS.critDmg's own frozen dur:180,
+  // maxStacks:1 -- no per-call override exists, same "no per-call duration override" pattern every
+  // other Phase 9 effect apply already follows).
+  onParry(fight,fighter){
+    if(fight.spar)return;
+    const pd=fighter.def.passive;if(!pd||pd.id!=='understudy')return;
+    const cfg=PASSIVES.understudy.onParry;
+    this._fire(fight,fighter,'understudy',cfg.id,cfg.stacks,false)},
+  // Hook from Fighter.startMove (50_fighter.js), called for every s1/s2/s3 activation (any fighter's,
+  // not just Donut's -- gated internally here, same as onParry). Donut's Royal Disdain: +1 weakness
+  // stack on the foe every time she throws a special, doubled to +2 when the foe already holds any
+  // other debuff (checked against PURIFIABLE, 48_effects.js's own frozen debuff set -- already defined,
+  // this file loads after it).
+  onSpecial(fight,fighter,move){
+    if(fight.spar)return;
+    const pd=fighter.def.passive;if(!pd||pd.id!=='royalDisdain')return;
+    const cfg=PASSIVES.royalDisdain.onSpecial;
+    const foe=fighter.side===1?fight.p2:fight.p1;
+    const debuffed=PURIFIABLE.some(id=>Effects.has(foe,id));
+    const stacks=cfg.stacks*(debuffed&&cfg.doubleIfDebuffed?2:1);
+    Effects.apply(fight,foe,cfg.id,{stacks,potency:this.potency(fighter.def)});
+    fight.emitPassive(fighter,'royalDisdain');
+    fight.fx.push({kind:'passiveBanner',x:fighter.x,y:FLOOR-200,id:'royalDisdain',cls:fighter.def.cls})}};
+
 class Fighter{
   constructor(def,side,ctrl){this.def=def;this.side=side;this.face=side;this.ctrl=ctrl;
     this.x=side===1?STAGE_W/2-160:STAGE_W/2+160;this.width=48;this.hp=def.hp;this.maxHp=def.hp;this.power=0;
@@ -2352,12 +2507,23 @@ class Fighter{
   // invariant the frozen interface asks for. `overrides`, when given, is shallow-merged on top of the
   // cached moveDef (used only by the in-combo heavy ender, CHAIN.enders.heavy -- see act()'s own
   // node-4 branch) so the per-fighter moveDef cache itself is never mutated or duplicated per-variant.
-  startMove(name,node,overrides){
+  // Task 9.2: `fight`, when given, is only ever read for Passives.onSpecial (49_passives.js) below --
+  // optional (every pre-existing call site, including every direct unit-test F.startMove(...) call
+  // with no 5th arg, still works unchanged, just skipping that one hook). act() (below) is the only
+  // real call site that ever passes it, threaded in from Fight.step's own act(i,this) call.
+  startMove(name,node,overrides,fight){
     this.moveSeq++; // fix-wave item 3 (final review I3): once per move instance, see its own comment above
     this.move=overrides?Object.assign({},this.moveDef(name),overrides):this.moveDef(name);
     this.moveName=name;this.chainNode=node===undefined?0:node;
     this.resetPerMove();
-    if(this.move.cost)this.power-=this.move.cost;this.setupDash();this.setState(this.move.charge?'CHARGE':'ATTACK')}
+    if(this.move.cost)this.power-=this.move.cost;this.setupDash();this.setState(this.move.charge?'CHARGE':'ATTACK');
+    // Task 9.2: Passives.onSpecial fires for a real special activation only (s1/s2/s3 -- name is
+    // never anything else at this exact 2-char shape; a chain continuation is 'light'/'medium', the
+    // in-combo heavy ender is 'heavy', neither of which matches). Gated internally (Donut's Royal
+    // Disdain only) -- a no-op call for every other fighter's s1/s2/s3, and for every fight this was
+    // started without a live `fight` reference (every direct unit test that calls startMove/act with
+    // no fight arg).
+    if(fight&&/^s[123]$/.test(name))Passives.onSpecial(fight,this,this.move)}
   // Task 8.0 (pre-art seam): the exact by-hand reset startMove used to do inline, pulled into its own
   // named method -- these three fields are unconditional resets to the same fixed value on every move
   // (a fresh empty hits Set, landed false, interceptedThisMove false), unlike everything else
@@ -2428,8 +2594,14 @@ class Fighter{
   hitIndex(){const m=this.move,k=this.f-this.effStartup,span=m.active+(m.gap||0);if(k<0)return-1;const i=Math.floor(k/span);return(k%span)<m.active&&i<(m.hits||1)?i:-1}
   hitbox(){if(this.phase()!=='active')return null;const a=this.front,b=this.front+this.face*this.move.range;return{x0:Math.min(a,b),x1:Math.max(a,b)}}
   hurtbox(){return{x0:this.x-this.width/2,x1:this.x+this.width/2}}
-  // Consume one frame of intent. Called before tick().
-  act(intent){this.pressTick++; // monotonic frame counter (Fighter has no fight-frame ref of its own); stamps blockPressedAt
+  // Consume one frame of intent. Called before tick(). Task 9.2: `fight`, when given (Fight.step's
+  // own act(i,this) call -- see its comment), rides through to the one startMove call below that can
+  // ever start a real special (s1/s2/s3), purely so Passives.onSpecial has a live fight to hook into.
+  // Every other startMove call site here (openers, chain continuations, the in-combo heavy ender)
+  // passes no `fight` at all -- startMove's own regex guard (`/^s[123]$/`) would skip them anyway,
+  // since none of those names ever matches, but there's no reason to thread it through call sites
+  // that can never need it.
+  act(intent,fight){this.pressTick++; // monotonic frame counter (Fighter has no fight-frame ref of its own); stamps blockPressedAt
     const prevAge=this.blockAge;this.blockAge=intent.block?this.blockAge+1:0;
     // Parry lockout bookkeeping: a block press that closes its (possibly widened, see parryBonus
     // above) PARRY_WINDOW without a parry arms a PARRY_LOCKOUT-frame lock; a successful parry
@@ -2443,7 +2615,7 @@ class Fighter{
     if(!intent.block&&prevAge>0&&prevAge<=PARRY_WINDOW+this.parryBonus&&!this._parried)this.parryLock=PARRY_LOCKOUT;
     const S=this.state;
     if(S==='IDLE'||S==='BLOCK'){
-      if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special);
+      if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special,undefined,undefined,fight);
       if(intent.dashBack){this.inv=DASH_BACK.inv;return this.setState('DASH')}
       // Task 7.2: openers (CHAIN.openers) always start a brand-new chain at node 1, regardless of
       // whatever chainNode a previous, already-finished chain left behind (it's already been reset to
@@ -2910,6 +3082,11 @@ class Fight{
     this.frame=0;this.clock=o.clock===undefined?120:o.clock;this.hitstop=0;this.over=false;this.winner=null;this.log=[];this.onEvent=o.onEvent||(()=>{});
     this.fx=[];this.slowmo=0;this.cinematic=0; // fx: plain events drained by G into FX each tick; slowmo/cinematic: frame counters G steps around
     this.noCrit=!!o.noCrit; // mkFight defaults this true for deterministic Phase 1/2 tests; G.startFight leaves crits live
+    // Task 9.2 (controller ruling): fight.spar marks a tutorial-mode fight (only ever true when
+    // G.startFight is called from G.startTutorial, 80_game.js) -- Passives.tick/onParry/onSpecial
+    // (49_passives.js) all short-circuit on it, so a champion's own signature passive (Spite, Brood,
+    // etc.) can never fire against the tutorial's guarded dummy goblin.
+    this.spar=!!o.spar;
     this.updateCam()}
   // Fix round 2: gameplay zoom capped at 1.12 (was 1.35) — same 1.0..cap ramp over the same
   // 120-500 distance range, just a smaller max, since the rescaled rig at 1.35 put a raised-arm
@@ -2935,7 +3112,11 @@ class Fight{
     // fully deterministic.
     this.p1.foeDist=this.p2.foeDist=Math.abs(this.p2.x-this.p1.x)-(this.p1.width/2+this.p2.width/2);
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);
-    this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();
+    // Task 9.2: `this` (the live fight) rides along into act()/startMove() now, purely so a real
+    // special activation can reach Passives.onSpecial (49_passives.js) -- see Fighter.act/startMove's
+    // own comments. Every existing direct unit-test call to F.act(intent) (no 2nd arg) still works
+    // unchanged: startMove's own fight param is optional and Passives.onSpecial is simply skipped.
+    this.p1.act(i1,this);this.p2.act(i2,this);this.p1.tick();this.p2.tick();
     this.buffFrame(this.p1,this.p2);this.buffFrame(this.p2,this.p1);
     // Task 7.1: Effects.tick runs once per step per fighter, same slot buffFrame already runs in
     // (before detect/resolve) -- ticks every active timed effect's own per-frame hook (bleed/regen/
@@ -2943,6 +3124,9 @@ class Fight{
     // its clock reaches 0. See 48_effects.js's own comment for why this yields exactly `dur` tick
     // calls per applied effect.
     Effects.tick(this,this.p1);Effects.tick(this,this.p2);
+    // Task 9.2: Passives.tick runs once per step per fighter, immediately after Effects.tick -- same
+    // slot, same "reads live state, never fight.rng" discipline (49_passives.js).
+    Passives.tick(this,this.p1);Passives.tick(this,this.p2);
     this.separate();this.updateCam();
     this.checkCinematic(this.p1);this.checkCinematic(this.p2);
     // Detect both sides' hits against the pre-resolve state before applying either, so a true
@@ -3019,6 +3203,10 @@ class Fight{
         this.emitTell('dexterity',def,att.face)}
       return this.emit('miss',att,def,0)}
     if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;att.chainNode=0;def.setState('IDLE');
+      // Task 9.2: Passives.onParry -- Katia's Understudy (49_passives.js), gated internally to her
+      // own passive id; a no-op for every other fighter. `def` is the parrier here (the one who was
+      // holding block and caught this attack inside the parry window), the correct holder to credit.
+      Passives.onParry(this,def);
       this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
       return this.emit('parry',def,att,0)}
     if(type==='block'){const m=r.m,last=r.last;
@@ -3241,6 +3429,16 @@ class Fight{
   emitEffect(holder,id,stacks,flag){
     this.log.push({f:this.frame,type:'effect',who:holder.side,id,stacks,[flag]:true});
     this.onEvent('effect',holder,null,stacks)}
+  // Task 9.2 (frozen interface, exact shape): 'passive' events carry {who,id} -- id is the passive's
+  // own PASSIVES key (spite/royalDisdain/understudy/immovable/championOfTheFloor/brood), `who` the
+  // fighter whose passive fired (the passive's OWNER, even for Royal Disdain, whose actual effect
+  // lands on the foe -- see Passives.onSpecial's own comment). A dedicated sibling to emitEffect for
+  // the same reason that one exists: emit()'s own (type,a,b,val,move) shape has no slot for a bare
+  // effect/passive id with no numeric val to carry. Presentation (72_fx.js's passiveBanner fx, pushed
+  // separately by Passives itself) draws the actual banner; this is only the log/onEvent bookkeeping.
+  emitPassive(holder,id){
+    this.log.push({f:this.frame,type:'passive',who:holder.side,id});
+    this.onEvent('passive',holder,null,id)}
   // Task 7.3 (frozen interface, exact shape): 'intercept'/'dexterity' events carry {type,who,dir} --
   // `who` is the fighter credited for the read (the interceptor for 'intercept', the dodger for
   // 'dexterity'; see each call site's own comment), `dir` is always the CURRENT resolve() call's own
@@ -7475,6 +7673,12 @@ const FX={list:[],
     // afterimage streak itself is its own fx kind, pushed separately by Fight.resolve (see 'afterimage'
     // below), since Effects.apply has no notion of a facing-direction streak.
     dexterity:{text:'DEXTERITY',col:'#4fc3f7'}},
+  // Task 9.2: label per champion/boss passive id, read only by the 'passiveBanner' push case below --
+  // Passives (49_passives.js, sim-side) pushes a bare {kind:'passiveBanner',x,y,id,cls} descriptor
+  // with no text/color choice of its own, same "sim pushes plain data, FX styles it" split
+  // EFFECT_STYLE/'effectPopup' above already use for Effects.apply's own popups.
+  PASSIVE_STYLE:{spite:{text:'SPITE'},royalDisdain:{text:'ROYAL DISDAIN'},understudy:{text:'UNDERSTUDY'},
+    immovable:{text:'IMMOVABLE'},championOfTheFloor:{text:'CHAMPION OF THE FLOOR'},brood:{text:'BROOD'}},
   reset(){this.list.length=0;this.shake={x:0,y:0};this.punch=0;this.punchTarget=0;this.punchHold=0;
     this.punchCreep=false;this.punchStart=0;this.punchHoldTotal=0;
     this.flash=0;this.card=null;this.shieldDown=null},
@@ -7533,6 +7737,15 @@ const FX={list:[],
         const st=this.EFFECT_STYLE[ev.id]||{text:String(ev.id||'?').toUpperCase(),col:'#fff'};
         const text=ev.stacks>1?st.text+' x'+ev.stacks:st.text;
         this.list.push({kind:'popup',x:ev.x,y:ev.y,text,col:st.col,big:false,muted:false,life:0,max:40});
+        break}
+      // Task 9.2 (controller ruling, exact ask): 22px gold-italic-styled, 40 frames, colored by the
+      // triggering fighter's own class gem (CLS_GEM[ev.cls], 40_movedata.js -- already loaded by the
+      // time this ever runs) rather than a fixed gold fill -- draw() below is the only place that
+      // actually paints it (italic/stroke styling lives there, alongside 'popup's own font choice).
+      case'passiveBanner':{
+        const st=this.PASSIVE_STYLE[ev.id]||{text:String(ev.id||'?').toUpperCase()};
+        const col=CLS_GEM[ev.cls]||CLS_GEM.default;
+        this.list.push({kind:'passiveBanner',x:ev.x,y:ev.y,text:st.text,col,life:0,max:40});
         break}
       case'popup':
         // Task 6.4: `muted` (Fight.resolve, forwarding BUFFS.tutorialGuard's ref.capped) draws grey
@@ -7678,6 +7891,15 @@ const FX={list:[],
         c.fillStyle=p.muted?'#888':p.col;
         c.font=(p.big?'bold 26px ':'bold 16px ')+'ui-monospace,monospace';c.textAlign='center';
         c.fillText(p.text,p.x,p.y-t*30)}
+      // Task 9.2 (controller ruling, exact ask): 22px, italic 900-weight (same font-weight/black-
+      // stroke treatment Render.combo already uses for the combo counter's own italic gold text,
+      // 70_render.js -- just a smaller size and this file's own particle-life-driven fade, not a
+      // live per-frame count), filled in the triggering fighter's own class-gem color (set by push()
+      // above), floating and fading over its full 40-frame life like 'popup' already does.
+      else if(p.kind==='passiveBanner'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
+        c.font='italic 900 22px ui-monospace,monospace';c.textAlign='center';
+        c.lineWidth=3;c.strokeStyle='#000';c.strokeText(p.text,p.x,p.y-t*20);
+        c.fillStyle=p.col;c.fillText(p.text,p.x,p.y-t*20)}
       else if(p.kind==='windup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t*.6);
         c.strokeStyle='#ff3b3b';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,16+16*t,0,Math.PI*2);c.stroke()}}
     c.globalAlpha=1},
@@ -8101,7 +8323,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     const perkOpts=Sponsors.apply({playerBuffs:o.playerBuffs});
     if(rosterEntry){const d=Stats.derive(p1def,rosterEntry);
       p1def=Object.assign({},p1def,{hp:d.hp,atk:Math.round(d.atk*perkOpts.statMul.atk)})}
-    this.fight=new Fight({seed,p1:p1def,p2:p2def,clock:o.clock,
+    // Task 9.2: spar:mode==='tutorial' -- the ONLY fight mode that must never let a champion/boss
+    // passive fire (Spite/Brood/etc. against the tutorial's own guarded dummy goblin, 49_passives.js's
+    // own controller ruling). mode is already resolved above (o.mode||...), and G.startTutorial is the
+    // only call site that ever passes mode:'tutorial'.
+    this.fight=new Fight({seed,p1:p1def,p2:p2def,clock:o.clock,spar:mode==='tutorial',
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
     // Task 5.5: fire-and-forget atlas preload for both looks. Atlas.load itself is the gate -- a
     // no-op Promise.resolve(null) with no fetch at all unless settings.useAtlas/?atlas=1 -- so this

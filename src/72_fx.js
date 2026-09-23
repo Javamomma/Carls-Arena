@@ -87,6 +87,12 @@ const FX={list:[],
     // afterimage streak itself is its own fx kind, pushed separately by Fight.resolve (see 'afterimage'
     // below), since Effects.apply has no notion of a facing-direction streak.
     dexterity:{text:'DEXTERITY',col:'#4fc3f7'}},
+  // Task 9.2: label per champion/boss passive id, read only by the 'passiveBanner' push case below --
+  // Passives (49_passives.js, sim-side) pushes a bare {kind:'passiveBanner',x,y,id,cls} descriptor
+  // with no text/color choice of its own, same "sim pushes plain data, FX styles it" split
+  // EFFECT_STYLE/'effectPopup' above already use for Effects.apply's own popups.
+  PASSIVE_STYLE:{spite:{text:'SPITE'},royalDisdain:{text:'ROYAL DISDAIN'},understudy:{text:'UNDERSTUDY'},
+    immovable:{text:'IMMOVABLE'},championOfTheFloor:{text:'CHAMPION OF THE FLOOR'},brood:{text:'BROOD'}},
   reset(){this.list.length=0;this.shake={x:0,y:0};this.punch=0;this.punchTarget=0;this.punchHold=0;
     this.punchCreep=false;this.punchStart=0;this.punchHoldTotal=0;
     this.flash=0;this.card=null;this.shieldDown=null},
@@ -145,6 +151,15 @@ const FX={list:[],
         const st=this.EFFECT_STYLE[ev.id]||{text:String(ev.id||'?').toUpperCase(),col:'#fff'};
         const text=ev.stacks>1?st.text+' x'+ev.stacks:st.text;
         this.list.push({kind:'popup',x:ev.x,y:ev.y,text,col:st.col,big:false,muted:false,life:0,max:40});
+        break}
+      // Task 9.2 (controller ruling, exact ask): 22px gold-italic-styled, 40 frames, colored by the
+      // triggering fighter's own class gem (CLS_GEM[ev.cls], 40_movedata.js -- already loaded by the
+      // time this ever runs) rather than a fixed gold fill -- draw() below is the only place that
+      // actually paints it (italic/stroke styling lives there, alongside 'popup's own font choice).
+      case'passiveBanner':{
+        const st=this.PASSIVE_STYLE[ev.id]||{text:String(ev.id||'?').toUpperCase()};
+        const col=CLS_GEM[ev.cls]||CLS_GEM.default;
+        this.list.push({kind:'passiveBanner',x:ev.x,y:ev.y,text:st.text,col,life:0,max:40});
         break}
       case'popup':
         // Task 6.4: `muted` (Fight.resolve, forwarding BUFFS.tutorialGuard's ref.capped) draws grey
@@ -290,6 +305,15 @@ const FX={list:[],
         c.fillStyle=p.muted?'#888':p.col;
         c.font=(p.big?'bold 26px ':'bold 16px ')+'ui-monospace,monospace';c.textAlign='center';
         c.fillText(p.text,p.x,p.y-t*30)}
+      // Task 9.2 (controller ruling, exact ask): 22px, italic 900-weight (same font-weight/black-
+      // stroke treatment Render.combo already uses for the combo counter's own italic gold text,
+      // 70_render.js -- just a smaller size and this file's own particle-life-driven fade, not a
+      // live per-frame count), filled in the triggering fighter's own class-gem color (set by push()
+      // above), floating and fading over its full 40-frame life like 'popup' already does.
+      else if(p.kind==='passiveBanner'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
+        c.font='italic 900 22px ui-monospace,monospace';c.textAlign='center';
+        c.lineWidth=3;c.strokeStyle='#000';c.strokeText(p.text,p.x,p.y-t*20);
+        c.fillStyle=p.col;c.fillText(p.text,p.x,p.y-t*20)}
       else if(p.kind==='windup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t*.6);
         c.strokeStyle='#ff3b3b';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,16+16*t,0,Math.PI*2);c.stroke()}}
     c.globalAlpha=1},

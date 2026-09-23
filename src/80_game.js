@@ -379,7 +379,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     const perkOpts=Sponsors.apply({playerBuffs:o.playerBuffs});
     if(rosterEntry){const d=Stats.derive(p1def,rosterEntry);
       p1def=Object.assign({},p1def,{hp:d.hp,atk:Math.round(d.atk*perkOpts.statMul.atk)})}
-    this.fight=new Fight({seed,p1:p1def,p2:p2def,clock:o.clock,
+    // Task 9.2: spar:mode==='tutorial' -- the ONLY fight mode that must never let a champion/boss
+    // passive fire (Spite/Brood/etc. against the tutorial's own guarded dummy goblin, 49_passives.js's
+    // own controller ruling). mode is already resolved above (o.mode||...), and G.startTutorial is the
+    // only call site that ever passes mode:'tutorial'.
+    this.fight=new Fight({seed,p1:p1def,p2:p2def,clock:o.clock,spar:mode==='tutorial',
       ctrl1:o.ctrl1||Ctrl.player(),ctrl2:o.ctrl2||AI.make(ai,seed^0xa5a5),onEvent:(t,a,b,v)=>this.onEvent(t,a,b,v)});
     // Task 5.5: fire-and-forget atlas preload for both looks. Atlas.load itself is the gate -- a
     // no-op Promise.resolve(null) with no fetch at all unless settings.useAtlas/?atlas=1 -- so this

@@ -10,6 +10,11 @@ class Fight{
     this.frame=0;this.clock=o.clock===undefined?120:o.clock;this.hitstop=0;this.over=false;this.winner=null;this.log=[];this.onEvent=o.onEvent||(()=>{});
     this.fx=[];this.slowmo=0;this.cinematic=0; // fx: plain events drained by G into FX each tick; slowmo/cinematic: frame counters G steps around
     this.noCrit=!!o.noCrit; // mkFight defaults this true for deterministic Phase 1/2 tests; G.startFight leaves crits live
+    // Task 9.2 (controller ruling): fight.spar marks a tutorial-mode fight (only ever true when
+    // G.startFight is called from G.startTutorial, 80_game.js) -- Passives.tick/onParry/onSpecial
+    // (49_passives.js) all short-circuit on it, so a champion's own signature passive (Spite, Brood,
+    // etc.) can never fire against the tutorial's guarded dummy goblin.
+    this.spar=!!o.spar;
     this.updateCam()}
   // Fix round 2: gameplay zoom capped at 1.12 (was 1.35) — same 1.0..cap ramp over the same
   // 120-500 distance range, just a smaller max, since the rescaled rig at 1.35 put a raised-arm
@@ -35,7 +40,11 @@ class Fight{
     // fully deterministic.
     this.p1.foeDist=this.p2.foeDist=Math.abs(this.p2.x-this.p1.x)-(this.p1.width/2+this.p2.width/2);
     const i1=this.p1.ctrl.next(this,this.p1,this.p2),i2=this.p2.ctrl.next(this,this.p2,this.p1);
-    this.p1.act(i1);this.p2.act(i2);this.p1.tick();this.p2.tick();
+    // Task 9.2: `this` (the live fight) rides along into act()/startMove() now, purely so a real
+    // special activation can reach Passives.onSpecial (49_passives.js) -- see Fighter.act/startMove's
+    // own comments. Every existing direct unit-test call to F.act(intent) (no 2nd arg) still works
+    // unchanged: startMove's own fight param is optional and Passives.onSpecial is simply skipped.
+    this.p1.act(i1,this);this.p2.act(i2,this);this.p1.tick();this.p2.tick();
     this.buffFrame(this.p1,this.p2);this.buffFrame(this.p2,this.p1);
     // Task 7.1: Effects.tick runs once per step per fighter, same slot buffFrame already runs in
     // (before detect/resolve) -- ticks every active timed effect's own per-frame hook (bleed/regen/
@@ -43,6 +52,9 @@ class Fight{
     // its clock reaches 0. See 48_effects.js's own comment for why this yields exactly `dur` tick
     // calls per applied effect.
     Effects.tick(this,this.p1);Effects.tick(this,this.p2);
+    // Task 9.2: Passives.tick runs once per step per fighter, immediately after Effects.tick -- same
+    // slot, same "reads live state, never fight.rng" discipline (49_passives.js).
+    Passives.tick(this,this.p1);Passives.tick(this,this.p2);
     this.separate();this.updateCam();
     this.checkCinematic(this.p1);this.checkCinematic(this.p2);
     // Detect both sides' hits against the pre-resolve state before applying either, so a true
@@ -119,6 +131,10 @@ class Fight{
         this.emitTell('dexterity',def,att.face)}
       return this.emit('miss',att,def,0)}
     if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;att.chainNode=0;def.setState('IDLE');
+      // Task 9.2: Passives.onParry -- Katia's Understudy (49_passives.js), gated internally to her
+      // own passive id; a no-op for every other fighter. `def` is the parrier here (the one who was
+      // holding block and caught this attack inside the parry window), the correct holder to credit.
+      Passives.onParry(this,def);
       this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
       return this.emit('parry',def,att,0)}
     if(type==='block'){const m=r.m,last=r.last;
@@ -341,6 +357,16 @@ class Fight{
   emitEffect(holder,id,stacks,flag){
     this.log.push({f:this.frame,type:'effect',who:holder.side,id,stacks,[flag]:true});
     this.onEvent('effect',holder,null,stacks)}
+  // Task 9.2 (frozen interface, exact shape): 'passive' events carry {who,id} -- id is the passive's
+  // own PASSIVES key (spite/royalDisdain/understudy/immovable/championOfTheFloor/brood), `who` the
+  // fighter whose passive fired (the passive's OWNER, even for Royal Disdain, whose actual effect
+  // lands on the foe -- see Passives.onSpecial's own comment). A dedicated sibling to emitEffect for
+  // the same reason that one exists: emit()'s own (type,a,b,val,move) shape has no slot for a bare
+  // effect/passive id with no numeric val to carry. Presentation (72_fx.js's passiveBanner fx, pushed
+  // separately by Passives itself) draws the actual banner; this is only the log/onEvent bookkeeping.
+  emitPassive(holder,id){
+    this.log.push({f:this.frame,type:'passive',who:holder.side,id});
+    this.onEvent('passive',holder,null,id)}
   // Task 7.3 (frozen interface, exact shape): 'intercept'/'dexterity' events carry {type,who,dir} --
   // `who` is the fighter credited for the read (the interceptor for 'intercept', the dodger for
   // 'dexterity'; see each call site's own comment), `dir` is always the CURRENT resolve() call's own

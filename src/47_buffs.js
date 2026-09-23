@@ -12,7 +12,16 @@ const BUFFS={
     // healing reads as reasonable in isolation. Retuned down ~3x as part of making the boss winnable
     // (see docs/ARENA.md's boss balance notes); the interface's rate itself was the plan defect, not
     // this buff's implementation.
-    onFrame(fight,holder,foe){holder.hp=Math.min(holder.maxHp,holder.hp+holder.maxHp*0.00017)}},
+    // Task 9.2: Brood (mother_rat's own passive, 49_passives.js's PASSIVES.brood) triples this
+    // per-frame rate while active. Checked live, off holder.def.passive.id -- never off PASSIVES/
+    // Passives themselves, so this function body needs no reference to 49_passives.js at all (it
+    // loads AFTER this file in tools/build.py's filename-sort order; def.passive itself is set on
+    // mother_rat's own def in 40_movedata.js, which this file already loads after). Any future
+    // champion/boss holding both this buff and a different passive id is simply untripled -- Brood
+    // is the only passive this multiplier is scoped to.
+    onFrame(fight,holder,foe){
+      const mul=(holder.def.passive&&holder.def.passive.id==='brood')?3:1;
+      holder.hp=Math.min(holder.maxHp,holder.hp+holder.maxHp*0.00017*mul)}},
   armorUp:{id:'armorUp',
     // Incoming damage x.7 when the holder is the one defending this exchange.
     onHit(fight,att,def,ref,holder){if(holder===def)ref.dmg=Math.round(ref.dmg*0.7)}},

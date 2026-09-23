@@ -102,12 +102,23 @@ class Fighter{
   // invariant the frozen interface asks for. `overrides`, when given, is shallow-merged on top of the
   // cached moveDef (used only by the in-combo heavy ender, CHAIN.enders.heavy -- see act()'s own
   // node-4 branch) so the per-fighter moveDef cache itself is never mutated or duplicated per-variant.
-  startMove(name,node,overrides){
+  // Task 9.2: `fight`, when given, is only ever read for Passives.onSpecial (49_passives.js) below --
+  // optional (every pre-existing call site, including every direct unit-test F.startMove(...) call
+  // with no 5th arg, still works unchanged, just skipping that one hook). act() (below) is the only
+  // real call site that ever passes it, threaded in from Fight.step's own act(i,this) call.
+  startMove(name,node,overrides,fight){
     this.moveSeq++; // fix-wave item 3 (final review I3): once per move instance, see its own comment above
     this.move=overrides?Object.assign({},this.moveDef(name),overrides):this.moveDef(name);
     this.moveName=name;this.chainNode=node===undefined?0:node;
     this.resetPerMove();
-    if(this.move.cost)this.power-=this.move.cost;this.setupDash();this.setState(this.move.charge?'CHARGE':'ATTACK')}
+    if(this.move.cost)this.power-=this.move.cost;this.setupDash();this.setState(this.move.charge?'CHARGE':'ATTACK');
+    // Task 9.2: Passives.onSpecial fires for a real special activation only (s1/s2/s3 -- name is
+    // never anything else at this exact 2-char shape; a chain continuation is 'light'/'medium', the
+    // in-combo heavy ender is 'heavy', neither of which matches). Gated internally (Donut's Royal
+    // Disdain only) -- a no-op call for every other fighter's s1/s2/s3, and for every fight this was
+    // started without a live `fight` reference (every direct unit test that calls startMove/act with
+    // no fight arg).
+    if(fight&&/^s[123]$/.test(name))Passives.onSpecial(fight,this,this.move)}
   // Task 8.0 (pre-art seam): the exact by-hand reset startMove used to do inline, pulled into its own
   // named method -- these three fields are unconditional resets to the same fixed value on every move
   // (a fresh empty hits Set, landed false, interceptedThisMove false), unlike everything else
@@ -178,8 +189,14 @@ class Fighter{
   hitIndex(){const m=this.move,k=this.f-this.effStartup,span=m.active+(m.gap||0);if(k<0)return-1;const i=Math.floor(k/span);return(k%span)<m.active&&i<(m.hits||1)?i:-1}
   hitbox(){if(this.phase()!=='active')return null;const a=this.front,b=this.front+this.face*this.move.range;return{x0:Math.min(a,b),x1:Math.max(a,b)}}
   hurtbox(){return{x0:this.x-this.width/2,x1:this.x+this.width/2}}
-  // Consume one frame of intent. Called before tick().
-  act(intent){this.pressTick++; // monotonic frame counter (Fighter has no fight-frame ref of its own); stamps blockPressedAt
+  // Consume one frame of intent. Called before tick(). Task 9.2: `fight`, when given (Fight.step's
+  // own act(i,this) call -- see its comment), rides through to the one startMove call below that can
+  // ever start a real special (s1/s2/s3), purely so Passives.onSpecial has a live fight to hook into.
+  // Every other startMove call site here (openers, chain continuations, the in-combo heavy ender)
+  // passes no `fight` at all -- startMove's own regex guard (`/^s[123]$/`) would skip them anyway,
+  // since none of those names ever matches, but there's no reason to thread it through call sites
+  // that can never need it.
+  act(intent,fight){this.pressTick++; // monotonic frame counter (Fighter has no fight-frame ref of its own); stamps blockPressedAt
     const prevAge=this.blockAge;this.blockAge=intent.block?this.blockAge+1:0;
     // Parry lockout bookkeeping: a block press that closes its (possibly widened, see parryBonus
     // above) PARRY_WINDOW without a parry arms a PARRY_LOCKOUT-frame lock; a successful parry
@@ -193,7 +210,7 @@ class Fighter{
     if(!intent.block&&prevAge>0&&prevAge<=PARRY_WINDOW+this.parryBonus&&!this._parried)this.parryLock=PARRY_LOCKOUT;
     const S=this.state;
     if(S==='IDLE'||S==='BLOCK'){
-      if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special);
+      if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special,undefined,undefined,fight);
       if(intent.dashBack){this.inv=DASH_BACK.inv;return this.setState('DASH')}
       // Task 7.2: openers (CHAIN.openers) always start a brand-new chain at node 1, regardless of
       // whatever chainNode a previous, already-finished chain left behind (it's already been reset to
