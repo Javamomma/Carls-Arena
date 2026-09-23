@@ -4406,29 +4406,24 @@ Test.add('move data applies:[{...,on:"last"}] fires exactly once, only on the mo
 // --- Task 9.1: the same behaviors, exercised through the real kit moves they actually landed on ---
 // Fix round 1 (controller ruling): the kit line is "S2 Regal Pounce 5 hits, LAST unblockable" -- donut's
 // own moves.s2 is now unblockable:'last' (only the move's own final sub-hit skips the block branch),
-// not the whole-move `true` MOVES.s3 keeps. Sub-hit 1 genuinely blocks (chip) under a continuous hold;
-// sub-hits 2-4 land as plain unblocked hits too, but NOT because of this flag -- MOVES.s2's own
-// blockstun (10) exactly equals its sub-hit period (active+gap=10), the same pre-existing timing
-// coincidence the task report's Deviation 6 already documents for carl's Boot Party (BLOCKSTUN clears
-// on the very frame the next sub-hit's hitbox goes active, one frame ahead of Fighter.act's next chance
-// to re-enter BLOCK; a landed unblocked hit then leaves the defender in the longer HITSTUN, which isn't
-// "blocking" either, so the cascade continues for the rest of the move). The real-move test below only
-// checks what this flag itself controls (the total block count, proving 'last' isn't whole-move
-// `true`); the synthetic-move test right after it proves "sub-hits before the last genuinely block,
-// and the final one forces through WITH the UNBLOCKABLE popup" cleanly, with a generous blockstun that
-// isn't subject to that coincidence -- under real MOVES.s2 timing, sub-hits 2-5 all land while the
-// defender is already in HITSTUN (knocked there by sub-hit 2's own "leaked" unblocked landing), so
-// `blocking` reads false at detect() time for the real final hit too, same as sub-hits 2-4 -- it lands
-// unblocked because the defender genuinely isn't blocking anymore, not because unblockable:'last'
-// forced it through an active block. No UNBLOCKABLE popup is expected here for that reason; the
-// synthetic test is what actually proves the popup fires on a truly forced-through final hit.
-Test.add('donut\'s real S2 Regal Pounce (unblockable:"last") does not bypass EVERY sub-hit\'s block, unlike a whole-move unblockable:true',()=>{
+// not the whole-move `true` MOVES.s3 keeps.
+// Task 9.1b (state-machine fix): MOVES.s2's own blockstun (10) exactly equals its sub-hit period
+// (active+gap=10) -- pre-fix, that coincidence let BLOCKSTUN clear on the very frame the next sub-hit's
+// hitbox went active, one frame ahead of Fighter.act's next chance to re-enter BLOCK, so sub-hits 2-4
+// used to leak through as plain unblocked hits (not because of unblockable:'last', which only ever
+// governs the move's own final sub-hit) and the whole cascade continued in HITSTUN. Fighter.tick's
+// BLOCKSTUN->IDLE transition now becomes BLOCKSTUN->BLOCK on the same frame whenever the last-read
+// intent still held block (see 50_fighter.js), closing that one-frame gap -- sub-hits 1-4 now all
+// genuinely block under a continuous hold, and only the 5th, truly forced through an active block by
+// unblockable:'last', lands as a hit (with its UNBLOCKABLE popup).
+Test.add('a continuously held block absorbs sub-hits 1-4 of donut\'s real S2 Regal Pounce; the unblockable 5th sub-hit still forces through an active block',()=>{
   const f=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;
   run(f,90);
   const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
   const blocks=f.log.filter(e=>e.type==='block'&&e.who===1);
-  eq(hits.length+blocks.length,5,'Regal Pounce is a 5-hit special -- every sub-hit resolves as either a hit or a block');
-  ok(blocks.length>=1&&blocks.length<5,'unblockable:"last" must not bypass EVERY sub-hit -- at least the first genuinely blocks, and not all 5 do');
+  eq(blocks.length,MOVES.s2.hits-1,'sub-hits 1-4 must all resolve as block events under a continuous hold');
+  eq(hits.length,1,'only the final, unblockable sub-hit should land as an unblocked hit');
+  ok(f.fx.some(x=>x.kind==='popup'&&x.text==='UNBLOCKABLE'),'the forced-through final hit must queue the UNBLOCKABLE popup -- it is genuinely forced through an active block now, not landing because the defender already fell out of BLOCK');
   eq(f.p2.state,'KNOCKDOWN','base MOVES.s2 still carries knockdown:true on its own last hit')});
 Test.add('unblockable:"last" (synthetic move, generous blockstun so every sub-hit genuinely blocks): sub-hits before the last block normally, only the final one forces through',()=>{
   const P1=Object.assign({},CHAMPS.carl,{moves:{s1:{unblockable:'last',blockstun:200}}});
@@ -4446,19 +4441,21 @@ Test.add('unblockable:true (synthetic move) still skips the block branch on EVER
   const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
   eq(hits.length,MOVES.s1.hits,'every sub-hit of the 3-hit s1 must land as an unblocked hit');
   ok(!f.log.some(e=>e.type==='block'&&e.who===1),'no sub-hit should resolve as a block event -- unblockable:true is whole-move, unchanged from before this fix round')});
-// Note: MOVES.s2's own blockstun (10) exactly equals its sub-hit period (active+gap=10), so a
-// continuously-held block only actually catches the FIRST sub-hit as a real 'block' event -- BLOCKSTUN
-// clears (Fighter.tick) on the very frame the next sub-hit's hitbox goes active, and Fighter.act (which
-// alone re-reads intent.block to re-enter BLOCK) doesn't run again until the NEXT step, one frame later
-// -- a pre-existing MOVES.s2 timing coincidence, untouched by this task, not something to retune here
-// (Task 9.4 owns balance/timing). The refund-fires-once invariant itself is proven below with a
-// synthetic generous-blockstun move so every sub-hit genuinely blocks; this real-move case only checks
-// the net power outcome.
-Test.add('carl\'s real S2 Boot Party (refundOnBlock 20) refunds the attacker power, net of the special\'s own cost',()=>{
+// Task 9.1b (state-machine fix): MOVES.s2's own blockstun (10) exactly equals its sub-hit period
+// (active+gap=10) -- pre-fix, that coincidence meant a continuously held block only ever caught the
+// FIRST sub-hit as a real 'block' event (BLOCKSTUN cleared, Fighter.tick, on the very frame the next
+// sub-hit's hitbox went active, one frame ahead of Fighter.act's next chance to re-read intent.block
+// and re-enter BLOCK), and every later sub-hit landed unblocked in the longer HITSTUN. Fighter.tick's
+// BLOCKSTUN->IDLE transition now becomes BLOCKSTUN->BLOCK on the same frame whenever the last-read
+// intent still held block, closing that gap -- a continuous hold now absorbs all 5 sub-hits.
+Test.add('a continuously held block absorbs all 5 sub-hits of carl\'s real S2 Boot Party -- no sub-hit leaks through as an unblocked hit',()=>{
   const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;
   run(f,90);
-  ok(f.log.some(e=>e.type==='block'&&e.who===1),'sanity: at least one sub-hit of Boot Party must actually be blocked');
-  eq(f.p1.power,300-MOVES.s2.cost+20,'power = 300 - the 200 special cost + one 20-power refund')});
+  const blocks=f.log.filter(e=>e.type==='block'&&e.who===1);
+  const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
+  eq(blocks.length,MOVES.s2.hits,'all 5 sub-hits of Boot Party must resolve as block events under a continuous hold');
+  eq(hits.length,0,'no sub-hit should land as HITSTUN-triggering unblocked damage');
+  eq(f.p1.power,300-MOVES.s2.cost+20,'refundOnBlock still fires exactly once, not once per blocked sub-hit')});
 Test.add('refundOnBlock fires exactly once per blocked MOVE INSTANCE, not once per blocked sub-hit (synthetic move, generous blockstun so every sub-hit genuinely blocks)',()=>{
   const P1=Object.assign({},CHAMPS.carl,{moves:{s1:{refundOnBlock:20,blockstun:200}}});
   const f=mkFight({p1:P1,ctrl1:Ctrl.script([{f:0,intent:{special:1}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=100;
@@ -4466,6 +4463,33 @@ Test.add('refundOnBlock fires exactly once per blocked MOVE INSTANCE, not once p
   const blocks=f.log.filter(e=>e.type==='block'&&e.who===1);
   eq(blocks.length,MOVES.s1.hits,'every sub-hit of the 3-hit s1 must genuinely block with a 200-frame blockstun');
   eq(f.p1.power,20,'power = 100 - the 100 special cost + exactly one 20-power refund, not 20 x 3')});
+Test.add('releasing block mid-special lets the next sub-hit land (Task 9.1b: the same-frame BLOCKSTUN->BLOCK re-entry only holds while block is actually held, it does not absorb the rest of the move unconditionally)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:2}}])});closeIn(f);f.p1.power=300;
+  let released=false;
+  f.p2.ctrl={next(){
+    if(!released){
+      if(f.log.some(e=>e.type==='block'&&e.who===1))released=true; // release the instant the first sub-hit has genuinely blocked
+      else return Object.assign(Ctrl.EMPTY(),{block:true})}
+    return Ctrl.EMPTY()}};
+  run(f,90);
+  const blocks=f.log.filter(e=>e.type==='block'&&e.who===1);
+  const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
+  eq(blocks.length,1,'only the first sub-hit should have blocked before release');
+  eq(hits.length,MOVES.s2.hits-1,'every sub-hit after the release should land as a genuine unblocked hit')});
+Test.add('Task 9.1b invariant: for every multi-hit move (s1/s2/s3) of every def in MOVES, a continuously held block absorbs every non-unblockable sub-hit as a real block event',()=>{
+  for(const def of Object.values(DEFS))for(const key of['s1','s2','s3']){
+    const m=Object.assign({},MOVES[key],def.moves&&def.moves[key]);
+    if(!m.hits||m.hits<2)continue; // not a multi-hit move for this def
+    const f=mkFight({p1:def,ctrl1:Ctrl.script([{f:0,intent:{special:Number(key[1])}}]),ctrl2:Ctrl.hold({block:true})});
+    closeIn(f);f.p1.power=m.cost||0;
+    for(let i=0;i<250;i++){f.cinematic=0;f.step()} // clear any s3 cinematic freeze each frame -- irrelevant to this invariant
+    const hits=f.log.filter(e=>e.type==='hit'&&e.who===1).length;
+    const blocks=f.log.filter(e=>e.type==='block'&&e.who===1).length;
+    const expectHit=m.unblockable===true?m.hits:(m.unblockable==='last'?1:0);
+    const tag=def.id+' '+key;
+    eq(hits,expectHit,tag+': only the sub-hits unblockable itself exempts should land as hits');
+    eq(blocks,m.hits-expectHit,tag+': every other sub-hit must resolve as a genuine block event');
+    eq(hits+blocks,m.hits,tag+': every sub-hit must resolve as exactly one of hit/block')}});
 Test.add('mongo\'s real S2 Bear Hug (healPct .30) heals the attacker 30% of each landed sub-hit\'s own damage, rounded, capped at maxHp',()=>{
   const f=mkFight({p1:CHAMPS.mongo,ctrl1:Ctrl.script([{f:0,intent:{special:2}}])});closeIn(f);f.p1.power=300;f.p1.hp=1;
   run(f,90);
