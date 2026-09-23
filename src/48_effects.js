@@ -85,7 +85,14 @@ const EFFECTS={
   // below is always 1 at potency 1, the only combination any move/dodge ever passes; kept in the
   // formula anyway for the same reason armorBreak/fury/weakness keep theirs -- a future potency-
   // scaled variant (a bigger single-dodge reward) needs no second EFFECTS entry.
-  dexterity:{id:'dexterity',dur:180,maxStacks:1,
+  // Task 12.1 (frozen interface, exact ruling, MCoC gameplay study §1.6): dur:180 is now a CAP, not a
+  // fixed lifetime -- expiresAfterHit:12 means Effects.clampAfterHit (below, called from Fight.resolve
+  // the instant the HOLDER's own next hit lands) clamps this entry's remaining `left` down to at most
+  // 12 frames, so the buff genuinely expires ~0.2s after your next hit connects instead of always
+  // riding out the full 3s timer. Before this task a dex could be banked and spent whenever; now it
+  // forces dodge-then-commit, per the mastery's own real wording ("...lasting until 0.2s after your
+  // next hit"). A dodge that never lands a follow-up hit still expires naturally at the 180f cap.
+  dexterity:{id:'dexterity',dur:180,maxStacks:1,expiresAfterHit:12,
     mod(e,m){m.critDelta+=0.2*e.stacks*e.potency}},
   // Task 9.1 (frozen interface, exact values): critDmg -- Katia's Understudy passive (Task 9.2) grants
   // a stack on a successful parry; Fight.resolve (60_fight.js) reads m.critMul (below) additively on
@@ -203,6 +210,18 @@ const Effects={
     const e=holder.effects.find(x=>x.id===id);
     if(e)e.left=EFFECTS[id].dur;
     return e},
+  // Task 12.1 (frozen interface, exact ruling): the generic mechanism behind EFFECTS[id].expiresAfterHit
+  // (dexterity today; any future "expires shortly after your next hit, capped at your normal dur
+  // otherwise" effect needs no new plumbing) -- called from Fight.resolve (60_fight.js) right where it
+  // already sets att.landed=true, on BOTH the hit and block branches (a blocked attack still "lands" in
+  // this codebase's own vocabulary -- att.landed is set identically either way). Clamps `left` DOWN to
+  // at most expiresAfterHit frames; never raises it back up, so a second landed hit while the fuse is
+  // already lit (or already past its own natural dur) is a silent no-op, matching "your NEXT hit",
+  // singular. A holder with no such effect active, or an effect with no expiresAfterHit field at all
+  // (every other id today), is untouched.
+  clampAfterHit(holder){
+    for(const e of holder.effects){const def=EFFECTS[e.id];
+      if(def.expiresAfterHit!=null&&e.left>def.expiresAfterHit)e.left=def.expiresAfterHit}},
   // Task 9.1 (frozen interface, controller ruling): drops every currently-held debuff in PURIFIABLE
   // (above) -- and only those; a beneficial effect (fury/regen/powerGain/dexterity/critDmg/armorUp)
   // is left untouched even if active. Same silent, no-event shape as clear() above (Buffs.apply's own

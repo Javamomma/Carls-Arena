@@ -410,7 +410,7 @@ const Ctrl={
   // live global G's own tick() reads), then finishes the dummy off with lights once every step is
   // done. Never rolls dice (Tutorial.state.step is the only thing branching its behavior), so it's
   // safe for the harness's exit-1-on-any-assertion-failure contract.
-  tutorialBot:seed=>{let holding=false;
+  tutorialBot:seed=>{let holding=false,punishing=false;
     // Shared with step 0's punch prompt and the post-step-4 finisher: continue an already-open light
     // chain through its own recovery+chain+landed window (mirrors Ctrl.competent's own priority
     // order), otherwise start a fresh light the moment `me` isn't busy.
@@ -431,11 +431,22 @@ const Ctrl={
         if(me.busy())return it;
         it.medium=true;return it}
       if(step===2){
+        // Task 12.1: lesson 3 now teaches parry -> heavy (the canonical MCoC punish), not a bare
+        // parry -- once the timed block below actually lands a parry (foe.state flips to STUNNED the
+        // instant Fight.resolve's own parry branch runs, 60_fight.js), hold heavy continuously; a full,
+        // uninterrupted hold still auto-fires the swing at MOVES.heavy.charge (22 frames -- see the
+        // 'heavy charges while held... a full hold still auto-fires' test) comfortably inside
+        // PARRY_STUN(66)'s own window, landing the punish on the still-stunned dummy. Checked ahead of
+        // the block-holding branch below (mirrors Ctrl.competent's own priority-1 heavy-hold check) so
+        // a held heavy is never dropped mid-charge by falling back into that branch's own logic.
+        if(punishing){it.heavy=true;if(me.state==='IDLE')punishing=false;return it}
         // Start holding the instant the dummy's own scripted medium is 2 frames from its active
         // window (Ctrl.tutorialDummy's only move), keep holding through the swing so the timed
         // block lands inside PARRY_WINDOW, then release once the dummy is done attacking.
         if(!holding&&foe.state==='ATTACK'&&foe.moveName==='medium'&&foe.f===foe.move.startup-2)holding=true;
-        if(holding){it.block=true;if(!(foe.state==='ATTACK'&&foe.moveName==='medium'))holding=false}
+        if(holding){
+          it.block=true;
+          if(!(foe.state==='ATTACK'&&foe.moveName==='medium')){holding=false;if(foe.state==='STUNNED')punishing=true}}
         return it}
       if(step===3){
         if(me.busy())return it;

@@ -13,6 +13,32 @@ class Fighter{
     // parry branches (covers "taking a hit resets it" -- an interrupted mid-chain recovery never gets
     // to end on its own).
     this.chainNode=0;
+    // Task 12.1: chainLights/chainMediums are the live per-type counts CHAIN.rule (40_movedata.js)
+    // checks against -- how many lights/mediums THIS chain instance has actually thrown so far, reset
+    // to {1,0}/{0,1} the instant a fresh opener starts (act()'s IDLE/BLOCK branch, below) and read (and
+    // incremented) by act()'s own continuation branch to decide whether a light/medium continuation is
+    // still legal. Never touched by anything outside a chain opener/continuation -- heavy from neutral,
+    // s1/s2/s3, and the in-combo heavy ender (moveName 'heavy') all leave these alone, same "0 unless
+    // something is badly wrong" invariant chainNode itself already keeps for non-grammar moves.
+    this.chainLights=0;this.chainMediums=0;
+    // Task 12.1 (frozen interface): bufferedSpecial -- set (sim-side, from live intent, never Input's
+    // own buffer) the instant an S1/S2 press arrives during the medium ender's own recovery (chainNode
+    // ===CHAIN.nodes, moveName==='medium'); consumed on the first frame act() can actually start a new
+    // move (the very next frame after recovery ends, when state has already flipped to IDLE) -- see
+    // act()'s own IDLE/BLOCK branch and IDLE-recovery capture branch, below, and Fight.resolve's hit
+    // branch (60_fight.js) for the one place it's cleared early (this fighter got hit before ever
+    // reaching IDLE, interrupting the buffered press). 0 means "nothing buffered", matching intent.
+    // special's own 0='none' convention (30_input.js) rather than null.
+    this.bufferedSpecial=0;
+    // Task 12.1 (frozen interface): parryStunned -- true only while this fighter is STUNNED specifically
+    // because THEY were the one whose attack got parried (Fight.resolve's own parry branch, 60_fight.js
+    // sets it alongside the existing stun/setState('STUNNED') arming), as opposed to a plain STUNNED
+    // from EFFECTS.stun (mongo's kit, carl's s3, etc.) which never touches this flag. Fight.resolve's
+    // hit branch reads it (before clearing it, win or lose) to decide whether a landed heavy earns the
+    // PUNISH_MUL bonus; Fighter.tick's own STUNNED->IDLE natural-timeout transition also clears it, so a
+    // parry stun that times out unpunished never leaves a stale flag for some later, unrelated heavy to
+    // cash in on.
+    this.parryStunned=false;
     // Fix-wave item 3 (final review I3): a read-only move-instance counter, incremented once per
     // startMove call (below) -- Input's own intent buffer (30_input.js) reads this to detect "this
     // fighter started a new move since I queued my buffered action" without needing any write access
@@ -210,33 +236,48 @@ class Fighter{
     if(!intent.block&&prevAge>0&&prevAge<=PARRY_WINDOW+this.parryBonus&&!this._parried)this.parryLock=PARRY_LOCKOUT;
     const S=this.state;
     if(S==='IDLE'||S==='BLOCK'){
+      // Task 12.1 (frozen interface): a buffered S1/S2 (armed below, during the medium ender's own
+      // recovery) is consumed on the very first frame act() can start a new move -- ahead of every
+      // other IDLE/BLOCK branch below, including a live intent.special this same frame (the buffered
+      // press already won the race; whatever the player's thumb is doing THIS frame doesn't get to
+      // cut in front of it). Dropped silently (no move started) if power was spent elsewhere in the
+      // meantime -- a buffered press is a courtesy, not a guarantee.
+      if(this.bufferedSpecial){
+        const sp=this.bufferedSpecial;this.bufferedSpecial=0;
+        if(this.power>=this.moveDef('s'+sp).cost)return this.startMove('s'+sp,undefined,undefined,fight)}
       if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special,undefined,undefined,fight);
       if(intent.dashBack){this.inv=DASH_BACK.inv;return this.setState('DASH')}
       // Task 7.2: openers (CHAIN.openers) always start a brand-new chain at node 1, regardless of
       // whatever chainNode a previous, already-finished chain left behind (it's already been reset to
       // 0 by tick()'s own 'done' transition or Fight.resolve's hit-taken reset by the time IDLE/BLOCK
       // can be acted on again -- this just makes the opener's own node explicit rather than relying on
-      // that).
-      if(intent.medium)return this.startMove('medium',1);
-      if(intent.light)return this.startMove('light',1);
+      // that). Task 12.1: chainLights/chainMediums are (re)armed here too, to the fresh opener's own
+      // {1,0}/{0,1} counts -- CHAIN.rule's caps (below) are read against THIS chain instance only, so a
+      // brand-new opener must never inherit a previous, already-finished chain's own tally.
+      if(intent.medium){this.chainLights=0;this.chainMediums=1;return this.startMove('medium',1)}
+      if(intent.light){this.chainLights=1;this.chainMediums=0;return this.startMove('light',1)}
       if(intent.heavy)return this.startMove('heavy');
       const want=intent.block?'BLOCK':'IDLE';if(want!==S)this.setState(want)}
     // Task 7.2: the five-node combo grammar (CHAIN, 40_movedata.js) replaces the old fixed
     // light1->light5/medium->light1 `chain` pointers. Gated on this.chainNode (0 for every move
     // outside the grammar -- heavy from neutral, s1/s2/s3 -- so neither branch below ever fires for
     // them, exactly like the old `this.move.chain` falsy check did) instead of a per-move field.
-    // Nodes 1-3 (chainNode<4): either opener continues the chain one node further. Node 4: the last
-    // regular continuation (light or medium, becoming node 5 -- the chain's real ender, CHAIN.enders
-    // read by Fight.resolve at hit-resolve time) OR the shortened heavy ender (CHAIN.enders.heavy --
-    // a 14-frame charge instead of MOVES.heavy's normal 22, applying the attacker's own def.sigEffect
-    // once it lands). Node 5 offers no further continuation ("no sixth node") -- chainNode stays 5
-    // until the ender's own recovery ends and resets it to 0.
-    else if(S==='ATTACK'&&this.phase()==='recovery'&&this.landed){
-      const cn=this.chainNode;
-      if(cn>=1&&cn<CHAIN.nodes-1){
-        if(intent.light)return this.startMove('light',cn+1);
-        if(intent.medium)return this.startMove('medium',cn+1)}
-      else if(cn===CHAIN.nodes-1){
+    // Task 12.1 (frozen interface, exact ruling): light/medium continuation is now gated by
+    // CHAIN.rule's own per-type caps (maxMediums:2, maxLights:4), checked and incremented fresh at
+    // EVERY node from 1 up to CHAIN.nodes-1, not just offered unconditionally through node 4 the way
+    // the old fixed-node-index grammar did -- a light is only offered while chainLights is still under
+    // its cap, a medium only while chainMediums is still under its own (mediumCount capping closes the
+    // WHOLE chain, light included; lightCount capping only closes off further lights -- see CHAIN.
+    // rule's own comment, 40_movedata.js, for the asymmetry and why it's exactly what produces M-M
+    // (ends at 2 hits) vs L-L-L-L-M (still reaches node 5)). The in-combo heavy ender stays exactly
+    // where it always was -- offered ONLY at cn===CHAIN.nodes-1 (node 4), unconditional on either cap,
+    // per the controller's own "stays, deliberate deviation" ruling -- and keeps its original priority
+    // (checked ahead of light/medium; see Fix round 1's own comment just below on why heavy must win
+    // that tie). Node 5 (chainNode===CHAIN.nodes) offers no further continuation ("no sixth node") --
+    // chainNode stays there until the ender's own recovery ends and resets it to 0.
+    else if(S==='ATTACK'&&this.phase()==='recovery'){
+      if(this.landed&&this.chainNode>=1&&this.chainNode<CHAIN.nodes){
+        const cn=this.chainNode;
         // Fix round 1 (verdict-7.2 C1): intent.heavy is checked FIRST here, ahead of light/medium.
         // The keyboard alias Shift+K (30_input.js) sets intent.medium (queued) and intent.heavy (held)
         // in the very same keydown event, so both can legitimately be true on the same frame here --
@@ -245,9 +286,22 @@ class Fighter{
         // held.heavy ever arms) is fixed at the source instead, in Input's own pointermove handler --
         // see its comment for why this reordering alone can't fix that one (intent.heavy simply isn't
         // true yet on the frame intent.medium is read there).
-        if(intent.heavy)return this.startMove('heavy',CHAIN.nodes,CHAIN.enders.heavy);
-        if(intent.light)return this.startMove('light',CHAIN.nodes);
-        if(intent.medium)return this.startMove('medium',CHAIN.nodes)}}
+        if(cn===CHAIN.nodes-1&&intent.heavy)return this.startMove('heavy',CHAIN.nodes,CHAIN.enders.heavy);
+        if(intent.light&&this.chainLights<CHAIN.rule.maxLights&&this.chainMediums<CHAIN.rule.maxMediums){
+          this.chainLights++;return this.startMove('light',cn+1)}
+        if(intent.medium&&this.chainMediums<CHAIN.rule.maxMediums){
+          this.chainMediums++;return this.startMove('medium',cn+1)}}
+      // Task 12.1 (frozen interface): Fighter.bufferedSpecial -- an S1/S2 press arriving during the
+      // MEDIUM ender's own recovery (chainNode already at CHAIN.nodes, i.e. this move instance WAS the
+      // chain's node-5 finisher) is remembered here rather than acted on immediately; consumed by the
+      // IDLE/BLOCK branch above, the first frame act() can actually start it. Scoped to moveName===
+      // 'medium' specifically -- the in-combo heavy ender also reaches chainNode===CHAIN.nodes, but the
+      // ruling is explicit ("during the MEDIUM ender's recovery"), and a neutral heavy/s1/s2/s3's own
+      // recovery never has chainNode>=1 at all, so this branch is a no-op for every other move. Gated
+      // to 1/2 only (S3 is out of scope per the ruling); a 3 arriving here is simply dropped, same as
+      // pressing it anywhere else without enough runway.
+      else if(this.moveName==='medium'&&this.chainNode===CHAIN.nodes&&(intent.special===1||intent.special===2)){
+        this.bufferedSpecial=intent.special}}
     // Fix-wave item 5 (final review, Important): releasing heavy early used to always cancel to IDLE
     // outright (clearMove, no swing) -- the README (and the swipe-and-hold gesture's own naming)
     // promised "release after a short charge to swing", which this branch never actually did; only a
@@ -304,7 +358,11 @@ class Fighter{
         // other reset case ("taking a hit resets it"), where this natural 'done' transition never runs.
         if(this.phase()==='done'){this.clearMove();this.landed=false;this.chainNode=0;this.setState('IDLE')}break}
       case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
-      case'HITSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
+      // Task 12.1: parryStunned self-clears here too, on a parry stun's own natural timeout (never
+      // punished) -- so a fighter who simply rode out the stun and reached IDLE on their own doesn't
+      // leave a stale flag for some later, unrelated heavy to cash the PUNISH_MUL bonus against.
+      // Harmless on the HITSTUN branch (parryStunned is never true there in the first place).
+      case'HITSTUN':case'STUNNED':if(this.f>=this.stun){this.parryStunned=false;this.setState('IDLE')}break;
       // Task 9.1b (controller ruling, verdict-9.1's "Block-through-specials" section): a held block
       // must absorb EVERY sub-hit of a multi-hit special, not just the first. Fight.step runs act()
       // (previous frame's state) then tick() (this switch) then detect()/resolve(), all in the same

@@ -110,18 +110,37 @@ a fight from the title screen, `P` pauses.
 
 ### Chaining
 
-Landing an opening light or medium from neutral opens a five-node combo chain: release and press
-again during the move's own recovery window to continue it, light or medium in any order, for up to
-four more hits. The chain always ends on node 5 — whatever move lands there decides the **ender**:
+Landing an opening light or medium from neutral opens a combo chain: release and press again during
+the move's own recovery window to continue it, light or medium in any order — up to a five-node
+ceiling, but the real limit is MCoC's own grammar: **the chain ends on its second medium or its
+fourth light, whichever comes first.** A medium stays available even after the light cap closes off
+further lights (a fourth light doesn't end the whole chain, just further lights), but the second
+medium closes the chain outright, light included — that's the difference between **L-L-L-L-M** (still
+reaching a real fifth hit) and **M-M** (a dead stop at two). The canonical string is **M-L-L-L-M**:
+medium opener, three lights, medium ender — five hits, the highest raw damage line. Whatever move
+lands the chain's actual final blow decides the **ender**:
 
 - **Light ender** — no bonus. A chain that ends on a light plays out exactly like a plain light hit.
-- **Medium ender** — shoves the foe back and knocks them down.
-- **Heavy ender** (in-combo only) — on the fourth hit specifically, swipe right and keep holding
-  through that hit's own recovery instead of releasing for a plain fifth node: release any time before
-  the recovery ends for the usual medium finisher above, or hold right up to when it ends for a
-  shorter, quicker in-combo heavy instead. Landing it fires your champion's own **signature effect**
-  (Carl: fury on himself; Donut: weakness on the foe; Katia: bleed on the foe; Mongo: armor break on
-  the foe) — mobs and bosses have no signature effect of their own.
+- **Medium ender** — shoves the foe back 90px and leaves them standing in HITSTUN, not knocked down —
+  they can act again the instant it clears, same as MCoC's own medium finisher. A special (S1/S2)
+  pressed during the ender's own recovery window is buffered and fires the instant that recovery ends,
+  so a medium-ended chain can flow straight into a special with no gap.
+- **Heavy ender** (in-combo only, a deliberate deviation from MCoC — our own signature delivery) — on
+  the fourth hit specifically, swipe right and keep holding through that hit's own recovery instead of
+  releasing for a plain fifth node: release any time before the recovery ends for the usual medium
+  finisher above, or hold right up to when it ends for a shorter, quicker in-combo heavy instead.
+  Landing it fires your champion's own **signature effect** (Carl: fury on himself; Donut: weakness on
+  the foe; Katia: bleed on the foe; Mongo: armor break on the foe) — mobs and bosses have no signature
+  effect of their own.
+
+### Parry and the punish
+
+Hold block and release inside the narrow **8-frame** window right before a hit lands, and it's a
+**parry**: the attacker is stunned for **66 frames**, long enough to charge and land a heavy. Landing
+that heavy on the still-stunned attacker is the **punish** — the canonical MCoC read, and the exact
+follow-through the tutorial's third lesson teaches: **parry, then heavy.** A landed punish deals
+**x1.25 damage** and pops a PUNISH! popup. Missing the window (holding block too long without a real
+parry) locks out re-parrying for 20 frames.
 
 ### Intercept and dexterity
 
@@ -135,8 +154,9 @@ throwing the hit):
   directional shake, and an INTERCEPT! popup.
 - **Dexterity** — dash back (swipe left, or hold through into block) so that your i-frames cover the
   exact moment a foe's hit would've connected, and it whiffs clean through you instead: **+20% crit
-  chance for your next hits** (a timed buff, refreshed rather than stacked by a second dodge), an
-  afterimage fx, and its own event.
+  chance**, until **12 frames after your next landed hit** (capped at 3s if you never land one — a
+  dash-and-bank buff, not a dash-and-forget one, matching MCoC's own "dex, then commit" mastery
+  wording), refreshed rather than stacked by a second dodge, plus an afterimage fx and its own event.
 
 ### Status effects
 

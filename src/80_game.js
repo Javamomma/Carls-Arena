@@ -13,7 +13,11 @@
 const Tutorial={
   state:{step:0,done:[false,false,false,false]},
   prompt:'',
-  _lights:0,_parried:false,_powerSet:false,_flash:0,
+  // Task 12.1: _punished (new) is what lesson 3 now completes on -- a bare _parried is still tracked
+  // (harmless, unused by any step's own done()) but no longer enough on its own; see steps[2]/onEvent
+  // below for the parry-then-heavy-punish flow this teaches, per the controller's own "the tutorial's
+  // parry lesson teaches parry->heavy" ruling.
+  _lights:0,_parried:false,_punished:false,_powerSet:false,_flash:0,
   // Fix-wave item 1 (final review, Critical): EVERY step now runs its own stall timer, not just the
   // last one -- a tap-only player used to dead-end at lesson 2 (the dummy is passive until lesson 3,
   // so nothing ever happens) with no hint and no way forward except the fight's own clock, which
@@ -39,15 +43,18 @@ const Tutorial={
   // it at a dummy that's still passive at this step anyway (Ctrl.tutorialDummy never attacks before
   // lesson 3). Mirrors how step 3 (POWER) already reads fight.p1.moveName directly rather than
   // waiting on an onEvent-fed flag.
+  // Task 12.1 (frozen ruling): lesson 3 now teaches the canonical MCoC punish (parry, then a heavy on
+  // the still-stunned foe), not a bare parry -- the prompt spells out the follow-through and done()
+  // gates on the punish landing, not just the parry itself.
   steps:[
     {prompt:'TAP to punch — land 3 hits (or tap PUNCH)',done:()=>Tutorial._lights>=3},
     {prompt:'SWIPE RIGHT to kick (or tap KICK)',done:fight=>!!(fight&&fight.p1&&fight.p1.moveName==='medium')},
-    {prompt:'HOLD to block, release as the hit lands to PARRY',done:()=>Tutorial._parried},
+    {prompt:'HOLD to block, release as the hit lands to PARRY — then HOLD to charge a HEAVY and PUNISH',done:()=>Tutorial._punished},
     {prompt:'POWER — fire a special',
       done:fight=>!!(fight&&fight.p1&&(fight.p1.moveName==='s1'||fight.p1.moveName==='s2'||fight.p1.moveName==='s3'))}],
   reset(){
     this.state={step:0,done:[false,false,false,false]};
-    this._lights=0;this._parried=false;this._powerSet=false;this._flash=0;
+    this._lights=0;this._parried=false;this._punished=false;this._powerSet=false;this._flash=0;
     this._stepFrames=0;this.stalled=false;this._pendingShieldDown=false;
     this.prompt=this.steps[0].prompt},
   // Fed every Fight.emit'd event (mirrors Broadcast.onEvent's own wiring), gated to the CURRENT step
@@ -58,7 +65,12 @@ const Tutorial={
     if(!fight||!fight.p1)return;
     const p1=fight.p1,step=this.state.step;
     if(step===0&&type==='hit'&&a===p1&&a.moveName&&a.moveName.indexOf('light')===0)this._lights++;
-    else if(step===2&&type==='parry'&&a===p1)this._parried=true},
+    else if(step===2&&type==='parry'&&a===p1)this._parried=true;
+    // Task 12.1: the actual lesson-3 completion signal -- `a` on a 'punish' event is the PUNISHER
+    // (Fight.resolve's own emit('punish',att,def,dmg), 60_fight.js), i.e. the player who parried the
+    // dummy and then landed the follow-up heavy. _parried above still tracks the bare parry (kept for
+    // symmetry/possible future hint text) but no longer drives this step's own done().
+    else if(step===2&&type==='punish'&&a===p1)this._punished=true},
   // Called once per sim frame (mirrors Broadcast.tick's own wiring): arms step 4's power-100 grant
   // exactly once (the instant that step becomes current, never re-applied once the player starts
   // spending it), then advances state.step the moment the current step's done(fight) goes true.

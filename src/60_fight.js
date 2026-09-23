@@ -130,7 +130,13 @@ class Fight{
         this.fx.push({kind:'afterimage',x:def.x,y:FLOOR-80,face:def.face});
         this.emitTell('dexterity',def,att.face)}
       return this.emit('miss',att,def,0)}
-    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;att.chainNode=0;def.setState('IDLE');
+    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;att.chainNode=0;
+      // Task 12.1 (frozen interface): att.parryStunned marks THIS specific STUNNED episode as a real
+      // parry stun (as opposed to a plain EFFECTS.stun) -- read by the hit branch below (once def, here
+      // the parrier, follows up with a heavy) to decide the PUNISH_MUL bonus; cleared there on the
+      // punishing hit either way, and by Fighter.tick's own STUNNED->IDLE timeout if it's never punished.
+      att.parryStunned=true;
+      def.setState('IDLE');
       // Task 9.2: Passives.onParry -- Katia's Understudy (49_passives.js), gated internally to her
       // own passive id; a no-op for every other fighter. `def` is the parrier here (the one who was
       // holding block and caught this attack inside the parry window), the correct holder to credit.
@@ -157,6 +163,11 @@ class Fight{
       if(m.ignoreBlock==='knockdown'&&(!m.hits||last))def.setState('KNOCKDOWN');
       else{def.stun=m.blockstun;def.setState('BLOCKSTUN')}
       def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;
+      // Task 12.1: a blocked attack still "lands" in this codebase's own vocabulary (att.landed is set
+      // identically on both branches) -- clamp any expiresAfterHit effect the ATTACKER holds (dexterity)
+      // the same way the hit branch below does, so a chip through a raised guard counts as "your next
+      // hit" exactly like a clean one does.
+      Effects.clampAfterHit(att);
       // Task 9.1 (frozen interface, exact ruling): m.refundOnBlock (carl's S2 Boot Party) refunds the
       // ATTACKER that many power once per blocked MOVE INSTANCE, not once per blocked sub-hit -- gated
       // by att.refundedThisMove, the same per-move-instance flag pattern interceptedThisMove already
@@ -214,6 +225,18 @@ class Fight{
     const rawIntercept=def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track));
     const intercept=rawIntercept&&!att.interceptedThisMove;
     if(intercept)att.interceptedThisMove=true;
+    // Task 12.1 (frozen interface, exact ruling): punish -- att's own heavy lands on a def who is
+    // STILL stunned from a parry THEY caused (def.parryStunned, armed by this very resolve()'s own
+    // parry branch above, on THAT earlier call's `att` -- here that fighter is `def`). Read before
+    // def.clearMove()/setState() below touch anything, same "read the pre-resolve fact" discipline
+    // intercept's own rawIntercept just used. Cleared unconditionally right after (win or lose the
+    // punish) -- ANY landed hit ends this fighter's own STUNNED episode (def.setState below always
+    // moves them to HITSTUN/KNOCKDOWN), so a stale parryStunned=true has no business surviving past
+    // this resolve() call regardless of what move actually landed it. Mutually exclusive with intercept
+    // by construction: a parry-stunned fighter is in STUNNED, never ATTACK, so rawIntercept can never
+    // also be true for the same def on the same call.
+    const punish=!!(def.parryStunned&&att.moveName==='heavy');
+    if(def.parryStunned)def.parryStunned=false;
     // ref carries dmg, the two power deltas, and the move itself so armorUp/powerGain can adjust
     // them before either is applied; defender-side hooks run first, then attacker-side, both against
     // the same ref. Fix-wave item 6: ref.move (not att.move) is what powerGain reads — on a true
@@ -223,7 +246,7 @@ class Fight{
     // and powerGain's old `att.move` read silently no-op'd. ref is a fresh object built fresh for
     // THIS resolve() call, never touched by the other side's resolve, so ref.move is always the
     // move that actually landed this call.
-    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*cls*critMul*(intercept?1.5:1)*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
+    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*cls*critMul*(intercept?1.5:1)*(punish?PUNISH_MUL:1)*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
     this.buffHook('onHit',def,att,def,ref);this.buffHook('onHit',att,att,def,ref);
     const dmg=ref.dmg;
     def.hp=Math.max(0,def.hp-dmg);
@@ -233,6 +256,9 @@ class Fight{
     // clamp regen's own tick hook (48_effects.js) uses.
     if(m.healPct)att.hp=Math.min(att.maxHp,att.hp+Math.round(dmg*m.healPct));
     att.landed=true;att.combo++;def.combo=0;
+    // Task 12.1: clamp any expiresAfterHit effect the ATTACKER holds (dexterity) -- see the block
+    // branch's own identical call above, and Effects.clampAfterHit's own comment (48_effects.js).
+    Effects.clampAfterHit(att);
     att.power=Math.min(POWER_MAX,att.power+ref.powHit+(intercept?15:0));def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
     // Task 7.2: CHAIN.enders (light:{}/medium:{push,knockdown}) only applies to the landed hit that's
     // actually the chain's node-5 finisher (a plain light/medium at nodes 1-4 gets no bonus, so an
@@ -248,6 +274,12 @@ class Fight{
     const knockdown=ender?!!ender.knockdown:!!m.knockdown;
     def.clearMove();if(knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
     def.chainNode=0; // Task 7.2 ruling: taking a hit resets the DEFENDER's own chain (they were interrupted mid-recovery)
+    // Task 12.1: a hit landing on def while THEY were sitting in a buffered-special window (mid the
+    // medium ender's own recovery) must drop that buffer outright, same "taking a hit kills a pending
+    // input" discipline chainNode's own reset just above already gives the chain itself -- otherwise a
+    // stale bufferedSpecial could fire much later, once def eventually reaches IDLE again, with no
+    // relation to the interrupted ender that armed it.
+    def.bufferedSpecial=0;
     // Task 7.1: m.applies -- on:'hit' entries fire on every landed hit, on:'crit' entries only when
     // this landed hit actually crit; both apply to the defender (the struck fighter) by default, after
     // the HITSTUN/KNOCKDOWN transition above so an applied stun's own onApply (EFFECTS.stun) can still
@@ -349,6 +381,13 @@ class Fight{
     if(intercept){
       this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'INTERCEPT!',col:'#ff9d3b',big:true});
       this.emitTell('intercept',att,att.face)}
+    // Task 12.1 (frozen interface, exact ruling): the punish's own PUNISH! callout and event, same
+    // "on top of, never instead of, the plain damage popup" shape intercept's own callout just above
+    // uses. emit (not emitTell) here -- val carries the actual (already x1.25'd) damage this punish
+    // dealt, the same shape 'hit'/'block' already use, rather than intercept/dexterity's own {who,dir}
+    // tell shape, since nothing downstream needs a facing for this one.
+    if(punish)this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'PUNISH!',col:'#ff5a4a',big:true});
+    if(punish)this.emit('punish',att,def,dmg);
     this.emit('hit',att,def,dmg,att.moveName)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
     this.winner=a.hp<=0?b:b.hp<=0?a:(a.hp/a.maxHp>=b.hp/b.maxHp?a:b);

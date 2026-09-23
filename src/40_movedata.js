@@ -39,8 +39,28 @@ const MOVES={
 // medium case (those come only from the enders table, at node 5, or from heavy's own base data at the
 // node-4 shortened ender -- heavy already carries knockdown/push, so its ender never needs an override
 // for either).
-const CHAIN={openers:['light','medium'],nodes:5,
-  enders:{light:{},medium:{push:90,knockdown:true},heavy:{charge:14,sig:true}}};
+// Task 12.1 (frozen interface, exact ruling, MCoC gameplay study §1.2/§4.2): CHAIN.rule replaces the
+// old "node index alone caps the chain at 5" grammar with MCoC's own real rule -- a chain ends on its
+// 2nd medium OR its 4th light, whichever comes first -- while keeping CHAIN.nodes=5 as the absolute
+// ceiling (unchanged; the in-combo heavy ender at node 4 stays a deliberate deviation, see its own
+// comment just below). The two counts are NOT symmetric: hitting maxLights only closes off further
+// LIGHT continuations (a medium can still follow, since mediumCount is unaffected), but hitting
+// maxMediums closes the WHOLE chain outright, light included -- this is what makes M-M a genuine
+// 2-hit dead end while L-L-L-L-M still reaches node 5 (four lights use up the light cap, then the
+// still-available medium closes it out). See Fighter.act's own chainLights/chainMediums bookkeeping
+// (50_fighter.js) for exactly where this is read/enforced; the controller's own worked examples (the
+// task report) confirm M-L-L-L-M and L-L-L-L-M are the only two 5-hit strings this produces.
+const CHAIN={openers:['light','medium'],nodes:5,rule:{maxMediums:2,maxLights:4},
+  // Task 12.1 (frozen interface, exact ruling): CHAIN.enders.medium.knockdown flips true->false -- the
+  // medium ender still shoves the foe out to `push` (90px, unchanged) but no longer knocks them down;
+  // Fight.resolve's own knockdown branch (60_fight.js) already reads `ender.knockdown` generically, so
+  // this is a pure data change -- a medium-ended chain's own defender now transitions to HITSTUN
+  // (def.stun=m.hitstun) exactly like the pre-existing light-ender/plain-hit path, standing and able to
+  // act the instant hitstun clears, instead of the old fixed KNOCKDOWN+getup pause. MCoC's own medium
+  // finisher (per the gameplay study) shoves to roughly light range and leaves the opponent standing --
+  // this is what actually enables "medium ender chains straight into a special" (Fighter.bufferedSpecial,
+  // 50_fighter.js) as a real follow-up, not just a knockdown reset.
+  enders:{light:{},medium:{push:90,knockdown:false},heavy:{charge:14,sig:true}}};
 // Task 6.2 (movement inside moves): per-frame rates Fighter.setupDash uses for medium's track and
 // light1's stepIn. DASH_TRACK_SPEED preserves medium's old flat dash(140)/startup(10) rate exactly
 // (140/10=14) so an already-in-range medium (dashLeft 0, see setupDash) and a near one that only needs
@@ -332,7 +352,14 @@ const CLS_GEM={brawler:'#f4c542',caster:'#9b6bd6',trickster:'#3fbfb0',tank:'#c06
 // 30) -- it's well under every one of those (a full charge is still what auto-fires the swing; this
 // only decides what an EARLY release does).
 const HEAVY_MIN_CHARGE=8;
-const CLASS_BONUS=1.15,PARRY_WINDOW=6,PARRY_STUN=50,CHIP=.08,POWER_MAX=300,PARRY_LOCKOUT=20,CRIT_MUL_DEFAULT=1.6;
+// Task 12.1 (frozen interface, exact ruling): PARRY_WINDOW 6->8 (133ms, was 100ms) and PARRY_STUN
+// 50->66 (1.1s, was 833ms) -- both widened toward the MCoC gameplay study's own sourced numbers
+// (§1.4/§4.2: a real parry stun is "a bit over one second"; our tighter 6f/50f window+stun was
+// unforgiving and too short to comfortably land a heavy punish afterward). PARRY_LOCKOUT (20f) is
+// unchanged per the ruling. PUNISH_MUL is new: a heavy landing on a still-parry-stunned foe (Fighter.
+// parryStunned, 50_fighter.js) deals this multiplier -- see Fight.resolve's own punish branch
+// (60_fight.js) for where it's read and the 'punish' event it emits.
+const CLASS_BONUS=1.15,PARRY_WINDOW=8,PARRY_STUN=66,CHIP=.08,POWER_MAX=300,PARRY_LOCKOUT=20,CRIT_MUL_DEFAULT=1.6,PUNISH_MUL=1.25;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
 const STAGE_W=1400;
 // Wall clamp half-width for Fighter.tick's x clamp. Wide enough that a fighter pinned at the wall
