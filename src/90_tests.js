@@ -7073,6 +7073,16 @@ Test.add('Fix-wave I2: a held self-buff special (mongo) fires S2, not S3, once p
     if(f.log.some(e=>e.who===1&&e.type==='hit'&&e.move==='s3'))fired3=true}
   ok(fired2,'S2 must fire once 200 power is banked while healthy');
   ok(!fired3,'S3 must never fire while healthy, however much power is banked -- it is opportunistic-only, not a hold target')});
+Test.add('Fix-wave I2 negative guard at a tier where kitHold is LIVE (t3/t4/t5): a hurt carl at 300 power is never pushed into S3 by the self-buff rule (his S3 targets the foe) -- he fires S2 like any foe-target kit with <2 debuffs on the foe',()=>{
+  for(const tier of['t3','t4','t5']){
+    const f=mkFight({p1:CHAMPS.carl,ctrl1:AI.make(tier,7),ctrl2:Ctrl.idle()});closeIn(f);
+    f.p1.power=300;f.p1.hp=Math.floor(f.p1.maxHp*0.5); // same fixture as the mongo positive test above, on a foe-target kit
+    let fired2=false,fired3=false;
+    for(let i=0;i<60&&!fired2;i++){f.cinematic=0;f.step();
+      if(f.log.some(e=>e.who===1&&e.type==='hit'&&e.move==='s2'))fired2=true;
+      if(f.log.some(e=>e.who===1&&e.type==='hit'&&e.move==='s3'))fired3=true}
+    ok(!fired3,tier+': carl must never be pushed into S3 by the self-buff rule (isSelfBuffSpecial(carl) is false inside a live kitHold)');
+    ok(fired2,tier+': with the foe carrying <2 debuffs the live hold resolves to S2, proving the kitHold branch actually ran')}});
 // --- I2 battery: Bear Hug (S2) rate must not regress below the pre-rule (pre-Task-9.5) rate. "Pre-
 // rule" is measured, same methodology (40 seeded fights, hp padded to 1e7 for a fair survival window,
 // 3600-frame/60s soak cap -- same trick and window the I4 battery above uses, so a natural KO doesn't

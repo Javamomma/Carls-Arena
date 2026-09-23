@@ -2223,3 +2223,11 @@ base.
   existed there with no deadline/reachability gate), so it undersells how good t5's Bear Hug rate was
   before `tier.kit` existed at all — recorded for visibility, not treated as a failing gate, since the
   brief's own ruling explicitly frames "pre-rule" as "before Task 9.5," not "before Task 9.4."
+
+### Phase 9 close-out rulings (2026-09-23)
+- **tier.kit starved specials (final review I1):** a kit hold now needs an rng-free reachability estimate (power + measured gain × 4 ≥ target) and abandons after 240 frames; the specials-per-fight floor in the battery is 0.4× the pre-tier.kit count as a placeholder — Phase 12.3 replaces it with a same-seed-stream comparison and re-tunes with the AI reaction floor.
+- **Self-buff S3 latch starved Mongo (I2):** dropped; a self-target S3 fires only when power is already 300 and hp ≤ 60%; a live-kitHold negative guard for Carl (t3-t5) is pinned.
+- **Uncapped clamp (I3):** a capped apply never reduces an existing uncapped pile.
+- **Signatures that never fired (I4):** Immovable counts cumulative blocked frames (the consecutive ruling measured 0/160) and grants fury every 60 (the wave's 120 measured 2.5%; 60 measures 12.5% at t4); Champion of the Floor every 360 f. Phase 12's AI block work is the real lever for Immovable.
+- Minors M1-M9 fixed (flag resets, truthful reorder comment + attacking-p1 golden, matrix worst-margin print, in-page kit-usage note, design-table annotations, 10-px kit lines, tint precedence, banner y).
+- Gate on the close-out commit: build --check; unit 612/0; tutorial; n=60 sb1 100/80/48.3/38.3/16.7, hob 60, grull 18.3, mother 33.3; n=60 sb101 100/88.3/55/31.7/20, hob 50, grull 18.3, mother 33.3.
