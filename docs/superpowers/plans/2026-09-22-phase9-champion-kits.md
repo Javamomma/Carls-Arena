@@ -14,6 +14,7 @@
 3. Every kit effect must be visible: an applied effect shows its HUD icon and popup (Phase 7), a passive trigger shows a short banner (`SPITE!`, `ROYAL DISDAIN`), and the S3 card names the special.
 4. Balance bands stay: tier sweep monotone with t5 ≤ 30% at n=30/60 on seed bases 1 and 101; floor-1 doors 1-3 ≥ 85%; f1_hob 40-70%; bosses 10-35%. Kits will move the numbers; retune by stats, never seeds; the t4/t5 thinness noted in Phase 7 is fixed here (target ≥ 10 pp separation at n=60 on both bases).
 5. The champion matrix (`--matrix`) gains a kit-usage check: each champion's S1/S2/S3 applies its listed effect in at least one matrix cell.
+6. Seams from the Phase 8 final review: `Effects.mods` returns a pooled per-fighter object, so `Fight.resolve` must read every field it needs before any further `Effects`/`Passives` call (Task 9.2 adds a test that pins this); every new pose key a kit introduces gets a `BodyStyle.FACE_STATE` entry (Task 9.3); per-effect impact tints are `IMPACTS` registry entries with an `opts` argument, never a sim change; the passive banner color comes from `CLS_GEM`.
 
 ## Global Constraints
 Everything from Phases 1-8 (single built file, sim boundary, determinism incl. per-field RNG gating, gate before every commit, exact Fable 5.1 trailer, no controller commits while an implementer runs, intent contract frozen, no new asset files). Plus: `--perf 600` < 6 ms; `--tutorial` green (the spar dummy must survive passives — Carl's Spite must not fire in spar mode below 40% because the dummy never damages; assert it).
