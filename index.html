@@ -14274,6 +14274,194 @@ Test.add('an already-in-range medium keeps its old flat startup and speed (bit-i
   f.step();
   eq(f.p1.effStartup,MOVES.medium.startup,'no dash needed, base startup unchanged from before this task')});
 
+// --- Task 9.2: champion/boss passives (Spite/Royal Disdain/Understudy/Immovable/Champion of the
+// Floor/Brood) -- PASSIVES table + Passives.tick/onParry/onSpecial (49_passives.js) ----------------
+// Task 9.1 review ruling (carried out here, per this task's own brief): a pooled-mods regression test
+// for the BLOCK branch's target:'self' path, mirroring the existing hit-branch test above (same file,
+// "Fight.resolve reads Effects.mods into locals before any Effects.apply this resolve"). Fight.resolve
+// computes attMods=Effects.mods(att) (block branch) BEFORE its own m.applies loop can call
+// Effects.apply on the same attacker -- a same-hit self-target apply must never retroactively affect
+// the CHIP damage of the very blocked hit that granted it.
+Test.add('Fight.resolve\'s BLOCK branch also reads Effects.mods into a local before any Effects.apply this resolve -- a same-hit self-target apply does not retroactively buff the chip damage of the blocked hit that granted it (Task 9.1 review ruling: pooled-mods regression, block branch)',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{light:{applies:[{id:'fury',stacks:5,on:'block',target:'self'}]}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(f);
+  run(f,15);
+  const baseChip=Math.round(CHAMPS.carl.atk*1*MOVES.light.dmg*CHIP*(1-(CHAMPS.carl.blockProf||0)));
+  eq(1000-f.p2.hp,baseChip,'the blocked hit\'s own chip must be the pre-buff amount, not boosted by the fury it just granted the attacker');
+  eq(Effects.stacks(f.p1,'fury'),5,'the fury must still land on the attacker afterward, for the NEXT blocked hit to benefit from')});
+Test.add('def.passive: exactly one id per champion/boss passive owner (carl/donut/katia/mongo/grull/mother_rat); every mob has none',()=>{
+  eq(CHAMPS.carl.passive.id,'spite');eq(CHAMPS.donut.passive.id,'royalDisdain');
+  eq(CHAMPS.katia.passive.id,'understudy');eq(CHAMPS.mongo.passive.id,'immovable');
+  eq(BOSSES.grull.passive.id,'championOfTheFloor');eq(BOSSES.mother_rat.passive.id,'brood');
+  for(const id in MOBS)ok(DEFS[id].passive===undefined,id+' must have no passive')});
+Test.add('Spite (Carl): +1 uncapped fury stack every 180 frames spent below 40% hp, never above; a passive-level ceiling stops it at 10 stacks (Task 9.1 review ruling)',()=>{
+  const f=mkFight({p1:CHAMPS.carl});
+  f.p1.hp=f.p1.maxHp*0.5; // above 40%
+  for(let i=0;i<400;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),0,'Spite must never fire while hp is at/above 40%');
+  f.p1.hp=f.p1.maxHp*0.39; // below 40%
+  for(let i=0;i<180;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),1,'exactly one fury stack after 180 frames spent below 40%');
+  for(let i=0;i<180;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),2,'a second stack after another full 180 frames below 40%');
+  // Passive-level ceiling: push stacks to 10 (uncapped, bypassing fury's own maxStacks:5) then keep
+  // ticking below 40% -- Spite must never push it any higher.
+  Effects.apply(f,f.p1,'fury',{stacks:8,uncapped:true});
+  eq(Effects.stacks(f.p1,'fury'),10);
+  for(let i=0;i<180;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),10,'Spite must stop applying once the holder already holds >=10 fury stacks')});
+Test.add('Spite\'s own 180-frame timer resets the instant hp climbs back to/above 40% -- it never banks partial progress from an earlier dip',()=>{
+  const f=mkFight({p1:CHAMPS.carl});
+  f.p1.hp=f.p1.maxHp*0.39;
+  for(let i=0;i<150;i++){f.frame++;Passives.tick(f,f.p1)} // 150/180 frames toward the first stack
+  eq(Effects.stacks(f.p1,'fury'),0);
+  f.p1.hp=f.p1.maxHp*0.9; // climb back above 40% before the timer completes
+  f.frame++;Passives.tick(f,f.p1);
+  f.p1.hp=f.p1.maxHp*0.39; // dip below again
+  for(let i=0;i<150;i++){f.frame++;Passives.tick(f,f.p1)} // only 150 more frames, not the 30 that would complete the OLD timer
+  eq(Effects.stacks(f.p1,'fury'),0,'the earlier 150 frames must not have carried over')});
+Test.add('Immovable (Mongo): +1 fury stack every 120 frames spent in BLOCK or BLOCKSTUN (both states count toward the same timer), capped at 5',()=>{
+  const f=mkFight({p1:CHAMPS.mongo});
+  f.p1.state='BLOCK';
+  for(let i=0;i<120;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),1,'one stack after 120 BLOCK frames');
+  f.p1.state='BLOCKSTUN';
+  for(let i=0;i<120;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),2,'BLOCKSTUN frames count toward the same timer as BLOCK');
+  f.p1.state='IDLE';
+  for(let i=0;i<120;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),2,'no stacks accrue while not blocking');
+  f.p1.state='BLOCK';
+  for(let i=0;i<120*4;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),5,'capped at 5, never exceeded however long the blocking continues')});
+Test.add('Champion of the Floor (Grull): purifies every currently-held debuff and grants +3 fury every 1200 frames (fight.frame % 1200)',()=>{
+  const f=mkFight({p1:BOSSES.grull});
+  for(let i=0;i<1199;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),0,'must not fire before frame 1200');
+  Effects.apply(f,f.p1,'weakness',{stacks:2});
+  f.frame++;Passives.tick(f,f.p1);
+  eq(Effects.stacks(f.p1,'fury'),3,'exactly +3 fury on the 1200th frame');
+  ok(!Effects.has(f.p1,'weakness'),'every debuff held at that instant must be purified on the same beat');
+  for(let i=0;i<1199;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),3,'must not fire again before the next 1200-frame beat');
+  f.frame++;Passives.tick(f,f.p1);
+  eq(Effects.stacks(f.p1,'fury'),5,'a second +3 grant on the 2400th frame, clamped by fury\'s own maxStacks(5)')});
+Test.add('Brood (Mother Rat): grants one powerGain stack the instant hp first crosses below 50% (edge-triggered, re-arms once healed back above)',()=>{
+  const f=mkFight({p1:BOSSES.mother_rat});
+  f.p1.hp=f.p1.maxHp*0.6;
+  for(let i=0;i<300;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'powerGain'),0,'must not fire while hp stays at/above 50%');
+  f.p1.hp=f.p1.maxHp*0.49;
+  f.frame++;Passives.tick(f,f.p1);
+  eq(Effects.stacks(f.p1,'powerGain'),1,'fires the instant hp crosses below 50%');
+  eq(f.log.filter(e=>e.type==='passive'&&e.id==='brood').length,1);
+  for(let i=0;i<60;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(f.log.filter(e=>e.type==='passive'&&e.id==='brood').length,1,'must not re-fire every frame spent below 50%, only on the crossing');
+  f.p1.hp=f.p1.maxHp*0.6;f.frame++;Passives.tick(f,f.p1); // heal back above -- re-arms
+  f.p1.hp=f.p1.maxHp*0.4;f.frame++;Passives.tick(f,f.p1); // dip below again
+  eq(f.log.filter(e=>e.type==='passive'&&e.id==='brood').length,2,'re-arms once healed back to/above 50%, fires again on the next crossing')});
+Test.add('Brood triples BUFFS.regen\'s per-frame heal rate for the holder that carries it (mother_rat only); an ordinary regen holder is unaffected',()=>{
+  const f=mkFight({p1:BOSSES.mother_rat,p2:CHAMPS.carl});
+  Buffs.apply(f,f.p1,['regen']);Buffs.apply(f,f.p2,['regen']);
+  f.p1.hp=100;f.p2.hp=100;
+  for(let i=0;i<60;i++){f.buffFrame(f.p1,f.p2);f.buffFrame(f.p2,f.p1)}
+  const ratGain=f.p1.hp-100,carlGain=f.p2.hp-100;
+  const expectRat=f.p1.maxHp*0.00017*3*60,expectCarl=f.p2.maxHp*0.00017*1*60;
+  ok(Math.abs(ratGain-expectRat)<1e-6,'mother_rat gain '+ratGain+' vs expected (x3) '+expectRat);
+  ok(Math.abs(carlGain-expectCarl)<1e-6,'carl gain '+carlGain+' vs expected (x1) '+expectCarl)});
+Test.add('Royal Disdain (Donut): applies 1 weakness stack on the foe every special she throws; doubled to 2 when the foe already holds another debuff',()=>{
+  const plain=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{special:1}}])});
+  plain.p1.power=100;run(plain,1);
+  eq(Effects.stacks(plain.p2,'weakness'),1,'an undebuffed foe gets exactly 1 weakness stack');
+  const debuffed=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{special:1}}])});
+  Effects.apply(debuffed,debuffed.p2,'bleed',{stacks:1});
+  debuffed.p1.power=100;run(debuffed,1);
+  eq(Effects.stacks(debuffed.p2,'weakness'),2,'a foe already holding another debuff (bleed) gets 2 weakness stacks instead')});
+Test.add('Royal Disdain fires off every special (s1/s2/s3), not just one',()=>{
+  for(const n of[1,2,3]){
+    const f=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{special:n}}])});
+    f.p1.power=300;run(f,1);
+    eq(Effects.stacks(f.p2,'weakness'),1,'s'+n+' must trigger Royal Disdain too')}});
+Test.add('Royal Disdain never fires from a plain light/medium/heavy -- only a real special (s1/s2/s3) activation',()=>{
+  const f=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{heavy:true}}])});
+  run(f,3);
+  eq(Effects.stacks(f.p2,'weakness'),0)});
+Test.add('Understudy (Katia): a successful parry grants the parrier +1 critDmg stack',()=>{
+  const f=mkFight({p2:CHAMPS.katia,ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.hold({block:true})});closeIn(f);
+  run(f,5);
+  ok(f.log.some(e=>e.type==='parry'),'sanity: the exchange must actually have parried');
+  eq(Effects.stacks(f.p2,'critDmg'),1,'the parrying katia must gain a critDmg stack via Understudy')});
+Test.add('Understudy never fires for a fighter who does not hold it, even on a real parry',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.hold({block:true})});closeIn(f); // both sides default carl -- no def.passive of 'understudy'
+  run(f,5);
+  ok(f.log.some(e=>e.type==='parry'),'sanity: still a real parry');
+  ok(!f.log.some(e=>e.type==='passive'),'no passive event for a fighter without Understudy')});
+Test.add('a passive trigger pushes a passiveBanner fx descriptor (presentation) alongside its own {type:"passive",who,id} event',()=>{
+  const f=mkFight({p1:CHAMPS.mongo});
+  f.p1.state='BLOCK';
+  for(let i=0;i<120;i++){f.frame++;Passives.tick(f,f.p1)}
+  ok(f.fx.some(e=>e.kind==='passiveBanner'&&e.id==='immovable'&&e.cls==='tank'),
+    'a passiveBanner fx descriptor must be pushed: '+f.fx.map(e=>e.kind).join());
+  ok(f.log.some(e=>e.type==='passive'&&e.id==='immovable'&&e.who===1),'a {type:"passive"} log entry must also be recorded')});
+Test.add('spar mode (fight.spar) blocks every passive centrally -- Spite (Carl) never fires below 40% hp',()=>{
+  const f=mkFight({p1:CHAMPS.carl,spar:true});
+  f.p1.hp=f.p1.maxHp*0.1;
+  for(let i=0;i<400;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),0,'Spite must never fire while fight.spar is true')});
+Test.add('spar mode (fight.spar) blocks Brood too',()=>{
+  const f=mkFight({p1:BOSSES.mother_rat,spar:true});
+  f.p1.hp=f.p1.maxHp*0.1;
+  for(let i=0;i<10;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'powerGain'),0,'Brood must never fire while fight.spar is true')});
+Test.add('spar mode also blocks onParry/onSpecial (Understudy/Royal Disdain)',()=>{
+  const parryF=mkFight({p2:CHAMPS.katia,ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.hold({block:true}),spar:true});closeIn(parryF);
+  run(parryF,5);
+  ok(parryF.log.some(e=>e.type==='parry'),'sanity: still a real parry even under spar');
+  eq(Effects.stacks(parryF.p2,'critDmg'),0,'Understudy must not fire under fight.spar');
+  const specialF=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{special:1}}]),spar:true});
+  specialF.p1.power=100;run(specialF,1);
+  eq(Effects.stacks(specialF.p2,'weakness'),0,'Royal Disdain must not fire under fight.spar')});
+Test.add('a real tutorial fight (G.startTutorial) sets fight.spar true',()=>{
+  Save.data=Meta.defaults();
+  G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  ok(G.fight&&G.fight.spar===true,'G.startTutorial must produce a fight with spar:true');
+  G.toTitle()});
+Test.add('a non-tutorial fight (G.startFight) leaves fight.spar false',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  ok(G.fight&&G.fight.spar===false,'an ordinary exhibition/quest/arena fight must never be spar mode');
+  G.toTitle()});
+Test.add('Passives module and every hook stay presentation-free and RNG-free (sim purity + "Passives consumes no RNG")',()=>{
+  const P_PURITY=/document|canvas|Audio\.|FX\.|Render\.|Stage\.|Tutorial\.|Screens\.|G\.|Math\.random|performance\.now|\.rng\.|RNG\(/;
+  for(const fn of[Passives.tick,Passives.onParry,Passives.onSpecial,Passives.potency,Passives._fire])
+    ok(!P_PURITY.test(fn.toString()),'Passives.'+(fn.name||'?')+' must stay presentation- and RNG-free')});
+Test.add('active passives do not change the fight\'s rng draw count (Passives consumes no RNG)',()=>{
+  // p2's hp is padded well past anything grull's own attacks could KO within 1300 frames -- a real KO
+  // would stop Fight.step (and with it Passives.tick) before Champion of the Floor's own 1200-frame
+  // beat ever landed, which is exactly what this test needs to actually exercise.
+  const f1=mkFight({noCrit:false,p1:BOSSES.grull,ctrl1:Ctrl.script([L(0,2500)])});closeIn(f1);f1.p2.hp=f1.p2.maxHp=1e6;
+  let n1=0;const raw1=f1.rng.next.bind(f1.rng);f1.rng.next=()=>{n1++;return raw1()};
+  run(f1,2500);
+  ok(f1.log.some(e=>e.type==='passive'),'sanity: Champion of the Floor must actually have fired during this run');
+  const f2=mkFight({noCrit:false,p1:BOSSES.grull,ctrl1:Ctrl.script([L(0,2500)]),spar:true});closeIn(f2);f2.p2.hp=f2.p2.maxHp=1e6;
+  let n2=0;const raw2=f2.rng.next.bind(f2.rng);f2.rng.next=()=>{n2++;return raw2()};
+  run(f2,2500);
+  ok(!f2.log.some(e=>e.type==='passive'),'sanity: fight.spar must have suppressed the passive entirely');
+  eq(n2,n1,'the number of fight.rng draws must be identical whether or not the passive actually fired')});
+// Sim-purity scan (same document.scripts slice-and-scan technique the Task 8.0 scan below uses):
+// 49_passives.js itself must carry no HITFEEL/shake/punch magnitudes (nothing here has any business
+// touching presentation numbers) and, redundantly with the function-level scan above, no rng/RNG/
+// Math.random/DOM surface anywhere in its own source text.
+Test.add('sim purity: 49_passives.js carries no HITFEEL/shake/punch magnitudes and no RNG/DOM surface anywhere in its own source',()=>{
+  const full=[...document.scripts].map(s=>s.textContent||'').join('\n');
+  const start=full.indexOf('const PASSIVES={');
+  const end=full.indexOf('class Fighter{');
+  ok(start>=0&&end>start,'could not locate src/49_passives.js in the built page');
+  const passivesSrc=full.slice(start,end);
+  ok(!/HITFEEL|shake|punch/.test(passivesSrc),'49_passives.js must not reference any HITFEEL/shake/punch magnitude');
+  ok(!/document|canvas|Audio\.|FX\.|Render\.|Stage\.|Tutorial\.|Screens\.|Math\.random|performance\.now|\.rng\.|RNG\(/.test(passivesSrc),
+    '49_passives.js must carry no presentation or RNG surface anywhere in its own source text')});
+
 // --- Task 8.0: pre-art seams (resetPerMove, sim-purity scan for the relocated HITFEEL numbers) ---
 // resetPerMove() replaces the by-hand reset startMove used to do inline -- proves the exact before/
 // after set the controller's own ruling calls for: it clears hits/landed/interceptedThisMove (the
