@@ -342,12 +342,38 @@ const AI={
     // "the foe was significantly debuffed, so this hold is for the special that punishes that," not a
     // frame-by-frame re-litigation of a condition that's already been satisfied once. Still only ever
     // fires once the full cost is actually banked; a latched target still can't jump the power queue.
+    // Task 9.5 (controller ruling, 9.4 review carry-over): a self-target S3 -- one whose kit effect
+    // lands on the ATTACKER, not the foe (move.applies has a target:'self' entry; mongo's Doorway
+    // Denial, armorUp on himself, is the only kit in the current roster shaped like this) -- can
+    // never be reached by the debuffs>=2 kitHold lock just below, since there is nothing on the FOE
+    // to count (measured: 0 real S3 throws for mongo across a 300-seed search, see the "kit usage in
+    // real (unprimed) play" test above it). Accepted reading (verdict-9.4.md): a self-buff finisher
+    // is thrown when its holder is HURT, not when the foe is debuffed -- "a tank pops armor up when
+    // he's hurt." isSelfBuffSpecial reads this generically off the move's own applies data (not a
+    // hard-coded 'mongo' id check), so any future self-target special is picked up the same way.
+    // First cut of this rule (see the task report's Deviations section) was a standalone rng-free
+    // branch checked ahead of the kitHold roll, gated on power>=300 -- provably unreachable in real
+    // play for a t3+ Mongo: kitHold commits on the very first eligible frame (power>=100) most of the
+    // time (kit .5-1), and the debuff-based lock then fires s2 (cost 200) the instant power crosses
+    // 200 every single hold, since mongo's foe never holds 2 real debuffs -- power never climbed to
+    // 300 in the first place for the standalone branch to ever see. Folded into the SAME latch the
+    // debuff check already uses instead: st.kitLockS3 (target s3, cost 300) also latches once this
+    // fighter's own hp drops to or below 60%, same "sticky once true" shape the debuff lock already
+    // has (a self-buff kit's own hp can only fall further while holding -- nothing in this roster
+    // heals a HOLDING fighter mid-hold -- so no un-latch case exists here the way the debuff clock's
+    // does). rng-free either way (no r.next() draw added), so t1/t2 (kit:0, never enter this block at
+    // all) stay bit-for-bit identical, and every other tier's own kitHold roll sequence is untouched
+    // -- this only changes which target a committed hold locks onto, never whether/when one starts.
+    function isSelfBuffSpecial(fighter){
+      const a=fighter.moveDef('s3').applies;
+      return!!(a&&a.some(x=>x.target==='self'))}
     function decideSpecial(it,me,foe){
       if(st.cd!==0||me.power<100)return false;
       if(st.kitHold===undefined&&p.kit>0)st.kitHold=r.next()<p.kit;
       if(st.kitHold){
         let debuffs=0;for(const id of PURIFIABLE)debuffs+=Effects.stacks(foe,id);
         if(debuffs>=2)st.kitLockS3=true;
+        if(isSelfBuffSpecial(me)&&me.hp<=me.maxHp*.6)st.kitLockS3=true;
         const target=st.kitLockS3?3:2,cost=target===3?300:200;
         if(me.power>=cost){it.special=target;st.cd=20;st.kitHold=undefined;st.kitLockS3=false;return true}
         return false}

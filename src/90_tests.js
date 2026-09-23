@@ -6908,3 +6908,48 @@ Test.add('kit usage in real (unprimed) play: over a seeded set of t3+ vs Ctrl.co
   let mongoS2=false;
   for(let i=0;i<12000&&!mongoS2;i++){mf.cinematic=0;mf.step();if(unprimedSpecialThrown(mf,'s2'))mongoS2=true}
   ok(mongoS2,'mongo\'s S2 must be thrown in real (unprimed) t3+ vs Ctrl.competent play')});
+
+// --- Task 9.5 (controller ruling, 9.4 review carry-over): mongo's S3 Doorway Denial grants armorUp
+// to HIMSELF (move.applies target:'self') -- the debuff-counting kitHold logic above (decideSpecial,
+// 55_ai.js) can therefore never target it for him, since there is nothing on the FOE to count (proved
+// by the "kit usage in real (unprimed) play" test just above: 0 real S3 throws for mongo across a
+// 300-seed search). Accepted reading (verdict-9.4.md): a self-buff finisher is thrown when its holder
+// is hurt, not when the foe is debuffed -- "a tank pops armor up when he's hurt." New rng-free rule:
+// once 300 power is banked and the holder's own hp is at or below 60% of max, a special whose s3
+// grants its effect to the attacker fires immediately, no roll. Two tests: the positive case (an
+// unprimed t4 Mongo below 60% hp really does throw S3 in real combat) and a negative guard (a
+// champion whose S3 targets the FOE, not himself -- carl -- must NOT be forced into S3 just because
+// his own hp drops below 60%; the pre-existing kitHold/fallback rules must be the only thing deciding
+// his special there, unchanged).
+Test.add('Task 9.5: unprimed play -- a t4 Mongo whose own hp is at or below 60% throws S3 (self-target armorUp) once 300 power is banked, in >=1 of N seeds',()=>{
+  let seenAny=false,seenSeed=null;
+  for(let seed=1;seed<=5&&!seenAny;seed++){
+    // hp/maxHp both scaled together (not padded to a flat huge number) so the 60%-of-max RATIO this
+    // rule reads is preserved for the whole fight while the absolute hp stays large enough that
+    // Ctrl.competent's own real, unprimed damage can't KO mongo before he banks 300 power -- power
+    // itself is never written by this test, only earned through real combat, same "unprimed" shape
+    // every other real-play test in this file already uses.
+    const f=new Fight({seed,p1:CHAMPS.mongo,p2:BOSSES.mother_rat,ctrl1:AI.make('t4',seed),ctrl2:Ctrl.competent(seed+500),clock:600,noCrit:false});
+    f.p2.hp=f.p2.maxHp=1e7;
+    f.p1.maxHp=1e7;f.p1.hp=1e7*0.55; // below the 60% threshold from frame 0, and stays there (mongo has no regen/lifesteal passive)
+    for(let i=0;i<12000&&!seenAny;i++){
+      f.cinematic=0;f.step();
+      if(unprimedSpecialThrown(f,'s3')){seenAny=true;seenSeed=seed}}}
+  ok(seenAny,'an unprimed t4 Mongo below 60% hp must throw S3 in at least one of 5 seeds (got none)')});
+Test.add('Task 9.5: the hp<=60% self-buff rule is scoped to self-target specials only -- carl (S3 targets the foe, no armorUp-style self applies entry) is not forced into S3 just because his own hp is low',()=>{
+  // Same shape as the tier.kit t1/t2 golden test above (mkFight defaults to carl-vs-carl): 400 raw
+  // steps, power forced to 300 at frame 0 (a held-power scenario, same as that golden run), except
+  // this time p1's own hp is also dropped below 60% first. Carl's s3 (Doorway Drop) applies a stun to
+  // the FOE (`on:'last'`, no target override -- default 'foe'), so the new self-buff rule (gated on
+  // the move's applies containing a target:'self' entry) must never match him; the fight must still
+  // play out via the pre-existing kitHold/fallback logic alone, bit-for-bit identical to the golden
+  // run recorded above (which never touches hp at all -- this test isolates that the new rule is a
+  // true no-op for a non-self-target kit, not just "the golden numbers happen to still match").
+  const golden={t1:{hp1:0,hp2:1000,frame:275},t2:{hp1:0,hp2:1000,frame:220}};
+  for(const tier of['t1','t2']){
+    const f=mkFight({ctrl1:Ctrl.idle(),ctrl2:AI.make(tier,7)});closeIn(f);
+    f.p2.power=300;f.p2.hp=Math.floor(f.p2.maxHp*0.5); // below 60%, same as the mongo test above, on a fighter whose s3 targets the foe
+    for(let i=0;i<400;i++){f.cinematic=0;f.step()}
+    const g=golden[tier];
+    eq(f.p1.hp,g.hp1,tier+': p1 hp must match the pre-9.5 golden run even with p2 hp forced low');
+    eq(f.frame,g.frame,tier+': the fight must end on the exact same frame as the pre-9.5 golden run even with p2 hp forced low')}});
