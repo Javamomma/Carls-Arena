@@ -894,6 +894,16 @@ const BodyStyle={
       const m=c.getTransform(),v=Math.hypot(m.a,m.b);
       if(isFinite(v)&&v>1e-4)s=v}
     return Math.max(.5,Math.min(4,this._r(s,2)/2))},
+  // Fix-wave item 5 (final review, Important #3). zoomBucket() reads the live CTM, and every part
+  // module used to call it for itself -- 27 getTransform() calls per fighter draw, ~108 DOMMatrix
+  // allocations a frame across two fighters and two reflections, every one of them returning the
+  // same matrix because the camera transform does not change between the part calls inside a single
+  // Rig.draw. Each rig's draw now computes the bucket ONCE (right after it applies the camera scale,
+  // which is the transform every part was reading anyway -- the head's own c.rotate cannot change
+  // hypot(a,b), so a rotated part still belongs to the same bucket) and threads it through the same
+  // options bag. A caller with no bucket to offer -- a portrait, a test calling a module directly --
+  // still gets the CTM read, so nothing has to know about this to stay correct.
+  zb(c,zb){return zb!==undefined?zb:this.zoomBucket(c)},
   // Task 8.2. Every rounded component of a cache key goes through this. Math.round breaks ties at
   // exactly .5, and several of the numbers that end up in a key land exactly ON a tie:
   //   * Mongo and Grull have def.scale 1.25, so zoomBucket rounds 2.5 -- and the CTM hypot comes
@@ -1044,7 +1054,7 @@ const BodyStyle={
       return}
     const face=opts.face||0,cloth=opts.cloth||'bare',bone=opts.bone||'limb';
     const w2=opts.w2!==undefined?opts.w2:w*.84;
-    const zb=this.zoomBucket(c),px=this.SS*zb;
+    const zb=this.zb(c,opts.zb),px=this.SS*zb;
     // Bone lengths are constants of the look, so rounding len into the key is a no-op in practice --
     // it is here only so a caller passing an odd-length segment can never collide with a cached
     // bitmap of a different size.
@@ -1129,12 +1139,12 @@ const BodyStyle={
   // ---- torso ------------------------------------------------------------------------------------
   // `chest` is the neck joint, `hip` the hip joint; every width comes from the look. See the header
   // comment for why the shear between them is an exact affine of one upright bitmap.
-  torso(c,chest,hip,look,face,lit){
+  torso(c,chest,hip,look,face,lit,zbIn){
     const b=look&&look.body;
     if(!b)return;
     const sx=chest.x-hip.x,sy=chest.y-hip.y,L=Math.hypot(sx,sy);
     if(!(L>.01))return;
-    const zb=this.zoomBucket(c),px=this.SS*zb;
+    const zb=this.zb(c,zbIn),px=this.SS*zb;
     const MW=Math.max(look.shoulderW,look.hipW,this.waistW(look))+look.limb*2.4;
     const topPad=look.headR*1.15,botPad=look.limb*1.9;
     const bw=Math.ceil(MW*px),bh=Math.ceil((L+topPad+botPad)*px);
@@ -1148,7 +1158,7 @@ const BodyStyle={
       const covered=b.cloth.torso==='shirt'||b.cloth.torso==='plate'||b.cloth.torso==='chitin'||b.cloth.torso==='fur';
       c.save();c.globalAlpha=Math.min(1,flat);
       this.limb(c,hip.x,hip.y,chest.x,chest.y,tw,look,
-        {bone:'trunk',cloth:b.cloth.torso==='bone'?'bare':covered?'full':b.cloth.torso==='robe'?'full':'bare',face,lit,w2:tw*.94});
+        {bone:'trunk',cloth:b.cloth.torso==='bone'?'bare':covered?'full':b.cloth.torso==='robe'?'full':'bare',face,lit,zb,w2:tw*.94});
       c.restore()}
     const cacheKey=this.key(look,'torso:'+this._r(L),face,zb);
     const cv0=this.cache(cacheKey,bw,bh,g=>{
@@ -1380,7 +1390,7 @@ const BodyStyle={
     if(!b)return;
     const cl=b.cloth;
     if(cl.legs==='bare'||cl.legs==='bone')return;
-    const zb=this.zoomBucket(c),px=this.SS*zb,limb=look.limb,hw=look.hipW;
+    const zb=this.zb(c,opts.zb),px=this.SS*zb,limb=look.limb,hw=look.hipW;
     const halfW=hw*.5+limb*.8+3,up=limb*.8,down=cl.legs==='shorts'?limb*2.0:limb*1.0;
     const bw=Math.ceil(halfW*2*px),bh=Math.ceil((up+down)*px);
     const cacheKey=this.key(look,'hips:'+cl.legs,face,zb);
@@ -1468,12 +1478,12 @@ const BodyStyle={
     g.beginPath();g.ellipse(0,limb*.28,hw*.24,limb*.34,0,0,Math.PI*2);g.fill()},
 
   // ---- head / face ------------------------------------------------------------------------------
-  head(c,x,y,r,look,face,state,lit){
+  head(c,x,y,r,look,face,state,lit,zbIn){
     const b=look&&look.body;
     if(!b)return;
     const st=HEAD_STATES.indexOf(state)>=0?state:'idle';
     const fx=face>0?1:face<0?-1:0;
-    const zb=this.zoomBucket(c),px=this.SS*zb;
+    const zb=this.zb(c,zbIn),px=this.SS*zb;
     const ear=b.face.ears==='pointed'?this.earLen(look,r):0;
     // The quad rig folds its ears INTO the head bitmap (the pre-8.2 drawQuad drew them separately
     // in world space, so they stayed bolt-upright while the head turned), which needs more room
@@ -2171,7 +2181,7 @@ const BodyStyle={
     opts=opts||{};
     const b=look&&look.body;
     if(!b)return;
-    const zb=this.zoomBucket(c),px=this.SS*zb;
+    const zb=this.zb(c,opts.zb),px=this.SS*zb;
     const half=r*1.75+3;
     const bw=Math.ceil(half*2*px);
     const cacheKey=this.key(look,'hand:'+this._r(r,4)+':'+(wrap?'w':'b'),face,zb);
@@ -2213,7 +2223,7 @@ const BodyStyle={
     const b=look&&look.body;
     if(!b)return;
     const base=col||look.skin;
-    const zb=this.zoomBucket(c),px=this.SS*zb,half=r*1.3+3;
+    const zb=this.zb(c,opts.zb),px=this.SS*zb,half=r*1.3+3;
     const bw=Math.ceil(half*2*px);
     const cacheKey=this.key(look,'joint:'+this._r(r,4)+':'+base,face,zb);
     const cv0=this.cache(cacheKey,bw,bw,g=>{
@@ -2250,7 +2260,7 @@ const BodyStyle={
     const b=look&&look.body;
     if(!b||!(r>.4))return;
     const base=col||look.skin;
-    const zb=this.zoomBucket(c),px=this.SS*zb,half=r+2;
+    const zb=this.zb(c,opts.zb),px=this.SS*zb,half=r+2;
     const bw=Math.ceil(half*2*px);
     const cacheKey=this.key(look,'seam:'+this._r(r,4)+':'+base,face,zb);
     const cv0=this.cache(cacheKey,bw,bw,g=>{
@@ -2277,7 +2287,7 @@ const BodyStyle={
     const b=look&&look.body;
     if(!b||!(rx>.3)||!(ry>.3))return;
     const base=col||look.skin,lo=b.skinShade[0],hi=b.skinShade[1];
-    const zb=this.zoomBucket(c),px=this.SS*zb;
+    const zb=this.zb(c,opts.zb),px=this.SS*zb;
     const half=Math.max(rx,ry)+3;
     const bw=Math.ceil(half*2*px);
     const cacheKey=this.key(look,'blob:'+name+':'+this._r(rx,2)+':'+this._r(ry,2)+':'+base,face,zb);
@@ -2303,7 +2313,7 @@ const BodyStyle={
     const b=look&&look.body;
     if(!b)return;
     opts=opts||{};
-    const zb=this.zoomBucket(c),px=this.SS*zb,half=w*1.5+3;
+    const zb=this.zb(c,opts.zb),px=this.SS*zb,half=w*1.5+3;
     const bw=Math.ceil(half*2*px);
     const kind=(look.species||'beast')+(opts.slam?':slam':'');
     const base=opts.col||look.skin;
@@ -2360,7 +2370,7 @@ const BodyStyle={
     opts=opts||{};
     const b=look&&look.body;
     if(!b)return;
-    const zb=this.zoomBucket(c),px=this.SS*zb;
+    const zb=this.zb(c,opts.zb),px=this.SS*zb;
     const w=look.limb*1.35,h=look.limb*.82,half=Math.max(w,h)*1.15+3;
     const bw=Math.ceil(half*2*px);
     const bare=!!look.bareFeet,kind=b.cloth.legs==='bone'?'bone':bare?'bare':'boot';
@@ -2847,8 +2857,10 @@ const Rig={
     // fighter draw, built once here, so threading the torch tint to the seven modules that used to
     // drop it costs no per-part allocation. L() is the same tint applied to a flat prop colour,
     // for the held weapons below (no cached bitmap of their own to hand _tintedBitmap).
-    const LO={lit},LC=col=>BodyStyle.litCol(col,lit);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
+    // Fix-wave item 5: one CTM read per fighter draw. Declared AFTER the camera translate/scale
+    // above, because that is the transform every part module was reading for itself.
+    const LO={lit,zb:BodyStyle.zoomBucket(c)},LC=col=>BodyStyle.litCol(col,lit);
     // Task 8.2 joint-seam polish, applied to all three rigs (see BodyStyle.seam). Three changes per
     // chain: the balls shrank from proud-of-the-limb (.62/.58/.56 of a width, i.e. 12-24% WIDER than
     // the tube they joined) to inside it; BOTH balls are laid down before EITHER segment, so no ring
@@ -2858,8 +2870,8 @@ const Rig={
       const jc=this.jointCol(look,'foreArm');
       BodyStyle.joint(c,sh.x,sh.y,armW*.48,look,face,this.jointCol(look,'upperArm'),LO);
       BodyStyle.joint(c,el.x,el.y,Math.min(armW*.86,foreW)*.48,look,face,jc,LO);
-      BodyStyle.limb(c,sh.x,sh.y,el.x,el.y,armW,look,{bone:'upperArm',cloth:cf('upperArm'),face,lit,w2:armW*.86});
-      BodyStyle.limb(c,el.x,el.y,hand.x,hand.y,foreW,look,{bone:'foreArm',cloth:cf('foreArm'),face,lit,w2:foreW*.90});
+      BodyStyle.limb(c,sh.x,sh.y,el.x,el.y,armW,look,{bone:'upperArm',cloth:cf('upperArm'),face,lit,zb:LO.zb,w2:armW*.86});
+      BodyStyle.limb(c,el.x,el.y,hand.x,hand.y,foreW,look,{bone:'foreArm',cloth:cf('foreArm'),face,lit,zb:LO.zb,w2:foreW*.90});
       if(!boney){
         BodyStyle.seam(c,sh.x,sh.y,armW*.50,look,face,this.jointCol(look,'upperArm'),Math.atan2(el.y-sh.y,el.x-sh.x),LO);
         BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5+1.1,look,face,jc,Math.atan2(hand.y-el.y,hand.x-el.x),LO)}
@@ -2867,20 +2879,20 @@ const Rig={
     const leg=(hp,kn,ft)=>{
       const jc=this.jointCol(look,'shin');
       BodyStyle.joint(c,kn.x,kn.y,Math.min(thighW*.78,shinW)*.48,look,face,jc,LO);
-      BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,thighW,look,{bone:'thigh',cloth:cf('thigh'),face,lit,w2:thighW*.78});
-      BodyStyle.limb(c,kn.x,kn.y,ft.x,ft.y,shinW,look,{bone:'shin',cloth:cf('shin'),face,lit,w2:shinW*.72});
+      BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,thighW,look,{bone:'thigh',cloth:cf('thigh'),face,lit,zb:LO.zb,w2:thighW*.78});
+      BodyStyle.limb(c,kn.x,kn.y,ft.x,ft.y,shinW,look,{bone:'shin',cloth:cf('shin'),face,lit,zb:LO.zb,w2:shinW*.72});
       if(cf('shin')!=='bone')
         BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.78,shinW)*.5+1.1,look,face,jc,Math.atan2(ft.y-kn.y,ft.x-kn.x),LO);
       BodyStyle.foot(c,ft.x+face*limb*.28,ft.y+limb*.14,look,face,0,LO)};
     leg(j.lHip,j.lKnee,j.lFoot);
     arm(j.lShoulder,j.lElbow,j.lHand);
-    BodyStyle.torso(c,j.neck,j.hip,look,face,lit);
+    BodyStyle.torso(c,j.neck,j.hip,look,face,lit,LO.zb);
     // The head rotates rigidly with the neck->head bone; its world angle comes straight off that
     // vector, so no second samplePose call is needed to recover the pose's own head angle.
     const hx=j.head.x-j.neck.x,hy=j.head.y-j.neck.y;
     c.save();c.translate(j.head.x,j.head.y);
     if(hx||hy)c.rotate(Math.atan2(hx,-hy));
-    BodyStyle.head(c,0,0,look.headR,look,face,fs,lit);
+    BodyStyle.head(c,0,0,look.headR,look,face,fs,lit,LO.zb);
     c.restore();
     leg(j.rHip,j.rKnee,j.rFoot);
     BodyStyle.hips(c,j.hip.x,j.hip.y,look,face,LO);
@@ -2920,32 +2932,32 @@ const Rig={
     const limb=look.limb,fs=BodyStyle.faceState(poseKey);
     const cf=part=>this.clothFor(look,part);
     const armW=limb*1.06,foreW=limb*.86,thighW=limb*1.34,shinW=limb*1.04;
-    // Fix-wave item 4, same options bag / flat-colour helper as _drawHuman.
-    const LO={lit},LC=col=>BodyStyle.litCol(col,lit);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
+    // Fix-wave items 4 and 5, same options bag / flat-colour helper / single CTM read as _drawHuman.
+    const LO={lit,zb:BodyStyle.zoomBucket(c)},LC=col=>BodyStyle.litCol(col,lit);
     const arm=(sh,el,hand)=>{
       const jc=this.jointCol(look,'foreArm');
       BodyStyle.joint(c,sh.x,sh.y,armW*.48,look,face,this.jointCol(look,'upperArm'),LO);
       BodyStyle.joint(c,el.x,el.y,Math.min(armW*.86,foreW)*.48,look,face,jc,LO);
-      BodyStyle.limb(c,sh.x,sh.y,el.x,el.y,armW,look,{bone:'upperArm',cloth:cf('upperArm'),face,lit,w2:armW*.86});
-      BodyStyle.limb(c,el.x,el.y,hand.x,hand.y,foreW,look,{bone:'foreArm',cloth:cf('foreArm'),face,lit,w2:foreW*.92});
+      BodyStyle.limb(c,sh.x,sh.y,el.x,el.y,armW,look,{bone:'upperArm',cloth:cf('upperArm'),face,lit,zb:LO.zb,w2:armW*.86});
+      BodyStyle.limb(c,el.x,el.y,hand.x,hand.y,foreW,look,{bone:'foreArm',cloth:cf('foreArm'),face,lit,zb:LO.zb,w2:foreW*.92});
       BodyStyle.seam(c,sh.x,sh.y,armW*.50,look,face,this.jointCol(look,'upperArm'),Math.atan2(el.y-sh.y,el.x-sh.x),LO);
       BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5+1.1,look,face,jc,Math.atan2(hand.y-el.y,hand.x-el.x),LO);
       BodyStyle.hand(c,hand.x,hand.y,limb*.62,look,face,Math.atan2(hand.y-el.y,hand.x-el.x),false,LO)};
     const leg=(hp,kn,ft)=>{
       const jc=this.jointCol(look,'shin');
       BodyStyle.joint(c,kn.x,kn.y,Math.min(thighW*.76,shinW)*.48,look,face,jc,LO);
-      BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,thighW,look,{bone:'thigh',cloth:cf('thigh'),face,lit,w2:thighW*.76});
-      BodyStyle.limb(c,kn.x,kn.y,ft.x,ft.y,shinW,look,{bone:'shin',cloth:cf('shin'),face,lit,w2:shinW*.78});
+      BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,thighW,look,{bone:'thigh',cloth:cf('thigh'),face,lit,zb:LO.zb,w2:thighW*.76});
+      BodyStyle.limb(c,kn.x,kn.y,ft.x,ft.y,shinW,look,{bone:'shin',cloth:cf('shin'),face,lit,zb:LO.zb,w2:shinW*.78});
       BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.76,shinW)*.5+1.1,look,face,jc,Math.atan2(ft.y-kn.y,ft.x-kn.x),LO);
       BodyStyle.foot(c,ft.x+face*limb*.30,ft.y+limb*.16,look,face,0,LO)};
     leg(j.lHip,j.lKnee,j.lFoot);
     arm(j.lShoulder,j.lElbow,j.lHand);
-    BodyStyle.torso(c,j.neck,j.hip,look,face,lit);
+    BodyStyle.torso(c,j.neck,j.hip,look,face,lit,LO.zb);
     const hx=j.head.x-j.neck.x,hy=j.head.y-j.neck.y;
     c.save();c.translate(j.head.x,j.head.y);
     if(hx||hy)c.rotate(Math.atan2(hx,-hy));
-    BodyStyle.head(c,0,0,look.headR,look,face,fs,lit);
+    BodyStyle.head(c,0,0,look.headR,look,face,fs,lit,LO.zb);
     c.restore();
     leg(j.rHip,j.rKnee,j.rFoot);
     BodyStyle.hips(c,j.hip.x,j.hip.y,look,face,LO);
@@ -3120,26 +3132,26 @@ const Rig={
     const slamming=poseKey==='medium';       // the rearing double-front-paw slam (POSES_QUAD.medium)
     const slamCol=slamming?shade(look.skin,-.18):undefined;
     const ang=(a,b)=>Math.atan2(b.y-a.y,b.x-a.x);
-    // Fix-wave item 4, same options bag / flat-colour helper as _drawHuman.
-    const LO={lit},LC=col=>BodyStyle.litCol(col,lit);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
+    // Fix-wave items 4 and 5, same options bag / flat-colour helper / single CTM read as _drawHuman.
+    const LO={lit,zb:BodyStyle.zoomBucket(c)},LC=col=>BodyStyle.litCol(col,lit);
     // A leg is the same joint/limb/seam/paw sandwich the human rig uses, so the joint-seam contract
     // (balls under both segments, inside the limb, a seam cap after) holds for all twelve of them.
     const leg=(hp,kn,pw,w,col,slam)=>{
       const uw=w,lw=w*.62;
       BodyStyle.joint(c,kn.x,kn.y,Math.min(uw*.70,lw)*.48,look,face,col||look.skin,LO);
-      BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,uw,look,{bone:'legU',cloth:'bare',face,lit,w2:uw*.70});
-      BodyStyle.limb(c,kn.x,kn.y,pw.x,pw.y,lw,look,{bone:'legL',cloth:'bare',face,lit,w2:lw*.84});
+      BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,uw,look,{bone:'legU',cloth:'bare',face,lit,zb:LO.zb,w2:uw*.70});
+      BodyStyle.limb(c,kn.x,kn.y,pw.x,pw.y,lw,look,{bone:'legL',cloth:'bare',face,lit,zb:LO.zb,w2:lw*.84});
       BodyStyle.seam(c,kn.x,kn.y,Math.min(uw*.70,lw)*.5+1.1,look,face,col||look.skin,ang(kn,pw),LO);
-      BodyStyle.paw(c,pw.x,pw.y,lw*1.05,look,face,ang(kn,pw),{col,slam,lit})};
+      BodyStyle.paw(c,pw.x,pw.y,lw*1.05,look,face,ang(kn,pw),{col,slam,lit,zb:LO.zb})};
     // --- back legs and haunches, behind everything
     leg(j.blHip,j.bl1,j.bl2,legW);
     leg(j.brHip,j.br1,j.br2,legW);
     // --- tail: two tapering segments plus a tip. tailTint (Mother Rat's bald pink tail) overrides
     //     the coat colour entirely, which is what separates a tail from a fifth leg at a glance.
     const tc=look.tailTint||look.skin;
-    BodyStyle.limb(c,j.hip.x,j.hip.y,j.tail1.x,j.tail1.y,legW*.66,look,{bone:'tail1',cloth:'bare',face,lit,w2:legW*.48});
-    BodyStyle.limb(c,j.tail1.x,j.tail1.y,j.tail2.x,j.tail2.y,legW*.48,look,{bone:'tail2',cloth:'bare',face,lit,w2:legW*.26});
+    BodyStyle.limb(c,j.hip.x,j.hip.y,j.tail1.x,j.tail1.y,legW*.66,look,{bone:'tail1',cloth:'bare',face,lit,zb:LO.zb,w2:legW*.48});
+    BodyStyle.limb(c,j.tail1.x,j.tail1.y,j.tail2.x,j.tail2.y,legW*.48,look,{bone:'tail2',cloth:'bare',face,lit,zb:LO.zb,w2:legW*.26});
     BodyStyle.seam(c,j.tail1.x,j.tail1.y,legW*.24+1.1,look,face,tc,ang(j.tail1,j.tail2),LO);
     BodyStyle.blob(c,j.tail2.x,j.tail2.y,legW*.28,legW*.26,0,look,face,'tailtip',tc,null,LO);
     if(look.tailTint){ // re-tint the two tail segments: BodyStyle.limb paints in the coat colour
@@ -3169,8 +3181,8 @@ const Rig={
     if(!grub){
       BodyStyle.blob(c,j.hip.x-Math.cos(hipA)*bodyW*.10,j.hip.y-Math.sin(hipA)*bodyW*.10,
         bodyW*.70,bodyW*.62,hipA,look,face,'haunch',null,null,LO);}
-    BodyStyle.limb(c,j.hip.x,j.hip.y,j.spine.x,j.spine.y,w0,look,{bone:'barrelA',cloth:'bare',face,lit,w2:w1});
-    BodyStyle.limb(c,j.spine.x,j.spine.y,j.chest.x,j.chest.y,w1,look,{bone:'barrelB',cloth:'bare',face,lit,w2});
+    BodyStyle.limb(c,j.hip.x,j.hip.y,j.spine.x,j.spine.y,w0,look,{bone:'barrelA',cloth:'bare',face,lit,zb:LO.zb,w2:w1});
+    BodyStyle.limb(c,j.spine.x,j.spine.y,j.chest.x,j.chest.y,w1,look,{bone:'barrelB',cloth:'bare',face,lit,zb:LO.zb,w2});
     BodyStyle.seam(c,j.spine.x,j.spine.y,w1*.5+1.1,look,face,null,chA,LO);
     if(!grub)BodyStyle.blob(c,j.chest.x,j.chest.y,bodyW*.46,bodyW*.44,chA,look,face,'shoulder',null,null,LO);
     if(look.body.cloth.torso==='chitin'){
@@ -3206,8 +3218,8 @@ const Rig={
     //     0.6*headR between the neck's end and the head's underside, which is why the first pass
     //     read as a cat head floating over a log.
     const nw=bodyW*(grub?.62:.50);
-    BodyStyle.limb(c,j.chest.x,j.chest.y,j.neck.x,j.neck.y,nw,look,{bone:'neck',cloth:'bare',face,lit,w2:nw*.86});
-    BodyStyle.limb(c,j.neck.x,j.neck.y,j.head.x,j.head.y,nw*.86,look,{bone:'nape',cloth:'bare',face,lit,w2:look.headR*.88});
+    BodyStyle.limb(c,j.chest.x,j.chest.y,j.neck.x,j.neck.y,nw,look,{bone:'neck',cloth:'bare',face,lit,zb:LO.zb,w2:nw*.86});
+    BodyStyle.limb(c,j.neck.x,j.neck.y,j.head.x,j.head.y,nw*.86,look,{bone:'nape',cloth:'bare',face,lit,zb:LO.zb,w2:look.headR*.88});
     BodyStyle.seam(c,j.neck.x,j.neck.y,nw*.43+1.1,look,face,null,ang(j.neck,j.head),LO);
     BodyStyle.seam(c,j.chest.x,j.chest.y,nw*.50+1.1,look,face,null,ang(j.chest,j.neck),LO);
     if(!grub){ // the chest ruff: a fur collar where the neck meets the shoulder
@@ -3222,7 +3234,7 @@ const Rig={
     const hx=j.head.x-j.neck.x,hy=j.head.y-j.neck.y;
     c.save();c.translate(j.head.x,j.head.y);
     if(hx||hy)c.rotate(Math.atan2(hx,-hy));
-    BodyStyle.head(c,0,0,look.headR,look,face,fs,lit);
+    BodyStyle.head(c,0,0,look.headR,look,face,fs,lit,LO.zb);
     c.restore();
     // --- front legs last, so they sit in front of the body. That is also why POSES_QUAD.medium's
     //     double-front-paw slam needs no draw-order handling: the striking limbs are already the

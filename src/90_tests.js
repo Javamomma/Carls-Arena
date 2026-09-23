@@ -5533,6 +5533,39 @@ Test.add('the torch tint reaches every cached part kind, not just limb/torso/hea
       ok(seen.has(part),'BodyStyle.'+part+' must route its cached bitmap through the torch tint; '+
         'tinted part kinds seen: '+[...seen].sort().join(','));
   }finally{BodyStyle._tintedBitmap=orig;G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+// ---- Fix-wave item 5 (final review, Important #3): read the CTM once per fighter draw -----------
+// BodyStyle.zoomBucket reads the live CTM (c.getTransform()) to pick which cached bitmap resolution
+// to use, and every part module called it for itself: the reviewer measured 27 getTransform() calls
+// per Render.fighter, roughly 108 DOMMatrix allocations a frame once both fighters and both floor
+// reflections are drawn. Every one returned the same matrix, because the camera transform does not
+// change between the part calls inside a single Rig.draw. Costs nothing measurable on desktop; it is
+// pure GC churn on a phone. The bucket is now computed once at the top of each rig's own draw (right
+// after the camera scale is applied, which is the frame every part was reading anyway) and threaded
+// through the same options bag item 4 added.
+Test.add('a fighter draw reads the canvas CTM at most once, not once per part',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const proto=Object.getPrototypeOf(c),orig=proto.getTransform;
+  const savedFight=G.fight,savedState=G.state;
+  let n=0;
+  try{
+    BodyStyle.clearCache();
+    proto.getTransform=function(){n++;return orig.apply(this,arguments)};
+    const cam={x:0,zoom:1};
+    const lit={tint:Stage._mix(Stage.AMBIENT_TINT,Stage.TORCH_TINT,.3),k:.3,rimSide:1};
+    // One look per rig kind -- human, big and quad each have their own draw function and their own
+    // set of part calls, so all three have to thread the bucket or the fix is partial.
+    for(const id of['carl','mongo','mother_rat']){
+      const F=mkFight({p1:DEFS[id]}).p1;
+      c.save();c.setTransform(1,0,0,1,427,432);
+      n=0;Rig.draw(c,F,cam,0,lit);
+      const cold=n;
+      n=0;Rig.draw(c,F,cam,0,lit);          // again, warm cache -- same path, no re-paints
+      const warm=n;
+      c.restore();
+      ok(cold<=1,id+' must read the CTM at most once per fighter draw (cold cache), got '+cold);
+      ok(warm<=1,id+' must read the CTM at most once per fighter draw (warm cache), got '+warm)}
+  }finally{proto.getTransform=orig;G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
 // The held-weapon half of the same finding: a dagger, a club and a spiked club are drawn straight
 // onto the main canvas with flat colours, not from a cached bitmap, so there is no bitmap to tint.
 // BodyStyle.litCol applies the SAME spec analytically -- an alpha blend of the tint colour over the
