@@ -44,7 +44,10 @@ class Fight{
     // special activation can reach Passives.onSpecial (49_passives.js) -- see Fighter.act/startMove's
     // own comments. Every existing direct unit-test call to F.act(intent) (no 2nd arg) still works
     // unchanged: startMove's own fight param is optional and Passives.onSpecial is simply skipped.
-    this.p1.act(i1,this);this.p2.act(i2,this);this.p1.tick();this.p2.tick();
+    // Task 12.1 fix round 2: tick() now takes `this` (the live fight) too -- see Fighter.tick's own
+    // comment (50_fighter.js) for why: its own natural end-of-recovery chain-exit stamp needs
+    // fight.frame, and tick() is the only place that transition happens.
+    this.p1.act(i1,this);this.p2.act(i2,this);this.p1.tick(this);this.p2.tick(this);
     this.buffFrame(this.p1,this.p2);this.buffFrame(this.p2,this.p1);
     // Task 7.1: Effects.tick runs once per step per fighter, same slot buffFrame already runs in
     // (before detect/resolve) -- ticks every active timed effect's own per-frame hook (bleed/regen/
@@ -140,7 +143,12 @@ class Fight{
         this.fx.push({kind:'afterimage',x:def.x,y:FLOOR-80,face:def.face});
         this.emitTell('dexterity',def,att.face)}
       return this.emit('miss',att,def,0)}
-    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;att.chainNode=0;
+    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;
+      // Task 12.1 fix round 2 (frozen ruling): stamp the PARRIED attacker's own lastChainExitFrame
+      // before resetting chainNode, gated on it actually having been mid a chain (>0) -- a parried
+      // neutral heavy/special (chainNode already 0) must not read as "a chain just exited".
+      if(att.chainNode>0)att.lastChainExitFrame=this.frame;
+      att.chainNode=0;
       // Task 12.1 (frozen interface): att.parryStunned marks THIS specific STUNNED episode as a real
       // parry stun (as opposed to a plain EFFECTS.stun) -- read by the hit branch below (once def, here
       // the parrier, follows up with a heavy) to decide the PUNISH_MUL bonus; cleared there on the
@@ -283,6 +291,11 @@ class Fight{
     const ender=isChainEnder?CHAIN.enders[moveName]:null;
     const knockdown=ender?!!ender.knockdown:!!m.knockdown;
     def.clearMove();if(knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
+    // Task 12.1 fix round 2 (frozen ruling): stamp the struck DEFENDER's own lastChainExitFrame
+    // before resetting chainNode, gated on it actually having been mid a chain (>0) -- a struck
+    // fighter mid a neutral heavy/special (chainNode already 0) must not read as "a chain just
+    // exited".
+    if(def.chainNode>0)def.lastChainExitFrame=this.frame;
     def.chainNode=0; // Task 7.2 ruling: taking a hit resets the DEFENDER's own chain (they were interrupted mid-recovery)
     // Task 12.1: a hit landing on def while THEY were sitting in a buffered-special window (mid the
     // medium ender's own recovery) must drop that buffer outright, same "taking a hit kills a pending

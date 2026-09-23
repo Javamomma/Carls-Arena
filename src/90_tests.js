@@ -1536,6 +1536,38 @@ Test.add('chain grammar: taking a hit resets the struck fighter\'s own chainNode
   run(h,6);
   eq(h.p1.state,'STUNNED','sanity: p1 must have been parried');
   eq(h.p1.chainNode,0,'a parried attacker\'s own chainNode must also reset to 0')});
+// Task 12.1 fix round 2 (frozen ruling, from the Phase 9 final review): fighter.lastChainExitFrame --
+// stamped at every site a chain that was actually open closes. Three tests: the natural end-of-
+// recovery close, a deliberate dash-back exit mid-chain, and the untouched (-999) default when no
+// chain is ever opened at all.
+Test.add('Task 12.1 fix round 2: lastChainExitFrame stamps the exact frame a completed M-L-L-L-M naturally closes',()=>{
+  const f=mkFight({ctrl1:chainSeq(['medium','light','light','light','medium'])});closeIn(f);
+  for(let i=0;i<300&&f.log.filter(e=>e.type==='hit').length<5;i++)f.step();
+  eq(f.log.filter(e=>e.type==='hit').length,5,'sanity: the full chain must have landed');
+  eq(f.p1.lastChainExitFrame,-999,'sanity: still untouched -- the chain has landed but not yet closed (still in the ender\'s own recovery)');
+  let exitFrame=-1;
+  for(let i=0;i<40&&exitFrame<0;i++){f.step();if(f.p1.chainNode===0)exitFrame=f.frame}
+  ok(exitFrame>0,'sanity: the ender\'s own recovery must have elapsed within the budget');
+  eq(f.p1.lastChainExitFrame,exitFrame,'lastChainExitFrame must equal the exact frame the chain closed')});
+Test.add('Task 12.1 fix round 2: lastChainExitFrame stamps the exact frame a dash-back abandons an open chain at node 3',()=>{
+  // A small inline controller (chainSeq itself has no dashBack support): presses light to open and
+  // continue through node 3, then dashes back instead of continuing a 4th time.
+  const ctrl={next(fight,me,foe){
+    const it=Ctrl.EMPTY();
+    if(me.state==='IDLE'){it.light=true;return it}
+    if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){
+      if(me.chainNode<3){it.light=true;return it}
+      it.dashBack=true;return it}
+    return it}};
+  const f=mkFight({ctrl1:ctrl});closeIn(f);
+  for(let i=0;i<200&&f.p1.state!=='DASH';i++)f.step();
+  eq(f.p1.state,'DASH','sanity: the dash-back must actually have fired');
+  eq(f.p1.chainNode,0,'the chain must be abandoned (chainNode reset) the instant the dash-back fires');
+  eq(f.p1.lastChainExitFrame,f.frame,'lastChainExitFrame must equal the exact frame the dash-back fired')});
+Test.add('Task 12.1 fix round 2: lastChainExitFrame stays untouched (-999) in a fight where no chain is ever opened',()=>{
+  const f=mkFight();run(f,60); // both sides idle -- mkFight's own defaults (ctrl1/ctrl2: Ctrl.idle())
+  eq(f.p1.lastChainExitFrame,-999);
+  eq(f.p2.lastChainExitFrame,-999,'sanity: a fighter that never even acted must also stay untouched')});
 Test.add('chain grammar: no sixth node -- the ender\'s own recovery accepts no further continuation',()=>{
   const F=mkFighter();
   F.startMove('medium',CHAIN.nodes); // pretend node 5 (the ender) just started

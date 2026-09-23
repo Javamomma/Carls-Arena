@@ -2671,6 +2671,17 @@ class Fighter{
     // s1/s2/s3, and the in-combo heavy ender (moveName 'heavy') all leave these alone, same "0 unless
     // something is badly wrong" invariant chainNode itself already keeps for non-grammar moves.
     this.chainLights=0;this.chainMediums=0;
+    // Task 12.1 fix round 2 (frozen ruling, from the Phase 9 final review): lastChainExitFrame --
+    // stamped with fight.frame at every site a chain that was actually open (chainNode>0) closes:
+    // the natural end-of-recovery reset (tick()'s own 'done' transition), the in-combo heavy ender's
+    // own early-release cancel (act()'s CHARGE branch), a hit landing on this fighter mid-chain and a
+    // parry landing on this fighter's own attack (both Fight.resolve, 60_fight.js), and a deliberate
+    // dash-back pressed during an open chain continuation window (act()'s own ATTACK-recovery branch,
+    // below -- MCoC's own named backdraft setup, "swipe back after your third light..."). -999 (never
+    // a real frame number) is the untouched default -- Task 12.2's own BACKDRAFT reads this to gate a
+    // 30-frame window after the exit, so a fight that never actually opened a chain must never read as
+    // "just exited one 999 frames ago" by coincidence.
+    this.lastChainExitFrame=-999;
     // Task 12.1 (frozen interface): bufferedSpecial -- set (sim-side, from live intent, never Input's
     // own buffer) the instant an S1/S2 press arrives during the medium ender's own recovery (chainNode
     // ===CHAIN.nodes, moveName==='medium'); consumed on the first frame act() can actually start a new
@@ -2928,6 +2939,18 @@ class Fighter{
     else if(S==='ATTACK'&&this.phase()==='recovery'){
       if(this.landed&&this.chainNode>=1&&this.chainNode<CHAIN.nodes){
         const cn=this.chainNode;
+        // Task 12.1 fix round 2 (frozen ruling): a dash-back pressed during an OPEN chain
+        // continuation window abandons the chain deliberately, same as a real dash-back anywhere
+        // else -- MCoC's own named "backdraft" setup ("swipe back after your third light, then throw
+        // a medium as they dash at you") depends on this being possible; before this fix, a dash-back
+        // intent read here simply fell through and did nothing (the chain window silently ignored
+        // it). Checked ahead of the heavy/light/medium continuation offers below so a dash-back wins
+        // any same-frame tie. Input's own dashBack intent is presented once and never buffered (see
+        // 30_input.js's drain()), so this can only ever fire on the exact frame it's pressed, same as
+        // the IDLE/BLOCK dashBack branch above.
+        if(intent.dashBack){
+          this.lastChainExitFrame=fight?fight.frame:this.lastChainExitFrame;
+          this.inv=DASH_BACK.inv;this.chainNode=0;return this.setState('DASH')}
         // Fix round 1 (verdict-7.2 C1): intent.heavy is checked FIRST here, ahead of light/medium.
         // The keyboard alias Shift+K (30_input.js) sets intent.medium (queued) and intent.heavy (held)
         // in the very same keydown event, so both can legitimately be true on the same frame here --
@@ -2972,9 +2995,21 @@ class Fighter{
       // ender specifically (chainNode was set to CHAIN.nodes by startMove's own node argument) this
       // used to leave chainNode stuck at 5 while genuinely back at IDLE, violating "0 when not
       // chaining". Harmless no-op for a plain neutral heavy cancel, whose chainNode is already 0.
-      else{this.clearMove();this.chainNode=0;this.setState('IDLE')}}}
-  // Advance one frame of the state machine.
-  tick(){
+      else{
+        // Task 12.1 fix round 2 (frozen ruling): stamp lastChainExitFrame here too -- this is the
+        // in-combo heavy ender's own early-release cancel, and chainNode is CHAIN.nodes (a real,
+        // open chain) whenever this branch is actually cancelling that specific ender (a plain
+        // neutral heavy cancel has chainNode already 0, so the gate below is a no-op for it).
+        if(this.chainNode>0)this.lastChainExitFrame=fight?fight.frame:this.lastChainExitFrame;
+        this.clearMove();this.chainNode=0;this.setState('IDLE')}}}
+  // Advance one frame of the state machine. Task 12.1 fix round 2: `fight`, when given (Fight.step's
+  // own tick(this) call, below), is read only for its own .frame -- the natural end-of-recovery
+  // chain-exit stamp (the ATTACK 'done' case below) needs a fight-frame number and tick() is the only
+  // place that transition happens, but Fighter itself keeps no global frame counter of its own (see
+  // pressTick's own comment). Every existing bare F.tick() call (the vast majority of this file's own
+  // unit tests) still works unchanged -- fight is simply undefined and the stamp is skipped, same
+  // "optional, gracefully skipped" shape act()'s own `fight` param already has.
+  tick(fight){
     // Self-clear wasKnockedDown the tick after _kdCounter (armed to KNOCKDOWN.frames+KNOCKDOWN.inv
     // the instant KNOCKDOWN starts — setState above) counts all the way down, checked here before
     // this tick's own decrement, against the value left over from the END of the previous tick —
@@ -3006,7 +3041,12 @@ class Fighter{
         // offer anything, so a fighter that reaches here with a non-zero chainNode is, by construction,
         // one whose chain window just closed for good. Fight.resolve's own hit/parry branches cover the
         // other reset case ("taking a hit resets it"), where this natural 'done' transition never runs.
-        if(this.phase()==='done'){this.clearMove();this.landed=false;this.chainNode=0;this.setState('IDLE')}break}
+        if(this.phase()==='done'){
+          // Task 12.1 fix round 2 (frozen ruling): stamp lastChainExitFrame here too, gated on
+          // chainNode>0 so a plain neutral heavy/special ending its own recovery (chainNode already 0)
+          // never overwrites the field as though a chain had just closed.
+          if(this.chainNode>0)this.lastChainExitFrame=fight?fight.frame:this.lastChainExitFrame;
+          this.clearMove();this.landed=false;this.chainNode=0;this.setState('IDLE')}break}
       case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
       // Task 12.1: parryStunned self-clears here too, on a parry stun's own natural timeout (never
       // punished) -- so a fighter who simply rode out the stun and reached IDLE on their own doesn't
@@ -3644,7 +3684,10 @@ class Fight{
     // special activation can reach Passives.onSpecial (49_passives.js) -- see Fighter.act/startMove's
     // own comments. Every existing direct unit-test call to F.act(intent) (no 2nd arg) still works
     // unchanged: startMove's own fight param is optional and Passives.onSpecial is simply skipped.
-    this.p1.act(i1,this);this.p2.act(i2,this);this.p1.tick();this.p2.tick();
+    // Task 12.1 fix round 2: tick() now takes `this` (the live fight) too -- see Fighter.tick's own
+    // comment (50_fighter.js) for why: its own natural end-of-recovery chain-exit stamp needs
+    // fight.frame, and tick() is the only place that transition happens.
+    this.p1.act(i1,this);this.p2.act(i2,this);this.p1.tick(this);this.p2.tick(this);
     this.buffFrame(this.p1,this.p2);this.buffFrame(this.p2,this.p1);
     // Task 7.1: Effects.tick runs once per step per fighter, same slot buffFrame already runs in
     // (before detect/resolve) -- ticks every active timed effect's own per-frame hook (bleed/regen/
@@ -3740,7 +3783,12 @@ class Fight{
         this.fx.push({kind:'afterimage',x:def.x,y:FLOOR-80,face:def.face});
         this.emitTell('dexterity',def,att.face)}
       return this.emit('miss',att,def,0)}
-    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;att.chainNode=0;
+    if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;
+      // Task 12.1 fix round 2 (frozen ruling): stamp the PARRIED attacker's own lastChainExitFrame
+      // before resetting chainNode, gated on it actually having been mid a chain (>0) -- a parried
+      // neutral heavy/special (chainNode already 0) must not read as "a chain just exited".
+      if(att.chainNode>0)att.lastChainExitFrame=this.frame;
+      att.chainNode=0;
       // Task 12.1 (frozen interface): att.parryStunned marks THIS specific STUNNED episode as a real
       // parry stun (as opposed to a plain EFFECTS.stun) -- read by the hit branch below (once def, here
       // the parrier, follows up with a heavy) to decide the PUNISH_MUL bonus; cleared there on the
@@ -3883,6 +3931,11 @@ class Fight{
     const ender=isChainEnder?CHAIN.enders[moveName]:null;
     const knockdown=ender?!!ender.knockdown:!!m.knockdown;
     def.clearMove();if(knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
+    // Task 12.1 fix round 2 (frozen ruling): stamp the struck DEFENDER's own lastChainExitFrame
+    // before resetting chainNode, gated on it actually having been mid a chain (>0) -- a struck
+    // fighter mid a neutral heavy/special (chainNode already 0) must not read as "a chain just
+    // exited".
+    if(def.chainNode>0)def.lastChainExitFrame=this.frame;
     def.chainNode=0; // Task 7.2 ruling: taking a hit resets the DEFENDER's own chain (they were interrupted mid-recovery)
     // Task 12.1: a hit landing on def while THEY were sitting in a buffered-special window (mid the
     // medium ender's own recovery) must drop that buffer outright, same "taking a hit kills a pending
@@ -11779,6 +11832,38 @@ Test.add('chain grammar: taking a hit resets the struck fighter\'s own chainNode
   run(h,6);
   eq(h.p1.state,'STUNNED','sanity: p1 must have been parried');
   eq(h.p1.chainNode,0,'a parried attacker\'s own chainNode must also reset to 0')});
+// Task 12.1 fix round 2 (frozen ruling, from the Phase 9 final review): fighter.lastChainExitFrame --
+// stamped at every site a chain that was actually open closes. Three tests: the natural end-of-
+// recovery close, a deliberate dash-back exit mid-chain, and the untouched (-999) default when no
+// chain is ever opened at all.
+Test.add('Task 12.1 fix round 2: lastChainExitFrame stamps the exact frame a completed M-L-L-L-M naturally closes',()=>{
+  const f=mkFight({ctrl1:chainSeq(['medium','light','light','light','medium'])});closeIn(f);
+  for(let i=0;i<300&&f.log.filter(e=>e.type==='hit').length<5;i++)f.step();
+  eq(f.log.filter(e=>e.type==='hit').length,5,'sanity: the full chain must have landed');
+  eq(f.p1.lastChainExitFrame,-999,'sanity: still untouched -- the chain has landed but not yet closed (still in the ender\'s own recovery)');
+  let exitFrame=-1;
+  for(let i=0;i<40&&exitFrame<0;i++){f.step();if(f.p1.chainNode===0)exitFrame=f.frame}
+  ok(exitFrame>0,'sanity: the ender\'s own recovery must have elapsed within the budget');
+  eq(f.p1.lastChainExitFrame,exitFrame,'lastChainExitFrame must equal the exact frame the chain closed')});
+Test.add('Task 12.1 fix round 2: lastChainExitFrame stamps the exact frame a dash-back abandons an open chain at node 3',()=>{
+  // A small inline controller (chainSeq itself has no dashBack support): presses light to open and
+  // continue through node 3, then dashes back instead of continuing a 4th time.
+  const ctrl={next(fight,me,foe){
+    const it=Ctrl.EMPTY();
+    if(me.state==='IDLE'){it.light=true;return it}
+    if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){
+      if(me.chainNode<3){it.light=true;return it}
+      it.dashBack=true;return it}
+    return it}};
+  const f=mkFight({ctrl1:ctrl});closeIn(f);
+  for(let i=0;i<200&&f.p1.state!=='DASH';i++)f.step();
+  eq(f.p1.state,'DASH','sanity: the dash-back must actually have fired');
+  eq(f.p1.chainNode,0,'the chain must be abandoned (chainNode reset) the instant the dash-back fires');
+  eq(f.p1.lastChainExitFrame,f.frame,'lastChainExitFrame must equal the exact frame the dash-back fired')});
+Test.add('Task 12.1 fix round 2: lastChainExitFrame stays untouched (-999) in a fight where no chain is ever opened',()=>{
+  const f=mkFight();run(f,60); // both sides idle -- mkFight's own defaults (ctrl1/ctrl2: Ctrl.idle())
+  eq(f.p1.lastChainExitFrame,-999);
+  eq(f.p2.lastChainExitFrame,-999,'sanity: a fighter that never even acted must also stay untouched')});
 Test.add('chain grammar: no sixth node -- the ender\'s own recovery accepts no further continuation',()=>{
   const F=mkFighter();
   F.startMove('medium',CHAIN.nodes); // pretend node 5 (the ender) just started
