@@ -4956,6 +4956,17 @@ Test.add('a passive trigger pushes a passiveBanner fx descriptor (presentation) 
   ok(f.fx.some(e=>e.kind==='passiveBanner'&&e.id==='immovable'&&e.cls==='tank'),
     'a passiveBanner fx descriptor must be pushed: '+f.fx.map(e=>e.kind).join());
   ok(f.log.some(e=>e.type==='passive'&&e.id==='immovable'&&e.who===1),'a {type:"passive"} log entry must also be recorded')});
+// Fix-wave item M9 (final review, Minor): the passive banner must not share a y with the Broadcast
+// ratings-multiplier popup (G.onEvent pushes Broadcast.state.lastPop's fx at FLOOR-200, 80_game.js) --
+// a signature firing during an active multiplier window used to draw directly on top of that popup.
+Test.add('Fix-wave M9: the passiveBanner fx descriptor\'s y is FLOOR-230, distinct from Broadcast\'s own ratings-multiplier popup y (FLOOR-200, 80_game.js)',()=>{
+  const f=mkFight({p1:CHAMPS.mongo});
+  f.p1.state='BLOCK';
+  for(let i=0;i<120;i++){f.frame++;Passives.tick(f,f.p1)}
+  const banner=f.fx.find(e=>e.kind==='passiveBanner');
+  ok(banner,'sanity: a passiveBanner fx must have been pushed');
+  eq(banner.y,FLOOR-230,'passiveBanner must sit at FLOOR-230');
+  ok(banner.y!==FLOOR-200,'passiveBanner\'s y must not collide with Broadcast\'s lastPop popup (FLOOR-200)')});
 Test.add('spar mode (fight.spar) blocks every passive centrally -- Spite (Carl) never fires below 40% hp',()=>{
   const f=mkFight({p1:CHAMPS.carl,spar:true});
   f.p1.hp=f.p1.maxHp*0.1;
@@ -6748,6 +6759,14 @@ Test.add('EFFECT_TINT/tintFor resolve poison green and weakness violet too; an u
   eq(tintFor({tags:['weakness']}),'#7e57c2');
   eq(tintFor({tags:['fury']}),null,'a tag with no EFFECT_TINT entry resolves to no override');
   eq(tintFor({}),null,'no tags at all resolves to no override')});
+// Fix-wave item M8 (final review, Minor, documented -- see tintFor's own comment, 72_fx.js): when a
+// sub-hit's tags carry more than one tinted id, precedence is FIRST-MATCH in `tags`' OWN order (the
+// order the move's own `applies` list names them in, per appliedIds, 60_fight.js), not EFFECT_TINT's
+// declaration order and not any notion of severity.
+Test.add('Fix-wave M8: tintFor\'s multi-tag precedence follows `tags`\' own array order (whichever id the move\'s applies list names first), not EFFECT_TINT\'s declaration order',()=>{
+  eq(tintFor({tags:['weakness','poison']}),'#7e57c2','weakness must win when it is listed first in tags, even though poison comes first in EFFECT_TINT');
+  eq(tintFor({tags:['poison','weakness']}),'#4caf50','poison must win when it is listed first in tags');
+  eq(tintFor({tags:['armorBreak','bleed']}),'#c62828','bleed must win over an untagged id (armorBreak has no EFFECT_TINT entry) regardless of order')});
 Test.add('impact fx tags only include applies entries that actually fired THIS landed sub-hit -- on:"last" never tags an early sub-hit',()=>{
   const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:1}}])});closeIn(f);f.p1.power=100; // carl S1: last hit only bleeds
   run(f,10); // early sub-hits only, well before the 3rd (last) one lands

@@ -56,7 +56,12 @@ const Passives={
   _fire(fight,holder,pid,id,stacks,uncapped,target){
     Effects.apply(fight,target||holder,id,{stacks,potency:this.potency(holder.def),uncapped});
     fight.emitPassive(holder,pid);
-    fight.fx.push({kind:'passiveBanner',x:holder.x,y:FLOOR-200,id:pid,cls:holder.def.cls})},
+    // Fix-wave item M9 (final review, Minor): FLOOR-200 -> FLOOR-230. The game object's own event
+    // handler (80_game.js) pushes Broadcast's own ratings-multiplier popup (Broadcast.state.lastPop)
+    // at the SAME y, FLOOR-200 -- a signature firing during an active multiplier window would draw
+    // its banner directly on top of that popup. FLOOR-230 sits clear of every other fx y in use
+    // (effectPopup FLOOR-160, PARRY!/damage/INTERCEPT! popups FLOOR-120/-150, lastPop FLOOR-200).
+    fight.fx.push({kind:'passiveBanner',x:holder.x,y:FLOOR-230,id:pid,cls:holder.def.cls})},
   // Once per step per fighter, called from Fight.step right after Effects.tick (same slot). RNG-free;
   // reads only hp/maxHp/state/power off `fighter` and fight.frame -- never fight.rng/presRng.
   // Task 9.2 (controller ruling): fight.spar (set only for a tutorial-mode fight, G.startFight,

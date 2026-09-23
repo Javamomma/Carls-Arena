@@ -345,6 +345,9 @@ def run_matrix():
         'p1', 'p2', 'ai', 'seed', 'fights', 'p1wins', 'frames_total', 'errors')
     lines = [hdr]
     bad = False
+    worst_margin = None  # Fix-wave item M4: the loosest stall margin seen, and which cell it's on --
+    worst_cell = None    # see the print just below the loop for why this is printed every run, not
+                          # just when something fails.
     for r in rows:
         lines.append('%-6s %-10s %-6s %-5d %-7d %-7d %-13d %-7d' % (
             r['p1'], r['p2'], r['ai'], r['seed'], r['fights'], r['p1wins'], r['frames_total'], r['errors']))
@@ -365,11 +368,25 @@ def run_matrix():
         # fix for a threshold this close. 0.85 (3600*0.85=3060) leaves both measured cells (3238,
         # 3239) a comfortable ~180-frame margin while still catching a genuine stall (a cell stuck near
         # 0 frames_total+ko_ticks, orders of magnitude under either threshold).
+        # Fix-wave item M4 (final review, Minor): the 0.85 floor is looser than the data requires --
+        # the final review measured every cell's own margin and found the whole distribution sits
+        # around 0.90 (worst cell 0.8994), so 0.85 now tolerates a ~5% real degradation before the
+        # gate would even notice. Rather than tightening the floor (risking a new round of the exact
+        # boss-cell coin-flip flakiness 9.4's own margin widening was fixing), print the worst margin
+        # in the summary every run so a real drift is VISIBLE even while the gate keeps passing.
+        margin = (r['frames_total'] + r['ko_ticks']) / r['req_frames'] if r['req_frames'] else 1.0
+        if worst_margin is None or margin < worst_margin:
+            worst_margin = margin
+            worst_cell = r
         if r['errors'] or r['frames_total'] + r['ko_ticks'] < r['req_frames'] * 0.85:
             bad = True
     total_wall = sum(r['wall'] for r in rows)
     print('\n'.join(lines))
     print('# %d cells, %.1fs total wall time' % (len(rows), total_wall))
+    if worst_cell is not None:
+        print('# worst stall margin: %.4f (floor 0.85) on %s/%s/%s/seed%d (frames_total=%d ko_ticks=%d req_frames=%d)' % (
+            worst_margin, worst_cell['p1'], worst_cell['p2'], worst_cell['ai'], worst_cell['seed'],
+            worst_cell['frames_total'], worst_cell['ko_ticks'], worst_cell['req_frames']))
     return 1 if bad else 0
 
 def main():

@@ -42,6 +42,16 @@ const HITFEEL={
 // only, read nowhere but here: any tag not listed here (fury, stun, armorBreak, ...) leaves the
 // impact ring/arc at its usual per-class color, unchanged from before this task.
 const EFFECT_TINT={bleed:'#c62828',poison:'#4caf50',weakness:'#7e57c2'};
+// Fix-wave item M8 (final review, Minor, documented not changed): when a single landed sub-hit's own
+// `tags` carries more than one tinted id, precedence is FIRST-MATCH in `ev.tags`' OWN order -- i.e.
+// whichever id the move's own `applies` list names FIRST (appliedIds, 60_fight.js, collects ids in
+// that list's own order), not EFFECT_TINT's declaration order above and not any notion of severity.
+// This is why a Katia S3 sub-hit that fires both bleed and armorBreak always tints red (armorBreak
+// has no EFFECT_TINT entry at all, so bleed is the only match regardless of order), and why a
+// hypothetical sub-hit applying both poison and weakness together shows whichever one that move's own
+// `applies` array lists first, never a blend of the two. Deliberate and fine as a rule (one tint per
+// impact, not a blend) -- this comment exists only so a reader doesn't have to trace `appliedIds`
+// back to Fight.resolve to find out the ordering isn't arbitrary.
 function tintFor(ev){return(ev.tags&&ev.tags.map(t=>EFFECT_TINT[t]).find(Boolean))||null}
 const IMPACTS={
   blunt:{
