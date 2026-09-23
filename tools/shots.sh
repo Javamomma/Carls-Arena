@@ -241,20 +241,22 @@ $H --sim --seconds 1 --bot idle --ai dummy --p1 mongo --p2 hobgoblin --eval "(()
 
 # ---- Task 12.4: fight HUD and feedback (opponent power bar + pulse, health ghost trail, damage-
 # number kinds, S3 camera sequence) --------------------------------------------------------------
-# p12-hud.png: p2's power banked to 300 (the new opponent power bar's own 3-bar gold pulse, under
-# their hp bar), then a scripted medium lands (a plain single-frame press, same shape L(0)'s own
-# light-attack fixtures use everywhere else in this repo -- heavy needs a HELD charge, which a bare
-# {f:0,intent:{heavy:true}} single-frame script immediately releases below HEAVY_MIN_CHARGE and
-# cancels, so medium is the reliable choice here) -- shot 5 ticks later so the ghost trail (12f) is
-# still mid-drain on p2's hp bar (a lighter sliver above the real, already-lower fill) and the damage
-# number popup (40f life) is still fresh, colored by its own popupKind (crit gold or normal white,
-# whichever the real crit roll produced).
-$H --sim --seconds 1 --bot idle --ai dummy --p1 carl --p2 hobgoblin --eval "(()=>{const f=G.fight;closeIn(f);f.p2.power=300;f.p1.ctrl=Ctrl.script([{f:0,intent:{medium:true}}]);let hit=false;for(let i=0;i<90&&!hit;i++){G.tick();hit=f.log.some(e=>e.type==='hit'&&e.who===1)}for(let i=0;i<5;i++)G.tick();return{hit,p2hp:f.p2.hp}})()" --shot "$S/p12-hud.png"
-# p12-s3.png: the S3 sequence mid-"hits at 0.5x" window (fight.cinematic in the ruled 6..53 range,
-# stopped once it's comfortably inside so at least one synthesized hit beat -- and the fully-ramped
-# background desaturation -- has already landed), camera still punched in (the snap-back only starts
-# in the sequence's own last 6 ticks, cinematic<6).
-$H --sim --seconds 1 --bot idle --ai dummy --p1 carl --p2 hobgoblin --eval "(()=>{const f=G.fight;closeIn(f);f.p2.hp=f.p2.maxHp=5000;f.p1.power=300;f.p1.ctrl=Ctrl.script([{f:0,intent:{special:3}}]);for(let i=0;i<200&&!(f.cinematic>0&&f.cinematic<=40);i++)G.tick();return{cinematic:f.cinematic}})()" --shot "$S/p12-s3.png"
+# p12-hud.png: Task 12.4 fix round 1 -- both sides' power bars now sit directly under their own health
+# bar (MCoC's own health -> power -> badges order); p1 banked to 150 (1/3 bars, unfilled/dark) and p2
+# to 300 (3/3, the gold pulse ring) so both states are visible in one shot, then a scripted medium
+# lands (a plain single-frame press, same shape L(0)'s own light-attack fixtures use everywhere else in
+# this repo -- heavy needs a HELD charge, which a bare {f:0,intent:{heavy:true}} single-frame script
+# immediately releases below HEAVY_MIN_CHARGE and cancels, so medium is the reliable choice here) --
+# shot 5 ticks later so the ghost trail (12f) is still mid-drain on p2's hp bar (a lighter sliver above
+# the real, already-lower fill) and the damage number popup (40f life) is still fresh, colored by its
+# own popupKind (crit gold or normal white, whichever the real crit roll produced).
+$H --sim --seconds 1 --bot idle --ai dummy --p1 carl --p2 hobgoblin --eval "(()=>{const f=G.fight;closeIn(f);f.p2.power=300;f.p1.power=150;f.p1.ctrl=Ctrl.script([{f:0,intent:{medium:true}}]);let hit=false;for(let i=0;i<90&&!hit;i++){G.tick();hit=f.log.some(e=>e.type==='hit'&&e.who===1)}for(let i=0;i<5;i++)G.tick();return{hit,p2hp:f.p2.hp}})()" --shot "$S/p12-hud.png"
+# p12-s3.png: Task 12.4 fix round 1 -- the S3 name card shrank to a small band below the HUD (no
+# taller than 90px, no full-screen darken) so the hit beat plays visibly in the clear lower two-thirds;
+# stopped at the exact tick (fight.cinematic===41) a synthesized hit beat fires, so its fresh spark +
+# impact-ring fx is on screen at shot time, alongside the fully-ramped background desaturation and the
+# still-punched-in camera (the snap-back only starts in the sequence's own last 6 ticks, cinematic<6).
+$H --sim --seconds 1 --bot idle --ai dummy --p1 carl --p2 hobgoblin --eval "(()=>{const f=G.fight;closeIn(f);f.p2.hp=f.p2.maxHp=5000;f.p1.power=300;f.p1.ctrl=Ctrl.script([{f:0,intent:{special:3}}]);for(let i=0;i<200&&f.cinematic!==41;i++)G.tick();return{cinematic:f.cinematic}})()" --shot "$S/p12-s3.png"
 
 echo "shots.sh: regenerated $(ls "$S"/*.png | wc -l | tr -d ' ') PNGs in $S"
 # Task 8.5 review, Important #3: the one-line summary. Sorted so the comparison against

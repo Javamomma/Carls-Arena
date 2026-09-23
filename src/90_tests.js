@@ -1956,40 +1956,63 @@ Test.add('S3 sequence camera "snap back": the punched-in 1.28 framing releases 6
   while(f.cinematic>0)G.tick(); // the final 6 (snap-back) ticks, punchIn null throughout
   ok(G.cam.zoom<zoomAtSnapStart,'cam.zoom must start easing back down during the snap-back window: '+zoomAtSnapStart.toFixed(3)+' -> '+G.cam.zoom.toFixed(3));
   G.fight=null;G.state='TITLE';G.cinemFocus=null});
-Test.add('Render.oppPowerGeom is a pure function: 3 evenly-gapped segments, filled one per 100 power toward POWER_MAX, pulse only at 3/3',()=>{
-  const g0=Render.oppPowerGeom(0,0,100,5,0);
+// Task 12.4 fix round 1 (controller ruling): the S3 name card must not hide the hit beat -- no
+// taller than 90px, anchored below the HUD, with the entire lower two-thirds of the frame left clear
+// for the hit beat's own particles/damage numbers/fighter poses.
+Test.add('FX.cardGeom: the card\'s own rotated footprint (half-height + the diagonal\'s vertical sweep) clears HUD_LINE above and stays entirely above the frame\'s lower-two-thirds line below',()=>{
+  ok(FX.BAND_H<=90,'the band itself must be no taller than the ruled 90px cap: '+FX.BAND_H);
+  const geom=FX.cardGeom();
+  const halfExtent=FX.BAND_H/2+geom.halfW*Math.abs(Math.sin(FX.BAND_ANGLE));
+  const topEdge=geom.centerY-halfExtent,bottomEdge=geom.centerY+halfExtent;
+  ok(topEdge>=HUD_LINE,'the card\'s top edge must clear HUD_LINE ('+HUD_LINE+'): topEdge='+topEdge.toFixed(1));
+  ok(bottomEdge<H*2/3,'the card\'s bottom edge must stay above the lower-two-thirds line (H*2/3='+(H*2/3)+'), leaving it fully clear for the hit beat: bottomEdge='+bottomEdge.toFixed(1));});
+Test.add('Render.powerBarGeom is a pure function: 3 evenly-gapped segments, filled one per 100 power toward POWER_MAX, pulse only at 3/3',()=>{
+  const g0=Render.powerBarGeom(0,0,100,5,0);
   eq(g0.segs.length,3);ok(g0.segs.every(s=>!s.filled));eq(g0.pulse,false);
-  const g1=Render.oppPowerGeom(0,0,100,5,150);
+  const g1=Render.powerBarGeom(0,0,100,5,150);
   eq(g1.segs.filter(s=>s.filled).length,1,'150 power must fill exactly 1 of 3 segments');
-  const g3=Render.oppPowerGeom(0,0,100,5,300);
+  const g3=Render.powerBarGeom(0,0,100,5,300);
   eq(g3.segs.filter(s=>s.filled).length,3);eq(g3.pulse,true,'a full 3-bar strip must pulse');
-  const over=Render.oppPowerGeom(0,0,100,5,999);
+  const over=Render.powerBarGeom(0,0,100,5,999);
   eq(over.segs.filter(s=>s.filled).length,3,'power must never fill more than 3 segments even past POWER_MAX');
   // segments must not overlap and must stay inside [x,x+w]
   for(let i=0;i<3;i++){ok(g0.segs[i].x>=0);ok(g0.segs[i].x+g0.segs[i].w<=100+1e-9)}
   ok(g0.segs[1].x>=g0.segs[0].x+g0.segs[0].w,'segments must not overlap')});
-Test.add('Render.oppPowerPulseAlpha is a pure, deterministic function of frame alone (no Math.random/performance.now), staying inside [.2,1]',()=>{
+Test.add('Render.powerBarPulseAlpha is a pure, deterministic function of frame alone (no Math.random/performance.now), staying inside [.2,1]',()=>{
   for(const fr of[0,1,7,60,600,6000]){
-    const a=Render.oppPowerPulseAlpha(fr);
+    const a=Render.powerBarPulseAlpha(fr);
     ok(a>=.2&&a<=1,'pulse alpha out of range at frame '+fr+': '+a);
-    eq(a,Render.oppPowerPulseAlpha(fr),'must be exactly reproducible for the same frame')}});
-Test.add('Render.oppPowerBar actually paints a filled gold segment at 300 power and an unfilled dark one at 0, at the geometry oppPowerGeom describes',()=>{
+    eq(a,Render.powerBarPulseAlpha(fr),'must be exactly reproducible for the same frame')}});
+Test.add('Render.powerBar actually paints a filled gold segment at 300 power and an unfilled dark one at 0, at the geometry powerBarGeom describes',()=>{
   const cnv=document.createElement('canvas');cnv.width=200;cnv.height=20;const c=cnv.getContext('2d');
-  Render.oppPowerBar(c,0,0,120,6,300,0);
-  const seg=Render.oppPowerGeom(0,0,120,6,300).segs[0];
+  Render.powerBar(c,0,0,120,6,300,0);
+  const seg=Render.powerBarGeom(0,0,120,6,300).segs[0];
   const px=c.getImageData(Math.round(seg.x+seg.w/2),3,1,1).data;
   ok(px[0]>180&&px[1]>150&&px[2]<120,'a filled segment at 300 power must be the gold fill color: '+Array.from(px).join(','));
   c.clearRect(0,0,200,20);
-  Render.oppPowerBar(c,0,0,120,6,0,0);
+  Render.powerBar(c,0,0,120,6,0,0);
   const px0=c.getImageData(Math.round(seg.x+seg.w/2),3,1,1).data;
   ok(px0[0]<80&&px0[1]<80&&px0[2]<80,'an unfilled segment at 0 power must be the dark idle color: '+Array.from(px0).join(','))});
-Test.add('the opponent (p2) power bar is wired into hud(): drawing a real fight does not throw, and is skipped while guardActive (tutorial dummy)',()=>{
+// Task 12.4 fix round 1: both sides now get a power bar (MCoC's own health -> power -> badges order),
+// directly under their own health bar at the shared POWER_BAR_Y/H -- p2's own moved there from the
+// bottom of its HUD column (the first pass's placement, flagged in the task report as reading as
+// "the opponent's power is invisible" all over again since it sat too far from the health bar).
+Test.add('both sides\' power bars are wired into hud(), directly under their own health bar; p2\'s is skipped while guardActive (tutorial dummy)',()=>{
   const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;const c=cnv.getContext('2d');
-  const f=mkFight();closeIn(f);f.p2.power=300;
+  const f=mkFight();closeIn(f);f.p1.power=300;f.p2.power=300;
   Render.hud(c,f); // sanity: must not throw with a plain fight, at the pulse-triggering 3-bar power
   f.p2.guardActive=true;
   Render.hud(c,f); // must not throw with the tutorial's own SPAR-plate path either
   f.p2.guardActive=false});
+Test.add('the player\'s own power bar sits directly under their health bar (health -> power -> badges, MCoC order), a real pixel check',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;const c=cnv.getContext('2d');
+  const f=mkFight();closeIn(f);f.p1.power=300;f.p2.power=0;
+  Render.hud(c,f);
+  const barW=300,p1barX=84;
+  const seg=Render.powerBarGeom(p1barX,Render.POWER_BAR_Y,barW,Render.POWER_BAR_H,300).segs[0];
+  ok(seg.y>48+18,'the power bar must sit BELOW the health bar (y=48, h=18), not overlap it: seg.y='+seg.y);
+  const px=c.getImageData(Math.round(seg.x+seg.w/2),Math.round(seg.y+seg.h/2),1,1).data;
+  ok(px[0]>180&&px[1]>150&&px[2]<120,'the player\'s own filled power segment must be the gold fill color: '+Array.from(px).join(','))});
 Test.add('Render.hpGhost: a drop leaves the ghost trailing the real value, draining linearly over exactly HP_GHOST_FRAMES draw calls; a rise (heal, or a fresh fight) snaps immediately, never trailing backwards',()=>{
   Render._hpGhost={};
   eq(Render.hpGhost('ghostTestA',1),1,'a side\'s first-ever read must not itself start a drain');

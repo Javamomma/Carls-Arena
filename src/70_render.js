@@ -56,8 +56,9 @@ const Render={ctx:canvas.getContext('2d'),
       p1SubCanvas:mk(140,14),p1SubLabel:null,
       // Task 5.1: "VIEWERS 12,340" — same cached-canvas pattern, keyed by the formatted label (so a
       // steady viewer count across frames costs nothing beyond the one drawImage every HUD already
-      // pays). Sized 12px tall and drawn with its bottom edge pinned exactly at HUD_LINE (104) so it
-      // sits directly under the floor line (80..96) without ever entering the zoom-cap region above it.
+      // pays). Sized 12px tall and drawn (viewersHud below) with its bottom edge pinned exactly at
+      // HUD_LINE (114, Task 12.4 fix round 1 -- was 104) so it sits directly under the floor line
+      // (80..96) without ever entering the zoom-cap region above it.
       viewersCanvas:mk(200,12),viewersLabel:null}},
   floorLine(c,label){
     const hc=this.hudCache();
@@ -85,12 +86,13 @@ const Render={ctx:canvas.getContext('2d'),
   // screens (85_screens.js, loaded after this file, calls Render.fmtViewers directly).
   fmtViewers(n){return Math.round(n).toLocaleString('en-US')},
   // Task 5.1: the ratings/viewers counter, centered directly under the floor line (drawn at y 80-96;
-  // this canvas is 12px tall, drawn at y=92 so its bottom edge lands exactly on HUD_LINE=104 -- never
-  // reaching into the region the per-fight zoom cap keeps clear for the fighters themselves). Only
-  // redraws its offscreen canvas when the ROUNDED value actually changes (Broadcast.state.viewers
-  // drifts by fractional amounts every HITSTUN frame via decay; rounding first means a decay that
-  // hasn't yet crossed an integer boundary costs nothing beyond the drawImage every HUD frame pays
-  // anyway). The small gold "×N" multiplier badge beside it is cheap enough to just draw live.
+  // this canvas is 12px tall, drawn (Task 12.4 fix round 1: y=102, was 92) so its bottom edge lands
+  // exactly on HUD_LINE=114 (was 104) -- never reaching into the region the per-fight zoom cap keeps
+  // clear for the fighters themselves). Only redraws its offscreen canvas when the ROUNDED value
+  // actually changes (Broadcast.state.viewers drifts by fractional amounts every HITSTUN frame via
+  // decay; rounding first means a decay that hasn't yet crossed an integer boundary costs nothing
+  // beyond the drawImage every HUD frame pays anyway). The small gold "×N" multiplier badge beside it
+  // is cheap enough to just draw live.
   viewersHud(c){
     const hc=this.hudCache(),v=Math.round(Broadcast.state.viewers),label='VIEWERS '+this.fmtViewers(v);
     if(hc.viewersLabel!==label){
@@ -103,11 +105,11 @@ const Render={ctx:canvas.getContext('2d'),
       // always -- "VIEWERS 12,340" is nowhere near 200px wide at 10px monospace).
       hc.viewersLabelWidth=vx.measureText(label).width;
       vx.fillText(label,vc.width/2,10);hc.viewersLabel=label}
-    c.drawImage(hc.viewersCanvas,W/2-hc.viewersCanvas.width/2,92);
+    c.drawImage(hc.viewersCanvas,W/2-hc.viewersCanvas.width/2,102);
     if(Broadcast.state.mult>1){
       c.save();c.font='bold 10px ui-monospace,monospace';c.fillStyle='#f4c542';
       c.textAlign='left';c.textBaseline='alphabetic';
-      c.fillText('×'+Broadcast.state.mult,W/2+hc.viewersLabelWidth/2+4,102);
+      c.fillText('×'+Broadcast.state.mult,W/2+hc.viewersLabelWidth/2+4,112);
       c.restore()}},
   // Quad looks have no legLen/torsoLen (see LOOKS.donut/grub/mother_rat in 68_rig.js) — hipH+neckLen
   // stands in for legLen+torsoLen as "how tall the body's base is off the ground before the head".
@@ -374,8 +376,8 @@ const Render={ctx:canvas.getContext('2d'),
   // draws AROUND the existing 56x56 portrait image already drawn at (x,y) by hud(), never changes the
   // portrait's own pixel size or any of hud()'s p1x/p2x/barX layout numbers the HUD-clearance and
   // phone-layout tests already pin. Bottom extent (y+size+11, see gemCenter's +6 plus this gem's own
-  // 5px radius) stays comfortably clear of HUD_LINE (104) -- see 10_util.js's own HUD_LINE comment,
-  // updated alongside this.
+  // 5px radius) stays comfortably clear of HUD_LINE (114, Task 12.4 fix round 1 -- was 104) -- see
+  // 10_util.js's own HUD_LINE comment, updated alongside this.
   portraitFrame(c,x,y,size,cls){
     const gem=CLS_GEM[cls]||CLS_GEM.default;
     c.save();
@@ -450,40 +452,42 @@ const Render={ctx:canvas.getContext('2d'),
   chevrons(c,power){
     const hc=this.hudCache(),filled=Math.min(3,Math.floor(power/100));
     c.drawImage(hc.chevrons[filled],W/2-hc.total/2,H-24)},
-  // Task 12.4 ruling (frozen interface, exact ruling 8 / gameplay study S4.2 "opponent power bar"):
-  // before this task the enemy's own power was invisible, which the study calls out as making baiting
-  // a special structurally impossible ("knowing the AI is about to have a special is what makes
-  // baiting possible"). This is the mirror of the player's own bottom-centre chevrons (Render.chevrons
-  // just above) but drawn under p2's OWN HUD column instead: three thin segments, one filled per 100
-  // power toward POWER_MAX (300), same fill rule chevrons() already uses. Placed at OPP_POWER_Y/H
-  // below (98/5, under p2's badge rows -- see hud()'s own comment on the call site for why there,
-  // not immediately under the bar itself) so no existing pinned layout number (buffBadges/
-  // effectBadges' own y, both still 48+barH(+16)) has to move.
+  // Task 12.4 fix round 1 (controller ruling, after looking at the first pass's p12-hud.png): MCoC's
+  // own column order is health -> power -> badges, both sides -- the first pass buried p2's power bar
+  // at the very bottom of the HUD column (past both badge rows) specifically to avoid moving any
+  // pinned layout number, which read as "the opponent's power is invisible" all over again in
+  // practice (it sat far enough from the health bar that a player's eye never connected the two). This
+  // ruling moves it: BOTH sides now get a thin 3-segment power bar directly under their own health
+  // bar, and the badge rows below it move down to make room -- see hud()'s own call sites for the new
+  // pinned numbers (POWER_BAR_Y=68/POWER_BAR_H=6, badge row baselines 76/92) and HUD_LINE's own
+  // updated comment (10_util.js) for how far the whole block grew (+10, exactly POWER_BAR_H(6) plus
+  // the two 2px gaps framing it). The bottom-centre chevrons (Render.chevrons above) stay exactly as
+  // they were -- the frozen "big tap target" ruling from the gameplay study, §4.2 -- these two thin
+  // bars are the readable METERS (now legible for either fighter, not just a big target for the
+  // player's own thumb).
   //
-  // oppPowerGeom is a pure function of (x,y,w,h,power) -- same "geometry as a testable pure function"
+  // powerBarGeom is a pure function of (x,y,w,h,power) -- same "geometry as a testable pure function"
   // pattern as barFillRect/streakGeom -- returning the 3 segment rects plus whether the 3-bar pulse is
-  // active, so a test can assert the exact segments/pulse state without a canvas.
-  // effectBadges' own p2 row bottoms out at y=98 (barY 82 + internal +4 + size 12) -- OPP_POWER_Y=99
-  // leaves a 1px seam clear of it, and OPP_POWER_H=4 keeps this bar's own bottom (103) under HUD_LINE
-  // (104) with a further 1px to spare.
-  OPP_POWER_Y:99,OPP_POWER_H:4,
-  oppPowerGeom(x,y,w,h,power){
+  // active, so a test can assert the exact segments/pulse state without a canvas. Used for both sides
+  // now (renamed from the first pass's oppPowerGeom/oppPowerBar, which were p2-only).
+  POWER_BAR_Y:68,POWER_BAR_H:6,
+  powerBarGeom(x,y,w,h,power){
     const filled=Math.min(3,Math.floor(power/100)),gap=4,segW=(w-gap*2)/3,segs=[];
     for(let i=0;i<3;i++)segs.push({x:x+i*(segW+gap),y,w:segW,h,filled:i<filled});
     return{segs,pulse:filled>=3}},
   // Pure function of `frame` (the live SIM frame, f.frame -- never Math.random/performance.now, so
   // the pulse is exactly reproducible for a given fight frame, same determinism every other
   // frame-driven presentation value in this file already holds to): a sine-based glow multiplier in
-  // [.2,1], read by oppPowerBar below to alpha-modulate the gold outline drawn around a full 3-bar
+  // [.2,1], read by powerBar below to alpha-modulate the gold outline drawn around a full 3-bar
   // strip -- the ruled "gold 3-bar pulse".
-  oppPowerPulseAlpha(frame){return .6+.4*Math.sin(frame*0.15)},
-  oppPowerBar(c,x,y,w,h,power,frame){
-    const g=this.oppPowerGeom(x,y,w,h,power);
+  powerBarPulseAlpha(frame){return .6+.4*Math.sin(frame*0.15)},
+  powerBar(c,x,y,w,h,power,frame){
+    const g=this.powerBarGeom(x,y,w,h,power);
     g.segs.forEach(s=>{
       c.fillStyle=s.filled?'#f4c542':'#26262c';c.fillRect(s.x,s.y,s.w,s.h);
       c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(s.x+.5,s.y+.5,s.w-1,s.h-1)});
     if(g.pulse){
-      c.save();c.globalAlpha=this.oppPowerPulseAlpha(frame);
+      c.save();c.globalAlpha=this.powerBarPulseAlpha(frame);
       c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(x-1,y-1,w+2,h+2);
       c.restore()}},
   hud(c,f){const a=f.p1,b=f.p2;
@@ -514,26 +518,31 @@ const Render={ctx:canvas.getContext('2d'),
     // new optional ghostPct param, so the trailing lighter fill and the real fill are always drawn
     // from the same frame's read of hp/maxHp.
     this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22','right',this.hpGhost('p1',a.hp/a.maxHp));
+    // Task 12.4 fix round 1 ruling: the player's own power bar, MCoC-style directly under their
+    // health bar (mirrors p2's own, just below) -- the bottom-centre chevrons (Render.chevrons) stay
+    // as the big tap target, this is the readable meter. POWER_BAR_Y/H are shared by both sides.
+    this.powerBar(c,p1barX,this.POWER_BAR_Y,barW,this.POWER_BAR_H,a.power,f.frame);
     // Task 6.4: the SPAR plate REPLACES p2's whole HP bar area (glyph+'SPAR', sparPlate above) while
     // guardActive -- the real numeric bar/text only return once the shield actually clears (lesson 4's
     // 'SHIELD DOWN'), so a first-time player is never shown a fake/frozen enemy hp reading mid-lesson.
     if(b.guardActive)this.sparPlate(c,p2barX,48,barW,barH);
     else this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp,'left',this.hpGhost('p2',b.hp/b.maxHp));
-    // Task 12.4 ruling (gameplay study S4.2 "opponent power bar"): drawn under p2's whole HUD column
-    // (health bar + its badge rows, OPP_POWER_Y=99) rather than immediately under the bar itself --
-    // the 4px gap between the bar's own bottom (66) and the first badge row (buffBadges, real pixel
-    // y=70) has no room for a segment, and buffBadges/effectBadges' own y values are load-bearing
-    // (pinned by nothing new here, but moving them for this bar would be its own regression risk for
-    // zero benefit) -- so this claims the last sliver of slack between effectBadges' own bottom (98)
-    // and HUD_LINE (104) instead. Skipped while guardActive, matching the real hp bar's own guard
-    // (the tutorial dummy has no real power to show either).
-    if(!b.guardActive)this.oppPowerBar(c,p2barX,this.OPP_POWER_Y,barW,this.OPP_POWER_H,b.power,f.frame);
-    if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);
+    // Task 12.4 fix round 1 ruling: moved from the bottom of p2's HUD column (the first pass's
+    // OPP_POWER_Y=99, past both badge rows -- flagged in that task's own report as reading as "the
+    // opponent's power is invisible" all over again since it sat too far from the health bar) to
+    // directly under it, MCoC's own health -> power -> badges order. Skipped while guardActive,
+    // matching the real hp bar's own guard (the tutorial dummy has no real power to show either).
+    if(!b.guardActive)this.powerBar(c,p2barX,this.POWER_BAR_Y,barW,this.POWER_BAR_H,b.power,f.frame);
+    // Task 12.4 fix round 1: buffBadges/effectBadges' own baseline moved from 48+barH(+16) to
+    // 76/92 -- POWER_BAR_Y(68)+POWER_BAR_H(6)+a 2px gap = 76 for the first row, +16 (one badge
+    // row's own height+gap, same spacing the pre-fix-round layout already used between its two rows)
+    // for p2's second row. HUD_LINE (10_util.js) grew by the same +10 this whole block shifted by.
+    if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,76,barW,G.encounter.buffs);
     // Task 7.1: per-fighter timed-effect badges. p1 gets its own row right under its bar (it never had
     // a buffBadges row -- that one's always been p2/encounter-only); p2's row sits one badge-height+gap
     // below its buffBadges row so an encounter buff and a landed effect never overlap.
-    this.effectBadges(c,p1barX,48+barH,barW,a.effects,true);
-    this.effectBadges(c,p2barX,48+barH+16,barW,b.effects,false);
+    this.effectBadges(c,p1barX,76,barW,a.effects,true);
+    this.effectBadges(c,p2barX,92,barW,b.effects,false);
     c.font='bold 12px ui-monospace,monospace';c.fillStyle='#fff';c.textAlign='center';
     c.fillText(Math.max(0,Math.round(a.hp))+' / '+a.maxHp,p1barX+barW/2,48+barH-4);
     if(!b.guardActive)c.fillText(Math.max(0,Math.round(b.hp))+' / '+b.maxHp,p2barX+barW/2,48+barH-4);

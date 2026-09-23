@@ -369,31 +369,41 @@ const FX={list:[],
       else if(p.kind==='windup'){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t*.6);
         c.strokeStyle='#ff3b3b';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,16+16*t,0,Math.PI*2);c.stroke()}}
     c.globalAlpha=1},
-  // Screen-space overlay for the S3 cinematic card: darken, a diagonal gold band that sweeps in
-  // from the left over the first 12 frames, holds, then sweeps out to the right over the last 12.
-  // Called by Render.frame AFTER the camera transform is reset and the HUD is drawn, so it always
-  // sits on top and is unaffected by camera zoom/shake. Unskippable: purely a function of card.t,
-  // which only Fight.checkCinematic (via the 'card' fx push) can (re)start.
-  // Band is a ~150px-tall (measured perpendicular to the band, i.e. in the rotated frame) name
-  // card centered on 52% of screen height, rotated about its own center (not the canvas origin) so
-  // its footprint stays roughly symmetric around that center line instead of growing off the top —
-  // this keeps the portraits/hp bars/floor line above it and the chevrons below it clear, per fix
-  // round 1. The DOM on-screen buttons sit in their own stacking context above the canvas either
-  // way, but the band is kept clear of that row too for a clean read.
+  // Screen-space overlay for the S3 cinematic card: a diagonal gold band that sweeps in from the
+  // left over the first 12 frames, holds, then sweeps out to the right over the last 12. Called by
+  // Render.frame AFTER the camera transform is reset and the HUD is drawn, so it always sits on top
+  // and is unaffected by camera zoom/shake. Unskippable: purely a function of card.t, which only
+  // Fight.checkCinematic (via the 'card' fx push) can (re)start.
+  //
+  // Task 12.4 fix round 1 (controller ruling, after looking at the first pass's p12-s3.png): the card
+  // must not hide the hit beat. Two things changed from the first pass: (1) the full-screen 55% black
+  // wash is GONE -- it used to darken the entire frame for the whole 72-tick sequence, which dimmed
+  // the fighters/hit-beat particles just as much as it dimmed the background the card was meant to
+  // stand out against; the opaque gold band itself carries plenty of visual weight without it. (2) the
+  // band itself shrank from 150px (centered at 52% screen height, ~174-325px once its own diagonal
+  // rotation is accounted for) to BAND_H<=90px, anchored just below the HUD instead of screen-center.
+  // BAND_W/BAND_H/BAND_ANGLE below are chosen so the band's own full rotated footprint (half-height
+  // plus the diagonal's own vertical sweep at its ends, halfW*sin(angle)) stays entirely above the
+  // frame's lower-two-thirds line (H*2/3=320): centerY sits right after HUD_LINE, and centerY+that
+  // footprint lands around 268 -- comfortably clear of 320, so the ENTIRE lower two-thirds, where the
+  // hit beat's spark/impact fx and the fighters themselves actually render, is left fully visible.
+  BAND_W:620,BAND_H:80,BAND_ANGLE:-6*Math.PI/180,
+  cardGeom(){
+    const halfW=this.BAND_W/2,sweep=halfW*Math.abs(Math.sin(this.BAND_ANGLE));
+    return{halfW,centerY:HUD_LINE+this.BAND_H/2+sweep+8}},
   drawScreen(c,frame){
     if(this.card){
-      const cd=this.card,t=cd.t,frames=cd.frames,slide=12,bandH=150,centerY=H*.52,angle=-8*Math.PI/180;
+      const cd=this.card,t=cd.t,frames=cd.frames,slide=12,
+        geom=this.cardGeom(),bandW=this.BAND_W,bandH=this.BAND_H,angle=this.BAND_ANGLE;
       c.save();c.setTransform(1,0,0,1,0,0);
-      c.globalAlpha=.55;c.fillStyle='#000';c.fillRect(0,0,W,H);
-      c.globalAlpha=1;
       const enter=Math.min(1,t/slide),exit=t>frames-slide?Math.min(1,(t-(frames-slide))/slide):0;
       const offsetX=-W*(1-enter)+W*exit,cx=W/2+offsetX;
-      c.save();c.translate(cx,centerY);c.rotate(angle);
-      c.fillStyle='#f4c542';c.fillRect(-(W/2+120),-bandH/2,W+240,bandH);
-      c.strokeStyle='#8a6a12';c.lineWidth=3;c.strokeRect(-(W/2+120),-bandH/2,W+240,bandH);
+      c.save();c.translate(cx,geom.centerY);c.rotate(angle);
+      c.fillStyle='#f4c542';c.fillRect(-geom.halfW,-bandH/2,bandW,bandH);
+      c.strokeStyle='#8a6a12';c.lineWidth=3;c.strokeRect(-geom.halfW,-bandH/2,bandW,bandH);
       c.textAlign='center';c.fillStyle='#1a1208';
-      c.font='900 44px ui-monospace,monospace';c.fillText(cd.name,0,-8);
-      c.font='bold 18px ui-monospace,monospace';c.fillText('SPECIAL 3',0,26);
+      c.font='900 30px ui-monospace,monospace';c.fillText(cd.name,0,-6);
+      c.font='bold 14px ui-monospace,monospace';c.fillText('SPECIAL 3',0,18);
       c.restore();
       c.restore()}
     // Task 6.4: the tutorial's "SHIELD DOWN" text -- screen-space, drawn here (after Render.frame's

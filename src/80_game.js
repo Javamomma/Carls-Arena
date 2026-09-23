@@ -238,8 +238,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // Task 5.3/6.4: #tutorialPrompt's position, same off-canvas-rect technique positionToast already
   // uses (so it tracks the canvas box exactly through any letterboxing). Task 6.4 moved it from
   // canvas-local y=112 to y=132 to make room for #tutorialLesson (the 'LESSON n / 4' banner) right
-  // above it at y=108 -- both still comfortably clear of HUD_LINE (104, the viewers counter's own
-  // bottom edge) above them and the fighters themselves below.
+  // above it at y=108. Task 12.4 fix round 1: HUD_LINE grew to 114 (was 104), putting #tutorialLesson
+  // (108) numerically just above it now -- unaffected in practice, since the tutorial's own p2 (the
+  // guarded dummy, guardActive) never draws the power bar/badge rows this task added (both explicitly
+  // gated off guardActive, 70_render.js), so the taller HUD column p1 vs a real p2 would show never
+  // actually appears during a tutorial fight; verified with `--tutorial-shot 1/3/shield`.
   positionTutorialPrompt(){
     const r=canvas.getBoundingClientRect(),el=document.getElementById('tutorialPrompt'),
       lesson=document.getElementById('tutorialLesson');
