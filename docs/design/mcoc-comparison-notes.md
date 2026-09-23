@@ -85,10 +85,10 @@ eight: **bleed** (DoT, ignores armor, stacks), **stun** (reuses the existing `ST
 
 | Champion | Signature | Heavy | S1 / S2 / S3 | Passive |
 |---|---|---|---|---|
-| **Carl** (brawler) | *Spite*: below 40% hp, +1 Fury every 3 s, uncapped | Haymaker — 2 armor break stacks, 8 s | S1 Two-Fisted, 3 hits, last applies bleed · S2 Boot Party, 5 hits, refunds 20 power on block · S3 Doorway Drop, 4 hits, guaranteed 2 s stun[^shipped-durs] | −10% damage from the class he beats |
-| **Princess Donut** (caster) | *Royal Disdain*: every special applies Weakness, doubled if the foe is already debuffed | Feline Contempt — power burn 30 | S1 Hairball, 5 hits, poison DoT · S2 Regal Pounce, 5 hits, unblockable final hit · S3 Sponsor Meltdown, 4 hits, strips every enemy buff first | +50% power from hits taken |
-| **Katia** (trickster) | *Understudy*: a parry grants 3 s of +40% crit damage | Quickdraw — refreshes every bleed stack | S1 Knife Work, 5 hits (already tuned, `40_movedata.js:19`), each bleeds · S2 Misdirection, 5 hits, 100% crit · S3 Curtain Call, 4 hits, damage scales with active bleed stacks | Crits apply 1 bleed stack |
-| **Mongo** (tank) | *Immovable*: while blocking, +1 Fury every 2 s, max 5 | Ground Slam — knockdown that ignores block | S1 Backhand, 3 hits, stun on the third · S2 Bear Hug, 5 hits, self-heal 30% of damage dealt · S3 Doorway Denial, 4 hits, +60% armor for 10 s | Unstoppable during heavy; keeps blockProf 0.15 (`40_movedata.js:21`) |
+| **Carl** (brawler) | *Spite*: below 40% hp, +1 Fury every 3 s, uncapped | Haymaker — 2 armor break stacks, 8 s | S1 Two-Fisted, 3 hits, last applies bleed · S2 Boot Party, 5 hits, refunds 20 power on block · S3 Doorway Drop, 4 hits, guaranteed 2 s stun[^shipped-durs] | −10% damage from the class he beats[^unshipped-passive] |
+| **Princess Donut** (caster) | *Royal Disdain*: every special applies Weakness, doubled if the foe is already debuffed | Feline Contempt — power burn 30 | S1 Hairball, 5 hits, poison DoT · S2 Regal Pounce, 5 hits, unblockable final hit · S3 Sponsor Meltdown, 4 hits, strips every enemy buff first[^shipped-donut-s3] | +50% power from hits taken[^unshipped-passive] |
+| **Katia** (trickster) | *Understudy*: a parry grants 3 s of +40% crit damage | Quickdraw — refreshes every bleed stack | S1 Knife Work, 5 hits (already tuned, `40_movedata.js:19`), each bleeds · S2 Misdirection, 5 hits, 100% crit · S3 Curtain Call, 4 hits, damage scales with active bleed stacks[^shipped-katia-s3] | Crits apply 1 bleed stack[^unshipped-passive] |
+| **Mongo** (tank) | *Immovable*: while blocking, +1 Fury every 2 s, max 5 | Ground Slam — knockdown that ignores block | S1 Backhand, 3 hits, stun on the third · S2 Bear Hug, 5 hits, self-heal 30% of damage dealt · S3 Doorway Denial, 4 hits, +60% armor for 10 s | Unstoppable during heavy[^unshipped-passive]; keeps blockProf 0.15 (`40_movedata.js:21`) |
 | **Grull** (boss, tank) | *Champion of the Floor*: every 20 s, purify and gain 3 Fury | Pillar Swing — long range, armor break | S3 Floor Wipe, 3 hits (already), applies 10 s Weakness[^shipped-durs] | Keeps `armorUp` (`45_encounter.js:39`) |
 | **Mother Rat** (boss, beast) | *Brood*: below 50% hp, regen triples and she gains Power Gain | Tail Sweep — 3 bleed stacks | S3 Swarm, 6 hits (already), each heals her 2% | Keeps retuned `regen` (`47_buffs.js:8-15`) |
 
@@ -101,6 +101,32 @@ target}`, never a duration) — an applied effect always runs for its own `EFFEC
 this table's 2s/120f; Grull's S3 weakness is `EFFECTS.weakness.dur` = **480f (8s)**, not this table's
 10s/600f. See `40_movedata.js`'s own Task 9.1 header comment and `docs/ARENA.md`'s Phase 9 exit
 section for the full ruling.
+
+[^shipped-donut-s3]: **Fix-wave annotation (M6, final review):** as shipped (`CHAMPS.donut.moves.s3`,
+`40_movedata.js`), Sponsor Meltdown is **6 hits, every hit applies 1 Weakness stack** — not this
+table's "4 hits, strips every enemy buff first." Task 9.3 resized the base 4-hit move up to the kit
+line's own `kitText` wording ("6 hits — every hit Weakens"), which itself already diverged from this
+design table before Task 9.3 shipped; there is no buff-strip mechanic (`Effects.purify` on the FOE)
+anywhere in Donut's kit. The table was never updated to match.
+
+[^shipped-katia-s3]: **Fix-wave annotation (M6, final review):** as shipped (`CHAMPS.katia.moves.s3`,
+`40_movedata.js`), Curtain Call is **4 hits, the LAST hit applies bleed ×3 stacks and 1 armor-break
+stack** — not this table's "damage scales with active bleed stacks." There is no damage-scaling-by-
+stack-count mechanic anywhere in the frozen `applies`/effect interfaces (a move's damage is fixed by
+its own `dmg`/`hits`, never read from `Effects.stacks`); the shipped kit reads "curtain call: heavy
+punish + guaranteed bleed stacks + an armor break," a different (and simpler) design than the table's.
+
+[^unshipped-passive]: **Fix-wave annotation (M6, final review):** this table's own **Passive** column
+is distinct from the *Signature* column (Spite/Royal Disdain/Understudy/Immovable — those four all
+shipped, Task 9.2, `PASSIVES`/`Passives` in `49_passives.js`) and was never implemented for any of the
+four playable champions: Carl's −10% class-beat damage reduction, Donut's +50% power-from-hits-taken,
+Katia's crits-apply-1-bleed-stack, and Mongo's unstoppable-during-heavy are all absent from the shipped
+kit data (`40_movedata.js`) and the passive hook table (`49_passives.js`) alike — each champion's
+`def.passive` carries exactly one id, the Signature mechanic, with no second effect layered on top.
+Grull's `armorUp` and Mother Rat's `regen` (this table's own Passive column for the two bosses) DID
+ship, via each boss's own `buffs:[...]` field (`40_movedata.js`) — a pre-Phase-9 mechanism (`47_buffs.
+js`) that predates and is unrelated to the Phase 9 `PASSIVES` table above; only the four champions'
+Passive-column entries are the gap.
 
 **Hitstop and camera per move class.** Light 3 f, no shake, no camera. Medium 5 f, 4 px directional
 shake, 2% punch-in over 6 f. Heavy 9 f, 8 px, 4% punch-in held 10 f. Intercept 10 f, 10 px, 5%
