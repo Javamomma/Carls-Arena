@@ -4573,6 +4573,17 @@ POSES.walk=[
 POSES.dash=[
   {t:0,ang:{torso:D(-14),lHip:D(-10),rHip:D(20),lKnee:D(20),rKnee:D(-10),lShoulder:D(20),rShoulder:D(-20)},off:{x:0,y:-4}},
   {t:1,ang:{torso:D(-18),lHip:D(-18),rHip:D(28),lKnee:D(26),rKnee:D(-6), lShoulder:D(26),rShoulder:D(-26)},off:{x:-10,y:-2}}];
+// Task 12.3 (frozen interface, exact ruling): the AI's new WINDUP telegraph -- "weight shift back on
+// the rear leg + lean" per the ruling. From an idle-braced stance (t:0), the torso leans BACK (negative
+// torso, unlike every forward-lunging move's positive lean) and weight settles onto the rear (right)
+// leg -- the same leg medium's own kick treats as the "rear leg" (see POSES.medium's own comment) --
+// with a small negative off.x (pulling back, mirroring 'dash', the retreat state's own negative off.x)
+// so the coil reads as "gathering to spring forward," not an attack in progress. Deliberately modest
+// (smaller angles/off than 'dash' or 'heavyCharge') -- this is a tell, not a committed swing, and stays
+// comfortably under both of those poses' own extent budget.
+POSES.windup=[
+  {t:0,ang:{torso:D(4),  lShoulder:D(6),rShoulder:D(10),lElbow:D(52),rElbow:D(50),lHip:D(-8),rHip:D(10),lKnee:D(8),rKnee:D(-4)},off:{x:0,y:0}},
+  {t:1,ang:{torso:D(-12),lShoulder:D(2),rShoulder:D(18),lElbow:D(50),rElbow:D(44),lHip:D(-4),rHip:D(22),lKnee:D(4),rKnee:D(16)},off:{x:-8,y:2}}];
 function jab(side,o={}){
   const S=side+'Shoulder',E=side+'Elbow';
   const startSh=o.startSh!==undefined?o.startSh:-15,startEl=o.startEl!==undefined?o.startEl:25;
@@ -4734,6 +4745,15 @@ POSES_QUAD.dash=[
             flU:D(24),flL:D(-14),frU:D(30),frL:D(-18),blU:D(-30),blL:D(24),brU:D(-24),brL:D(20)},off:{x:0,y:-4}},
   {t:1,ang:{spine:D(-10),chest:D(-8),neck:D(24),tail1:D(2),tail2:D(0),
             flU:D(32),flL:D(-18),frU:D(38),frL:D(-22),blU:D(-38),blL:D(30),brU:D(-30),brL:D(26)},off:{x:-14,y:-3}}];
+// Task 12.3: the same "weight shift back" telegraph as the human/big rigs above, expressed the way
+// POSES_QUAD.heavyCharge already expresses "weight shifts back onto the haunches" -- a much shallower
+// version of that same rear-up read (roughly half heavyCharge's own spine/chest magnitude) plus a
+// small negative off.x pulling back, so it reads as a light coil rather than a full rear-up charge.
+POSES_QUAD.windup=[
+  {t:0,ang:{spine:D(1),chest:D(1),neck:D(34),head:D(-4),tail1:D(42),tail2:D(-24),
+            flU:D(-4), flL:D(5), frU:D(3), frL:D(-3),blU:D(-6),blL:D(7), brU:D(5), brL:D(-5)},off:{x:0,y:0}},
+  {t:1,ang:{spine:D(5),chest:D(7),neck:D(28),head:D(-6),tail1:D(36),tail2:D(-18),
+            flU:D(-14),flL:D(12),frU:D(-12),frL:D(10),blU:D(6), blL:D(-6),brU:D(7), brL:D(-6)},off:{x:-6,y:2}}];
 // Front-paw swipe: the quad equivalent of the human jab() helper. side is 'fl' or 'fr' (which front
 // leg leads); the opposite front leg stays a light guard bend so the swipe reads against a grounded
 // tripod, not a rig floating on one leg.
@@ -4915,6 +4935,11 @@ POSES_BIG.walk=[ // a heavy plod, not a human trot: bigger hip/knee swing, slowe
 POSES_BIG.dash=[
   {t:0,ang:{torso:D(-4), lHip:D(-14),rHip:D(24),lKnee:D(24),rKnee:D(-12),lShoulder:D(24),rShoulder:D(-24)},off:{x:0,y:6}},
   {t:1,ang:{torso:D(-8), lHip:D(-22),rHip:D(32),lKnee:D(30),rKnee:D(-8), lShoulder:D(30),rShoulder:D(-30)},off:{x:-10,y:8}}];
+// Task 12.3: same "weight shift back on the rear leg + lean" telegraph as POSES.windup above, scaled
+// to this rig's own idle/dash angle range.
+POSES_BIG.windup=[
+  {t:0,ang:{torso:D(4),  lShoulder:D(8),rShoulder:D(12),lElbow:D(60),rElbow:D(70),lHip:D(-10),rHip:D(10),lKnee:D(8),rKnee:D(-8)},off:{x:0,y:0}},
+  {t:1,ang:{torso:D(-14),lShoulder:D(4),rShoulder:D(18),lElbow:D(58),rElbow:D(64),lHip:D(-6), rHip:D(20),lKnee:D(4),rKnee:D(14)},off:{x:-8,y:4}}];
 // Lights read as hooks, not jabs: jab() is reused (it's generic over the same bone-name fields) but
 // with a wide elbow bend held through the swing and a much bigger torsoPeak than POSES.light* ever
 // uses, so the silhouette sweeps around instead of extending straight out.
@@ -5551,7 +5576,10 @@ const BodyStyle={
   // turns Fighter.state into a pose key every frame, so the face rides on that. 'dash' wears the
   // braced block face (a backdash is a defensive retreat, not an attack); 'getup' stays on the ko
   // face because a fighter pushing himself off the floor has not recovered his composure yet.
-  FACE_STATE:{idle:'idle',walk:'idle',dash:'block',
+  // Task 12.3: 'windup' reads as 'attack' -- a committed weight-shift lean into an oncoming dash-in is
+  // an aggressive tell, not a defensive one (unlike 'dash', the actual dash-BACK retreat, which wears
+  // the braced 'block' face per its own comment above).
+  FACE_STATE:{idle:'idle',walk:'idle',dash:'block',windup:'attack',
     light1:'attack',light2:'attack',light3:'attack',light4:'attack',light5:'attack',
     medium:'attack',heavyCharge:'attack',heavy:'attack',s1:'attack',s2:'attack',s3:'attack',
     block:'block',blockstun:'block',hit:'hit',stunned:'hit',
@@ -7084,6 +7112,10 @@ const Rig={
     // still reads as a walk cycle instead of the idle sway while it's happening.
     if(st==='IDLE')return Math.abs(f.dx)>0.3?{key:'walk',t01:(f.f%24)/24}:{key:'idle',t01:(f.f%60)/60};
     if(st==='DASH')return{key:'dash',t01:clamp(f.f/DASH_BACK.frames,0,1)};
+    // Task 12.3 (frozen interface, exact ruling): WINDUP -- the AI's new telegraphed approach dash-in
+    // (50_fighter.js), a committed weight-shift-back pose held for WINDUP_FRAMES (40_movedata.js) with
+    // no hitbox, before the real tracked medium dash-in fires.
+    if(st==='WINDUP')return{key:'windup',t01:clamp(f.f/WINDUP_FRAMES,0,1)};
     if(st==='BLOCK')return{key:'block',t01:clamp(f.f/10,0,1)};
     if(st==='BLOCKSTUN')return{key:'blockstun',t01:clamp(f.f/(f.stun||1),0,1)};
     if(st==='HITSTUN')return{key:'hit',t01:clamp(f.f/(f.stun||1),0,1)};
