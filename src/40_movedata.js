@@ -256,7 +256,7 @@ const BOSSES={
       s3:{dmg:3.6,hits:3,gap:10,applies:[{id:'weakness',stacks:1,on:'last'}]}},
     // Task 9.2: Champion of the Floor -- see PASSIVES.championOfTheFloor (49_passives.js).
     passive:{id:'championOfTheFloor'},
-    kitText:{sig:'CHAMPION OF THE FLOOR — purifies every debuff and gains +3 Fury every 10s',
+    kitText:{sig:'CHAMPION OF THE FLOOR — purifies every debuff and gains +3 Fury every 6s',
       heavy:'PILLAR SWING — long reach, Armor Breaks',
       s1:'3-hit flurry',
       s2:'5-hit flurry',

@@ -4852,18 +4852,18 @@ Test.add('Immovable (Mongo): +1 fury stack every 120 frames spent in BLOCK or BL
   f.p1.state='BLOCK';
   for(let i=0;i<120*4;i++){f.frame++;Passives.tick(f,f.p1)}
   eq(Effects.stacks(f.p1,'fury'),5,'capped at 5, never exceeded however long the blocking continues')});
-Test.add('Champion of the Floor (Grull): purifies every currently-held debuff and grants +3 fury every 600 frames (fight.frame % 600) -- Task 9.4 halved the cadence from 1200f (real boss fights average 300-620f, so the old cadence rarely landed even once)',()=>{
+Test.add('Champion of the Floor (Grull): purifies every currently-held debuff and grants +3 fury every 360 frames (fight.frame % 360) -- fix-wave item 4 (I4) halved the cadence again from 600f (measured: 600f still only landed a beat inside 4/40 real Grull fights, a 475-frame average real fight)',()=>{
   const f=mkFight({p1:BOSSES.grull});
-  for(let i=0;i<599;i++){f.frame++;Passives.tick(f,f.p1)}
-  eq(Effects.stacks(f.p1,'fury'),0,'must not fire before frame 600');
+  for(let i=0;i<359;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),0,'must not fire before frame 360');
   Effects.apply(f,f.p1,'weakness',{stacks:2});
   f.frame++;Passives.tick(f,f.p1);
-  eq(Effects.stacks(f.p1,'fury'),3,'exactly +3 fury on the 600th frame');
+  eq(Effects.stacks(f.p1,'fury'),3,'exactly +3 fury on the 360th frame');
   ok(!Effects.has(f.p1,'weakness'),'every debuff held at that instant must be purified on the same beat');
-  for(let i=0;i<599;i++){f.frame++;Passives.tick(f,f.p1)}
-  eq(Effects.stacks(f.p1,'fury'),3,'must not fire again before the next 600-frame beat');
+  for(let i=0;i<359;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),3,'must not fire again before the next 360-frame beat');
   f.frame++;Passives.tick(f,f.p1);
-  eq(Effects.stacks(f.p1,'fury'),5,'a second +3 grant on the 1200th frame, clamped by fury\'s own maxStacks(5)')});
+  eq(Effects.stacks(f.p1,'fury'),5,'a second +3 grant on the 720th frame, clamped by fury\'s own maxStacks(5)')});
 Test.add('Brood (Mother Rat): grants one powerGain stack the instant hp first crosses below 50% (edge-triggered, re-arms once healed back above)',()=>{
   const f=mkFight({p1:BOSSES.mother_rat});
   f.p1.hp=f.p1.maxHp*0.6;
@@ -4955,8 +4955,8 @@ Test.add('Passives module and every hook stay presentation-free and RNG-free (si
     ok(!P_PURITY.test(fn.toString()),'Passives.'+(fn.name||'?')+' must stay presentation- and RNG-free')});
 Test.add('active passives do not change the fight\'s rng draw count (Passives consumes no RNG)',()=>{
   // p2's hp is padded well past anything grull's own attacks could KO within 2500 frames -- a real KO
-  // would stop Fight.step (and with it Passives.tick) before Champion of the Floor's own 600-frame
-  // beat ever landed, which is exactly what this test needs to actually exercise.
+  // would stop Fight.step (and with it Passives.tick) before Champion of the Floor's own 360-frame
+  // beat (fix-wave item 4, I4) ever landed, which is exactly what this test needs to actually exercise.
   const f1=mkFight({noCrit:false,p1:BOSSES.grull,ctrl1:Ctrl.script([L(0,2500)])});closeIn(f1);f1.p2.hp=f1.p2.maxHp=1e6;
   let n1=0;const raw1=f1.rng.next.bind(f1.rng);f1.rng.next=()=>{n1++;return raw1()};
   run(f1,2500);
@@ -6723,18 +6723,22 @@ Test.add('impact fx tags only include applies entries that actually fired THIS l
   const all=f.fx.filter(e=>e.kind==='impact');
   ok(all.some(e=>e.tags.includes('bleed')),'the final sub-hit\'s own impact fx must carry the bleed tag')});
 
-// --- carry-over #1 (9.2 review): Immovable's counter is CONSECUTIVE frames, resets on leaving BLOCK/BLOCKSTUN
-Test.add('Immovable\'s consecutive-block counter resets to 0 the instant the holder leaves BLOCK/BLOCKSTUN (carry-over from the 9.2 review)',()=>{
+// --- Fix-wave item 4 (I4, final review): Immovable's counter is CUMULATIVE across the whole fight,
+// not consecutive -- this reverses the Task 9.3 ruling the carry-over test below used to pin.
+// Measured (final review): a consecutive-only requirement produced 0/160 real fights with Immovable
+// ever firing, since a scripted bot's own react/hold/block-plan cycling rarely holds an unbroken
+// 120-frame block streak against a live opponent. See PASSIVES.immovable's own comment for the full
+// ruling text.
+Test.add('Immovable\'s block counter is CUMULATIVE across the fight -- an interruption (a hit landing) does not reset it back to 0 (fix-wave item 4, I4, reverses the old carry-over-#1 consecutive ruling)',()=>{
   const f=mkFight({p1:CHAMPS.mongo});
   f.p1.state='BLOCK';
   for(let i=0;i<90;i++){f.frame++;Passives.tick(f,f.p1)} // 90 blocked frames, short of the 120 threshold
-  f.p1.state='HITSTUN'; // "a hit" -- leaves BLOCK/BLOCKSTUN
+  f.p1.state='HITSTUN'; // "a hit" -- leaves BLOCK/BLOCKSTUN, but must NOT reset the cumulative counter
   f.frame++;Passives.tick(f,f.p1);
+  eq(Effects.stacks(f.p1,'fury'),0,'no stack yet -- only 90 of the 120 needed blocked frames have accumulated');
   f.p1.state='BLOCK';
-  for(let i=0;i<90;i++){f.frame++;Passives.tick(f,f.p1)} // 90 more -- would wrongly total 180 without the reset
-  eq(Effects.stacks(f.p1,'fury'),0,'the counter must have reset on the hit -- 90+90 must NOT sum to a stack');
-  for(let i=0;i<30;i++){f.frame++;Passives.tick(f,f.p1)} // complete a genuine 120 CONSECUTIVE frames
-  eq(Effects.stacks(f.p1,'fury'),1,'120 straight (unbroken) frames must still grant exactly 1 stack')});
+  for(let i=0;i<30;i++){f.frame++;Passives.tick(f,f.p1)} // 30 more -- 90+30=120 cumulative, across the interruption
+  eq(Effects.stacks(f.p1,'fury'),1,'90 blocked + an interruption + 30 more blocked must still sum to 120 and grant a stack')});
 
 // --- carry-over #2 (9.2 review): Passives.onSpecial reuses _fire with a target parameter ---------
 Test.add('Passives._fire (carry-over from the 9.2 review): an explicit 7th `target` arg redirects the Effects.apply, while emitPassive still always credits the passive\'s OWNER',()=>{
@@ -6971,3 +6975,42 @@ Test.add('Task 9.5: the hp<=60% self-buff rule is scoped to self-target specials
     const g=golden[tier];
     eq(f.p1.hp,g.hp1,tier+': p1 hp must match the pre-9.5 golden run even with p2 hp forced low');
     eq(f.frame,g.frame,tier+': the fight must end on the exact same frame as the pre-9.5 golden run even with p2 hp forced low')}});
+
+// ================================================================================================
+// Fix-wave (final review, verdict-phase9-final.md + verdict-9.5.md): I1 (tier.kit starves specials),
+// I2 (self-buff S3 latch starves Mongo), I3 (uncapped-clamp regression, above), I4 (Immovable/
+// Champion of the Floor never fire, above), M1-M9. Base 3ee7c0e.
+// ================================================================================================
+
+// --- I4 battery: over 40 seeded fights, Immovable/Champion of the Floor must each be visibly
+// reachable at the rate the controller's ruling set, not just correct in a synthetic all-BLOCK/
+// all-frame-360 unit test (the ones above already pin the exact mechanics). Both sides' hp are padded
+// (1e7, same trick the "kit usage in real (unprimed) play" test above uses) so a natural KO around
+// the 400-500-frame mark this exact matchup measures (Ctrl.competent is a strong, consistent attacker
+// against a t4 AI) doesn't truncate the soak before a mechanic gated on 120-360 CUMULATIVE frames of
+// a specific state gets a fair, real-combat-paced shot at its own threshold within one realistic
+// fight-length window (3600 frames/60s -- well past the 475-frame average real fight the final review
+// measured, giving room for below-average-length real matchups too) -- power/debuff fields are never
+// hand-written, only hp, so the AI's own block/attack/passive decisions are exactly as unprimed as
+// every other real-play test in this file. p1 is the AI (ctrl1), p2 is Ctrl.competent, same "who=1
+// credits the AI side" convention emitPassive already uses (60_fight.js).
+Test.add('Fix-wave I4: Immovable fires in >=30% of 40 seeded AI-Mongo-vs-Ctrl.competent fights at t4',()=>{
+  let seen=0;
+  for(let seed=1;seed<=40;seed++){
+    const f=new Fight({seed,p1:CHAMPS.mongo,p2:CHAMPS.carl,ctrl1:AI.make('t4',seed),ctrl2:Ctrl.competent(seed+9000),clock:600,noCrit:false});
+    f.p1.hp=f.p1.maxHp=1e7;f.p2.hp=f.p2.maxHp=1e7;
+    let fired=false;
+    for(let i=0;i<3600&&!fired;i++){f.cinematic=0;f.step();
+      if(f.log.some(e=>e.type==='passive'&&e.id==='immovable'&&e.who===1))fired=true}
+    if(fired)seen++}
+  ok(seen/40>=0.3,'Immovable must fire in at least 30% of 40 seeded fights, got '+Math.round(seen/40*1000)/10+'%')});
+Test.add('Fix-wave I4: Champion of the Floor fires in >=50% of 40 seeded AI-Grull-vs-Ctrl.competent fights at t4',()=>{
+  let seen=0;
+  for(let seed=1;seed<=40;seed++){
+    const f=new Fight({seed,p1:BOSSES.grull,p2:CHAMPS.carl,ctrl1:AI.make('t4',seed),ctrl2:Ctrl.competent(seed+9000),clock:600,noCrit:false});
+    f.p1.hp=f.p1.maxHp=1e7;f.p2.hp=f.p2.maxHp=1e7;
+    let fired=false;
+    for(let i=0;i<3600&&!fired;i++){f.cinematic=0;f.step();
+      if(f.log.some(e=>e.type==='passive'&&e.id==='championOfTheFloor'&&e.who===1))fired=true}
+    if(fired)seen++}
+  ok(seen/40>=0.5,'Champion of the Floor must fire in at least 50% of 40 seeded fights, got '+Math.round(seen/40*1000)/10+'%')});

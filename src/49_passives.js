@@ -23,9 +23,15 @@ const PASSIVES={
   // so the frozen interface's own 1200f cadence meant Grull's own signature ability -- a full
   // purify plus +3 fury -- almost never actually fired within a real fight's length (it needed to
   // survive past frame 1200 first). Halving it to 600 lets a fight that runs the boss's own typical
-  // length actually see the mechanic at least once. kitText's own "every 20s" line (40_movedata.js)
-  // is updated alongside this to "every 10s" (600f/60fps).
-  championOfTheFloor:{every:600,purify:true,apply:{id:'fury',stacks:3}},
+  // length actually see the mechanic at least once.
+  // Fix-wave item 4 (I4, final review): 600 -> 360 frames. The 600f cadence still measured 4/40 real
+  // Grull fights (10%) ever reaching the beat at all -- a 475-frame average real fight (final review's
+  // own measurement) leaves only one 600f beat inside a typical fight's length, and most fights end
+  // before frame 600 entirely. 360f (6s) gives a typical ~475-frame fight a comfortable shot at the
+  // first beat with margin to spare, while still well inside "every kit effect must be visible."
+  // kitText's own "every 10s" line (40_movedata.js) is updated alongside this to "every 6s"
+  // (360f/60fps).
+  championOfTheFloor:{every:360,purify:true,apply:{id:'fury',stacks:3}},
   brood:{hpBelow:.50,apply:{id:'powerGain',stacks:1}}};
 
 const Passives={
@@ -86,6 +92,19 @@ const Passives={
       // EFFECTS.maxStacks is already 5, so the cap is enforced twice over (belt and suspenders, not a
       // second real ceiling) -- the explicit `<cfg.max` guard still skips the apply call (and its
       // event/banner) once capped, rather than firing a no-op Effects.apply every 120 frames forever.
+      // Fix-wave item 4 (I4, final review): the counter is CUMULATIVE across the whole fight, not
+      // consecutive -- this reverses the Task 9.3 ruling below. Measured (final review, 40 AI-Mongo
+      // fights across four tiers): a CONSECUTIVE 120-frame requirement produced 0/160 real fights with
+      // Immovable ever firing -- a scripted bot's own react/hold/block-plan cycling (55_ai.js) almost
+      // never holds BLOCK/BLOCKSTUN for 120 unbroken frames against a live opponent that keeps forcing
+      // brief gaps (a landed hit, a parry window, a busy() frame elsewhere), even though a real fight
+      // spends far more than 120 TOTAL frames blocking over its whole length. The kit table's own
+      // wording ("while blocking, +1 fury every 2s") reads as accumulated blocking time, not an
+      // unbroken streak, and ruling 3 of the Phase 9 plan ("every kit effect must be visible") is the
+      // standard a mechanic that fires in 0/160 real fights fails outright. A held guard producing
+      // exactly 5 Immovable stacks in a synthetic all-BLOCK run (the pre-fix test below) proves the
+      // math was always correct -- only the reset-on-leave was wrong for how the mechanic is actually
+      // used in play.
       case'immovable':{
         const cfg=PASSIVES.immovable.whileBlocking;
         if(fighter.state==='BLOCK'||fighter.state==='BLOCKSTUN'){
@@ -94,18 +113,13 @@ const Passives={
             t.immovable=0;
             if(Effects.stacks(fighter,cfg.apply.id)<cfg.max)
               this._fire(fight,fighter,'immovable',cfg.apply.id,cfg.apply.stacks,false)}}
-        // Task 9.3 (carry-over from the 9.2 review, controller ruling): the counter is CONSECUTIVE
-        // frames spent in BLOCK/BLOCKSTUN -- leaving either state resets it to 0, it does not just
-        // pause. Pre-9.3 this branch had no else at all, so 90 blocked frames + a hit + 90 more would
-        // have wrongly summed to 180 (a stack at the wrong time) instead of resetting to 0 on the hit.
-        else t.immovable=0;
         break}
       // Grull's Champion of the Floor: every cfg.every frames (fight.frame%cfg.every===0, controller
       // ruling -- a stateless clock, no per-fighter timer needed; Task 9.4 halved this from 1200 to
-      // 600 -- see PASSIVES.championOfTheFloor's own comment), purify every debuff he's currently
-      // holding then grant +3 fury. Purify runs unconditionally on the beat (not gated by whether he
-      // actually holds any debuff) -- Effects.purify is already a silent no-op when there's nothing
-      // to strip.
+      // 600, fix-wave item 4 (I4) halved it again to 360 -- see PASSIVES.championOfTheFloor's own
+      // comment), purify every debuff he's currently holding then grant +3 fury. Purify runs
+      // unconditionally on the beat (not gated by whether he actually holds any debuff) -- Effects.
+      // purify is already a silent no-op when there's nothing to strip.
       case'championOfTheFloor':{
         const cfg=PASSIVES.championOfTheFloor;
         if(fight.frame>0&&fight.frame%cfg.every===0){
