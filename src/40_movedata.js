@@ -83,16 +83,13 @@ const CHAMPS={
     // Party (base MOVES.s2 hits:5, matches) refunds 20 power when blocked; s3 Doorway Drop (base
     // MOVES.s3 hits:4, matches) last hit stuns -- the kit table's own "120f" duration is EFFECTS.
     // stun's frozen 60f here (see the header comment above and the task report).
-    // Deviation (task report): s1 Two-Fisted's own kit line ("3 hits, last->bleed 1") is NOT landed
-    // here despite matching base MOVES.s1's hit count -- carl's s1 is the exact special the Task 5.3
-    // tutorial (src/80_game.js's G.startTutorial + BUFFS.tutorialGuard, 47_buffs.js, neither in this
-    // task's file scope) fires against its guarded, "cannot be KO'd" dummy. tutorialGuard only caps
-    // the special's own onHit damage inside Fight.resolve; a bleed stack's own DOT (Effects.tick,
-    // 48_effects.js) subtracts the dummy's hp directly, bypassing that cap entirely, and could push
-    // the guarded dummy to 0 hp mid-tutorial. Flagged for the controller/a later task to resolve
-    // (extend tutorialGuard, or have the tutorial script a different special) rather than silently
-    // shipping a tutorial-breaking real-data flag from this one.
+    // s1 Two-Fisted (base MOVES.s1 hits:3, matches) last hit bleeds 1 -- fix round 1: previously
+    // withheld (see the task report's original Deviations section) because a bleed DOT tick bypassed
+    // BUFFS.tutorialGuard's onHit cap and could bleed the tutorial's guarded dummy past hp-1;
+    // tutorialGuard now also caps DOT ticks (47_buffs.js's new onDot hook, read generically through
+    // Effects.tick's dotDamage helper, 48_effects.js), so this lands on real data now.
     moves:{heavy:{applies:[{id:'armorBreak',stacks:2,on:'hit'}]},
+      s1:{applies:[{id:'bleed',stacks:1,on:'last'}]},
       s2:{refundOnBlock:20},
       s3:{applies:[{id:'stun',stacks:1,on:'last'}]}}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
@@ -102,8 +99,12 @@ const CHAMPS={
     // heavy burns 30 power (single-hit, matches); s2 Regal Pounce (base MOVES.s2 hits:5, matches) is
     // unblockable. S1 Hairball (kit: 5 hits) and S3 Sponsor Meltdown (kit: 6 hits) don't match base
     // MOVES.s1/s3's own hit counts (3/4) yet, so they carry nothing here -- Task 9.3 resizes them.
+    // Fix round 1 (controller ruling): the kit line reads "5 hits, LAST unblockable" -- s2 now sets
+    // move.unblockable:'last' (only the move's own final sub-hit skips the block branch; sub-hits 1-4
+    // still block normally, chip+blockstun) instead of the whole-move `true` every other unblockable
+    // move (base MOVES.s3) keeps. See Fight.detect's own comment (60_fight.js) for the two-value flag.
     moves:{heavy:{applies:[{id:'powerBurn',stacks:1,potency:30,on:'hit'}]},
-      s2:{unblockable:true}}},
+      s2:{unblockable:'last'}}},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blade',
     // s1 Knife Work already overridden to 5 hits (pre-Phase-9) -- matches the kit table verbatim, so
     // each landed hit now also bleeds 1. s2 Misdirection (base MOVES.s2 hits:5, matches) crits every

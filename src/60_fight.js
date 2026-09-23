@@ -73,7 +73,13 @@ class Fight{
     const blocking=def.state==='BLOCK'||def.state==='BLOCKSTUN';
     // unblockableSpecials: the attacker's special (m.cost is only set on s1/s2/s3) ignores block if
     // the attacker holds the buff, same treatment as MOVES.s3's own m.unblockable flag.
-    const unblockable=m.unblockable||(m.cost&&att.buffs&&att.buffs.some(b=>b.id==='unblockableSpecials'));
+    // Fix round 1 (controller ruling): m.unblockable is now two-valued -- `true` (base MOVES.s3, and
+    // any future whole-move case) bypasses block on every sub-hit, unchanged from before this task;
+    // `'last'` (donut's own S2 Regal Pounce) bypasses ONLY the move's own final sub-hit -- sub-hits
+    // 1-4 still resolve as a normal block (chip + blockstun) below. Reuses the exact same `last`
+    // sub-hit predicate hitstop/on:'last' already read (computed unconditionally above).
+    const unblockable=m.unblockable===true||(m.unblockable==='last'&&last)||
+      (m.cost&&att.buffs&&att.buffs.some(b=>b.id==='unblockableSpecials'));
     if(blocking&&!unblockable){
       // Task 5.2: def.parryBonus (Sponsor perk "Parry Insurance", 0 for everyone else) widens the
       // window by that many frames -- see Fighter.act's own parryLock-arming comment (50_fighter.js)
@@ -85,10 +91,9 @@ class Fight{
       // multi-hit bonus (push/knockdown/hitstop) already gets.
       return{type:'block',att,def,idx,m,last}}
     // Task 9.1: `forcedThroughBlock` records that def WAS actually blocking when this hit's own
-    // move.unblockable (or the unblockableSpecials buff) bypassed the block branch entirely -- a bare
-    // fact for resolve()'s hit branch to read (no behavior change here: m.unblockable already ignores
-    // block unconditionally for the whole move, exactly as before this task); resolve() uses it only to
-    // decide whether to queue the presentation-only UNBLOCKABLE popup.
+    // move.unblockable (whole-move `true`, this-sub-hit-only `'last'`, or the unblockableSpecials
+    // buff) bypassed the block branch entirely -- a bare fact for resolve()'s hit branch to read;
+    // resolve() uses it only to decide whether to queue the presentation-only UNBLOCKABLE popup.
     return{type:'hit',att,def,idx,m,last,forcedThroughBlock:blocking&&unblockable}}
   // Task 7.2: the landed move's own effective per-node damage -- MOVES.light/medium each carry a
   // chainDmg[] indexed by chainNode (1..CHAIN.nodes), the frozen node multiplier table; every other

@@ -106,7 +106,32 @@ const BUFFS={
     onHit(fight,att,def,ref,holder){
       if(holder!==def)return; // only ever meaningful for the dummy defending, never attacking
       if(!holder.guardActive)return; // FINISH HIM already fired (or this holder was never guarded): no cap
-      if(ref.dmg>=holder.hp){ref.dmg=Math.max(0,holder.hp-1);ref.capped=true}}}};
+      if(ref.dmg>=holder.hp){ref.dmg=Math.max(0,holder.hp-1);ref.capped=true}},
+    // Fix round 1 (Task 9.1, controller ruling): a landed special's own onHit cap (above) never
+    // covered a DOT tick (bleed/poison) applied by that same special -- Effects.tick's own hp
+    // subtraction ran entirely outside Fight.resolve's ref/onHit pipeline, so a guarded, "cannot be
+    // KO'd" dummy could still be bled/poisoned to 0 mid-tutorial. dotDamage (48_effects.js) now routes
+    // every tick hook's own damage through this SAME buff-hook mechanism under a new kind, 'onDot' --
+    // called with holder passed as both att and def (a DOT is self-inflicted, no separate attacker),
+    // so the `holder!==def` guard above still reads correctly here too. Deliberately identical cap
+    // logic to onHit, and deliberately ignorant of which effect id produced ref.dmg -- bleed, poison,
+    // or any later id that ever routes through dotDamage all get the exact same treatment, no
+    // per-effect special-casing in this buff.
+    // Fix round 1 note: NOT onHit's own `ref.dmg>=holder.hp` gate verbatim -- that gate only fires
+    // when a single application would meet/exceed the CURRENT hp outright (fine for one lump onHit
+    // hit, which is either clearly lethal-sized or clearly isn't), but a DOT tick's own per-frame
+    // amount is tiny by design (bleed at 3 stacks is ~0.2 hp/frame against a 1000-maxHp fighter) --
+    // reusing that exact gate would let hundreds of small, individually-"not lethal" ticks creep the
+    // guarded holder's hp down through 0.8, 0.6, 0.4... one frame at a time, never tripping the gate
+    // until hp was already well under 1. The equivalent, correct floor check for a REPEATED small
+    // drain is "would THIS tick push hp under 1", not "is this ONE tick alone bigger than hp" --
+    // holder.hp-ref.dmg<1 -- which is what actually keeps a holder already sitting at (or above) the
+    // floor pinned there tick after tick, the "stays at 1 hp for 300 frames" the controller's own
+    // ruling asks for.
+    onDot(fight,att,def,ref,holder){
+      if(holder!==def)return;
+      if(!holder.guardActive)return;
+      if(holder.hp-ref.dmg<1){ref.dmg=Math.max(0,holder.hp-1);ref.capped=true}}}};
 
 const Buffs={
   // Resolves ids[] to BUFFS objects and sets holder.buffs (replacing whatever was there). Called

@@ -16,9 +16,22 @@
 // Effects.apply) so a future move's applies:[{id,potency}] can hand out a stronger/weaker copy of the
 // same effect without a second EFFECTS entry; every number in the frozen Phase 7 interfaces list is
 // exactly what potency 1 (the only potency any test or existing move data ever passes) produces.
+// Fix round 1 (controller ruling, Task 9.1): shared helper every hp-reducing TICK hook (bleed,
+// poison) routes its damage through, instead of subtracting holder.hp directly -- mirrors
+// Fight.resolve's own onHit ref.dmg pattern (BUFFS.tutorialGuard's onHit caps ref.dmg there) with a
+// NEW buff-hook kind, 'onDot', so a guarded holder's DOT ticks get the exact same "cap at hp-1" cover
+// its main hits already get. Neither this helper nor the EFFECTS[id].tick hooks that call it know or
+// care whether any buff is listening -- fight.buffHook('onDot',...) is a no-op for a holder with no
+// buffs (or none that implement onDot), same as every other buffHook call site. BUFFS.tutorialGuard's
+// own onDot hook (47_buffs.js) is the only thing that reads holder.guardActive; this file stays fully
+// generic, never special-casing bleed vs poison vs any later id that reuses this helper.
+function dotDamage(fight,holder,amount){
+  const ref={dmg:amount};
+  fight.buffHook('onDot',holder,holder,holder,ref);
+  holder.hp=Math.max(0,holder.hp-ref.dmg)}
 const EFFECTS={
   bleed:{id:'bleed',dur:180,maxStacks:5,
-    tick(fight,holder,e){holder.hp=Math.max(0,holder.hp-holder.maxHp*0.004*e.stacks*e.potency/60)}},
+    tick(fight,holder,e){dotDamage(fight,holder,holder.maxHp*0.004*e.stacks*e.potency/60)}},
   // Reuses the existing STUNNED state handling in Fighter (50_fighter.js's act()/tick()) instead of a
   // second stun path, per the controller ruling: onApply just arms holder.stun/holder.state exactly
   // like Fight.resolve's own parry branch already does for PARRY_STUN (60_fight.js). No `tick` hook of
@@ -87,7 +100,7 @@ const EFFECTS={
   // smaller per-stack rate (0.3%/s vs bleed's 0.4%/s) and a lower cap (3 vs bleed's 5), mirroring
   // regen's own dur:300/maxStacks:3 shape rather than bleed's dur:180/maxStacks:5.
   poison:{id:'poison',dur:300,maxStacks:3,
-    tick(fight,holder,e){holder.hp=Math.max(0,holder.hp-holder.maxHp*0.003*e.stacks*e.potency/60)}},
+    tick(fight,holder,e){dotDamage(fight,holder,holder.maxHp*0.003*e.stacks*e.potency/60)}},
   // Task 9.1 (frozen interface, exact values): armorUp -- Mongo's Doorway Denial s3 (Task 9.3) applies
   // this to himself (target:'self' in the move's own `applies` entry). Same armorDelta accumulator
   // armorBreak already reads in Fight.resolve, just the opposite sign (a positive buff instead of a

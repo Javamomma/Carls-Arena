@@ -1048,7 +1048,10 @@ Test.add('sim files contain no DOM or presentation identifiers',()=>{
   const BUFF_PURITY=/document|canvas|Audio\.|FX\.|Render\.|Stage\.|Tutorial\.|Screens\.|G\./;
   for(const id in BUFFS){
     const b=BUFFS[id];
-    for(const hook of['onFrame','onHit','onBlock'])
+    // Fix round 1: 'onDot' joins the checked hook list -- BUFFS.tutorialGuard's new hook (47_buffs.js,
+    // Task 9.1 fix round 1), called from Effects.tick's dotDamage helper (48_effects.js) to cap a DOT
+    // tick the same way onHit already caps a landed special.
+    for(const hook of['onFrame','onHit','onBlock','onDot'])
       if(b[hook])ok(!BUFF_PURITY.test(b[hook].toString()),'BUFFS.'+id+'.'+hook+' must stay presentation-free')}});
 Test.add('FX and camera advance per tick, not per render',()=>{
   G.startFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
@@ -3868,6 +3871,11 @@ Test.add('lesson 4: the dummy survives the special with hp>=1, then a real follo
   eq(G.fight.p1.state,'IDLE','sanity: the special must have run its own move out to completion');
   ok(G.fight.p2.hp>=1,'the dummy must survive the whole special with at least 1 hp');
   eq(G.fight.p2.guardActive,false,'guardActive must have cleared once the special ended');
+  // Fix round 1: carl's real S1 now carries a real kit flag (applies:[{bleed,1,on:'last'}]) --
+  // confirms it actually fired in this live tutorial fight, and that BUFFS.tutorialGuard's new onDot
+  // hook (47_buffs.js) is what kept the guarded dummy from being bled below hp 1 while it was still
+  // guarded (see the two dedicated onDot/dotDamage tests above).
+  ok(Effects.has(G.fight.p2,'bleed'),'carl\'s S1 last hit must have applied bleed to the dummy');
   G.fight.p1.ctrl=Ctrl.script([L(0,600)]);
   for(let i=0;i<600&&G.state!=='RESULT';i++)G.tick();
   eq(G.state,'RESULT','a real follow-up light chain must finish the dummy for a genuine FINISH HIM KO');
@@ -3918,6 +3926,32 @@ Test.add('a hit actually capped by BUFFS.tutorialGuard sets ref.capped, and Figh
     'a capped hit must push a muted popup fx: '+JSON.stringify(calls.filter(e=>e.kind==='popup')));
   ok(G.fight.p2.hp>=1,'the dummy must never have actually dropped below 1 hp from the capped hit');
   G.toTitle();G.sim=false});
+// Fix round 1 (Task 9.1, controller ruling): BUFFS.tutorialGuard's new onDot hook, and dotDamage's own
+// generic routing (48_effects.js) -- a guarded holder's bleed/poison DOT ticks must be capped at hp-1
+// the exact same way a landed special's onHit damage already is.
+Test.add('BUFFS.tutorialGuard.onDot caps a DOT tick at hp-1, mirroring onHit -- no effect-id special-casing',()=>{
+  const capped={hp:5,guardActive:true};
+  const ref1={dmg:20};
+  BUFFS.tutorialGuard.onDot(null,capped,capped,ref1,capped);
+  eq(ref1.dmg,4,'must cap to hp-1');ok(ref1.capped);
+  const notCapped={hp:500,guardActive:true};
+  const ref2={dmg:20};
+  BUFFS.tutorialGuard.onDot(null,notCapped,notCapped,ref2,notCapped);
+  eq(ref2.dmg,20,'no cap when the tick genuinely fits under current hp');ok(!ref2.capped);
+  const unguarded={hp:5,guardActive:false};
+  const ref3={dmg:20};
+  BUFFS.tutorialGuard.onDot(null,unguarded,unguarded,ref3,unguarded);
+  eq(ref3.dmg,20,'no cap at all once guardActive is false')});
+Test.add('a guarded dummy at 1 hp with 3 bleed stacks stays at 1 hp for 300 frames (DOT capped, not KO\'d)',()=>{
+  const f=mkFight();f.p2.hp=1;f.p2.guardActive=true;Buffs.apply(f,f.p2,['tutorialGuard']);
+  Effects.apply(f,f.p2,'bleed',{stacks:3});
+  run(f,300);
+  eq(f.p2.hp,1,'a guarded holder\'s hp must never drop below 1 from a DOT tick, for the whole 300-frame window (bleed\'s own 180f duration included)')});
+Test.add('the same fighter, unguarded, genuinely loses hp to the same 3 bleed stacks',()=>{
+  const f=mkFight();f.p2.hp=1000;
+  Effects.apply(f,f.p2,'bleed',{stacks:3});
+  run(f,60);
+  ok(f.p2.hp<1000,'an unguarded holder must actually take bleed damage -- the cap is guardActive-gated, not a blanket floor')});
 Test.add('a muted popup always renders grey, regardless of what color it was pushed with',()=>{
   FX.reset();
   FX.push({kind:'popup',x:1,y:1,text:'4',col:'#ff4444',big:true,muted:true});
@@ -4370,14 +4404,48 @@ Test.add('move data applies:[{...,on:"last"}] fires exactly once, only on the mo
   eq(f.log.filter(e=>e.type==='hit'&&e.who===1).length,MOVES.s1.hits,'every sub-hit of the 3-hit s1 must land');
   eq(Effects.stacks(f.p2,'bleed'),1,'bleed must have applied exactly once, not once per sub-hit')});
 // --- Task 9.1: the same behaviors, exercised through the real kit moves they actually landed on ---
-Test.add('donut\'s real S2 Regal Pounce (unblockable) lands every sub-hit through a held block for full damage, with an UNBLOCKABLE popup',()=>{
+// Fix round 1 (controller ruling): the kit line is "S2 Regal Pounce 5 hits, LAST unblockable" -- donut's
+// own moves.s2 is now unblockable:'last' (only the move's own final sub-hit skips the block branch),
+// not the whole-move `true` MOVES.s3 keeps. Sub-hit 1 genuinely blocks (chip) under a continuous hold;
+// sub-hits 2-4 land as plain unblocked hits too, but NOT because of this flag -- MOVES.s2's own
+// blockstun (10) exactly equals its sub-hit period (active+gap=10), the same pre-existing timing
+// coincidence the task report's Deviation 6 already documents for carl's Boot Party (BLOCKSTUN clears
+// on the very frame the next sub-hit's hitbox goes active, one frame ahead of Fighter.act's next chance
+// to re-enter BLOCK; a landed unblocked hit then leaves the defender in the longer HITSTUN, which isn't
+// "blocking" either, so the cascade continues for the rest of the move). The real-move test below only
+// checks what this flag itself controls (the total block count, proving 'last' isn't whole-move
+// `true`); the synthetic-move test right after it proves "sub-hits before the last genuinely block,
+// and the final one forces through WITH the UNBLOCKABLE popup" cleanly, with a generous blockstun that
+// isn't subject to that coincidence -- under real MOVES.s2 timing, sub-hits 2-5 all land while the
+// defender is already in HITSTUN (knocked there by sub-hit 2's own "leaked" unblocked landing), so
+// `blocking` reads false at detect() time for the real final hit too, same as sub-hits 2-4 -- it lands
+// unblocked because the defender genuinely isn't blocking anymore, not because unblockable:'last'
+// forced it through an active block. No UNBLOCKABLE popup is expected here for that reason; the
+// synthetic test is what actually proves the popup fires on a truly forced-through final hit.
+Test.add('donut\'s real S2 Regal Pounce (unblockable:"last") does not bypass EVERY sub-hit\'s block, unlike a whole-move unblockable:true',()=>{
   const f=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;
   run(f,90);
   const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
-  eq(hits.length,5,'Regal Pounce is a 5-hit special; unblockable ignores the block branch entirely, not just the last hit');
-  ok(!f.log.some(e=>e.type==='block'&&e.who===1),'no sub-hit should resolve as a block event');
-  ok(f.fx.some(x=>x.kind==='popup'&&x.text==='UNBLOCKABLE'),'an UNBLOCKABLE popup must be queued');
+  const blocks=f.log.filter(e=>e.type==='block'&&e.who===1);
+  eq(hits.length+blocks.length,5,'Regal Pounce is a 5-hit special -- every sub-hit resolves as either a hit or a block');
+  ok(blocks.length>=1&&blocks.length<5,'unblockable:"last" must not bypass EVERY sub-hit -- at least the first genuinely blocks, and not all 5 do');
   eq(f.p2.state,'KNOCKDOWN','base MOVES.s2 still carries knockdown:true on its own last hit')});
+Test.add('unblockable:"last" (synthetic move, generous blockstun so every sub-hit genuinely blocks): sub-hits before the last block normally, only the final one forces through',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{s1:{unblockable:'last',blockstun:200}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([{f:0,intent:{special:1}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=100;
+  run(f,60);
+  const events=f.log.filter(e=>e.who===1&&(e.type==='block'||e.type==='hit'));
+  eq(events.length,MOVES.s1.hits,'every sub-hit of the 3-hit s1 must resolve');
+  eq(events.filter(e=>e.type==='block').length,MOVES.s1.hits-1,'every sub-hit except the last must genuinely block');
+  eq(events[events.length-1].type,'hit','the final sub-hit must force through as an unblocked hit');
+  ok(f.fx.some(x=>x.kind==='popup'&&x.text==='UNBLOCKABLE'),'an UNBLOCKABLE popup must be queued for the forced-through final hit')});
+Test.add('unblockable:true (synthetic move) still skips the block branch on EVERY sub-hit, unlike "last" (regression lock on the whole-move case)',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{s1:{unblockable:true,blockstun:200}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([{f:0,intent:{special:1}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=100;
+  run(f,60);
+  const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
+  eq(hits.length,MOVES.s1.hits,'every sub-hit of the 3-hit s1 must land as an unblocked hit');
+  ok(!f.log.some(e=>e.type==='block'&&e.who===1),'no sub-hit should resolve as a block event -- unblockable:true is whole-move, unchanged from before this fix round')});
 // Note: MOVES.s2's own blockstun (10) exactly equals its sub-hit period (active+gap=10), so a
 // continuously-held block only actually catches the FIRST sub-hit as a real 'block' event -- BLOCKSTUN
 // clears (Fighter.tick) on the very frame the next sub-hit's hitbox goes active, and Fighter.act (which
@@ -4443,11 +4511,13 @@ Test.add('mongo\'s real S3 Doorway Denial applies armorUp to himself (target:"se
   eq(Effects.stacks(f.p2,'armorUp'),0,'never on the foe')});
 Test.add('Phase 9 kit flags landed on real move data exactly where hit counts already matched the kit table (data lock)',()=>{
   const cH=CHAMPS.carl.moves.heavy.applies[0];eq(cH.id,'armorBreak');eq(cH.stacks,2);eq(cH.on,'hit');
-  ok(!CHAMPS.carl.moves.s1,'carl S1\'s kit bleed does not land on real data -- it collides with the Task 5.3 tutorial\'s guarded dummy (see the task report\'s Deviations section)');
+  // Fix round 1: carl S1's own bleed now lands, since BUFFS.tutorialGuard's new onDot hook (below)
+  // caps a bleed DOT the same way its onHit already caps a landed special.
+  const cS1=CHAMPS.carl.moves.s1.applies[0];eq(cS1.id,'bleed');eq(cS1.stacks,1);eq(cS1.on,'last');
   eq(CHAMPS.carl.moves.s2.refundOnBlock,20);
   const cS3=CHAMPS.carl.moves.s3.applies[0];eq(cS3.id,'stun');eq(cS3.stacks,1);eq(cS3.on,'last');
   const dH=CHAMPS.donut.moves.heavy.applies[0];eq(dH.id,'powerBurn');eq(dH.potency,30);eq(dH.on,'hit');
-  eq(CHAMPS.donut.moves.s2.unblockable,true);
+  eq(CHAMPS.donut.moves.s2.unblockable,'last','fix round 1: last-sub-hit-only, not the whole-move true');
   ok(!CHAMPS.donut.moves.s1,'donut S1\'s kit hit count (5) does not match base MOVES.s1 (3) yet -- no flag lands until Task 9.3 resizes it');
   ok(!CHAMPS.donut.moves.s3,'donut S3\'s kit hit count (6) does not match base MOVES.s3 (4) yet -- no flag lands until Task 9.3 resizes it');
   eq(CHAMPS.katia.moves.s1.hits,5,'katia\'s own pre-existing s1 override, untouched');

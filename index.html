@@ -1632,16 +1632,13 @@ const CHAMPS={
     // Party (base MOVES.s2 hits:5, matches) refunds 20 power when blocked; s3 Doorway Drop (base
     // MOVES.s3 hits:4, matches) last hit stuns -- the kit table's own "120f" duration is EFFECTS.
     // stun's frozen 60f here (see the header comment above and the task report).
-    // Deviation (task report): s1 Two-Fisted's own kit line ("3 hits, last->bleed 1") is NOT landed
-    // here despite matching base MOVES.s1's hit count -- carl's s1 is the exact special the Task 5.3
-    // tutorial (src/80_game.js's G.startTutorial + BUFFS.tutorialGuard, 47_buffs.js, neither in this
-    // task's file scope) fires against its guarded, "cannot be KO'd" dummy. tutorialGuard only caps
-    // the special's own onHit damage inside Fight.resolve; a bleed stack's own DOT (Effects.tick,
-    // 48_effects.js) subtracts the dummy's hp directly, bypassing that cap entirely, and could push
-    // the guarded dummy to 0 hp mid-tutorial. Flagged for the controller/a later task to resolve
-    // (extend tutorialGuard, or have the tutorial script a different special) rather than silently
-    // shipping a tutorial-breaking real-data flag from this one.
+    // s1 Two-Fisted (base MOVES.s1 hits:3, matches) last hit bleeds 1 -- fix round 1: previously
+    // withheld (see the task report's original Deviations section) because a bleed DOT tick bypassed
+    // BUFFS.tutorialGuard's onHit cap and could bleed the tutorial's guarded dummy past hp-1;
+    // tutorialGuard now also caps DOT ticks (47_buffs.js's new onDot hook, read generically through
+    // Effects.tick's dotDamage helper, 48_effects.js), so this lands on real data now.
     moves:{heavy:{applies:[{id:'armorBreak',stacks:2,on:'hit'}]},
+      s1:{applies:[{id:'bleed',stacks:1,on:'last'}]},
       s2:{refundOnBlock:20},
       s3:{applies:[{id:'stun',stacks:1,on:'last'}]}}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
@@ -1651,8 +1648,12 @@ const CHAMPS={
     // heavy burns 30 power (single-hit, matches); s2 Regal Pounce (base MOVES.s2 hits:5, matches) is
     // unblockable. S1 Hairball (kit: 5 hits) and S3 Sponsor Meltdown (kit: 6 hits) don't match base
     // MOVES.s1/s3's own hit counts (3/4) yet, so they carry nothing here -- Task 9.3 resizes them.
+    // Fix round 1 (controller ruling): the kit line reads "5 hits, LAST unblockable" -- s2 now sets
+    // move.unblockable:'last' (only the move's own final sub-hit skips the block branch; sub-hits 1-4
+    // still block normally, chip+blockstun) instead of the whole-move `true` every other unblockable
+    // move (base MOVES.s3) keeps. See Fight.detect's own comment (60_fight.js) for the two-value flag.
     moves:{heavy:{applies:[{id:'powerBurn',stacks:1,potency:30,on:'hit'}]},
-      s2:{unblockable:true}}},
+      s2:{unblockable:'last'}}},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blade',
     // s1 Knife Work already overridden to 5 hits (pre-Phase-9) -- matches the kit table verbatim, so
     // each landed hit now also bleeds 1. s2 Misdirection (base MOVES.s2 hits:5, matches) crits every
@@ -2019,7 +2020,32 @@ const BUFFS={
     onHit(fight,att,def,ref,holder){
       if(holder!==def)return; // only ever meaningful for the dummy defending, never attacking
       if(!holder.guardActive)return; // FINISH HIM already fired (or this holder was never guarded): no cap
-      if(ref.dmg>=holder.hp){ref.dmg=Math.max(0,holder.hp-1);ref.capped=true}}}};
+      if(ref.dmg>=holder.hp){ref.dmg=Math.max(0,holder.hp-1);ref.capped=true}},
+    // Fix round 1 (Task 9.1, controller ruling): a landed special's own onHit cap (above) never
+    // covered a DOT tick (bleed/poison) applied by that same special -- Effects.tick's own hp
+    // subtraction ran entirely outside Fight.resolve's ref/onHit pipeline, so a guarded, "cannot be
+    // KO'd" dummy could still be bled/poisoned to 0 mid-tutorial. dotDamage (48_effects.js) now routes
+    // every tick hook's own damage through this SAME buff-hook mechanism under a new kind, 'onDot' --
+    // called with holder passed as both att and def (a DOT is self-inflicted, no separate attacker),
+    // so the `holder!==def` guard above still reads correctly here too. Deliberately identical cap
+    // logic to onHit, and deliberately ignorant of which effect id produced ref.dmg -- bleed, poison,
+    // or any later id that ever routes through dotDamage all get the exact same treatment, no
+    // per-effect special-casing in this buff.
+    // Fix round 1 note: NOT onHit's own `ref.dmg>=holder.hp` gate verbatim -- that gate only fires
+    // when a single application would meet/exceed the CURRENT hp outright (fine for one lump onHit
+    // hit, which is either clearly lethal-sized or clearly isn't), but a DOT tick's own per-frame
+    // amount is tiny by design (bleed at 3 stacks is ~0.2 hp/frame against a 1000-maxHp fighter) --
+    // reusing that exact gate would let hundreds of small, individually-"not lethal" ticks creep the
+    // guarded holder's hp down through 0.8, 0.6, 0.4... one frame at a time, never tripping the gate
+    // until hp was already well under 1. The equivalent, correct floor check for a REPEATED small
+    // drain is "would THIS tick push hp under 1", not "is this ONE tick alone bigger than hp" --
+    // holder.hp-ref.dmg<1 -- which is what actually keeps a holder already sitting at (or above) the
+    // floor pinned there tick after tick, the "stays at 1 hp for 300 frames" the controller's own
+    // ruling asks for.
+    onDot(fight,att,def,ref,holder){
+      if(holder!==def)return;
+      if(!holder.guardActive)return;
+      if(holder.hp-ref.dmg<1){ref.dmg=Math.max(0,holder.hp-1);ref.capped=true}}}};
 
 const Buffs={
   // Resolves ids[] to BUFFS objects and sets holder.buffs (replacing whatever was there). Called
@@ -2049,9 +2075,22 @@ const Buffs={
 // Effects.apply) so a future move's applies:[{id,potency}] can hand out a stronger/weaker copy of the
 // same effect without a second EFFECTS entry; every number in the frozen Phase 7 interfaces list is
 // exactly what potency 1 (the only potency any test or existing move data ever passes) produces.
+// Fix round 1 (controller ruling, Task 9.1): shared helper every hp-reducing TICK hook (bleed,
+// poison) routes its damage through, instead of subtracting holder.hp directly -- mirrors
+// Fight.resolve's own onHit ref.dmg pattern (BUFFS.tutorialGuard's onHit caps ref.dmg there) with a
+// NEW buff-hook kind, 'onDot', so a guarded holder's DOT ticks get the exact same "cap at hp-1" cover
+// its main hits already get. Neither this helper nor the EFFECTS[id].tick hooks that call it know or
+// care whether any buff is listening -- fight.buffHook('onDot',...) is a no-op for a holder with no
+// buffs (or none that implement onDot), same as every other buffHook call site. BUFFS.tutorialGuard's
+// own onDot hook (47_buffs.js) is the only thing that reads holder.guardActive; this file stays fully
+// generic, never special-casing bleed vs poison vs any later id that reuses this helper.
+function dotDamage(fight,holder,amount){
+  const ref={dmg:amount};
+  fight.buffHook('onDot',holder,holder,holder,ref);
+  holder.hp=Math.max(0,holder.hp-ref.dmg)}
 const EFFECTS={
   bleed:{id:'bleed',dur:180,maxStacks:5,
-    tick(fight,holder,e){holder.hp=Math.max(0,holder.hp-holder.maxHp*0.004*e.stacks*e.potency/60)}},
+    tick(fight,holder,e){dotDamage(fight,holder,holder.maxHp*0.004*e.stacks*e.potency/60)}},
   // Reuses the existing STUNNED state handling in Fighter (50_fighter.js's act()/tick()) instead of a
   // second stun path, per the controller ruling: onApply just arms holder.stun/holder.state exactly
   // like Fight.resolve's own parry branch already does for PARRY_STUN (60_fight.js). No `tick` hook of
@@ -2120,7 +2159,7 @@ const EFFECTS={
   // smaller per-stack rate (0.3%/s vs bleed's 0.4%/s) and a lower cap (3 vs bleed's 5), mirroring
   // regen's own dur:300/maxStacks:3 shape rather than bleed's dur:180/maxStacks:5.
   poison:{id:'poison',dur:300,maxStacks:3,
-    tick(fight,holder,e){holder.hp=Math.max(0,holder.hp-holder.maxHp*0.003*e.stacks*e.potency/60)}},
+    tick(fight,holder,e){dotDamage(fight,holder,holder.maxHp*0.003*e.stacks*e.potency/60)}},
   // Task 9.1 (frozen interface, exact values): armorUp -- Mongo's Doorway Denial s3 (Task 9.3) applies
   // this to himself (target:'self' in the move's own `applies` entry). Same armorDelta accumulator
   // armorBreak already reads in Fight.resolve, just the opposite sign (a positive buff instead of a
@@ -2916,7 +2955,13 @@ class Fight{
     const blocking=def.state==='BLOCK'||def.state==='BLOCKSTUN';
     // unblockableSpecials: the attacker's special (m.cost is only set on s1/s2/s3) ignores block if
     // the attacker holds the buff, same treatment as MOVES.s3's own m.unblockable flag.
-    const unblockable=m.unblockable||(m.cost&&att.buffs&&att.buffs.some(b=>b.id==='unblockableSpecials'));
+    // Fix round 1 (controller ruling): m.unblockable is now two-valued -- `true` (base MOVES.s3, and
+    // any future whole-move case) bypasses block on every sub-hit, unchanged from before this task;
+    // `'last'` (donut's own S2 Regal Pounce) bypasses ONLY the move's own final sub-hit -- sub-hits
+    // 1-4 still resolve as a normal block (chip + blockstun) below. Reuses the exact same `last`
+    // sub-hit predicate hitstop/on:'last' already read (computed unconditionally above).
+    const unblockable=m.unblockable===true||(m.unblockable==='last'&&last)||
+      (m.cost&&att.buffs&&att.buffs.some(b=>b.id==='unblockableSpecials'));
     if(blocking&&!unblockable){
       // Task 5.2: def.parryBonus (Sponsor perk "Parry Insurance", 0 for everyone else) widens the
       // window by that many frames -- see Fighter.act's own parryLock-arming comment (50_fighter.js)
@@ -2928,10 +2973,9 @@ class Fight{
       // multi-hit bonus (push/knockdown/hitstop) already gets.
       return{type:'block',att,def,idx,m,last}}
     // Task 9.1: `forcedThroughBlock` records that def WAS actually blocking when this hit's own
-    // move.unblockable (or the unblockableSpecials buff) bypassed the block branch entirely -- a bare
-    // fact for resolve()'s hit branch to read (no behavior change here: m.unblockable already ignores
-    // block unconditionally for the whole move, exactly as before this task); resolve() uses it only to
-    // decide whether to queue the presentation-only UNBLOCKABLE popup.
+    // move.unblockable (whole-move `true`, this-sub-hit-only `'last'`, or the unblockableSpecials
+    // buff) bypassed the block branch entirely -- a bare fact for resolve()'s hit branch to read;
+    // resolve() uses it only to decide whether to queue the presentation-only UNBLOCKABLE popup.
     return{type:'hit',att,def,idx,m,last,forcedThroughBlock:blocking&&unblockable}}
   // Task 7.2: the landed move's own effective per-node damage -- MOVES.light/medium each carry a
   // chainDmg[] indexed by chainNode (1..CHAIN.nodes), the frozen node multiplier table; every other
@@ -10358,7 +10402,10 @@ Test.add('sim files contain no DOM or presentation identifiers',()=>{
   const BUFF_PURITY=/document|canvas|Audio\.|FX\.|Render\.|Stage\.|Tutorial\.|Screens\.|G\./;
   for(const id in BUFFS){
     const b=BUFFS[id];
-    for(const hook of['onFrame','onHit','onBlock'])
+    // Fix round 1: 'onDot' joins the checked hook list -- BUFFS.tutorialGuard's new hook (47_buffs.js,
+    // Task 9.1 fix round 1), called from Effects.tick's dotDamage helper (48_effects.js) to cap a DOT
+    // tick the same way onHit already caps a landed special.
+    for(const hook of['onFrame','onHit','onBlock','onDot'])
       if(b[hook])ok(!BUFF_PURITY.test(b[hook].toString()),'BUFFS.'+id+'.'+hook+' must stay presentation-free')}});
 Test.add('FX and camera advance per tick, not per render',()=>{
   G.startFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
@@ -13178,6 +13225,11 @@ Test.add('lesson 4: the dummy survives the special with hp>=1, then a real follo
   eq(G.fight.p1.state,'IDLE','sanity: the special must have run its own move out to completion');
   ok(G.fight.p2.hp>=1,'the dummy must survive the whole special with at least 1 hp');
   eq(G.fight.p2.guardActive,false,'guardActive must have cleared once the special ended');
+  // Fix round 1: carl's real S1 now carries a real kit flag (applies:[{bleed,1,on:'last'}]) --
+  // confirms it actually fired in this live tutorial fight, and that BUFFS.tutorialGuard's new onDot
+  // hook (47_buffs.js) is what kept the guarded dummy from being bled below hp 1 while it was still
+  // guarded (see the two dedicated onDot/dotDamage tests above).
+  ok(Effects.has(G.fight.p2,'bleed'),'carl\'s S1 last hit must have applied bleed to the dummy');
   G.fight.p1.ctrl=Ctrl.script([L(0,600)]);
   for(let i=0;i<600&&G.state!=='RESULT';i++)G.tick();
   eq(G.state,'RESULT','a real follow-up light chain must finish the dummy for a genuine FINISH HIM KO');
@@ -13228,6 +13280,32 @@ Test.add('a hit actually capped by BUFFS.tutorialGuard sets ref.capped, and Figh
     'a capped hit must push a muted popup fx: '+JSON.stringify(calls.filter(e=>e.kind==='popup')));
   ok(G.fight.p2.hp>=1,'the dummy must never have actually dropped below 1 hp from the capped hit');
   G.toTitle();G.sim=false});
+// Fix round 1 (Task 9.1, controller ruling): BUFFS.tutorialGuard's new onDot hook, and dotDamage's own
+// generic routing (48_effects.js) -- a guarded holder's bleed/poison DOT ticks must be capped at hp-1
+// the exact same way a landed special's onHit damage already is.
+Test.add('BUFFS.tutorialGuard.onDot caps a DOT tick at hp-1, mirroring onHit -- no effect-id special-casing',()=>{
+  const capped={hp:5,guardActive:true};
+  const ref1={dmg:20};
+  BUFFS.tutorialGuard.onDot(null,capped,capped,ref1,capped);
+  eq(ref1.dmg,4,'must cap to hp-1');ok(ref1.capped);
+  const notCapped={hp:500,guardActive:true};
+  const ref2={dmg:20};
+  BUFFS.tutorialGuard.onDot(null,notCapped,notCapped,ref2,notCapped);
+  eq(ref2.dmg,20,'no cap when the tick genuinely fits under current hp');ok(!ref2.capped);
+  const unguarded={hp:5,guardActive:false};
+  const ref3={dmg:20};
+  BUFFS.tutorialGuard.onDot(null,unguarded,unguarded,ref3,unguarded);
+  eq(ref3.dmg,20,'no cap at all once guardActive is false')});
+Test.add('a guarded dummy at 1 hp with 3 bleed stacks stays at 1 hp for 300 frames (DOT capped, not KO\'d)',()=>{
+  const f=mkFight();f.p2.hp=1;f.p2.guardActive=true;Buffs.apply(f,f.p2,['tutorialGuard']);
+  Effects.apply(f,f.p2,'bleed',{stacks:3});
+  run(f,300);
+  eq(f.p2.hp,1,'a guarded holder\'s hp must never drop below 1 from a DOT tick, for the whole 300-frame window (bleed\'s own 180f duration included)')});
+Test.add('the same fighter, unguarded, genuinely loses hp to the same 3 bleed stacks',()=>{
+  const f=mkFight();f.p2.hp=1000;
+  Effects.apply(f,f.p2,'bleed',{stacks:3});
+  run(f,60);
+  ok(f.p2.hp<1000,'an unguarded holder must actually take bleed damage -- the cap is guardActive-gated, not a blanket floor')});
 Test.add('a muted popup always renders grey, regardless of what color it was pushed with',()=>{
   FX.reset();
   FX.push({kind:'popup',x:1,y:1,text:'4',col:'#ff4444',big:true,muted:true});
@@ -13680,14 +13758,48 @@ Test.add('move data applies:[{...,on:"last"}] fires exactly once, only on the mo
   eq(f.log.filter(e=>e.type==='hit'&&e.who===1).length,MOVES.s1.hits,'every sub-hit of the 3-hit s1 must land');
   eq(Effects.stacks(f.p2,'bleed'),1,'bleed must have applied exactly once, not once per sub-hit')});
 // --- Task 9.1: the same behaviors, exercised through the real kit moves they actually landed on ---
-Test.add('donut\'s real S2 Regal Pounce (unblockable) lands every sub-hit through a held block for full damage, with an UNBLOCKABLE popup',()=>{
+// Fix round 1 (controller ruling): the kit line is "S2 Regal Pounce 5 hits, LAST unblockable" -- donut's
+// own moves.s2 is now unblockable:'last' (only the move's own final sub-hit skips the block branch),
+// not the whole-move `true` MOVES.s3 keeps. Sub-hit 1 genuinely blocks (chip) under a continuous hold;
+// sub-hits 2-4 land as plain unblocked hits too, but NOT because of this flag -- MOVES.s2's own
+// blockstun (10) exactly equals its sub-hit period (active+gap=10), the same pre-existing timing
+// coincidence the task report's Deviation 6 already documents for carl's Boot Party (BLOCKSTUN clears
+// on the very frame the next sub-hit's hitbox goes active, one frame ahead of Fighter.act's next chance
+// to re-enter BLOCK; a landed unblocked hit then leaves the defender in the longer HITSTUN, which isn't
+// "blocking" either, so the cascade continues for the rest of the move). The real-move test below only
+// checks what this flag itself controls (the total block count, proving 'last' isn't whole-move
+// `true`); the synthetic-move test right after it proves "sub-hits before the last genuinely block,
+// and the final one forces through WITH the UNBLOCKABLE popup" cleanly, with a generous blockstun that
+// isn't subject to that coincidence -- under real MOVES.s2 timing, sub-hits 2-5 all land while the
+// defender is already in HITSTUN (knocked there by sub-hit 2's own "leaked" unblocked landing), so
+// `blocking` reads false at detect() time for the real final hit too, same as sub-hits 2-4 -- it lands
+// unblocked because the defender genuinely isn't blocking anymore, not because unblockable:'last'
+// forced it through an active block. No UNBLOCKABLE popup is expected here for that reason; the
+// synthetic test is what actually proves the popup fires on a truly forced-through final hit.
+Test.add('donut\'s real S2 Regal Pounce (unblockable:"last") does not bypass EVERY sub-hit\'s block, unlike a whole-move unblockable:true',()=>{
   const f=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;
   run(f,90);
   const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
-  eq(hits.length,5,'Regal Pounce is a 5-hit special; unblockable ignores the block branch entirely, not just the last hit');
-  ok(!f.log.some(e=>e.type==='block'&&e.who===1),'no sub-hit should resolve as a block event');
-  ok(f.fx.some(x=>x.kind==='popup'&&x.text==='UNBLOCKABLE'),'an UNBLOCKABLE popup must be queued');
+  const blocks=f.log.filter(e=>e.type==='block'&&e.who===1);
+  eq(hits.length+blocks.length,5,'Regal Pounce is a 5-hit special -- every sub-hit resolves as either a hit or a block');
+  ok(blocks.length>=1&&blocks.length<5,'unblockable:"last" must not bypass EVERY sub-hit -- at least the first genuinely blocks, and not all 5 do');
   eq(f.p2.state,'KNOCKDOWN','base MOVES.s2 still carries knockdown:true on its own last hit')});
+Test.add('unblockable:"last" (synthetic move, generous blockstun so every sub-hit genuinely blocks): sub-hits before the last block normally, only the final one forces through',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{s1:{unblockable:'last',blockstun:200}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([{f:0,intent:{special:1}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=100;
+  run(f,60);
+  const events=f.log.filter(e=>e.who===1&&(e.type==='block'||e.type==='hit'));
+  eq(events.length,MOVES.s1.hits,'every sub-hit of the 3-hit s1 must resolve');
+  eq(events.filter(e=>e.type==='block').length,MOVES.s1.hits-1,'every sub-hit except the last must genuinely block');
+  eq(events[events.length-1].type,'hit','the final sub-hit must force through as an unblocked hit');
+  ok(f.fx.some(x=>x.kind==='popup'&&x.text==='UNBLOCKABLE'),'an UNBLOCKABLE popup must be queued for the forced-through final hit')});
+Test.add('unblockable:true (synthetic move) still skips the block branch on EVERY sub-hit, unlike "last" (regression lock on the whole-move case)',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{s1:{unblockable:true,blockstun:200}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([{f:0,intent:{special:1}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=100;
+  run(f,60);
+  const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
+  eq(hits.length,MOVES.s1.hits,'every sub-hit of the 3-hit s1 must land as an unblocked hit');
+  ok(!f.log.some(e=>e.type==='block'&&e.who===1),'no sub-hit should resolve as a block event -- unblockable:true is whole-move, unchanged from before this fix round')});
 // Note: MOVES.s2's own blockstun (10) exactly equals its sub-hit period (active+gap=10), so a
 // continuously-held block only actually catches the FIRST sub-hit as a real 'block' event -- BLOCKSTUN
 // clears (Fighter.tick) on the very frame the next sub-hit's hitbox goes active, and Fighter.act (which
@@ -13753,11 +13865,13 @@ Test.add('mongo\'s real S3 Doorway Denial applies armorUp to himself (target:"se
   eq(Effects.stacks(f.p2,'armorUp'),0,'never on the foe')});
 Test.add('Phase 9 kit flags landed on real move data exactly where hit counts already matched the kit table (data lock)',()=>{
   const cH=CHAMPS.carl.moves.heavy.applies[0];eq(cH.id,'armorBreak');eq(cH.stacks,2);eq(cH.on,'hit');
-  ok(!CHAMPS.carl.moves.s1,'carl S1\'s kit bleed does not land on real data -- it collides with the Task 5.3 tutorial\'s guarded dummy (see the task report\'s Deviations section)');
+  // Fix round 1: carl S1's own bleed now lands, since BUFFS.tutorialGuard's new onDot hook (below)
+  // caps a bleed DOT the same way its onHit already caps a landed special.
+  const cS1=CHAMPS.carl.moves.s1.applies[0];eq(cS1.id,'bleed');eq(cS1.stacks,1);eq(cS1.on,'last');
   eq(CHAMPS.carl.moves.s2.refundOnBlock,20);
   const cS3=CHAMPS.carl.moves.s3.applies[0];eq(cS3.id,'stun');eq(cS3.stacks,1);eq(cS3.on,'last');
   const dH=CHAMPS.donut.moves.heavy.applies[0];eq(dH.id,'powerBurn');eq(dH.potency,30);eq(dH.on,'hit');
-  eq(CHAMPS.donut.moves.s2.unblockable,true);
+  eq(CHAMPS.donut.moves.s2.unblockable,'last','fix round 1: last-sub-hit-only, not the whole-move true');
   ok(!CHAMPS.donut.moves.s1,'donut S1\'s kit hit count (5) does not match base MOVES.s1 (3) yet -- no flag lands until Task 9.3 resizes it');
   ok(!CHAMPS.donut.moves.s3,'donut S3\'s kit hit count (6) does not match base MOVES.s3 (4) yet -- no flag lands until Task 9.3 resizes it');
   eq(CHAMPS.katia.moves.s1.hits,5,'katia\'s own pre-existing s1 override, untouched');
