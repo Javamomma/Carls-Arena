@@ -94,34 +94,64 @@ const CHAMPS={
       s3:{applies:[{id:'stun',stacks:1,on:'last'}]}},
     // Task 9.2: Spite -- see PASSIVES.spite (49_passives.js) for the actual numbers; this def only
     // ever carries the bare id, same split every other champion/boss passive below keeps.
-    passive:{id:'spite'}},
+    passive:{id:'spite'},
+    // Task 9.3: def.kitText = {sig,heavy,s1,s2,s3} -- short roster-card strings (85_screens.js), one
+    // per signature/heavy/special, sourced verbatim from the kit table's own move names above. Never
+    // read by the sim; presentation-only, same boundary CLS_GEM/sigEffect's own comments already draw.
+    kitText:{sig:'SPITE — below 40% HP, an uncapped Fury stack builds up every 3s',
+      heavy:'2 stacks of Armor Break',
+      s1:'TWO-FISTED (3 hits) — last hit Bleeds',
+      s2:'BOOT PARTY (5 hits) — a blocked hit refunds 20 power',
+      s3:'DOORWAY DROP (4 hits) — last hit guarantees a Stun'}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
   // and Rig.solve's 'quad' branch in 68_rig.js).
   donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',impact:'energy',
     sigEffect:{id:'weakness',stacks:1},
     // heavy burns 30 power (single-hit, matches); s2 Regal Pounce (base MOVES.s2 hits:5, matches) is
-    // unblockable. S1 Hairball (kit: 5 hits) and S3 Sponsor Meltdown (kit: 6 hits) don't match base
-    // MOVES.s1/s3's own hit counts (3/4) yet, so they carry nothing here -- Task 9.3 resizes them.
+    // unblockable.
     // Fix round 1 (controller ruling): the kit line reads "5 hits, LAST unblockable" -- s2 now sets
     // move.unblockable:'last' (only the move's own final sub-hit skips the block branch; sub-hits 1-4
     // still block normally, chip+blockstun) instead of the whole-move `true` every other unblockable
     // move (base MOVES.s3) keeps. See Fight.detect's own comment (60_fight.js) for the two-value flag.
+    // Task 9.3: S1 Hairball (kit: 5 hits, each hit poisons) and S3 Sponsor Meltdown (kit: 6 hits, each
+    // hit weakens) resize base MOVES.s1/s3 (3/4 hits) up to the kit table's own hit counts -- per the
+    // controller's ruling, total move damage stays within +-10% of the pre-resize total by adjusting
+    // per-hit dmg down to match: s1 3*1.5=4.5 -> 5*0.9=4.5 (0%); s3 4*3=12 -> 6*2.0=12 (0%). gap is
+    // trimmed alongside the extra hits (same "more hits, shorter gap" shape katia's own pre-Phase-9
+    // 5-hit s1 override and mother_rat's own 6-hit s3 override already use) so the move's own total
+    // active span doesn't balloon out of proportion to the added hit count. 68_rig.js needs no pose
+    // change: every pose is keyed by moveName alone (s1/s2/s3/heavy), never by hit count.
     moves:{heavy:{applies:[{id:'powerBurn',stacks:1,potency:30,on:'hit'}]},
-      s2:{unblockable:'last'}},
+      s1:{hits:5,gap:4,dmg:0.9,applies:[{id:'poison',stacks:1,on:'hit'}]},
+      s2:{unblockable:'last'},
+      s3:{hits:6,gap:5,dmg:2.0,applies:[{id:'weakness',stacks:1,on:'hit'}]}},
     // Task 9.2: Royal Disdain -- see PASSIVES.royalDisdain (49_passives.js).
-    passive:{id:'royalDisdain'}},
+    passive:{id:'royalDisdain'},
+    kitText:{sig:'ROYAL DISDAIN — every special she throws Weakens the foe (x2 if already debuffed)',
+      heavy:'Burns 30 power',
+      s1:'HAIRBALL (5 hits) — every hit Poisons',
+      s2:'REGAL POUNCE (5 hits) — last hit is Unblockable',
+      s3:'SPONSOR MELTDOWN (6 hits) — every hit Weakens'}},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blade',
     // s1 Knife Work already overridden to 5 hits (pre-Phase-9) -- matches the kit table verbatim, so
     // each landed hit now also bleeds 1. s2 Misdirection (base MOVES.s2 hits:5, matches) crits every
     // sub-hit. s3 Curtain Call (base MOVES.s3 hits:4, matches) last hit bleeds 3 and armor-breaks 1.
-    // Heavy's "refreshes every bleed stack's duration" isn't a flag this task's frozen interfaces
-    // cover (no move flag refreshes another effect's clock) -- left for a later task.
-    moves:{s1:{hits:5,gap:4,dmg:1.2,applies:[{id:'bleed',stacks:1,on:'hit'}]},
+    // Task 9.3: heavy's "refreshes every bleed stack's duration" isn't covered by the frozen applies/
+    // flag set (no move flag refreshes another effect's clock) -- move.refreshEffect is this task's
+    // own small addition (Effects.refresh, 48_effects.js; read in Fight.resolve's hit branch,
+    // 60_fight.js), a silent no-op if the foe isn't already bleeding.
+    moves:{heavy:{refreshEffect:'bleed'},
+      s1:{hits:5,gap:4,dmg:1.2,applies:[{id:'bleed',stacks:1,on:'hit'}]},
       s2:{critChance:1.0},
       s3:{applies:[{id:'bleed',stacks:3,on:'last'},{id:'armorBreak',stacks:1,on:'last'}]}},
     sigEffect:{id:'bleed',stacks:1},
     // Task 9.2: Understudy -- see PASSIVES.understudy (49_passives.js).
-    passive:{id:'understudy'}},
+    passive:{id:'understudy'},
+    kitText:{sig:'UNDERSTUDY — a successful parry grants +1 Crit Damage stack',
+      heavy:'Refreshes the duration of every Bleed stack already on the foe',
+      s1:'KNIFE WORK (5 hits) — every hit Bleeds',
+      s2:'MISDIRECTION (5 hits) — every hit is a guaranteed Crit',
+      s3:'CURTAIN CALL (4 hits) — last hit Bleeds x3 and Armor Breaks'}},
   // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
   mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',impact:'blunt',
     sigEffect:{id:'armorBreak',stacks:1},
@@ -135,7 +165,12 @@ const CHAMPS={
       s2:{healPct:0.30},
       s3:{applies:[{id:'armorUp',stacks:1,on:'last',target:'self'}]}},
     // Task 9.2: Immovable -- see PASSIVES.immovable (49_passives.js).
-    passive:{id:'immovable'}}};
+    passive:{id:'immovable'},
+    kitText:{sig:'IMMOVABLE — +1 Fury stack per 120 straight frames spent blocking, capped at 5',
+      heavy:'GROUND SLAM — knocks down even through a raised guard',
+      s1:'BACKHAND (3 hits) — last hit Stuns',
+      s2:'BEAR HUG (5 hits) — heals 30% of the damage each hit deals',
+      s3:'DOORWAY DENIAL (4 hits) — last hit grants himself Armor Up'}}};
 // Task 6.1, ruling 3 (playtest note: "Hobgoblin Brute is impossible to defeat" at floor 1 door 3,
 // level 1): goblin/skeleton hp raised and atk lowered exactly to the plan's given numbers (360/30,
 // 320/28) -- longer, safer early fights instead of fast trades a level-1 player can lose to a bad
@@ -201,20 +236,31 @@ const BOSSES={
   // competent's own sustained DPS roughly doubled (see 55_ai.js's own tier-gate retune comment for the
   // measured before/after) — the t4 AI_TIERS retune alone still left this boss at 40% (n=30), over the
   // 10-35% band; the atk bump alone (hp untouched) brings it back to 26.7% (n=30).
-  // Task 9.1: heavy Pillar Swing (single-hit, matches) armor-breaks the foe -- the kit line's own
-  // "longer reach: dash 40" is a move-shape change (not one of this task's flags), left for Task 9.3.
+  // Task 9.1: heavy Pillar Swing (single-hit, matches) armor-breaks the foe.
   // s3 Floor Wipe already overridden to 3 hits (pre-Phase-9) -- matches the kit table verbatim, so its
   // last hit now also weakens (kit's own "600f" duration is EFFECTS.weakness's frozen 480f here, same
   // "no per-call duration override" note as carl/mongo's own comments above). buffs:['armorUp'] is the
   // separate, pre-existing flat Buffs.apply system (47_buffs.js) -- a different id namespace from the
   // new EFFECTS.armorUp this task adds (mongo's own S3 grants that one to himself); unrelated, and this
   // boss's own long-standing buff is untouched.
+  // Task 9.3: the kit line's own "longer reach: dash 40" for Pillar Swing -- a move-shape change, not
+  // one of Task 9.1's flags -- is a plain m.dash:40 on grull's own heavy override. setupDash's own
+  // `else if(m.dash)` branch (50_fighter.js) already handles this generically for any move (every
+  // light/medium already uses it): startMove computes dashLeft/dashRate once at CHARGE-press time,
+  // but the dash movement itself is only ever consumed during the ATTACK phase's own tick() case (the
+  // CHARGE->ATTACK transition resets f to 0 first) -- so the 40px lunge plays out over the swing's own
+  // 8-frame startup right after release, not during the hold. No engine change needed.
   grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:50,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',impact:'blunt',
     boss:true,buffs:['armorUp'],
-    moves:{heavy:{applies:[{id:'armorBreak',stacks:1,on:'hit'}]},
+    moves:{heavy:{dash:40,applies:[{id:'armorBreak',stacks:1,on:'hit'}]},
       s3:{dmg:3.6,hits:3,gap:10,applies:[{id:'weakness',stacks:1,on:'last'}]}},
     // Task 9.2: Champion of the Floor -- see PASSIVES.championOfTheFloor (49_passives.js).
-    passive:{id:'championOfTheFloor'}},
+    passive:{id:'championOfTheFloor'},
+    kitText:{sig:'CHAMPION OF THE FLOOR — purifies every debuff and gains +3 Fury every 20s',
+      heavy:'PILLAR SWING — long reach, Armor Breaks',
+      s1:'3-hit flurry',
+      s2:'5-hit flurry',
+      s3:'FLOOR WIPE (3 hits) — last hit Weakens'}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
   // 47_buffs.js, since disabling it entirely still left her a 20/20 wall — her offense, not the
@@ -251,7 +297,12 @@ const BOSSES={
       s3:{dmg:2.4,hits:6,gap:5,healPct:0.02}},
     // Task 9.2: Brood -- see PASSIVES.brood (49_passives.js). The regen-tripling half lives in
     // BUFFS.regen's own onFrame (47_buffs.js), which checks this same passive id live.
-    passive:{id:'brood'}}};
+    passive:{id:'brood'},
+    kitText:{sig:'BROOD — below 50% HP, gains a power stack and regen triples',
+      heavy:'TAIL SWEEP — Bleeds x3',
+      s1:'3-hit flurry',
+      s2:'5-hit flurry',
+      s3:'SWARM (6 hits) — every hit heals 2% of the damage it deals'}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
 // Task 8.4 ruling: CLS_GEM maps a def's own cls (CHAMPS/MOBS/BOSSES above) to the portrait-frame

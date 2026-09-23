@@ -258,9 +258,23 @@ class Fight{
     // there). `target`:'self' redirects the apply onto the ATTACKER instead of the defender (mongo's S3
     // Doorway Denial applies its own armorUp to himself) -- defaults to the defender ('foe') when
     // omitted, same default the frozen interface's own sigEffect target already uses just below.
+    // Task 9.3 (carry-over from the 9.2 review): appliedIds collects the id of every applies entry
+    // that actually fired THIS landed hit -- a bare fact, same "sim passes plain data" boundary
+    // att.def.impact's own raw id string already keeps below -- so the impact fx push just past this
+    // loop can carry it through as `tags` for presentation (72_fx.js's IMPACTS registry) to resolve
+    // into a per-effect tint (bleed red, poison green, weakness violet) without this file needing to
+    // know a single color.
+    const appliedIds=[];
     if(m.applies)for(let i=0;i<m.applies.length;i++){const ap=m.applies[i];
-      if(ap.on==='hit'||(ap.on==='crit'&&crit)||(ap.on==='last'&&last))
-        Effects.apply(this,ap.target==='self'?att:def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
+      if(ap.on==='hit'||(ap.on==='crit'&&crit)||(ap.on==='last'&&last)){
+        Effects.apply(this,ap.target==='self'?att:def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att});
+        appliedIds.push(ap.id)}}
+    // Task 9.3 (bespoke mechanic outside the frozen applies/flag set, Katia's heavy Knife Sharpen:
+    // "refreshes every bleed stack's duration"): m.refreshEffect names an EFFECTS id whose clock (if
+    // the defender already holds it) is reset to its own full duration -- Effects.refresh
+    // (48_effects.js) is a silent no-op when the defender isn't already holding it, so this never
+    // creates a fresh effect out of nothing the way m.applies/Effects.apply would.
+    if(m.refreshEffect)Effects.refresh(def,m.refreshEffect);
     // Task 7.2: the in-combo heavy ender (m.sig:true, only ever true for CHAIN.enders.heavy's own
     // merged move data) fires the ATTACKER's own def.sigEffect once it lands -- a champion-signature
     // bonus effect (Carl fury targets himself; Donut weakness/Katia bleed/Mongo armorBreak all target
@@ -296,7 +310,11 @@ class Fight{
     // the fx descriptor, whatever that string is (even undefined, for some future def that forgets to
     // set one) -- the presentation-side FX object's own 'impact' push case is what resolves it,
     // falling back to blunt there.
-    this.fx.push({kind:'impact',id:att.def.impact,x:def.x,y:FLOOR-80,face:att.face});
+    // Task 9.3 (carry-over from the 9.2 review): `tags` rides along as the bare list of effect ids
+    // this landed hit's own applies just fired (built above) -- 72_fx.js's IMPACTS registry is the
+    // only place that turns any of bleed/poison/weakness into an actual tint color; every other id
+    // (or an empty list, the common case) leaves the impact fx at its usual per-class color.
+    this.fx.push({kind:'impact',id:att.def.impact,x:def.x,y:FLOOR-80,face:att.face,tags:appliedIds});
     // Task 6.4: BUFFS.tutorialGuard (47_buffs.js) sets ref.capped=true the instant it actually
     // clamped this hit's dmg -- forwarded onto the popup fx as `muted`, which FX/Render draw grey
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.

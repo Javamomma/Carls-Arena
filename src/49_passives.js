@@ -32,8 +32,16 @@ const Passives={
   // own emitEffect) and a bare {kind:'passiveBanner'} fx descriptor (presentation-only; 72_fx.js is
   // the only place that turns it into the actual 22px gold-italic/class-gem banner -- same "sim
   // pushes plain data, FX styles it" split Effects.apply's own effectPopup push already uses).
-  _fire(fight,holder,pid,id,stacks,uncapped){
-    Effects.apply(fight,holder,id,{stacks,potency:this.potency(holder.def),uncapped});
+  // Task 9.3 (carry-over from the 9.2 review): `target` (optional) is who Effects.apply actually
+  // lands the effect on -- defaults to `holder` (every pre-9.3 call site: spite/immovable/
+  // championOfTheFloor/brood all buff their own owner) so every existing call keeps working
+  // unchanged. Royal Disdain's own onSpecial hook (below) is the one passive whose effect lands on
+  // the FOE, not its owner -- it used to duplicate this whole method inline for exactly that reason;
+  // now it just passes its own foe reference through as the 7th arg instead. emitPassive/
+  // passiveBanner still always credit `holder` (the passive's OWNER, unchanged -- see emitPassive's
+  // own frozen-shape comment, 60_fight.js).
+  _fire(fight,holder,pid,id,stacks,uncapped,target){
+    Effects.apply(fight,target||holder,id,{stacks,potency:this.potency(holder.def),uncapped});
     fight.emitPassive(holder,pid);
     fight.fx.push({kind:'passiveBanner',x:holder.x,y:FLOOR-200,id:pid,cls:holder.def.cls})},
   // Once per step per fighter, called from Fight.step right after Effects.tick (same slot). RNG-free;
@@ -79,6 +87,11 @@ const Passives={
             t.immovable=0;
             if(Effects.stacks(fighter,cfg.apply.id)<cfg.max)
               this._fire(fight,fighter,'immovable',cfg.apply.id,cfg.apply.stacks,false)}}
+        // Task 9.3 (carry-over from the 9.2 review, controller ruling): the counter is CONSECUTIVE
+        // frames spent in BLOCK/BLOCKSTUN -- leaving either state resets it to 0, it does not just
+        // pause. Pre-9.3 this branch had no else at all, so 90 blocked frames + a hit + 90 more would
+        // have wrongly summed to 180 (a stack at the wrong time) instead of resetting to 0 on the hit.
+        else t.immovable=0;
         break}
       // Grull's Champion of the Floor: every 1200 frames (fight.frame%1200===0, controller ruling --
       // a stateless clock, no per-fighter timer needed), purify every debuff he's currently holding
@@ -119,6 +132,10 @@ const Passives={
   // stack on the foe every time she throws a special, doubled to +2 when the foe already holds any
   // other debuff (checked against PURIFIABLE, 48_effects.js's own frozen debuff set -- already defined,
   // this file loads after it).
+  // Task 9.3 (carry-over from the 9.2 review): reuses _fire with its own `target` (foe, the 7th
+  // arg) instead of duplicating _fire's own Effects.apply/emitPassive/fx.push body inline -- the
+  // only behavior difference from before this refactor is none: potency/emitPassive/passiveBanner
+  // are computed exactly the same way _fire already did them for every other passive.
   onSpecial(fight,fighter,move){
     if(fight.spar)return;
     const pd=fighter.def.passive;if(!pd||pd.id!=='royalDisdain')return;
@@ -126,6 +143,4 @@ const Passives={
     const foe=fighter.side===1?fight.p2:fight.p1;
     const debuffed=PURIFIABLE.some(id=>Effects.has(foe,id));
     const stacks=cfg.stacks*(debuffed&&cfg.doubleIfDebuffed?2:1);
-    Effects.apply(fight,foe,cfg.id,{stacks,potency:this.potency(fighter.def)});
-    fight.emitPassive(fighter,'royalDisdain');
-    fight.fx.push({kind:'passiveBanner',x:fighter.x,y:FLOOR-200,id:'royalDisdain',cls:fighter.def.cls})}};
+    this._fire(fight,fighter,'royalDisdain',cfg.id,stacks,false,foe)}};

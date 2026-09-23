@@ -582,6 +582,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       const pop=Broadcast.state.lastPop;Broadcast.state.lastPop=null;
       if(this.fight)this.fight.fx.push({kind:'popup',
         x:(this.fight.p1.x+this.fight.p2.x)/2,y:FLOOR-200,text:pop.text,col:'#f4c542',big:true})}
+    // Task 9.3 (frozen ruling): Broadcast.state.lastLine is a one-shot commentary pick (one line per
+    // signature trigger, COMMENTARY table in 13_broadcast.js) -- drained and routed to the toast the
+    // exact same way lastPop is drained into an fx popup just above. this.say already gates the
+    // announcer setting/throttle/cinematic/tutorial-mode no-op, same as every other announcer line.
+    if(Broadcast.state.lastLine){
+      const line=Broadcast.state.lastLine;Broadcast.state.lastLine=null;
+      this.say(line)}
     if(t==='hit'){const mv=MOVES[a.moveName];
       // Multi-hit specials (s1/s2/s3) already got their one full recipe burst from checkSpecial on
       // the moveName transition; each of their landed sub-hits here just gets a light impact thud,

@@ -181,6 +181,18 @@ const Effects={
   clear(holder,id){
     if(id===undefined)holder.effects.length=0;
     else{const i=holder.effects.findIndex(e=>e.id===id);if(i>=0)holder.effects.splice(i,1)}},
+  // Task 9.3 (Katia's heavy, "refreshes every bleed stack's duration"): resets an ALREADY-HELD
+  // effect's own clock back to its full EFFECTS[id].dur, touching nothing else -- stacks/potency/
+  // source are left exactly as they were, and no fresh entry is ever created (a no-op, same silent
+  // no-event shape as clear()/purify() above, when the holder doesn't currently hold id). This is
+  // deliberately NOT Effects.apply with stacks:0: that path still creates a brand-new zero-stack
+  // entry when none exists (holder.effects.push a 0-stack bleed that then ticks for 0 damage until
+  // its own dur expires), which is not what "refreshes every bleed stack" means -- a fighter who
+  // isn't already bleeding has nothing for Katia's heavy to refresh.
+  refresh(holder,id){
+    const e=holder.effects.find(x=>x.id===id);
+    if(e)e.left=EFFECTS[id].dur;
+    return e},
   // Task 9.1 (frozen interface, controller ruling): drops every currently-held debuff in PURIFIABLE
   // (above) -- and only those; a beneficial effect (fury/regen/powerGain/dexterity/critDmg/armorUp)
   // is left untouched even if active. Same silent, no-event shape as clear() above (Buffs.apply's own

@@ -239,6 +239,9 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
 .card .lvl{font-size:10px;color:#bbb}
 .card .xpbar{height:5px;background:#333;border-radius:3px;overflow:hidden;max-width:240px}
 .card .xpbar i{display:block;height:100%;background:#f4c542}
+.card .kit{margin-top:4px}
+.card .kitline{font-size:9px;color:#9aa0a6;line-height:1.4}
+.card .kitline b{color:#ddd;margin-right:3px}
 .card .actions{flex:0 0 auto;display:flex;gap:6px}
 .card .actions button{min-width:96px;min-height:44px;padding:4px 6px;font-size:9px;line-height:1.3;letter-spacing:.3px;border-radius:4px;background:#1a1f33;color:#f4c542;border:1px solid #f4c542;font-family:inherit}
 .card .actions button:disabled{opacity:.3}
@@ -847,8 +850,42 @@ const Arena={
 // instance the event came from — Fight.onEvent itself only ever passes (type,a,b,val)); G.tick
 // calls Broadcast.tick(fight) once per sim frame for the hitstun decay and the multiplier-window
 // countdown, since Broadcast has no frame counter of its own and must never read a wall clock.
+// Task 9.3 (frozen ruling, the Phase 9 Interfaces section): "Broadcast gets one commentary line per
+// signature trigger." COMMENTARY holds one array of snarky game-show-host lines per PASSIVES id
+// (49_passives.js), same tone/cast as 20_audio.js's own Lines table (the ordinary announcer toast).
+// Broadcast.onEvent (below) is the only thing that ever reads this, on a real {type:'passive'} event
+// (Fight.emitPassive, 60_fight.js) -- picked via the live fight's own presRng, a presentation-only
+// RNG stream fully separate from fight.rng (see Fight's own constructor comment, 60_fight.js), so a
+// commentary pick can never perturb the sim or any later crit roll. Left in state.lastLine, a one-
+// shot flag the same shape state.lastPop already is (G.onEvent, 80_game.js, drains and clears both
+// the same way, every real event).
+const COMMENTARY={
+  spite:[
+    "Carl's temper is running low on patience and high on fury. Somebody get this doorway insurance.",
+    "That's the look of a man who has had enough of this particular Tuesday.",
+    "Carl's getting madder by the second, and the sponsors could not be happier about it."],
+  royalDisdain:[
+    "Princess Donut has rendered her verdict, and it is not a kind one.",
+    "The cat is unimpressed, and now so is your attack stat.",
+    "Donut just docked another competitor a point for presentation."],
+  understudy:[
+    "Katia turns the parry into a masterclass. The understudy just upstaged the lead.",
+    "That reversal was so smooth it should have its own agent.",
+    "Katia reads the room, and then reads the attack, and then punishes both."],
+  immovable:[
+    "Mongo hasn't moved an inch, and he's getting angrier about it by the block.",
+    "You could build a dungeon wing on Mongo's guard right now. It is that solid.",
+    "The floor cracks a little more every time Mongo refuses to budge."],
+  championOfTheFloor:[
+    "Grull shrugs off every debuff at once, like a boss who reads his own contract.",
+    "The floor's own champion just wiped the slate clean and got stronger doing it.",
+    "Grull purifies, powers up, and reminds everyone whose doorway this is."],
+  brood:[
+    "Mother Rat is hurting, and the whole brood just got a little more dangerous for it.",
+    "Wounded and worse for it -- Mother Rat's swarm is only getting started.",
+    "The rats sense weakness. Unfortunately for the competition, it's their own mother's."]};
 const Broadcast={
-  state:{viewers:0,peak:0,combo:0,mult:1,lastPop:null},
+  state:{viewers:0,peak:0,combo:0,mult:1,lastPop:null,lastLine:null},
   // Flat bonus for a player special's first landed hit, keyed by moveName — this REPLACES (not
   // adds to) the normal dmg*2*mult hit gain for that one event, so a 4-hit S3 doesn't also collect
   // the ordinary per-hit formula on top of its own cinematic bonus. "First hit" is read off the
@@ -864,6 +901,7 @@ const Broadcast={
   // unaffected.
   reset(o){
     this.state.viewers=0;this.state.peak=0;this.state.combo=0;this.state.mult=1;this.state.lastPop=null;
+    this.state.lastLine=null;
     this._multVal=1;this._multFrames=0;
     // "First blood" (ruling #1's +250) is the PLAYER's own first landed hit of the fight, not
     // literally whichever side strikes first — an enemy hit landing on the player first doesn't
@@ -911,7 +949,15 @@ const Broadcast={
       // tie-in that wants it without reaching into fight.p1 directly.
       this.state.combo=p1.combo
     }else if(type==='parry'&&a===p1){
-      this._gain(300);this._setMult(1.5,180)}
+      this._gain(300);this._setMult(1.5,180)
+    // Task 9.3 (frozen ruling): one commentary line per signature trigger -- fires for EITHER
+    // fighter's own passive (a boss's Champion of the Floor/Brood deserve a reaction shot too, not
+    // just the player's own Spite/Royal Disdain/Understudy/Immovable), picked deterministically off
+    // fight.presRng (a seeded, presentation-only stream fully separate from fight.rng -- see this
+    // file's own purity test just below).
+    }else if(type==='passive'){
+      const lines=COMMENTARY[val];
+      if(lines&&lines.length)this.state.lastLine=fight.presRng.pick(lines)}
   },
   tick(fight){
     if(fight&&fight.p1&&fight.p1.state==='HITSTUN')this._gain(-0.5);
@@ -1643,34 +1689,64 @@ const CHAMPS={
       s3:{applies:[{id:'stun',stacks:1,on:'last'}]}},
     // Task 9.2: Spite -- see PASSIVES.spite (49_passives.js) for the actual numbers; this def only
     // ever carries the bare id, same split every other champion/boss passive below keeps.
-    passive:{id:'spite'}},
+    passive:{id:'spite'},
+    // Task 9.3: def.kitText = {sig,heavy,s1,s2,s3} -- short roster-card strings (85_screens.js), one
+    // per signature/heavy/special, sourced verbatim from the kit table's own move names above. Never
+    // read by the sim; presentation-only, same boundary CLS_GEM/sigEffect's own comments already draw.
+    kitText:{sig:'SPITE — below 40% HP, an uncapped Fury stack builds up every 3s',
+      heavy:'2 stacks of Armor Break',
+      s1:'TWO-FISTED (3 hits) — last hit Bleeds',
+      s2:'BOOT PARTY (5 hits) — a blocked hit refunds 20 power',
+      s3:'DOORWAY DROP (4 hits) — last hit guarantees a Stun'}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
   // and Rig.solve's 'quad' branch in 68_rig.js).
   donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',impact:'energy',
     sigEffect:{id:'weakness',stacks:1},
     // heavy burns 30 power (single-hit, matches); s2 Regal Pounce (base MOVES.s2 hits:5, matches) is
-    // unblockable. S1 Hairball (kit: 5 hits) and S3 Sponsor Meltdown (kit: 6 hits) don't match base
-    // MOVES.s1/s3's own hit counts (3/4) yet, so they carry nothing here -- Task 9.3 resizes them.
+    // unblockable.
     // Fix round 1 (controller ruling): the kit line reads "5 hits, LAST unblockable" -- s2 now sets
     // move.unblockable:'last' (only the move's own final sub-hit skips the block branch; sub-hits 1-4
     // still block normally, chip+blockstun) instead of the whole-move `true` every other unblockable
     // move (base MOVES.s3) keeps. See Fight.detect's own comment (60_fight.js) for the two-value flag.
+    // Task 9.3: S1 Hairball (kit: 5 hits, each hit poisons) and S3 Sponsor Meltdown (kit: 6 hits, each
+    // hit weakens) resize base MOVES.s1/s3 (3/4 hits) up to the kit table's own hit counts -- per the
+    // controller's ruling, total move damage stays within +-10% of the pre-resize total by adjusting
+    // per-hit dmg down to match: s1 3*1.5=4.5 -> 5*0.9=4.5 (0%); s3 4*3=12 -> 6*2.0=12 (0%). gap is
+    // trimmed alongside the extra hits (same "more hits, shorter gap" shape katia's own pre-Phase-9
+    // 5-hit s1 override and mother_rat's own 6-hit s3 override already use) so the move's own total
+    // active span doesn't balloon out of proportion to the added hit count. 68_rig.js needs no pose
+    // change: every pose is keyed by moveName alone (s1/s2/s3/heavy), never by hit count.
     moves:{heavy:{applies:[{id:'powerBurn',stacks:1,potency:30,on:'hit'}]},
-      s2:{unblockable:'last'}},
+      s1:{hits:5,gap:4,dmg:0.9,applies:[{id:'poison',stacks:1,on:'hit'}]},
+      s2:{unblockable:'last'},
+      s3:{hits:6,gap:5,dmg:2.0,applies:[{id:'weakness',stacks:1,on:'hit'}]}},
     // Task 9.2: Royal Disdain -- see PASSIVES.royalDisdain (49_passives.js).
-    passive:{id:'royalDisdain'}},
+    passive:{id:'royalDisdain'},
+    kitText:{sig:'ROYAL DISDAIN — every special she throws Weakens the foe (x2 if already debuffed)',
+      heavy:'Burns 30 power',
+      s1:'HAIRBALL (5 hits) — every hit Poisons',
+      s2:'REGAL POUNCE (5 hits) — last hit is Unblockable',
+      s3:'SPONSOR MELTDOWN (6 hits) — every hit Weakens'}},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blade',
     // s1 Knife Work already overridden to 5 hits (pre-Phase-9) -- matches the kit table verbatim, so
     // each landed hit now also bleeds 1. s2 Misdirection (base MOVES.s2 hits:5, matches) crits every
     // sub-hit. s3 Curtain Call (base MOVES.s3 hits:4, matches) last hit bleeds 3 and armor-breaks 1.
-    // Heavy's "refreshes every bleed stack's duration" isn't a flag this task's frozen interfaces
-    // cover (no move flag refreshes another effect's clock) -- left for a later task.
-    moves:{s1:{hits:5,gap:4,dmg:1.2,applies:[{id:'bleed',stacks:1,on:'hit'}]},
+    // Task 9.3: heavy's "refreshes every bleed stack's duration" isn't covered by the frozen applies/
+    // flag set (no move flag refreshes another effect's clock) -- move.refreshEffect is this task's
+    // own small addition (Effects.refresh, 48_effects.js; read in Fight.resolve's hit branch,
+    // 60_fight.js), a silent no-op if the foe isn't already bleeding.
+    moves:{heavy:{refreshEffect:'bleed'},
+      s1:{hits:5,gap:4,dmg:1.2,applies:[{id:'bleed',stacks:1,on:'hit'}]},
       s2:{critChance:1.0},
       s3:{applies:[{id:'bleed',stacks:3,on:'last'},{id:'armorBreak',stacks:1,on:'last'}]}},
     sigEffect:{id:'bleed',stacks:1},
     // Task 9.2: Understudy -- see PASSIVES.understudy (49_passives.js).
-    passive:{id:'understudy'}},
+    passive:{id:'understudy'},
+    kitText:{sig:'UNDERSTUDY — a successful parry grants +1 Crit Damage stack',
+      heavy:'Refreshes the duration of every Bleed stack already on the foe',
+      s1:'KNIFE WORK (5 hits) — every hit Bleeds',
+      s2:'MISDIRECTION (5 hits) — every hit is a guaranteed Crit',
+      s3:'CURTAIN CALL (4 hits) — last hit Bleeds x3 and Armor Breaks'}},
   // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
   mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',impact:'blunt',
     sigEffect:{id:'armorBreak',stacks:1},
@@ -1684,7 +1760,12 @@ const CHAMPS={
       s2:{healPct:0.30},
       s3:{applies:[{id:'armorUp',stacks:1,on:'last',target:'self'}]}},
     // Task 9.2: Immovable -- see PASSIVES.immovable (49_passives.js).
-    passive:{id:'immovable'}}};
+    passive:{id:'immovable'},
+    kitText:{sig:'IMMOVABLE — +1 Fury stack per 120 straight frames spent blocking, capped at 5',
+      heavy:'GROUND SLAM — knocks down even through a raised guard',
+      s1:'BACKHAND (3 hits) — last hit Stuns',
+      s2:'BEAR HUG (5 hits) — heals 30% of the damage each hit deals',
+      s3:'DOORWAY DENIAL (4 hits) — last hit grants himself Armor Up'}}};
 // Task 6.1, ruling 3 (playtest note: "Hobgoblin Brute is impossible to defeat" at floor 1 door 3,
 // level 1): goblin/skeleton hp raised and atk lowered exactly to the plan's given numbers (360/30,
 // 320/28) -- longer, safer early fights instead of fast trades a level-1 player can lose to a bad
@@ -1750,20 +1831,31 @@ const BOSSES={
   // competent's own sustained DPS roughly doubled (see 55_ai.js's own tier-gate retune comment for the
   // measured before/after) — the t4 AI_TIERS retune alone still left this boss at 40% (n=30), over the
   // 10-35% band; the atk bump alone (hp untouched) brings it back to 26.7% (n=30).
-  // Task 9.1: heavy Pillar Swing (single-hit, matches) armor-breaks the foe -- the kit line's own
-  // "longer reach: dash 40" is a move-shape change (not one of this task's flags), left for Task 9.3.
+  // Task 9.1: heavy Pillar Swing (single-hit, matches) armor-breaks the foe.
   // s3 Floor Wipe already overridden to 3 hits (pre-Phase-9) -- matches the kit table verbatim, so its
   // last hit now also weakens (kit's own "600f" duration is EFFECTS.weakness's frozen 480f here, same
   // "no per-call duration override" note as carl/mongo's own comments above). buffs:['armorUp'] is the
   // separate, pre-existing flat Buffs.apply system (47_buffs.js) -- a different id namespace from the
   // new EFFECTS.armorUp this task adds (mongo's own S3 grants that one to himself); unrelated, and this
   // boss's own long-standing buff is untouched.
+  // Task 9.3: the kit line's own "longer reach: dash 40" for Pillar Swing -- a move-shape change, not
+  // one of Task 9.1's flags -- is a plain m.dash:40 on grull's own heavy override. setupDash's own
+  // `else if(m.dash)` branch (50_fighter.js) already handles this generically for any move (every
+  // light/medium already uses it): startMove computes dashLeft/dashRate once at CHARGE-press time,
+  // but the dash movement itself is only ever consumed during the ATTACK phase's own tick() case (the
+  // CHARGE->ATTACK transition resets f to 0 first) -- so the 40px lunge plays out over the swing's own
+  // 8-frame startup right after release, not during the hold. No engine change needed.
   grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:50,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',impact:'blunt',
     boss:true,buffs:['armorUp'],
-    moves:{heavy:{applies:[{id:'armorBreak',stacks:1,on:'hit'}]},
+    moves:{heavy:{dash:40,applies:[{id:'armorBreak',stacks:1,on:'hit'}]},
       s3:{dmg:3.6,hits:3,gap:10,applies:[{id:'weakness',stacks:1,on:'last'}]}},
     // Task 9.2: Champion of the Floor -- see PASSIVES.championOfTheFloor (49_passives.js).
-    passive:{id:'championOfTheFloor'}},
+    passive:{id:'championOfTheFloor'},
+    kitText:{sig:'CHAMPION OF THE FLOOR — purifies every debuff and gains +3 Fury every 20s',
+      heavy:'PILLAR SWING — long reach, Armor Breaks',
+      s1:'3-hit flurry',
+      s2:'5-hit flurry',
+      s3:'FLOOR WIPE (3 hits) — last hit Weakens'}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
   // 47_buffs.js, since disabling it entirely still left her a 20/20 wall — her offense, not the
@@ -1800,7 +1892,12 @@ const BOSSES={
       s3:{dmg:2.4,hits:6,gap:5,healPct:0.02}},
     // Task 9.2: Brood -- see PASSIVES.brood (49_passives.js). The regen-tripling half lives in
     // BUFFS.regen's own onFrame (47_buffs.js), which checks this same passive id live.
-    passive:{id:'brood'}}};
+    passive:{id:'brood'},
+    kitText:{sig:'BROOD — below 50% HP, gains a power stack and regen triples',
+      heavy:'TAIL SWEEP — Bleeds x3',
+      s1:'3-hit flurry',
+      s2:'5-hit flurry',
+      s3:'SWARM (6 hits) — every hit heals 2% of the damage it deals'}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
 // Task 8.4 ruling: CLS_GEM maps a def's own cls (CHAMPS/MOBS/BOSSES above) to the portrait-frame
@@ -2263,6 +2360,18 @@ const Effects={
   clear(holder,id){
     if(id===undefined)holder.effects.length=0;
     else{const i=holder.effects.findIndex(e=>e.id===id);if(i>=0)holder.effects.splice(i,1)}},
+  // Task 9.3 (Katia's heavy, "refreshes every bleed stack's duration"): resets an ALREADY-HELD
+  // effect's own clock back to its full EFFECTS[id].dur, touching nothing else -- stacks/potency/
+  // source are left exactly as they were, and no fresh entry is ever created (a no-op, same silent
+  // no-event shape as clear()/purify() above, when the holder doesn't currently hold id). This is
+  // deliberately NOT Effects.apply with stacks:0: that path still creates a brand-new zero-stack
+  // entry when none exists (holder.effects.push a 0-stack bleed that then ticks for 0 damage until
+  // its own dur expires), which is not what "refreshes every bleed stack" means -- a fighter who
+  // isn't already bleeding has nothing for Katia's heavy to refresh.
+  refresh(holder,id){
+    const e=holder.effects.find(x=>x.id===id);
+    if(e)e.left=EFFECTS[id].dur;
+    return e},
   // Task 9.1 (frozen interface, controller ruling): drops every currently-held debuff in PURIFIABLE
   // (above) -- and only those; a beneficial effect (fury/regen/powerGain/dexterity/critDmg/armorUp)
   // is left untouched even if active. Same silent, no-event shape as clear() above (Buffs.apply's own
@@ -2305,8 +2414,16 @@ const Passives={
   // own emitEffect) and a bare {kind:'passiveBanner'} fx descriptor (presentation-only; 72_fx.js is
   // the only place that turns it into the actual 22px gold-italic/class-gem banner -- same "sim
   // pushes plain data, FX styles it" split Effects.apply's own effectPopup push already uses).
-  _fire(fight,holder,pid,id,stacks,uncapped){
-    Effects.apply(fight,holder,id,{stacks,potency:this.potency(holder.def),uncapped});
+  // Task 9.3 (carry-over from the 9.2 review): `target` (optional) is who Effects.apply actually
+  // lands the effect on -- defaults to `holder` (every pre-9.3 call site: spite/immovable/
+  // championOfTheFloor/brood all buff their own owner) so every existing call keeps working
+  // unchanged. Royal Disdain's own onSpecial hook (below) is the one passive whose effect lands on
+  // the FOE, not its owner -- it used to duplicate this whole method inline for exactly that reason;
+  // now it just passes its own foe reference through as the 7th arg instead. emitPassive/
+  // passiveBanner still always credit `holder` (the passive's OWNER, unchanged -- see emitPassive's
+  // own frozen-shape comment, 60_fight.js).
+  _fire(fight,holder,pid,id,stacks,uncapped,target){
+    Effects.apply(fight,target||holder,id,{stacks,potency:this.potency(holder.def),uncapped});
     fight.emitPassive(holder,pid);
     fight.fx.push({kind:'passiveBanner',x:holder.x,y:FLOOR-200,id:pid,cls:holder.def.cls})},
   // Once per step per fighter, called from Fight.step right after Effects.tick (same slot). RNG-free;
@@ -2352,6 +2469,11 @@ const Passives={
             t.immovable=0;
             if(Effects.stacks(fighter,cfg.apply.id)<cfg.max)
               this._fire(fight,fighter,'immovable',cfg.apply.id,cfg.apply.stacks,false)}}
+        // Task 9.3 (carry-over from the 9.2 review, controller ruling): the counter is CONSECUTIVE
+        // frames spent in BLOCK/BLOCKSTUN -- leaving either state resets it to 0, it does not just
+        // pause. Pre-9.3 this branch had no else at all, so 90 blocked frames + a hit + 90 more would
+        // have wrongly summed to 180 (a stack at the wrong time) instead of resetting to 0 on the hit.
+        else t.immovable=0;
         break}
       // Grull's Champion of the Floor: every 1200 frames (fight.frame%1200===0, controller ruling --
       // a stateless clock, no per-fighter timer needed), purify every debuff he's currently holding
@@ -2392,6 +2514,10 @@ const Passives={
   // stack on the foe every time she throws a special, doubled to +2 when the foe already holds any
   // other debuff (checked against PURIFIABLE, 48_effects.js's own frozen debuff set -- already defined,
   // this file loads after it).
+  // Task 9.3 (carry-over from the 9.2 review): reuses _fire with its own `target` (foe, the 7th
+  // arg) instead of duplicating _fire's own Effects.apply/emitPassive/fx.push body inline -- the
+  // only behavior difference from before this refactor is none: potency/emitPassive/passiveBanner
+  // are computed exactly the same way _fire already did them for every other passive.
   onSpecial(fight,fighter,move){
     if(fight.spar)return;
     const pd=fighter.def.passive;if(!pd||pd.id!=='royalDisdain')return;
@@ -2399,9 +2525,7 @@ const Passives={
     const foe=fighter.side===1?fight.p2:fight.p1;
     const debuffed=PURIFIABLE.some(id=>Effects.has(foe,id));
     const stacks=cfg.stacks*(debuffed&&cfg.doubleIfDebuffed?2:1);
-    Effects.apply(fight,foe,cfg.id,{stacks,potency:this.potency(fighter.def)});
-    fight.emitPassive(fighter,'royalDisdain');
-    fight.fx.push({kind:'passiveBanner',x:fighter.x,y:FLOOR-200,id:'royalDisdain',cls:fighter.def.cls})}};
+    this._fire(fight,fighter,'royalDisdain',cfg.id,stacks,false,foe)}};
 
 class Fighter{
   constructor(def,side,ctrl){this.def=def;this.side=side;this.face=side;this.ctrl=ctrl;
@@ -3330,9 +3454,23 @@ class Fight{
     // there). `target`:'self' redirects the apply onto the ATTACKER instead of the defender (mongo's S3
     // Doorway Denial applies its own armorUp to himself) -- defaults to the defender ('foe') when
     // omitted, same default the frozen interface's own sigEffect target already uses just below.
+    // Task 9.3 (carry-over from the 9.2 review): appliedIds collects the id of every applies entry
+    // that actually fired THIS landed hit -- a bare fact, same "sim passes plain data" boundary
+    // att.def.impact's own raw id string already keeps below -- so the impact fx push just past this
+    // loop can carry it through as `tags` for presentation (72_fx.js's IMPACTS registry) to resolve
+    // into a per-effect tint (bleed red, poison green, weakness violet) without this file needing to
+    // know a single color.
+    const appliedIds=[];
     if(m.applies)for(let i=0;i<m.applies.length;i++){const ap=m.applies[i];
-      if(ap.on==='hit'||(ap.on==='crit'&&crit)||(ap.on==='last'&&last))
-        Effects.apply(this,ap.target==='self'?att:def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
+      if(ap.on==='hit'||(ap.on==='crit'&&crit)||(ap.on==='last'&&last)){
+        Effects.apply(this,ap.target==='self'?att:def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att});
+        appliedIds.push(ap.id)}}
+    // Task 9.3 (bespoke mechanic outside the frozen applies/flag set, Katia's heavy Knife Sharpen:
+    // "refreshes every bleed stack's duration"): m.refreshEffect names an EFFECTS id whose clock (if
+    // the defender already holds it) is reset to its own full duration -- Effects.refresh
+    // (48_effects.js) is a silent no-op when the defender isn't already holding it, so this never
+    // creates a fresh effect out of nothing the way m.applies/Effects.apply would.
+    if(m.refreshEffect)Effects.refresh(def,m.refreshEffect);
     // Task 7.2: the in-combo heavy ender (m.sig:true, only ever true for CHAIN.enders.heavy's own
     // merged move data) fires the ATTACKER's own def.sigEffect once it lands -- a champion-signature
     // bonus effect (Carl fury targets himself; Donut weakness/Katia bleed/Mongo armorBreak all target
@@ -3368,7 +3506,11 @@ class Fight{
     // the fx descriptor, whatever that string is (even undefined, for some future def that forgets to
     // set one) -- the presentation-side FX object's own 'impact' push case is what resolves it,
     // falling back to blunt there.
-    this.fx.push({kind:'impact',id:att.def.impact,x:def.x,y:FLOOR-80,face:att.face});
+    // Task 9.3 (carry-over from the 9.2 review): `tags` rides along as the bare list of effect ids
+    // this landed hit's own applies just fired (built above) -- 72_fx.js's IMPACTS registry is the
+    // only place that turns any of bleed/poison/weakness into an actual tint color; every other id
+    // (or an empty list, the common case) leaves the impact fx at its usual per-class color.
+    this.fx.push({kind:'impact',id:att.def.impact,x:def.x,y:FLOOR-80,face:att.face,tags:appliedIds});
     // Task 6.4: BUFFS.tutorialGuard (47_buffs.js) sets ref.capped=true the instant it actually
     // clamped this hit's dmg -- forwarded onto the popup fx as `muted`, which FX/Render draw grey
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
@@ -7620,22 +7762,31 @@ const HITFEEL={
 // builds the list particle (same shape/lifetimes as the old direct impactBlunt/impactBlade/
 // impactEnergy push cases this replaces); draw() renders it (same visuals, moved verbatim from
 // FX.draw's old per-kind branches) -- both push() and draw() below dispatch through this one table.
+// Task 9.3 (carry-over from the 9.2 review): "implement the per-effect impact tints (bleed red,
+// poison green, weakness violet) through IMPACTS opts when a move's applies lands." Fight.resolve
+// (60_fight.js) pushes the bare list of effect ids its own m.applies just fired this landed hit as
+// `tags` on the 'impact' fx descriptor -- a plain fact, same boundary att.def.impact's own raw id
+// string already keeps (the sim names what happened, never a color). EFFECT_TINT is presentation-
+// only, read nowhere but here: any tag not listed here (fury, stun, armorBreak, ...) leaves the
+// impact ring/arc at its usual per-class color, unchanged from before this task.
+const EFFECT_TINT={bleed:'#c62828',poison:'#4caf50',weakness:'#7e57c2'};
+function tintFor(ev){return(ev.tags&&ev.tags.map(t=>EFFECT_TINT[t]).find(Boolean))||null}
 const IMPACTS={
   blunt:{
-    spawn(ev){return{kind:'impact',id:'blunt',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:16}},
+    spawn(ev){return{kind:'impact',id:'blunt',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:16,tint:tintFor(ev)}},
     draw(c,p){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
-      c.strokeStyle='#cbb89a';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,6+t*22,0,Math.PI*2);c.stroke()}},
+      c.strokeStyle=p.tint||'#cbb89a';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,6+t*22,0,Math.PI*2);c.stroke()}},
   blade:{
-    spawn(ev){return{kind:'impact',id:'blade',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:14}},
+    spawn(ev){return{kind:'impact',id:'blade',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:14,tint:tintFor(ev)}},
     draw(c,p){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
-      c.strokeStyle='#e8f0ff';c.lineWidth=4;c.beginPath();
+      c.strokeStyle=p.tint||'#e8f0ff';c.lineWidth=4;c.beginPath();
       c.arc(p.x,p.y,14+t*10,-0.7*p.face,0.7*p.face,p.face<0);c.stroke()}},
   energy:{
-    spawn(ev){return{kind:'impact',id:'energy',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:20}},
+    spawn(ev){return{kind:'impact',id:'energy',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:20,tint:tintFor(ev)}},
     draw(c,p){const t=p.life/p.max;
-      c.globalAlpha=Math.max(0,(1-t)*.85);c.strokeStyle='#b388ff';c.lineWidth=3;
+      c.globalAlpha=Math.max(0,(1-t)*.85);c.strokeStyle=p.tint||'#b388ff';c.lineWidth=3;
       c.beginPath();c.arc(p.x,p.y,8+t*18,0,Math.PI*2);c.stroke();
-      c.globalAlpha=Math.max(0,(1-t)*.4);c.fillStyle='#b388ff';
+      c.globalAlpha=Math.max(0,(1-t)*.4);c.fillStyle=p.tint||'#b388ff';
       c.beginPath();c.arc(p.x,p.y,4+t*6,0,Math.PI*2);c.fill()}}};
 const FX={list:[],
   // Task 7.4: FX.shake is now a decaying {x,y} vector (was a bare scalar) -- x kicks in the
@@ -7667,6 +7818,11 @@ const FX={list:[],
     armorBreak:{text:'ARMOR BREAK',col:'#9a9a9a'},fury:{text:'FURY',col:'#ff5a4a'},
     powerGain:{text:'POWER+',col:'#f4c542'},powerBurn:{text:'POWER BURN',col:'#ff8c00'},
     regen:{text:'REGEN',col:'#4caf50'},weakness:{text:'WEAKNESS',col:'#7e57c2'},
+    // Task 9.3: poison (Task 9.1's own effect, actually landed on real move data by this task's
+    // Donut S1 Hairball) gets the same green EFFECT_TINT already gives its impact ring -- previously
+    // missing here entirely, which just meant poison's own effectPopup silently fell back to the
+    // generic {text:id.toUpperCase(),col:'#fff'} default a few lines below.
+    poison:{text:'POISON',col:'#4caf50'},
     // Task 7.3: blue, per the plan's own "popup, blue afterimage" description of the dodge read --
     // the 'effectPopup' case below already turns this into the same styled popup every other EFFECTS
     // id gets, so this one line is the only wiring this file needs for the dexterity POPUP; the
@@ -8526,6 +8682,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       const pop=Broadcast.state.lastPop;Broadcast.state.lastPop=null;
       if(this.fight)this.fight.fx.push({kind:'popup',
         x:(this.fight.p1.x+this.fight.p2.x)/2,y:FLOOR-200,text:pop.text,col:'#f4c542',big:true})}
+    // Task 9.3 (frozen ruling): Broadcast.state.lastLine is a one-shot commentary pick (one line per
+    // signature trigger, COMMENTARY table in 13_broadcast.js) -- drained and routed to the toast the
+    // exact same way lastPop is drained into an fx popup just above. this.say already gates the
+    // announcer setting/throttle/cinematic/tutorial-mode no-op, same as every other announcer line.
+    if(Broadcast.state.lastLine){
+      const line=Broadcast.state.lastLine;Broadcast.state.lastLine=null;
+      this.say(line)}
     if(t==='hit'){const mv=MOVES[a.moveName];
       // Multi-hit specials (s1/s2/s3) already got their one full recipe burst from checkSpecial on
       // the moveName transition; each of their landed sub-hits here just gets a light impact thud,
@@ -9368,7 +9531,14 @@ const Screens={
         '<div class="rankline"><span class="pips">'+Array.from({length:entry.stars},(_,i)=>
           '<span class="rp'+(i<entry.rank?' on':'')+'"></span>').join('')+
           '</span><span class="lvl">LVL '+entry.level+(atCap?' (MAX)':'')+'</span></div>'+
-        '<div class="xpbar"><i style="width:'+pct+'%"></i></div>';
+        '<div class="xpbar"><i style="width:'+pct+'%"></i></div>'+
+        // Task 9.3 (frozen ruling): def.kitText = {sig,heavy,s1,s2,s3} -- five short roster-card
+        // lines, one per signature/heavy/special. Every CHAMPS def now carries one (40_movedata.js);
+        // a champion with none (shouldn't happen for anything actually in Save.data.roster) just
+        // renders no kit block rather than throwing.
+        (def.kitText?'<div class="kit">'+
+          ['sig','heavy','s1','s2','s3'].map(k=>'<div class="kitline"><b>'+k.toUpperCase()+'</b> '+def.kitText[k]+'</div>').join('')+
+          '</div>':'');
       const actions=document.createElement('div');actions.className='actions';
       const lvlCost=10*entry.level;
       const lvlBtn=document.createElement('button');
@@ -14140,8 +14310,16 @@ Test.add('Phase 9 kit flags landed on real move data exactly where hit counts al
   const cS3=CHAMPS.carl.moves.s3.applies[0];eq(cS3.id,'stun');eq(cS3.stacks,1);eq(cS3.on,'last');
   const dH=CHAMPS.donut.moves.heavy.applies[0];eq(dH.id,'powerBurn');eq(dH.potency,30);eq(dH.on,'hit');
   eq(CHAMPS.donut.moves.s2.unblockable,'last','fix round 1: last-sub-hit-only, not the whole-move true');
-  ok(!CHAMPS.donut.moves.s1,'donut S1\'s kit hit count (5) does not match base MOVES.s1 (3) yet -- no flag lands until Task 9.3 resizes it');
-  ok(!CHAMPS.donut.moves.s3,'donut S3\'s kit hit count (6) does not match base MOVES.s3 (4) yet -- no flag lands until Task 9.3 resizes it');
+  // Task 9.3: donut S1/S3 are resized up to the kit table's own hit counts here (were withheld under
+  // Task 9.1's own "hit count must already match" rule -- see this test's own title) -- total move
+  // damage held within +-10% of the pre-resize total by adjusting per-hit dmg down to match.
+  eq(CHAMPS.donut.moves.s1.hits,5,'donut S1 (Hairball) resized up to the kit table\'s 5 hits');
+  eq(CHAMPS.donut.moves.s1.dmg*CHAMPS.donut.moves.s1.hits,4.5,'total S1 damage held at the pre-resize total (3*1.5), 0% delta');
+  const dS1=CHAMPS.donut.moves.s1.applies[0];eq(dS1.id,'poison');eq(dS1.stacks,1);eq(dS1.on,'hit');
+  eq(CHAMPS.donut.moves.s3.hits,6,'donut S3 (Sponsor Meltdown) resized up to the kit table\'s 6 hits');
+  eq(CHAMPS.donut.moves.s3.dmg*CHAMPS.donut.moves.s3.hits,12,'total S3 damage held at the pre-resize total (4*3), 0% delta');
+  const dS3=CHAMPS.donut.moves.s3.applies[0];eq(dS3.id,'weakness');eq(dS3.stacks,1);eq(dS3.on,'hit');
+  eq(CHAMPS.katia.moves.heavy.refreshEffect,'bleed','katia\'s own heavy: Task 9.3\'s bespoke bleed-refresh flag');
   eq(CHAMPS.katia.moves.s1.hits,5,'katia\'s own pre-existing s1 override, untouched');
   const kS1=CHAMPS.katia.moves.s1.applies[0];eq(kS1.id,'bleed');eq(kS1.stacks,1);eq(kS1.on,'hit');
   eq(CHAMPS.katia.moves.s2.critChance,1.0);
@@ -14153,6 +14331,7 @@ Test.add('Phase 9 kit flags landed on real move data exactly where hit counts al
   eq(CHAMPS.mongo.moves.s2.healPct,0.30);
   const mS3=CHAMPS.mongo.moves.s3.applies[0];eq(mS3.id,'armorUp');eq(mS3.stacks,1);eq(mS3.on,'last');eq(mS3.target,'self');
   const gH=BOSSES.grull.moves.heavy.applies[0];eq(gH.id,'armorBreak');eq(gH.stacks,1);eq(gH.on,'hit');
+  eq(BOSSES.grull.moves.heavy.dash,40,'grull\'s own heavy (Task 9.3): the kit line\'s "longer reach"');
   eq(BOSSES.grull.moves.s3.hits,3,'grull\'s own pre-existing s3 override, untouched');
   const gS3=BOSSES.grull.moves.s3.applies[0];eq(gS3.id,'weakness');eq(gS3.stacks,1);eq(gS3.on,'last');
   const rH=BOSSES.mother_rat.moves.heavy.applies[0];eq(rH.id,'bleed');eq(rH.stacks,3);eq(rH.on,'hit');

@@ -9,8 +9,42 @@
 // instance the event came from — Fight.onEvent itself only ever passes (type,a,b,val)); G.tick
 // calls Broadcast.tick(fight) once per sim frame for the hitstun decay and the multiplier-window
 // countdown, since Broadcast has no frame counter of its own and must never read a wall clock.
+// Task 9.3 (frozen ruling, the Phase 9 Interfaces section): "Broadcast gets one commentary line per
+// signature trigger." COMMENTARY holds one array of snarky game-show-host lines per PASSIVES id
+// (49_passives.js), same tone/cast as 20_audio.js's own Lines table (the ordinary announcer toast).
+// Broadcast.onEvent (below) is the only thing that ever reads this, on a real {type:'passive'} event
+// (Fight.emitPassive, 60_fight.js) -- picked via the live fight's own presRng, a presentation-only
+// RNG stream fully separate from fight.rng (see Fight's own constructor comment, 60_fight.js), so a
+// commentary pick can never perturb the sim or any later crit roll. Left in state.lastLine, a one-
+// shot flag the same shape state.lastPop already is (G.onEvent, 80_game.js, drains and clears both
+// the same way, every real event).
+const COMMENTARY={
+  spite:[
+    "Carl's temper is running low on patience and high on fury. Somebody get this doorway insurance.",
+    "That's the look of a man who has had enough of this particular Tuesday.",
+    "Carl's getting madder by the second, and the sponsors could not be happier about it."],
+  royalDisdain:[
+    "Princess Donut has rendered her verdict, and it is not a kind one.",
+    "The cat is unimpressed, and now so is your attack stat.",
+    "Donut just docked another competitor a point for presentation."],
+  understudy:[
+    "Katia turns the parry into a masterclass. The understudy just upstaged the lead.",
+    "That reversal was so smooth it should have its own agent.",
+    "Katia reads the room, and then reads the attack, and then punishes both."],
+  immovable:[
+    "Mongo hasn't moved an inch, and he's getting angrier about it by the block.",
+    "You could build a dungeon wing on Mongo's guard right now. It is that solid.",
+    "The floor cracks a little more every time Mongo refuses to budge."],
+  championOfTheFloor:[
+    "Grull shrugs off every debuff at once, like a boss who reads his own contract.",
+    "The floor's own champion just wiped the slate clean and got stronger doing it.",
+    "Grull purifies, powers up, and reminds everyone whose doorway this is."],
+  brood:[
+    "Mother Rat is hurting, and the whole brood just got a little more dangerous for it.",
+    "Wounded and worse for it -- Mother Rat's swarm is only getting started.",
+    "The rats sense weakness. Unfortunately for the competition, it's their own mother's."]};
 const Broadcast={
-  state:{viewers:0,peak:0,combo:0,mult:1,lastPop:null},
+  state:{viewers:0,peak:0,combo:0,mult:1,lastPop:null,lastLine:null},
   // Flat bonus for a player special's first landed hit, keyed by moveName — this REPLACES (not
   // adds to) the normal dmg*2*mult hit gain for that one event, so a 4-hit S3 doesn't also collect
   // the ordinary per-hit formula on top of its own cinematic bonus. "First hit" is read off the
@@ -26,6 +60,7 @@ const Broadcast={
   // unaffected.
   reset(o){
     this.state.viewers=0;this.state.peak=0;this.state.combo=0;this.state.mult=1;this.state.lastPop=null;
+    this.state.lastLine=null;
     this._multVal=1;this._multFrames=0;
     // "First blood" (ruling #1's +250) is the PLAYER's own first landed hit of the fight, not
     // literally whichever side strikes first — an enemy hit landing on the player first doesn't
@@ -73,7 +108,15 @@ const Broadcast={
       // tie-in that wants it without reaching into fight.p1 directly.
       this.state.combo=p1.combo
     }else if(type==='parry'&&a===p1){
-      this._gain(300);this._setMult(1.5,180)}
+      this._gain(300);this._setMult(1.5,180)
+    // Task 9.3 (frozen ruling): one commentary line per signature trigger -- fires for EITHER
+    // fighter's own passive (a boss's Champion of the Floor/Brood deserve a reaction shot too, not
+    // just the player's own Spite/Royal Disdain/Understudy/Immovable), picked deterministically off
+    // fight.presRng (a seeded, presentation-only stream fully separate from fight.rng -- see this
+    // file's own purity test just below).
+    }else if(type==='passive'){
+      const lines=COMMENTARY[val];
+      if(lines&&lines.length)this.state.lastLine=fight.presRng.pick(lines)}
   },
   tick(fight){
     if(fight&&fight.p1&&fight.p1.state==='HITSTUN')this._gain(-0.5);

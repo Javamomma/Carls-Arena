@@ -4542,8 +4542,16 @@ Test.add('Phase 9 kit flags landed on real move data exactly where hit counts al
   const cS3=CHAMPS.carl.moves.s3.applies[0];eq(cS3.id,'stun');eq(cS3.stacks,1);eq(cS3.on,'last');
   const dH=CHAMPS.donut.moves.heavy.applies[0];eq(dH.id,'powerBurn');eq(dH.potency,30);eq(dH.on,'hit');
   eq(CHAMPS.donut.moves.s2.unblockable,'last','fix round 1: last-sub-hit-only, not the whole-move true');
-  ok(!CHAMPS.donut.moves.s1,'donut S1\'s kit hit count (5) does not match base MOVES.s1 (3) yet -- no flag lands until Task 9.3 resizes it');
-  ok(!CHAMPS.donut.moves.s3,'donut S3\'s kit hit count (6) does not match base MOVES.s3 (4) yet -- no flag lands until Task 9.3 resizes it');
+  // Task 9.3: donut S1/S3 are resized up to the kit table's own hit counts here (were withheld under
+  // Task 9.1's own "hit count must already match" rule -- see this test's own title) -- total move
+  // damage held within +-10% of the pre-resize total by adjusting per-hit dmg down to match.
+  eq(CHAMPS.donut.moves.s1.hits,5,'donut S1 (Hairball) resized up to the kit table\'s 5 hits');
+  eq(CHAMPS.donut.moves.s1.dmg*CHAMPS.donut.moves.s1.hits,4.5,'total S1 damage held at the pre-resize total (3*1.5), 0% delta');
+  const dS1=CHAMPS.donut.moves.s1.applies[0];eq(dS1.id,'poison');eq(dS1.stacks,1);eq(dS1.on,'hit');
+  eq(CHAMPS.donut.moves.s3.hits,6,'donut S3 (Sponsor Meltdown) resized up to the kit table\'s 6 hits');
+  eq(CHAMPS.donut.moves.s3.dmg*CHAMPS.donut.moves.s3.hits,12,'total S3 damage held at the pre-resize total (4*3), 0% delta');
+  const dS3=CHAMPS.donut.moves.s3.applies[0];eq(dS3.id,'weakness');eq(dS3.stacks,1);eq(dS3.on,'hit');
+  eq(CHAMPS.katia.moves.heavy.refreshEffect,'bleed','katia\'s own heavy: Task 9.3\'s bespoke bleed-refresh flag');
   eq(CHAMPS.katia.moves.s1.hits,5,'katia\'s own pre-existing s1 override, untouched');
   const kS1=CHAMPS.katia.moves.s1.applies[0];eq(kS1.id,'bleed');eq(kS1.stacks,1);eq(kS1.on,'hit');
   eq(CHAMPS.katia.moves.s2.critChance,1.0);
@@ -4555,6 +4563,7 @@ Test.add('Phase 9 kit flags landed on real move data exactly where hit counts al
   eq(CHAMPS.mongo.moves.s2.healPct,0.30);
   const mS3=CHAMPS.mongo.moves.s3.applies[0];eq(mS3.id,'armorUp');eq(mS3.stacks,1);eq(mS3.on,'last');eq(mS3.target,'self');
   const gH=BOSSES.grull.moves.heavy.applies[0];eq(gH.id,'armorBreak');eq(gH.stacks,1);eq(gH.on,'hit');
+  eq(BOSSES.grull.moves.heavy.dash,40,'grull\'s own heavy (Task 9.3): the kit line\'s "longer reach"');
   eq(BOSSES.grull.moves.s3.hits,3,'grull\'s own pre-existing s3 override, untouched');
   const gS3=BOSSES.grull.moves.s3.applies[0];eq(gS3.id,'weakness');eq(gS3.stacks,1);eq(gS3.on,'last');
   const rH=BOSSES.mother_rat.moves.heavy.applies[0];eq(rH.id,'bleed');eq(rH.stacks,3);eq(rH.on,'hit');

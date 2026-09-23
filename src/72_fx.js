@@ -34,22 +34,31 @@ const HITFEEL={
 // builds the list particle (same shape/lifetimes as the old direct impactBlunt/impactBlade/
 // impactEnergy push cases this replaces); draw() renders it (same visuals, moved verbatim from
 // FX.draw's old per-kind branches) -- both push() and draw() below dispatch through this one table.
+// Task 9.3 (carry-over from the 9.2 review): "implement the per-effect impact tints (bleed red,
+// poison green, weakness violet) through IMPACTS opts when a move's applies lands." Fight.resolve
+// (60_fight.js) pushes the bare list of effect ids its own m.applies just fired this landed hit as
+// `tags` on the 'impact' fx descriptor -- a plain fact, same boundary att.def.impact's own raw id
+// string already keeps (the sim names what happened, never a color). EFFECT_TINT is presentation-
+// only, read nowhere but here: any tag not listed here (fury, stun, armorBreak, ...) leaves the
+// impact ring/arc at its usual per-class color, unchanged from before this task.
+const EFFECT_TINT={bleed:'#c62828',poison:'#4caf50',weakness:'#7e57c2'};
+function tintFor(ev){return(ev.tags&&ev.tags.map(t=>EFFECT_TINT[t]).find(Boolean))||null}
 const IMPACTS={
   blunt:{
-    spawn(ev){return{kind:'impact',id:'blunt',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:16}},
+    spawn(ev){return{kind:'impact',id:'blunt',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:16,tint:tintFor(ev)}},
     draw(c,p){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
-      c.strokeStyle='#cbb89a';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,6+t*22,0,Math.PI*2);c.stroke()}},
+      c.strokeStyle=p.tint||'#cbb89a';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,6+t*22,0,Math.PI*2);c.stroke()}},
   blade:{
-    spawn(ev){return{kind:'impact',id:'blade',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:14}},
+    spawn(ev){return{kind:'impact',id:'blade',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:14,tint:tintFor(ev)}},
     draw(c,p){const t=p.life/p.max;c.globalAlpha=Math.max(0,1-t);
-      c.strokeStyle='#e8f0ff';c.lineWidth=4;c.beginPath();
+      c.strokeStyle=p.tint||'#e8f0ff';c.lineWidth=4;c.beginPath();
       c.arc(p.x,p.y,14+t*10,-0.7*p.face,0.7*p.face,p.face<0);c.stroke()}},
   energy:{
-    spawn(ev){return{kind:'impact',id:'energy',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:20}},
+    spawn(ev){return{kind:'impact',id:'energy',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:20,tint:tintFor(ev)}},
     draw(c,p){const t=p.life/p.max;
-      c.globalAlpha=Math.max(0,(1-t)*.85);c.strokeStyle='#b388ff';c.lineWidth=3;
+      c.globalAlpha=Math.max(0,(1-t)*.85);c.strokeStyle=p.tint||'#b388ff';c.lineWidth=3;
       c.beginPath();c.arc(p.x,p.y,8+t*18,0,Math.PI*2);c.stroke();
-      c.globalAlpha=Math.max(0,(1-t)*.4);c.fillStyle='#b388ff';
+      c.globalAlpha=Math.max(0,(1-t)*.4);c.fillStyle=p.tint||'#b388ff';
       c.beginPath();c.arc(p.x,p.y,4+t*6,0,Math.PI*2);c.fill()}}};
 const FX={list:[],
   // Task 7.4: FX.shake is now a decaying {x,y} vector (was a bare scalar) -- x kicks in the
@@ -81,6 +90,11 @@ const FX={list:[],
     armorBreak:{text:'ARMOR BREAK',col:'#9a9a9a'},fury:{text:'FURY',col:'#ff5a4a'},
     powerGain:{text:'POWER+',col:'#f4c542'},powerBurn:{text:'POWER BURN',col:'#ff8c00'},
     regen:{text:'REGEN',col:'#4caf50'},weakness:{text:'WEAKNESS',col:'#7e57c2'},
+    // Task 9.3: poison (Task 9.1's own effect, actually landed on real move data by this task's
+    // Donut S1 Hairball) gets the same green EFFECT_TINT already gives its impact ring -- previously
+    // missing here entirely, which just meant poison's own effectPopup silently fell back to the
+    // generic {text:id.toUpperCase(),col:'#fff'} default a few lines below.
+    poison:{text:'POISON',col:'#4caf50'},
     // Task 7.3: blue, per the plan's own "popup, blue afterimage" description of the dodge read --
     // the 'effectPopup' case below already turns this into the same styled popup every other EFFECTS
     // id gets, so this one line is the only wiring this file needs for the dexterity POPUP; the

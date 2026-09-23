@@ -334,7 +334,14 @@ const Screens={
         '<div class="rankline"><span class="pips">'+Array.from({length:entry.stars},(_,i)=>
           '<span class="rp'+(i<entry.rank?' on':'')+'"></span>').join('')+
           '</span><span class="lvl">LVL '+entry.level+(atCap?' (MAX)':'')+'</span></div>'+
-        '<div class="xpbar"><i style="width:'+pct+'%"></i></div>';
+        '<div class="xpbar"><i style="width:'+pct+'%"></i></div>'+
+        // Task 9.3 (frozen ruling): def.kitText = {sig,heavy,s1,s2,s3} -- five short roster-card
+        // lines, one per signature/heavy/special. Every CHAMPS def now carries one (40_movedata.js);
+        // a champion with none (shouldn't happen for anything actually in Save.data.roster) just
+        // renders no kit block rather than throwing.
+        (def.kitText?'<div class="kit">'+
+          ['sig','heavy','s1','s2','s3'].map(k=>'<div class="kitline"><b>'+k.toUpperCase()+'</b> '+def.kitText[k]+'</div>').join('')+
+          '</div>':'');
       const actions=document.createElement('div');actions.className='actions';
       const lvlCost=10*entry.level;
       const lvlBtn=document.createElement('button');
