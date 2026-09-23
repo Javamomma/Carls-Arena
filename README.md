@@ -16,6 +16,8 @@ One-on-one tap-and-swipe fighter in the Dungeon Crawler Carl universe. Single HT
 | Intercepting a foe's dash-in: punch-in camera + directional shake | A landed heavy, with its own per-class impact fx |
 | ![The in-fight HUD: chevron bars, bronze class-gem portrait frames, a gold combo counter](docs/shots/p8-hud.png) | ![Carl vs Mother Rat, Floor 2's boss](docs/shots/p3-floor2-boss.png) |
 | The in-fight HUD — chevron bars, class-gem portrait frames, a tilted gold combo counter | Floor 2's boss fight |
+| ![The grub: a segmented chitin-plated larva with a dark head-end and six stubby legs](docs/shots/p8-grub.png) | ![The shaman: a robed caster with a sash, staff arm raised](docs/shots/p8-shaman.png) |
+| The grub — banded chitin plates on the quad rig's own body language | The shaman — the sixth human-rig look, in robe and sash |
 
 The [S3 cinematic card](docs/shots/p7-s3.png) (Carl's SPECIAL 3) rounds out `docs/shots/p7-*.png`.
 

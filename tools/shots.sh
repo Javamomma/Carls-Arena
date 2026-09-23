@@ -33,13 +33,26 @@ S=docs/shots
 # blanket suppression -- every other line keeps `set -e`'s real protection) lets the shot still get
 # taken and the script still run to completion; each is still worth a LOOK afterward (a freeze-frame
 # mid-fight is exactly what these shots are for), just not a real pass/fail signal on its own.
+#
+# Task 8.5 review, Important #3: bare `|| true` threw the exit code away, so a genuinely NEW failure
+# among those ten lines (a real crash, a broken screen) was indistinguishable from the expected
+# soak-floor case -- both exited 1, both were swallowed, and the script's closing line only printed a
+# PNG count. `soft` below records each one instead, and the summary at the bottom compares what
+# actually happened against EXPECTED_SOFT_FAIL: the ten names that reproducibly exit non-zero on this
+# tree for the documented reason. A line that starts failing (or stops) is named in the summary, so
+# it is visible without being fatal -- these shots still can't be a pass/fail signal on their own.
+SOFT_FAIL=()
+SOFT_OK=()
+soft(){ local label="$1"; shift
+  if "$@"; then SOFT_OK+=("$label"); else SOFT_FAIL+=("$label"); fi; }
+EXPECTED_SOFT_FAIL="p2-close-hob p2-close p2-goblin p3-floor1-boss p3-floor2-boss p3-grub p3-grull p3-mother p3-quads p7-intercept p8-stage-doorway p8-stage-sewers"
 # ---- Phase 2: Carl's own pose set + one real fight + the S3 cinematic card --------------------
 for key in idle light3 heavy block hit s3; do
   $H --sim --seconds 1 --pose "$key" --shot "$S/p2-$key.png"
 done
-$H --sim --seconds 6 --encounter f1_goblin --shot "$S/p2-goblin.png" || true
-$H --sim --seconds 4 --encounter f1_goblin --shot "$S/p2-close.png" || true
-$H --sim --seconds 4 --encounter f1_hob --shot "$S/p2-close-hob.png" || true
+soft p2-goblin $H --sim --seconds 6 --encounter f1_goblin --shot "$S/p2-goblin.png"
+soft p2-close $H --sim --seconds 4 --encounter f1_goblin --shot "$S/p2-close.png"
+soft p2-close-hob $H --sim --seconds 4 --encounter f1_hob --shot "$S/p2-close-hob.png"
 $H --cinematic --shot "$S/p2-card.png"
 
 # ---- Phase 3: quad/big rigs (donut/mongo pose sets), the new Phase-3 mobs, both floor bosses ----
@@ -49,12 +62,12 @@ done
 for key in idle heavy s3; do
   $H --p1 mongo --pose "$key" --shot "$S/p3-mongo-$key.png"
 done
-$H --sim --seconds 3 --p2 grub --ai t3 --shot "$S/p3-grub.png" || true
-$H --sim --seconds 3 --p2 grull --ai t4 --shot "$S/p3-grull.png" || true
-$H --sim --seconds 3 --p2 mother_rat --ai t5 --shot "$S/p3-mother.png" || true
-$H --sim --seconds 3 --p1 donut --p2 grub --shot "$S/p3-quads.png" || true
-$H --sim --seconds 4 --encounter f1_grull --shot "$S/p3-floor1-boss.png" || true
-$H --sim --seconds 4 --encounter f2_mother --shot "$S/p3-floor2-boss.png" || true
+soft p3-grub $H --sim --seconds 3 --p2 grub --ai t3 --shot "$S/p3-grub.png"
+soft p3-grull $H --sim --seconds 3 --p2 grull --ai t4 --shot "$S/p3-grull.png"
+soft p3-mother $H --sim --seconds 3 --p2 mother_rat --ai t5 --shot "$S/p3-mother.png"
+soft p3-quads $H --sim --seconds 3 --p1 donut --p2 grub --shot "$S/p3-quads.png"
+soft p3-floor1-boss $H --sim --seconds 4 --encounter f1_grull --shot "$S/p3-floor1-boss.png"
+soft p3-floor2-boss $H --sim --seconds 4 --encounter f2_mother --shot "$S/p3-floor2-boss.png"
 
 # ---- Phase 4: menu screens (title/map/roster/roster-4/crystal/shop/arena) ---------------------
 $H --reset-save --screen title --shot "$S/p4-title.png"
@@ -95,7 +108,7 @@ $H --tutorial-shot shield --shot "$S/p6-tutorial-shield.png"
 # INTERCEPT! popup, the camera punch-in and the directional shake all still live. Hitstop holding
 # G.fight.frame for part of that tiny window is exactly the "don't advance frame-for-tick" case the
 # top-of-file note explains -- `|| true` here for the same reason, not a Task 8.5-introduced issue.
-$H --sim --seconds 0.28333333333333333 --p1 carl --p2 goblin --ai t3 --seed 1 --shot "$S/p7-intercept.png" || true
+soft p7-intercept $H --sim --seconds 0.28333333333333333 --p1 carl --p2 goblin --ai t3 --seed 1 --shot "$S/p7-intercept.png"
 # p7-heavy.png: carl (t3 AI) vs goblin, seed 2 -- a heavy crits at sim frame 97; 99 ticks (1.65s) is
 # 2 ticks later, showing the crit damage popup, the spark burst, the new impactBlunt ring (carl's
 # own def.impact) and the directional shake together.
@@ -131,6 +144,27 @@ $H --sim --seconds 1 --p1 mongo --p2 donut --bot idle --ai t1 --shot "$S/p8-mong
 $H --p1 donut --p2 goblin --pose idle --shot "$S/p8-donut.png"
 $H --p1 grull --p2 goblin --pose idle --shot "$S/p8-grull.png"
 $H --p1 mother_rat --p2 goblin --pose idle --shot "$S/p8-mother.png"
+# Final review, Minor #9: grub and the shaman were the two of the eleven looks with no standing shot
+# anywhere in the set. Grub appeared only prone at the floor line in p8-hud.png and p3-grub.png, in
+# both cases mostly behind the subtitle bar, and the shaman only inside regenerated p2/p3 fight
+# shots -- so the phase's "all eleven looks have layered bodies and faces" exit criterion had visual
+# evidence for nine. Same --pose idle fixture as every other body shot above, which is the point:
+# these are graded the same way, on the same frame, as the nine that already had one.
+# `--pre "G.say=()=>{}"` silences the announcer toast for these two only. That toast is what buried
+# grub in every previous shot: it is a larva, so its whole body sits at the floor line exactly where
+# the subtitle bar draws, and with the bar up only its back half cleared it. Suppressing it shows the
+# full chitin plating, the head-end and all six legs. The shaman gets the same treatment so the pair
+# is shot identically; nothing else about the frame changes.
+$H --p1 grub --p2 goblin --pose idle --pre "G.say=()=>{}" --shot "$S/p8-grub.png"
+$H --p1 shaman --p2 goblin --pose idle --pre "G.say=()=>{}" --shot "$S/p8-shaman.png"
+
+# ---- Phase 8: stage depth and torch lighting (Task 8.3) ---------------------------------------
+# These two were never in this script -- they were taken by hand during Task 8.3 and are documented
+# only in that task's report ("floor 1, f1_grull, 4s sim" / "floor 2, f2_mother, 4s sim"), which made
+# them the one part of the p8 set this file could not regenerate. Same two encounters the
+# p3-floor{1,2}-boss lines above use, so the two themes are shown on their own floors.
+soft p8-stage-doorway $H --sim --seconds 4 --encounter f1_grull --shot "$S/p8-stage-doorway.png"
+soft p8-stage-sewers $H --sim --seconds 4 --encounter f2_mother --shot "$S/p8-stage-sewers.png"
 
 # ---- Phase 8: door cards + roster portrait frames (Task 8.5) ----------------------------------
 # p8-map.png: a fresh save's floor 1 -- door 1 open, everything else locked -- so the door-card art
@@ -150,3 +184,17 @@ $H --reset-save --screen map --shot "$S/p8-map.png"
 $H --reset-save --pre "Save.data.roster.carl={stars:3,rank:2,level:14,xp:22,shards:2};Save.data.roster.katia={stars:2,rank:2,level:9,xp:30,shards:4};Save.data.roster.donut={stars:2,rank:1,level:6,xp:12,shards:1};Save.data.roster.mongo={stars:1,rank:1,level:3,xp:5,shards:0};Save.data.iso=400;Save.put()" --screen roster --shot "$S/p8-roster.png"
 
 echo "shots.sh: regenerated $(ls "$S"/*.png | wc -l | tr -d ' ') PNGs in $S"
+# Task 8.5 review, Important #3: the one-line summary. Sorted so the comparison against
+# EXPECTED_SOFT_FAIL is order-independent, and both directions are reported -- a line that newly
+# fails is a possible real regression, and a line that newly PASSES means this list is stale.
+got=$(printf '%s\n' ${SOFT_FAIL[@]+"${SOFT_FAIL[@]}"} | sort | tr '\n' ' ' | sed 's/ $//')
+want=$(printf '%s\n' $EXPECTED_SOFT_FAIL | sort | tr '\n' ' ' | sed 's/ $//')
+if [ "$got" = "$want" ]; then
+  echo "shots.sh: soak-floor shots: ${#SOFT_FAIL[@]}/12 exited non-zero, exactly the documented set -- no new failures"
+else
+  echo "shots.sh: soak-floor shots CHANGED -- look at these before trusting the set:"
+  echo "  expected non-zero: $want"
+  echo "  actually non-zero: ${got:-(none)}"
+  for n in $want; do case " $got " in *" $n "*) ;; *) echo "  NEWLY CLEAN: $n (this list is stale)";; esac; done
+  for n in $got; do case " $want " in *" $n "*) ;; *) echo "  NEWLY FAILING: $n (a real crash, or the shot is wrong -- LOOK at it)";; esac; done
+fi
