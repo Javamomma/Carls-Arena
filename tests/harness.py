@@ -42,6 +42,14 @@ from playwright.sync_api import sync_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INDEX = 'file://' + os.path.join(ROOT, 'index.html')
+# The four-champion roster fixture, kept in one place because two things have to agree on it: the
+# docs/shots/p8-roster.png line in tools/shots.sh (which passes it as --pre) and --phone-check's own
+# roster seeding (Phase 8 final review, Important #5 -- a fresh one-champion save made every roster
+# card assertion vacuous). Four is the whole roster the game can grant today, so it is also the
+# densest list the .cards container ever has to lay out.
+ROSTER_PRE = ("Save.data.roster.katia={stars:1,rank:1,level:1,xp:0,shards:0};"
+              "Save.data.roster.donut={stars:1,rank:1,level:1,xp:0,shards:0};"
+              "Save.data.roster.mongo={stars:1,rank:1,level:1,xp:0,shards:0};Save.put()")
 
 def build_soak_js(seed, p1n, p2n, ain, ctrl_expr, ticks, enc='', probes=(), pre=''):
     """The one restart-on-KO soak loop, shared by run_matrix_cell and the plain `--sim` path: a
@@ -469,15 +477,15 @@ def main():
                           ">=44 CSS-px rect fully inside the viewport too -- one currently scrolled out "
                           "of a .path/.setrows/#shopBody internal scroll region is skipped, not failed, "
                           "since it's reachable by scrolling rather than clipped/inaccessible. Task 8.5 "
-                          "fix round 1: also asserts no two #mapPath .node elements' own bounding rects "
-                          "overlap, and likewise for #rosterCards .card, catching a flex-shrink layout "
-                          "bug (each row's box shrank below its own door-card/portrait-card child's "
-                          "real height, which then bled into neighboring rows) that per-button size/"
-                          "position checks alone can't see; and that the map's DOOR 1 (the door a "
-                          "player actually plays next) is fully inside the viewport with zero "
-                          "scrolling needed, even though the rest of a full floor may legitimately "
-                          "require it. Prints a JSON summary and exits 1 on any check failure or "
-                          "page/console error")
+                          "fix round 1, corrected by the Phase 8 final review: seeds the roster with "
+                          "the four-champion fixture (a fresh save has one champion, which made every "
+                          "roster assertion vacuous), then asserts -- for #mapPath .node and "
+                          "#rosterCards .card alike -- that no two rows' ART children (canvas.doorcard "
+                          "/ canvas.pcard) overlap, that no row's own box is shorter than that child "
+                          "(the flex-shrink bug itself, caught at the row it happens on), and that the "
+                          "first card of each list is fully inside both the viewport and its own "
+                          "scroll container while the last one stays reachable at max scroll. Prints a "
+                          "JSON summary and exits 1 on any check failure or page/console error")
     a = ap.parse_args()
     if a.floor is not None and a.node is None:
         ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2
@@ -758,6 +766,16 @@ def main():
             pg2.goto(INDEX)
             pg2.wait_for_function('typeof G!=="undefined"')
             pg2.evaluate('localStorage.clear();Save.load()')
+            # Phase 8 final review, Important #5: a FRESH save has exactly one champion, so the
+            # roster half of the card checks below ran against a single rect -- one rect cannot
+            # overlap another, and one card cannot be pushed out of view by the ones above it, so
+            # the roster assertions proved nothing at all (the reviewer measured
+            # cardOverlap.roster.count == 1). Seeded here with the SAME four-champion fixture
+            # tools/shots.sh already uses for docs/shots/p8-roster.png, so the check runs against
+            # the densest roster the game can actually show today -- which is the density the
+            # Critical it now guards (the first card clipped above an unreachable scroll range)
+            # only appears at.
+            pg2.evaluate(ROSTER_PRE)
 
             def capture_screen(nav_js):
                 pg2.evaluate(nav_js)
@@ -806,15 +824,28 @@ def main():
             # child rendered at its real size and (overflow:visible) bled into the row above/below it.
             # That's a real, screenshot-visible defect no per-button size/position check above would
             # ever catch (each individual button can still be >=44px and "inside the viewport" while
-            # overlapping its neighbor) -- so this checks the one property that actually rules it out:
-            # no two sibling node/card elements' own bounding rects may overlap on both axes. A small
-            # 0.5px tolerance absorbs sub-pixel layout rounding between genuinely-adjacent (touching,
-            # zero-gap) rects without masking a real double-digit-pixel overlap.
-            def rects_for(selector):
-                return pg2.evaluate("""(sel=>[...document.querySelectorAll(sel)].map(el=>{
-                  const r=el.getBoundingClientRect();
-                  return{left:r.left,top:r.top,right:r.right,bottom:r.bottom};
-                }))(%s)""" % json.dumps(selector))
+            # overlapping its neighbor).
+            #
+            # Phase 8 final review, Important #5 / Task 8.5 review Critical #1: the first version of
+            # this check sampled the .node/.card PARENT rects, which is the one thing that provably
+            # could NOT see that bug -- at the broken commit (ab73246) every .node had shrunk to
+            # exactly its 44px min-height, so the parents were touching-but-never-overlapping and the
+            # assertion reported `bad_pairs: []` on the known-broken tree. Only the canvas CHILDREN
+            # overlapped. Two assertions replace it, both aimed at the actual failure mode:
+            #   * ART OVERLAP -- the same pairwise test, run on the visual content itself
+            #     (canvas.doorcard / canvas.pcard), which is what a reader of the screenshot sees;
+            #   * SHRUNK -- every .node/.card's own bounding height must be >= its art child's
+            #     rendered height. This catches the shrink DIRECTLY, at the one row it happens on,
+            #     without needing a neighbour to bleed into, so it fails even on a one-row list.
+            # A small 0.5px tolerance absorbs sub-pixel layout rounding between genuinely-adjacent
+            # (touching, zero-gap) rects without masking a real double-digit-pixel overlap.
+            def card_rects(selector, art_selector):
+                return pg2.evaluate("""(a=>[...document.querySelectorAll(a[0])].map(el=>{
+                  const r=el.getBoundingClientRect(),art=el.querySelector(a[1]);
+                  const ar=art?art.getBoundingClientRect():null;
+                  const box=q=>({left:q.left,top:q.top,right:q.right,bottom:q.bottom,height:q.height});
+                  return{parent:box(r),art:ar?box(ar):null};
+                }))(%s)""" % json.dumps([selector, art_selector]))
 
             def overlap_pairs(rects):
                 pairs = []
@@ -826,43 +857,85 @@ def main():
                             pairs.append([i, j])
                 return pairs
 
-            overlap_results = {}
-            nav_by_name = dict(SCREENS)
-            for scr_name, sel in (('map', '#mapPath .node'), ('roster', '#rosterCards .card')):
-                pg2.evaluate(nav_by_name[scr_name])
-                rects = rects_for(sel)
-                overlap_results[scr_name] = {'count': len(rects), 'bad_pairs': overlap_pairs(rects)}
+            # Phase 8 final review, Critical #1: "the first card must be fully visible without
+            # scrolling" was asserted for the map only, and the roster shipped a first card that was
+            # cut off at EVERY reachable scroll position (justify-content:center puts an overflowing
+            # flex column's start-side overflow outside the scroll range). Checked here for both
+            # lists, against two separate properties, because the map bug and the roster bug failed
+            # differently: `insideViewport` is the original map assertion; `insideScroller` is the
+            # roster one (a card can sit inside the viewport and still be clipped by its own
+            # overflow-y:auto ancestor). `lastReachable` is the other half of the same ruling -- a
+            # long list is ALLOWED to scroll (Phase 6), so the fix for the first card must not push
+            # the last one past the end of the scroll range; scrollTop is restored afterwards so the
+            # measurement never changes what a later check or a screenshot sees.
+            def first_card_state(sel):
+                return pg2.evaluate("""(sel=>{
+                  const all=[...document.querySelectorAll(sel)];
+                  if(!all.length)return null;
+                  const el=document.querySelector(sel+'.open')||all[0],last=all[all.length-1];
+                  let sc=el.parentElement;
+                  while(sc&&sc!==document.documentElement&&
+                        !/(auto|scroll)/.test(getComputedStyle(sc).overflowY))sc=sc.parentElement;
+                  const r=el.getBoundingClientRect();
+                  const box=q=>({left:q.left,top:q.top,right:q.right,bottom:q.bottom});
+                  let insideScroller=true,lastReachable=true,scrollRange=null;
+                  if(sc&&sc!==document.documentElement){
+                    const sr=sc.getBoundingClientRect();
+                    insideScroller=r.top>=sr.top-0.5&&r.bottom<=sr.bottom+0.5;
+                    const was=sc.scrollTop;
+                    // .path is flex-direction:column-reverse, so ITS scroll range runs from a
+                    // negative minimum up to 0 while .cards' runs 0..max -- probe both ends rather
+                    // than assuming a direction, and count the last row reachable if EITHER extreme
+                    // brings it fully inside.
+                    sc.scrollTop=-1e6;const min=sc.scrollTop;
+                    const fits=()=>{const lr=last.getBoundingClientRect(),s2=sc.getBoundingClientRect();
+                      return lr.top>=s2.top-0.5&&lr.bottom<=s2.bottom+0.5};
+                    lastReachable=fits();
+                    sc.scrollTop=1e6;const max=sc.scrollTop;
+                    lastReachable=lastReachable||fits();
+                    sc.scrollTop=was;
+                    scrollRange=[min,max]}
+                  return{rect:box(r),count:all.length,insideScroller,lastReachable,scrollRange};
+                })(%s)""" % json.dumps(sel))
 
-            # Task 8.5 fix round 1 (controller ruling, distinct from the overlap check above): "at
-            # 844x390 the first card must be fully visible without scrolling" -- a full floor with
-            # 5 doors + boss legitimately needs #mapPath to scroll (Phase 6 ruling), but the door a
-            # player actually plays next (DOOR 1, the map's own .node.open in a worst-case fresh
-            # floor) must never itself require scrolling to reach at the game's tightest supported
-            # viewport. Sampled straight off the live page (not re-derived from CSS assumptions) so
-            # a future layout change that regresses this gets caught here, not just by eye.
-            pg2.evaluate(nav_by_name['map'])
-            first_door = pg2.evaluate("""(()=>{
-              const el=document.querySelector('#mapPath .node.open')||document.querySelector('#mapPath .node');
-              if(!el)return null;
-              const r=el.getBoundingClientRect();
-              return{top:r.top,bottom:r.bottom,left:r.left,right:r.right};
-            })()""")
+            overlap_results, first_cards = {}, {}
+            nav_by_name = dict(SCREENS)
             vw2, vh2 = pg2.evaluate('innerWidth'), pg2.evaluate('innerHeight')
-            first_door_ok = bool(first_door) and (
-                first_door['top'] >= -0.5 and first_door['left'] >= -0.5 and
-                first_door['bottom'] <= vh2 + 0.5 and first_door['right'] <= vw2 + 0.5)
+            for scr_name, sel, art_sel in (('map', '#mapPath .node', 'canvas.doorcard'),
+                                           ('roster', '#rosterCards .card', 'canvas.pcard')):
+                pg2.evaluate(nav_by_name[scr_name])
+                entries = card_rects(sel, art_sel)
+                arts = [e['art'] for e in entries if e['art']]
+                shrunk = [i for i, e in enumerate(entries)
+                          if e['art'] and e['parent']['height'] < e['art']['height'] - 0.5]
+                overlap_results[scr_name] = {'count': len(entries), 'artCount': len(arts),
+                                             'bad_pairs': overlap_pairs(arts), 'shrunk': shrunk}
+                st = first_card_state(sel)
+                if st:
+                    r = st['rect']
+                    st['insideViewport'] = (r['top'] >= -0.5 and r['left'] >= -0.5 and
+                                            r['bottom'] <= vh2 + 0.5 and r['right'] <= vw2 + 0.5)
+                    st['ok'] = st['insideViewport'] and st['insideScroller'] and st['lastReachable']
+                first_cards[scr_name] = st
+
+            # firstDoor/firstDoorOk kept under their original names: docs/ARENA.md and the Task 8.5
+            # reports quote them, and the map half of the ruling is unchanged.
+            first_door = first_cards['map']['rect'] if first_cards['map'] else None
+            first_door_ok = bool(first_cards['map']) and first_cards['map']['ok']
             b2.close()
         screens_bad = [r['screen'] for r in screen_results if r['bad']]
-        overlap_bad = [name for name, v in overlap_results.items() if v['bad_pairs']]
+        overlap_bad = [name for name, v in overlap_results.items() if v['bad_pairs'] or v['shrunk']]
+        first_card_bad = [name for name, v in first_cards.items() if not v or not v['ok']]
 
         out = {'errors': errs, 'attackButtonsHidden': hidden_out, 'attackButtonsShown': shown_out,
                'wiring_ok': wiring_ok, 'screens': screen_results, 'screenErrors': screen_errs,
-               'cardOverlap': overlap_results, 'firstDoor': first_door, 'firstDoorOk': first_door_ok}
+               'cardOverlap': overlap_results, 'firstCard': first_cards,
+               'firstDoor': first_door, 'firstDoorOk': first_door_ok}
         print(json.dumps(out, indent=1))
         bad = (errs or not hidden_out['aspect_ok'] or not hidden_out['fits_ok'] or hidden_out['bad_btns']
                or not hidden_out['no_hscroll'] or not shown_out['aspect_ok'] or not shown_out['fits_ok']
                or shown_out['bad_btns'] or not shown_out['no_hscroll'] or not wiring_ok
-               or screen_errs or screens_bad or overlap_bad or not first_door_ok)
+               or screen_errs or screens_bad or overlap_bad or first_card_bad)
         sys.exit(1 if bad else 0)
     errors, console = [], []
     with sync_playwright() as p:

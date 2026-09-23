@@ -192,10 +192,24 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
    name/DONUT's actions ran off both edges with overflow:hidden and no way to reach them). Same fix
    as fix-wave item 8 already applied to .path/.setrows/#shopBody: a list that outgrows its box
    scrolls to reach the rest instead of clipping it (the phone-layout brief's own "scrolling lists
-   allowed but no clipping" line). justify-content:center still centers a short (1-2 card) roster;
-   once content overflows, the browser's own scrollable-overflow behavior lets it be reached above
-   and below center by scrolling. */
-.cards{display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1;justify-content:center}
+   allowed but no clipping" line).
+   Phase 8 final review, Critical #1 -- and the previous version of this comment was WRONG about the
+   second half of it. `justify-content:center` on an OVERFLOWING scroll container does not let the
+   overflow "be reached above and below center by scrolling": this engine places the start-side
+   overflow outside the scrollable range entirely, so it is unreachable at every scroll position.
+   Measured with the same 4-champion fixture the roster shot uses, before this fix: the first card's
+   top sat at -53.5px (854x480) / -98.5px (844x390) relative to #rosterCards at scrollTop 0, and the
+   scroll range (0..54 / 0..99) only ever moves content further UP -- so ~99px of the ACTIVE
+   champion's card (portrait top, name, stars, the ACTIVE button) was permanently cut off on the
+   phone target. That is exactly the behaviour .path's own comment a hundred lines above already
+   documents and fixes with flex-start; the fix was simply never applied here.
+   `safe center` is that fix while keeping what the centering was for: it behaves as `center` while
+   the content FITS (a 1-2 champion roster still sits mid-panel, no snap between densities) and falls
+   back to start alignment the moment it overflows, which puts the first card's top at 0 and inside
+   the scroll range (0..107 at 844x390, so the last card stays reachable too). The plain flex-start
+   declaration before it is the fallback for an engine with no `safe` overflow-alignment keyword: it
+   drops the whole declaration and lands on flex-start, which is never-centered but never clipped. */
+.cards{display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1;justify-content:flex-start;justify-content:safe center}
 /* Task 8.5 fix round 1: flex-shrink:0, the same root-cause fix as .node above -- a roster card
    wasn't visibly overlapping (the controller's own note: "acceptable, only cut by scroll
    position"), but it was exposed to the identical flex-shrink risk as a scrollable flex-column

@@ -136,9 +136,17 @@ $H --p1 mother_rat --p2 goblin --pose idle --shot "$S/p8-mother.png"
 # p8-map.png: a fresh save's floor 1 -- door 1 open, everything else locked -- so the door-card art
 # (arch/torch/portrait/banner) and the lock overlay are both visible in one shot; see the task's own
 # report for a second, mixed-state (done/open/locked) reference render reviewed alongside this one.
-# p8-roster.png: the same 4-champion roster fixture p4-roster-4.png used, now with the 112px
-# portrait + class-gem frame (Screens.portraitCard) instead of the old plain 56px bust.
+# p8-roster.png: its OWN fixture, not p4-roster-4.png's. The final review found two problems with
+# reusing that one (Critical #1, Minor #8): the two files came out byte-identical, so the p8 shot
+# added no evidence of its own; and its framing -- the first card sliced through the middle -- read
+# as a cropping choice when it was actually the unreachable-content bug in `.cards`
+# (justify-content:center on an overflowing scroll container, fixed to `safe center`; see
+# src/00_head.html). This fixture keeps four champions (the densest roster the game grants, so the
+# list still overflows and the first card's position is still a real test of the fix) but gives each
+# one a different stars/rank/level/shards state, so the star row, the rank pips, the XP bar and the
+# N/5 shard count all show real variety instead of four identical rank-1 rows -- and the shot opens
+# at the list's own top, where CARL's card is now fully visible.
 $H --reset-save --screen map --shot "$S/p8-map.png"
-$H --reset-save --pre "Save.data.roster.katia={stars:1,rank:1,level:1,xp:0,shards:0};Save.data.roster.donut={stars:1,rank:1,level:1,xp:0,shards:0};Save.data.roster.mongo={stars:1,rank:1,level:1,xp:0,shards:0};Save.put()" --screen roster --shot "$S/p8-roster.png"
+$H --reset-save --pre "Save.data.roster.carl={stars:3,rank:2,level:14,xp:22,shards:2};Save.data.roster.katia={stars:2,rank:2,level:9,xp:30,shards:4};Save.data.roster.donut={stars:2,rank:1,level:6,xp:12,shards:1};Save.data.roster.mongo={stars:1,rank:1,level:3,xp:5,shards:0};Save.data.iso=400;Save.put()" --screen roster --shot "$S/p8-roster.png"
 
 echo "shots.sh: regenerated $(ls "$S"/*.png | wc -l | tr -d ' ') PNGs in $S"
