@@ -2325,14 +2325,24 @@ const Effects={
   // Task 9.1 (frozen interface, exact ruling): o.uncapped bypasses the maxStacks clamp for THIS call
   // only (Carl's Spite passive, Task 9.2, hands out uncapped fury past its normal cap of 5) -- the
   // clamp is skipped on both the fresh-entry and the already-active branches below, same "latest call
-  // decides" shape every other Effects.apply option already has. A later, ordinary (non-uncapped) call
-  // on the same holder/id still clamps normally, down to maxStacks, exactly like any other apply would.
+  // decides" shape every other Effects.apply option already has.
+  // Fix-wave item 3 (I3, final review): a later, ordinary (non-uncapped) call on the same holder/id
+  // must never REDUCE a pile an earlier uncapped call built past maxStacks -- the pre-fix clamp
+  // (Math.min(def.maxStacks,e.stacks+stacks)) computed the cap against the CURRENT count, so any
+  // capped apply on top of an uncapped pile silently clamped it back down to maxStacks (verified:
+  // nine uncapped +1 applies give 9 stacks, one ordinary apply then dropped it to 5 -- Carl's own
+  // in-combo heavy-ender signature fury apply, a plain non-uncapped call, would have stripped up to 5
+  // Spite stacks on landing, the opposite of the ruling and the README's "builds up ... up to 10").
+  // Fixed floor: Math.min(Math.max(def.maxStacks,e.stacks),e.stacks+stacks) -- the ceiling a capped
+  // apply clamps against is whichever is HIGHER, the frozen cap or the pile already held, so a capped
+  // call can still add stacks (bounded the normal way whenever the pile is at/under the cap already)
+  // but can never subtract from a pile an earlier uncapped call built past it.
   apply(fight,holder,id,o){
     o=o||{};
     const def=EFFECTS[id];if(!def)throw new Error('unknown effect: '+id);
     const stacks=o.stacks===undefined?1:o.stacks,potency=o.potency===undefined?1:o.potency,uncapped=!!o.uncapped;
     let e=holder.effects.find(x=>x.id===id);
-    if(e){e.left=def.dur;e.stacks=uncapped?e.stacks+stacks:Math.min(def.maxStacks,e.stacks+stacks);e.potency=potency;e.source=o.source}
+    if(e){e.left=def.dur;e.stacks=uncapped?e.stacks+stacks:Math.min(Math.max(def.maxStacks,e.stacks),e.stacks+stacks);e.potency=potency;e.source=o.source}
     else{e={id,left:def.dur,stacks:uncapped?stacks:Math.min(def.maxStacks,stacks),potency,source:o.source};holder.effects.push(e)}
     if(def.onApply)def.onApply(fight,holder,e);
     fight.emitEffect(holder,id,e.stacks,'applied');
@@ -14384,8 +14394,26 @@ Test.add('Effects.apply({uncapped:true}) bypasses maxStacks for that one call (S
   Effects.apply(f,f.p1,'fury',{stacks:3});
   Effects.apply(f,f.p1,'fury',{stacks:4,uncapped:true});
   eq(Effects.stacks(f.p1,'fury'),7,'uncapped must skip the maxStacks(5) clamp entirely, even past it');
+  // Fix-wave item 3 (I3, final review): a later NON-uncapped call must never REDUCE an existing
+  // uncapped pile back toward maxStacks -- the pre-fix clamp (Math.min(maxStacks,e.stacks+stacks))
+  // computed against the CURRENT stack count, so any ordinary apply on top of an uncapped pile above
+  // maxStacks silently clamped it back down (7 -> 5 here; Carl's own signature fury apply, a plain
+  // non-uncapped call, would have stripped Spite stacks on landing -- the opposite of the ruling).
+  // Fixed formula: Math.min(Math.max(def.maxStacks,e.stacks),e.stacks+stacks) -- the floor of the
+  // clamp is whichever is higher, the frozen cap or the pile already held, so a capped apply can still
+  // ADD up to its own stacks (bounded by the higher floor) but can never subtract from what's there.
   Effects.apply(f,f.p1,'fury',{stacks:100});
-  eq(Effects.stacks(f.p1,'fury'),5,'a later NON-uncapped call still clamps normally, down to maxStacks')});
+  eq(Effects.stacks(f.p1,'fury'),7,'a later NON-uncapped call must respect (never reduce) the existing pile -- min(max(maxStacks,e.stacks),e.stacks+stacks)')});
+// Fix-wave item 3 (I3, final review, exact repro): "nine uncapped applies give 9 stacks, one ordinary
+// apply drops it to 5" -- the review's own verification. maxStacks(fury)=5 here too; nine separate
+// uncapped +1 calls (not one +9 call) matches Carl's own passive shape (Spite fires one uncapped
+// +1 stack at a time, 49_passives.js), the realistic reproduction the review used.
+Test.add('Fix-wave I3: nine uncapped +1 fury applies give 9 stacks; a later ordinary fury apply leaves 9, not 5',()=>{
+  const f=mkFight();
+  for(let i=0;i<9;i++)Effects.apply(f,f.p1,'fury',{stacks:1,uncapped:true});
+  eq(Effects.stacks(f.p1,'fury'),9,'nine uncapped +1 applies must give 9 stacks');
+  Effects.apply(f,f.p1,'fury',{stacks:1}); // an ordinary, non-uncapped apply (Carl's own sigEffect shape)
+  eq(Effects.stacks(f.p1,'fury'),9,'an ordinary fury apply on top of 9 uncapped stacks must leave 9, never clamp down to maxStacks(5)')});
 Test.add('Effects.purify removes only the debuff set (bleed/stun/armorBreak/weakness/poison/powerBurn), leaving every buff untouched',()=>{
   const f=mkFight();
   for(const id of['bleed','weakness','armorBreak','poison','stun'])Effects.apply(f,f.p1,id,{});

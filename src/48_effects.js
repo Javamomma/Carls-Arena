@@ -124,14 +124,24 @@ const Effects={
   // Task 9.1 (frozen interface, exact ruling): o.uncapped bypasses the maxStacks clamp for THIS call
   // only (Carl's Spite passive, Task 9.2, hands out uncapped fury past its normal cap of 5) -- the
   // clamp is skipped on both the fresh-entry and the already-active branches below, same "latest call
-  // decides" shape every other Effects.apply option already has. A later, ordinary (non-uncapped) call
-  // on the same holder/id still clamps normally, down to maxStacks, exactly like any other apply would.
+  // decides" shape every other Effects.apply option already has.
+  // Fix-wave item 3 (I3, final review): a later, ordinary (non-uncapped) call on the same holder/id
+  // must never REDUCE a pile an earlier uncapped call built past maxStacks -- the pre-fix clamp
+  // (Math.min(def.maxStacks,e.stacks+stacks)) computed the cap against the CURRENT count, so any
+  // capped apply on top of an uncapped pile silently clamped it back down to maxStacks (verified:
+  // nine uncapped +1 applies give 9 stacks, one ordinary apply then dropped it to 5 -- Carl's own
+  // in-combo heavy-ender signature fury apply, a plain non-uncapped call, would have stripped up to 5
+  // Spite stacks on landing, the opposite of the ruling and the README's "builds up ... up to 10").
+  // Fixed floor: Math.min(Math.max(def.maxStacks,e.stacks),e.stacks+stacks) -- the ceiling a capped
+  // apply clamps against is whichever is HIGHER, the frozen cap or the pile already held, so a capped
+  // call can still add stacks (bounded the normal way whenever the pile is at/under the cap already)
+  // but can never subtract from a pile an earlier uncapped call built past it.
   apply(fight,holder,id,o){
     o=o||{};
     const def=EFFECTS[id];if(!def)throw new Error('unknown effect: '+id);
     const stacks=o.stacks===undefined?1:o.stacks,potency=o.potency===undefined?1:o.potency,uncapped=!!o.uncapped;
     let e=holder.effects.find(x=>x.id===id);
-    if(e){e.left=def.dur;e.stacks=uncapped?e.stacks+stacks:Math.min(def.maxStacks,e.stacks+stacks);e.potency=potency;e.source=o.source}
+    if(e){e.left=def.dur;e.stacks=uncapped?e.stacks+stacks:Math.min(Math.max(def.maxStacks,e.stacks),e.stacks+stacks);e.potency=potency;e.source=o.source}
     else{e={id,left:def.dur,stacks:uncapped?stacks:Math.min(def.maxStacks,stacks),potency,source:o.source};holder.effects.push(e)}
     if(def.onApply)def.onApply(fight,holder,e);
     fight.emitEffect(holder,id,e.stacks,'applied');

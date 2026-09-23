@@ -4459,8 +4459,26 @@ Test.add('Effects.apply({uncapped:true}) bypasses maxStacks for that one call (S
   Effects.apply(f,f.p1,'fury',{stacks:3});
   Effects.apply(f,f.p1,'fury',{stacks:4,uncapped:true});
   eq(Effects.stacks(f.p1,'fury'),7,'uncapped must skip the maxStacks(5) clamp entirely, even past it');
+  // Fix-wave item 3 (I3, final review): a later NON-uncapped call must never REDUCE an existing
+  // uncapped pile back toward maxStacks -- the pre-fix clamp (Math.min(maxStacks,e.stacks+stacks))
+  // computed against the CURRENT stack count, so any ordinary apply on top of an uncapped pile above
+  // maxStacks silently clamped it back down (7 -> 5 here; Carl's own signature fury apply, a plain
+  // non-uncapped call, would have stripped Spite stacks on landing -- the opposite of the ruling).
+  // Fixed formula: Math.min(Math.max(def.maxStacks,e.stacks),e.stacks+stacks) -- the floor of the
+  // clamp is whichever is higher, the frozen cap or the pile already held, so a capped apply can still
+  // ADD up to its own stacks (bounded by the higher floor) but can never subtract from what's there.
   Effects.apply(f,f.p1,'fury',{stacks:100});
-  eq(Effects.stacks(f.p1,'fury'),5,'a later NON-uncapped call still clamps normally, down to maxStacks')});
+  eq(Effects.stacks(f.p1,'fury'),7,'a later NON-uncapped call must respect (never reduce) the existing pile -- min(max(maxStacks,e.stacks),e.stacks+stacks)')});
+// Fix-wave item 3 (I3, final review, exact repro): "nine uncapped applies give 9 stacks, one ordinary
+// apply drops it to 5" -- the review's own verification. maxStacks(fury)=5 here too; nine separate
+// uncapped +1 calls (not one +9 call) matches Carl's own passive shape (Spite fires one uncapped
+// +1 stack at a time, 49_passives.js), the realistic reproduction the review used.
+Test.add('Fix-wave I3: nine uncapped +1 fury applies give 9 stacks; a later ordinary fury apply leaves 9, not 5',()=>{
+  const f=mkFight();
+  for(let i=0;i<9;i++)Effects.apply(f,f.p1,'fury',{stacks:1,uncapped:true});
+  eq(Effects.stacks(f.p1,'fury'),9,'nine uncapped +1 applies must give 9 stacks');
+  Effects.apply(f,f.p1,'fury',{stacks:1}); // an ordinary, non-uncapped apply (Carl's own sigEffect shape)
+  eq(Effects.stacks(f.p1,'fury'),9,'an ordinary fury apply on top of 9 uncapped stacks must leave 9, never clamp down to maxStacks(5)')});
 Test.add('Effects.purify removes only the debuff set (bleed/stun/armorBreak/weakness/poison/powerBurn), leaving every buff untouched',()=>{
   const f=mkFight();
   for(const id of['bleed','weakness','armorBreak','poison','stun'])Effects.apply(f,f.p1,id,{});
