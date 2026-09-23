@@ -5444,6 +5444,60 @@ Test.add('Rig.draw/drawBig/drawQuad tolerate a missing lit argument (existing ca
   const quad=new Fighter(DEFS.donut,1,Ctrl.idle());
   ok(!threw(()=>Rig.draw(c,quad,cam,0)),'quad rig must not throw with lit omitted')});
 
+// Pinned counts for the session sweep below. Named constants rather than literals so the two places
+// that have to agree -- the assertion and the memory estimate in the task report -- read the same
+// number, and so a deliberate change (fix-wave item 4 routing seven more part kinds through the tint
+// path) lands as one edit with a reason next to it.
+const SESSION_BASE_BITMAPS=340,SESSION_TINTED_BITMAPS=600;
+// ---- Fix-wave item 3 (final review, Important #1): every BodyStyle cache is counted and bounded --
+// cacheCount() used to report _cache alone, which is the one cache that is provably bounded (it is
+// keyed on look|part|face|zoomBucket, all of which are finite). _tintedCache -- one full copy of a
+// part bitmap per (base key, k-bucket) -- was never counted and never cleared, so the "600 further
+// frames add no cache entries" test above was blind to the only cache that actually grows: the
+// reviewer measured ~253 base bitmaps and ~444 tinted copies (~79MB of backing store) across a
+// session that visits every look at both zoom buckets, none of it ever released. This pins the whole
+// working set for exactly that session shape, and pins the release: G.startFight drops all three
+// caches, so a fight pays one warm-up frame and the working set stays at what ONE fight needs.
+Test.add('every BodyStyle cache is counted, bounded across an all-looks session, and emptied by G.startFight',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  try{
+    BodyStyle.clearCache();
+    eq(BodyStyle.cacheTotal(),0,'clearCache() must empty ALL THREE caches, not just the bone-part one');
+    const ids=Object.keys(LOOKS).filter(id=>DEFS[id]&&LOOKS[id].body);
+    eq(ids.length,11,'the session sweep must cover all eleven shipped looks');
+    const cam={x:0,zoom:1};
+    // Two zoom buckets (the on-screen camera's own scale, and a 2x one) x four k-buckets, which is
+    // the shape the reviewer's ~79MB session estimate was measured on.
+    for(const id of ids){
+      const F=mkFight({p1:DEFS[id]}).p1;
+      for(const zoom of[1,2])for(let i=0;i<4;i++){
+        const k=i/3,lit={tint:Stage._mix(Stage.AMBIENT_TINT,Stage.TORCH_TINT,k),k,rimSide:i%2?1:-1};
+        c.save();c.setTransform(zoom,0,0,zoom,427,432);Rig.draw(c,F,cam,i,lit);c.restore()}}
+    const base=BodyStyle.cacheCount(),tinted=BodyStyle.tintedCount(),spec=BodyStyle.specCount();
+    ok(base>0,'the sweep must have cached base bitmaps, got '+base);
+    ok(tinted>0,'the sweep must have cached tinted copies -- if this is 0 the lighting path is dead, got '+tinted);
+    eq(spec,4,'four distinct k values must bucket to exactly four tint specs');
+    eq(BodyStyle.cacheTotal(),base+tinted+spec,'cacheTotal() must report all three caches');
+    // Pinned, not bounded-by-a-guess: an unnoticed key-shape change (a pose-dependent term slipping
+    // into a cache key, a per-frame k that stops bucketing) shows up here as a number that moved.
+    eq(base,SESSION_BASE_BITMAPS,'base bone-part bitmaps for the 11-look x 2-zoom sweep');
+    eq(tinted,SESSION_TINTED_BITMAPS,'tinted copies for the same sweep x 4 k-buckets');
+    // A second identical sweep must add nothing at all -- the caches are warm, not growing.
+    for(const id of ids){
+      const F=mkFight({p1:DEFS[id]}).p1;
+      for(const zoom of[1,2])for(let i=0;i<4;i++){
+        const k=i/3,lit={tint:Stage._mix(Stage.AMBIENT_TINT,Stage.TORCH_TINT,k),k,rimSide:i%2?1:-1};
+        c.save();c.setTransform(zoom,0,0,zoom,427,432);Rig.draw(c,F,cam,i,lit);c.restore()}}
+    eq(BodyStyle.cacheTotal(),base+tinted+spec,'a repeat of the same sweep must add no cache entries at all');
+    // The release: a new fight starts from an empty working set.
+    G.startFight({seed:1,p1:'carl',p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+    eq(BodyStyle.cacheCount(),0,'G.startFight must drop the bone-part cache');
+    eq(BodyStyle.tintedCount(),0,'G.startFight must drop the tinted-copy cache -- this is the one that grew');
+    eq(BodyStyle.specCount(),0,'G.startFight must drop the tint-spec cache');
+  }finally{G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+
 // ---- Task 8.3 fix round 1: torch tint must never paint outside the fighter's own silhouette -----
 // Controller-found Critical: the first version stamped one source-atop fillRect per BODY PART onto
 // the MAIN canvas (already opaque -- the stage is drawn under the fighter), so 'source-atop' painted

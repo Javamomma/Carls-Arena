@@ -869,8 +869,22 @@ const BodyStyle={
   // camera's usual ~1.0-1.3 zoom is DOWNsampled rather than magnified -- a rotated blit of an
   // exactly-1:1 bitmap aliases badly along a limb's outline.
   SS:2,
+  // Fix-wave item 3 (final review, Important #1). There are THREE caches on this object, and before
+  // this fix only one of them was counted or cleared -- the one that was already provably bounded.
+  //   _cache        base part bitmaps, keyed look|part|face|zoomBucket: finite by construction.
+  //   _tintedCache  one full COPY of a base bitmap per (base key, k-bucket): bounded per fight, but
+  //                 it accumulated across every fight of a session and nothing ever released it.
+  //                 The reviewer measured ~253 base + ~444 tinted (~79MB) across a whole session.
+  //   _tintSpecCache  ~21 tiny {fill,alpha} records; never a memory concern, cleared with the rest
+  //                 only so "cleared" means cleared.
+  // cacheCount() deliberately keeps its old meaning (base bitmaps) because the tests that pin the
+  // bone-part cache's growth are about exactly that cache; tintedCount()/specCount()/cacheTotal()
+  // are what make the other two visible to a test at all.
   cacheCount(){return Object.keys(this._cache).length},
-  clearCache(){this._cache={}},
+  tintedCount(){return Object.keys(this._tintedCache).length},
+  specCount(){return Object.keys(this._tintSpecCache).length},
+  cacheTotal(){return this.cacheCount()+this.tintedCount()+this.specCount()},
+  clearCache(){this._cache={};this._tintedCache={};this._tintSpecCache={}},
   // The context's own world->device scale, quantized to 1/2 steps in [0.5,4]. Read off the live CTM
   // rather than off cam.zoom so every caller -- the fight camera, Render.shadow's vertically flipped
   // transform, a portrait's identity transform -- gets a bucket matching the pixels it will cover.

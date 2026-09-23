@@ -429,6 +429,18 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // Broadcast.reset -- see its own comment (13_broadcast.js) for why it's stashed there once per
     // fight instead of read live.
     this.cam={x:STAGE_W/2,zoom:1};this.cinemFocus=null;FX.reset();Broadcast.reset({viewersMul:perkOpts.viewersMul});
+    // Fix-wave item 3 (final review, Important #1): drop BodyStyle's bitmap caches at the fight
+    // boundary. They are keyed on (look, part, face, zoomBucket) and (that key, k-bucket), so they
+    // are bounded WITHIN a fight -- two looks, one or two zoom buckets, the two or three k-buckets a
+    // real fight's fighter positions actually visit, which the reviewer measured at ~3.5MB. What was
+    // unbounded was the SESSION: nothing ever released the entries a finished fight left behind, so
+    // eleven looks across a play session reached ~79MB of backing store that could never be reused.
+    // Clearing here costs exactly one warm-up frame per fight (every part repaints on the first
+    // draw, then blits from cache for the rest of the fight -- the same cost the very first fight of
+    // a session always paid) and bounds the working set at what one fight actually needs. This is
+    // presentation state only: no sim object reads or writes these caches, so nothing here can move
+    // a damage number or a frame count.
+    BodyStyle.clearCache();
     // Fix-wave item 5 (final review M2): dilate/_dilateN (Task 7.4's intercept time-dilation counters,
     // this object's own top -- see their comment there) survived across fights -- a fight that ended
     // with an intercept still in its own dilation window left the NEXT fight starting at half speed
