@@ -5387,13 +5387,13 @@ Test.add('Render.streakGeom (the floor specular streak under a fighter\'s feet) 
   ok(Render.streakGeom(F,bright).alpha>Render.streakGeom(F,dim).alpha,
     'a fighter standing in brighter torchlight (higher k) must get a brighter streak')});
 Test.add('BodyStyle fighter-tint overlay cache is bounded to k-buckets (0.05 steps), never one entry per distinct lightAt() result',()=>{
-  BodyStyle._tintCache={};
+  BodyStyle._tintSpecCache={};
   for(let i=0;i<400;i++){
     const k=(i%97)/97;
     BodyStyle._litSpec({tint:Stage._mix(Stage.AMBIENT_TINT,Stage.TORCH_TINT,k),k,rimSide:i%2?1:-1})}
-  ok(Object.keys(BodyStyle._tintCache).length<=21,
+  ok(Object.keys(BodyStyle._tintSpecCache).length>0&&Object.keys(BodyStyle._tintSpecCache).length<=21,
     'k in [0,1] bucketed to 0.05 steps is at most 21 distinct entries no matter how many lightAt() '+
-    'results (400 near-continuous k values here) feed it -- got '+Object.keys(BodyStyle._tintCache).length);
+    'results (400 near-continuous k values here) feed it -- got '+Object.keys(BodyStyle._tintSpecCache).length);
   const spec=BodyStyle._litSpec({tint:'#ffb060',k:.5,rimSide:1});
   eq(spec.alpha,0,'k=0.5 is the neutral pivot: no darkening, no brightening');
   const dark=BodyStyle._litSpec({tint:'#ffb060',k:0,rimSide:1});

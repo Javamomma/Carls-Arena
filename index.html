@@ -3140,14 +3140,15 @@ const Stage={cache:{},
     // Task 8.3: floor falloff -- the strip darkens with distance from the nearest torch (never
     // brightens above the floor's own baked tiles), sampled in coarse columns via the same lightAt
     // this frame will hand the fighters, so the floor and whatever stands on it agree. Fix round 1
-    // (reviewer Minor #3, then widened further chasing the perf target): step widened 16px -> 32px
-    // -> 96px -- each `lightAt` call here is a real (cached-per-column, but the cache is reset every
-    // draw()) nearest-torch search plus two RNG(seed) flicker draws, and at 16px/32px this loop alone
-    // was worth ~0.1ms/frame of the perf budget. 96px is still visually indistinguishable given the
-    // floor art's own 26-70px tile granularity (see docs/shots/p8-stage-*.png -- no visible banding).
+    // (reviewer Minor #3): step widened 16px -> 32px; each `lightAt` call here is a real (cached-per-
+    // column, but the cache is reset every draw()) nearest-torch search plus two RNG(seed) flicker
+    // draws, and at 16px this loop alone was worth ~0.1ms/frame of the perf budget.
     c.save();c.beginPath();c.rect(0,st.floorY,STAGE_W,80);c.clip();
-    for(let x=-48;x<STAGE_W+48;x+=96){const dark=this.falloffAlpha(this.lightAt(x).k);
-      if(dark>0){c.fillStyle=`rgba(0,0,0,${dark})`;c.fillRect(x-48,st.floorY,96,80)}}
+    // Controller ruling (8.3 re-review): 32px, not 96 -- the re-reviewer pixel-sampled a periodic
+    // brightness step every 96px on an unobstructed floor row; 32px sits under the floor art's own
+    // 26-70px tile granularity and costs ~0.03ms.
+    for(let x=-16;x<STAGE_W+16;x+=32){const dark=this.falloffAlpha(this.lightAt(x).k);
+      if(dark>0){c.fillStyle=`rgba(0,0,0,${dark})`;c.fillRect(x-16,st.floorY,32,80)}}
     c.restore()}};
 const Camera={
   // Anchor moved .62 -> .74 (round 1) -> .90 (fix round 2): at zoom 1.0 a character's SCREEN size
@@ -14376,13 +14377,13 @@ Test.add('Render.streakGeom (the floor specular streak under a fighter\'s feet) 
   ok(Render.streakGeom(F,bright).alpha>Render.streakGeom(F,dim).alpha,
     'a fighter standing in brighter torchlight (higher k) must get a brighter streak')});
 Test.add('BodyStyle fighter-tint overlay cache is bounded to k-buckets (0.05 steps), never one entry per distinct lightAt() result',()=>{
-  BodyStyle._tintCache={};
+  BodyStyle._tintSpecCache={};
   for(let i=0;i<400;i++){
     const k=(i%97)/97;
     BodyStyle._litSpec({tint:Stage._mix(Stage.AMBIENT_TINT,Stage.TORCH_TINT,k),k,rimSide:i%2?1:-1})}
-  ok(Object.keys(BodyStyle._tintCache).length<=21,
+  ok(Object.keys(BodyStyle._tintSpecCache).length>0&&Object.keys(BodyStyle._tintSpecCache).length<=21,
     'k in [0,1] bucketed to 0.05 steps is at most 21 distinct entries no matter how many lightAt() '+
-    'results (400 near-continuous k values here) feed it -- got '+Object.keys(BodyStyle._tintCache).length);
+    'results (400 near-continuous k values here) feed it -- got '+Object.keys(BodyStyle._tintSpecCache).length);
   const spec=BodyStyle._litSpec({tint:'#ffb060',k:.5,rimSide:1});
   eq(spec.alpha,0,'k=0.5 is the neutral pivot: no darkening, no brightening');
   const dark=BodyStyle._litSpec({tint:'#ffb060',k:0,rimSide:1});
