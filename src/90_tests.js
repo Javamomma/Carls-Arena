@@ -5676,10 +5676,15 @@ Test.add('Screens.doorCard dims a locked door and marks a done one, each its own
   const locked=Screens.doorCard('f1_goblin','locked');
   const done=Screens.doorCard('f1_goblin','done');
   eq(open.dataset.state,'open');eq(locked.dataset.state,'locked');eq(done.dataset.state,'done');
-  const brightness=cnv=>{const cx=cnv.getContext('2d');const d=cx.getImageData(2,2,4,4).data;
+  // Fix round 1: the lock glyph/overlay moved off the canvas into doorStack's own .doortext column
+  // (controller ruling), so the canvas itself now differentiates locked purely through its stone/
+  // torch colors -- sampled at (6,38), a point inside the arch's left jamb (a flat vertical wall for
+  // this y range, see _paintDoorCard's own comment) but outside the portrait's bounding box (which
+  // starts at x=14), so the sample reflects the jamb stone color alone, not the enemy portrait.
+  const brightness=cnv=>{const cx=cnv.getContext('2d');const d=cx.getImageData(6,38,4,4).data;
     let sum=0;for(let i=0;i<d.length;i+=4)sum+=d[i]+d[i+1]+d[i+2];return sum};
   ok(brightness(locked)<brightness(open),
-    'a locked door card must read dimmer than an open one at the same corner sample (locked overlay is opaque enough to always darken it)')});
+    'a locked door card\'s jamb must read dimmer than an open one at the same sample point (locked stone is a darker color, and the torch is unlit)')});
 Test.add('the map renders one door-card canvas per node (5 doors + boss), each reused (not rebuilt) across a re-render of the same floor',()=>{
   Save.data=Meta.defaults();
   Screens._doorCache={};

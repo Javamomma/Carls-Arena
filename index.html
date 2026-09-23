@@ -92,12 +92,34 @@ body.left-handed #powerPicker{right:auto;left:14px}
 .ftab.active{color:#f4c542;border-color:#f4c542}
 /* Fix-wave item 8: overflow:hidden -> auto -- once .scr itself is capped to the real viewport height
    (above), a floor with more doors than fit (e.g. a full 5-node-+-boss floor at 844x390) now scrolls
-   inside .path instead of silently clipping a door off the bottom with no way to reach it. */
-.path{display:flex;flex-direction:column-reverse;align-items:center;gap:3px;overflow-y:auto;flex:1;justify-content:center}
+   inside .path instead of silently clipping a door off the bottom with no way to reach it.
+   Task 8.5 fix round 1 (controller ruling: "at 844x390 the first card must be fully visible without
+   scrolling"): justify-content:center -> flex-start. .path's main-start (where DOOR 1, the first
+   child in DOM order, ends up under flex-direction:column-reverse) is the visual BOTTOM of the row
+   -- flex-start packs the whole node stack against that bottom edge instead of centering it, so
+   DOOR 1 sits flush against .path's own bottom boundary and is always the default-scroll-position
+   row, with every row above it (DOOR 2..5, BOSS) the part that scrolls off the top when the full
+   stack doesn't fit. With justify-content:center, DOOR 1 ended up on the far side of the
+   container's own scrollable-overflow range instead (verified: it sat almost entirely below the
+   844x390 fold at the default scroll position, with no scrollTop value able to bring it fully into
+   view -- centering the overflow, not the scroll range's start/end, apparently caps how far a
+   column-reverse flex container's own scroll can reach toward either edge in this engine). */
+.path{display:flex;flex-direction:column-reverse;align-items:center;gap:3px;overflow-y:auto;flex:1;justify-content:flex-start}
 /* Fix-wave item 8: min-height 40px->44px -- a real touch target, matching every other button in the
    game; .path's own overflow-y:auto (above) means a floor with more doors than fit at a given
    viewport height now scrolls to reach the rest instead of rendering them under-target-sized. */
-.node{width:320px;max-width:84%;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;
+/* Task 8.5 fix round 1 (controller): flex-shrink:0 is the actual fix for the door-card overlap bug
+   the controller caught in docs/shots/p8-map.png -- .node is a flex item inside #mapPath's own
+   scrollable flex column (.path, below), and without flex-shrink:0 the browser was compressing each
+   .node's own box down toward its old ~44px text-only height whenever the full stack of rows didn't
+   fit .path's available space, even though .path is overflow-y:auto (meant to let an over-tall list
+   scroll, not force every row to shrink). Since .node itself has overflow:visible, the shrunk box
+   didn't clip its own taller door-card child -- it just silently let it bleed into the row above/
+   below, which is exactly what the screenshot showed. flex-shrink:0 makes every row keep its real,
+   self-contained content height no matter how many rows the list holds; .path's scroll is what
+   reaches the rest, same as it always was meant to. padding:4px 0 gives the row a little breathing
+   room now that its own height is driven by real content (the 72px door card) instead of min-height. */
+.node{width:320px;max-width:84%;min-height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:4px 0;
   font-size:12px;letter-spacing:2px;border-radius:6px;border:2px solid #3a3a3a;background:#181c2b;color:#666}
 .node:disabled{cursor:default}
 .node.open{border-color:#f4c542;color:#f4c542;background:#20263d}
@@ -114,16 +136,23 @@ body.left-handed #powerPicker{right:auto;left:14px}
    their own vertical stack, inside .node's existing flex row (so the boss/locked ::before icon stays
    inline with the label, unaffected) -- .reclvl is deliberately tiny/muted (informational, not a
    warning by default); .under (level below recLevel) goes red, still never disables the door.
-   Task 8.5: .doorstack is now a horizontal row -- the door-card canvas (arch/torch/portrait/banner)
-   on the left, the label + REC. LVL text (.doortext, the old vertical stack) on the right -- instead
-   of the label being the doorstack's only content. .node's own width/min-height (unchanged) now
-   simply grows to fit the taller row; #mapPath's existing overflow-y:auto (fix-wave item 8, below)
-   is what a full 6-row floor scrolls through when the six door cards don't all fit at once. */
+   Task 8.5: .doorstack is now a horizontal row -- a fixed 72x72 door-card canvas (arch/torch/
+   portrait) on the left, the label + REC. LVL + lock/check text (.doortext, the old vertical
+   stack) on the right -- instead of the label being the doorstack's only content. .node's own
+   height (see its own flex-shrink:0 comment above) grows to fit whichever of the two is taller;
+   #mapPath's existing overflow-y:auto (fix-wave item 8, below) is what a full 6-row floor scrolls
+   through when the six door cards don't all fit at once. */
 .doorstack{display:flex;flex-direction:row;align-items:center;gap:8px}
-.doortext{display:flex;flex-direction:column;align-items:flex-start;line-height:1.3}
-canvas.doorcard{width:80px;height:104px;flex:none;border-radius:4px;background:#101422}
+.doortext{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;line-height:1.3}
+canvas.doorcard{width:72px;height:72px;flex:none;border-radius:4px;background:#101422}
 .reclvl{font-size:8px;letter-spacing:1px;opacity:.7;color:inherit}
 .reclvl.under{color:#e2554f;opacity:1}
+/* Task 8.5 fix round 1: the locked/cleared indicator, moved off the door-card canvas and into the
+   text column as real DOM text (the controller's own ruling) -- costs nothing to test, and reads
+   at the same small/muted size as .reclvl rather than needing its own pixel inspection. */
+.doormark{font-size:8px;letter-spacing:1px;margin-top:2px}
+.doormark.locked{color:#888}
+.doormark.done{color:#7fd18a}
 /* Task 5.3: the map's own permanently-open TUTORIAL entry -- never disabled, so it gets a distinct
    teal (not .node.open's gold) so it doesn't read as just another campaign door. Lives in the .ftabs
    row (Screens.renderMap), not #mapPath's own node list, so it costs zero extra vertical space there
@@ -167,7 +196,14 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
    once content overflows, the browser's own scrollable-overflow behavior lets it be reached above
    and below center by scrolling. */
 .cards{display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1;justify-content:center}
-.card{box-sizing:border-box;background:#181c2b;border:2px solid #333;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:10px;text-align:left}
+/* Task 8.5 fix round 1: flex-shrink:0, the same root-cause fix as .node above -- a roster card
+   wasn't visibly overlapping (the controller's own note: "acceptable, only cut by scroll
+   position"), but it was exposed to the identical flex-shrink risk as a scrollable flex-column
+   item, just less severe since .card's own natural height (94px) is a smaller jump over its old
+   52px than .node's 72px was over ITS old ~44px. Pinned here defensively so it can never regress
+   the same way, and so the new --phone-check card-overlap assertion has a real guarantee behind it
+   rather than a coincidence of today's exact roster size. */
+.card{box-sizing:border-box;flex-shrink:0;background:#181c2b;border:2px solid #333;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:10px;text-align:left}
 .card.active{border-color:#f4c542}
 .card canvas{width:52px;height:52px;flex:none;background:#101422;border-radius:4px}
 /* Task 8.5: the roster card's own portrait+frame canvas (Screens.portraitCard) carries the 112px
@@ -8855,10 +8891,12 @@ const Screens={
   // disables the door (still enterable; state/energy gating is the caller's own .disabled, set right
   // after this in renderMap). Every real FLOORS-referenced encounter carries a recLevel now, but this
   // stays defensive (no hint span at all) for any future node that doesn't.
-  // Task 8.5: doorStack now wraps a door-card canvas (the arch/torch/portrait/banner illustration
-  // below) alongside its original label + REC. LVL text, in a horizontal row -- the label/hint stay
-  // plain DOM text (not baked into the canvas) so Task 6.1's own REC. LVL test keeps working
-  // unchanged and the hint stays trivially readable/testable rather than needing pixel inspection.
+  // Task 8.5 fix round 1 (controller ruling): doorStack lays out a horizontal strip -- a fixed
+  // 72x72 door-art canvas, then a text column (.doortext) carrying the label, REC. LVL hint, and a
+  // lock/check indicator -- with the card's own height driven by whichever of the two is taller.
+  // The lock/check glyph moved off the canvas and into this DOM text column (was baked into the
+  // canvas as an overlay in the first cut of this task; the controller's fix-round ruling put it
+  // here instead), so it costs nothing to test and never depends on canvas pixel inspection.
   doorStack(label,encId,state){
     const stack=document.createElement('span');stack.className='doorstack';
     stack.appendChild(Screens.doorCard(encId,state));
@@ -8872,19 +8910,29 @@ const Screens={
       hint.className='reclvl'+(level<recLevel?' under':'');
       hint.textContent='REC. LVL '+recLevel;
       text.appendChild(hint)}
+    if(state==='locked'||state==='done'){
+      const mark=document.createElement('span');
+      mark.className='doormark '+state;
+      mark.textContent=state==='locked'?'\u{1F512} LOCKED':'✔ CLEARED';
+      text.appendChild(mark)}
     stack.appendChild(text);
     return stack},
   // ---- Task 8.5: map door cards --------------------------------------------------------------
   // A small procedural illustration per node -- a stone arch, a torch (Stage's own TORCH_TINT, so
-  // it reads as the same light source the in-fight stage lighting model uses), the encounter
-  // enemy's own 112px HUD bust (Rig.portrait, Task 8.1/8.2), and a floor-number banner -- replacing
-  // the old plain-text-only doorstack. Cached per node id + state (Boundaries: "no per-render redraw
-  // of every card") keyed on `encId+'|'+state`: a floor switch or a Screens.refresh() with nothing
-  // actually changed about that node hands back the exact same canvas instead of repainting it; only
-  // a real state flip (a door going open -> done on a win, or unlocking) produces a new cache entry,
-  // and the old entry for the state it left behind is simply never touched again.
+  // it reads as the same light source the in-fight stage lighting model uses), and the encounter
+  // enemy's own 112px HUD bust (Rig.portrait, Task 8.1/8.2) scaled down into the arch mouth --
+  // replacing the old plain-text-only doorstack. Fix round 1 (controller ruling): fixed 72x72
+  // square, matching the width of DOOR_W/DOOR_H below -- the floor banner and the locked/done
+  // overlay+glyph from the first cut both moved out (the banner dropped, the lock/check glyph now
+  // lives in doorStack's own .doortext column, see above) so the card stays a small, self-contained
+  // square instead of a tall rectangle a 44px map row can't actually contain without overlap.
+  // Cached per node id + state (Boundaries: "no per-render redraw of every card") keyed on
+  // `encId+'|'+state`: a floor switch or a Screens.refresh() with nothing actually changed about
+  // that node hands back the exact same canvas instead of repainting it; only a real state flip (a
+  // door going open -> done on a win, or unlocking) produces a new cache entry, and the old entry
+  // for the state it left behind is simply never touched again.
   _doorCache:{},
-  DOOR_W:80,DOOR_H:104,
+  DOOR_W:72,DOOR_H:72,
   doorCard(encId,state){
     const key=encId+'|'+state;
     let cnv=this._doorCache[key];
@@ -8896,46 +8944,31 @@ const Screens={
     return cnv},
   _paintDoorCard(c,encId,state){
     const W=Screens.DOOR_W,H=Screens.DOOR_H,enc=ENCOUNTERS[encId],def=DEFS[enc.enemy],look=lookFor(def);
-    const locked=state==='locked',done=state==='done';
+    const locked=state==='locked';
     c.save();
     // stone jamb + arch mouth: a plain doorway silhouette so the portrait inset reads as "standing
-    // in a doorway", not a floating headshot; a locked door's stone reads darker/flatter even before
-    // the full dim overlay below, so a quick glance (not just the lock glyph) reads "not open yet".
+    // in a doorway", not a floating headshot; a locked door's stone reads darker/flatter and its
+    // torch is unlit (below), so the card reads "not open yet" even before the .doormark text.
     c.fillStyle='#1c1f2c';c.fillRect(0,0,W,H);
     c.fillStyle=locked?'#14161f':'#262b40';
-    c.beginPath();c.moveTo(6,H-6);c.lineTo(6,28);c.quadraticCurveTo(6,6,W/2,6);
-    c.quadraticCurveTo(W-6,6,W-6,28);c.lineTo(W-6,H-6);c.closePath();c.fill();
+    c.beginPath();c.moveTo(5,H-5);c.lineTo(5,24);c.quadraticCurveTo(5,5,W/2,5);
+    c.quadraticCurveTo(W-5,5,W-5,24);c.lineTo(W-5,H-5);c.closePath();c.fill();
     c.strokeStyle=locked?'#000':'#3a3f56';c.lineWidth=2;c.stroke();
     // torch: a small flame glyph on the left jamb -- skipped on a locked door (nothing's lit yet).
     if(!locked){
-      const tx=12,ty=H-24;
+      const tx=10,ty=H-18;
       c.fillStyle=Stage.TORCH_TINT;
-      c.beginPath();c.moveTo(tx,ty+8);c.quadraticCurveTo(tx-4,ty,tx,ty-8);
-      c.quadraticCurveTo(tx+4,ty,tx,ty+8);c.fill();
-      c.fillStyle='#6a4a2a';c.fillRect(tx-1.5,ty+6,3,10)}
+      c.beginPath();c.moveTo(tx,ty+6);c.quadraticCurveTo(tx-3,ty,tx,ty-6);
+      c.quadraticCurveTo(tx+3,ty,tx,ty+6);c.fill();
+      c.fillStyle='#6a4a2a';c.fillRect(tx-1.2,ty+4,2.4,8)}
     // portrait: the encounter enemy's own 112px HUD bust, scaled down into the arch mouth -- the
     // same bitmap Rig.portrait already builds and caches for the in-fight HUD/roster, so the door
-    // card, the roster card and the fight sprite are demonstrably the same character.
-    const port=Rig.portrait(look,112),pw=48,ph=48,px=W/2-pw/2,py=20;
+    // card, the roster card and the fight sprite are demonstrably the same character. Dimmed
+    // (globalAlpha) rather than hidden on a locked door, so the enemy is still recognizable at a
+    // glance -- only the torch/stone/.doormark carry the "not open yet" signal, not a blackout.
+    const port=Rig.portrait(look,112),pw=44,ph=44,px=W/2-pw/2,py=H/2-pw/2+4;
+    c.globalAlpha=locked?.4:1;
     c.drawImage(port,px,py,pw,ph);
-    // floor banner: a small ribbon across the bottom third, state-colored, showing the floor number.
-    c.fillStyle=done?'#2c4a2c':locked?'#1a1a22':'#3a2f1a';
-    c.fillRect(6,H-20,W-12,14);
-    c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(6.5,H-19.5,W-13,13);
-    c.fillStyle=done?'#8fd18a':locked?'#555':'#f4c542';
-    c.font='bold 9px ui-monospace,monospace';c.textAlign='center';c.textBaseline='middle';
-    c.fillText('F'+enc.floor,W/2,H-13);
-    // locked/done overlay, drawn last so it covers the whole card (including the corner the
-    // brightness-comparison test above samples) -- a locked door dims hard and shows a lock glyph;
-    // a cleared one tints faintly green and shows a check, without hiding the art underneath.
-    if(locked){
-      c.fillStyle='rgba(0,0,0,.55)';c.fillRect(0,0,W,H);
-      c.fillStyle='#999';c.font='16px ui-monospace,monospace';c.textAlign='center';c.textBaseline='middle';
-      c.fillText('\u{1F512}',W/2,H/2)}
-    else if(done){
-      c.fillStyle='rgba(20,40,20,.35)';c.fillRect(0,0,W,H);
-      c.strokeStyle='#7fd18a';c.lineWidth=3;c.lineCap='round';c.lineJoin='round';
-      c.beginPath();c.moveTo(W*.28,H*.5);c.lineTo(W*.44,H*.64);c.lineTo(W*.74,H*.32);c.stroke()}
     c.restore()},
   // Task 8.5: the roster card's own portrait+frame, one canvas combining the 112px HUD bust
   // (Rig.portrait, Tasks 8.1/8.2) with the in-fight HUD's own class-gem ring (Render.portraitFrame/
@@ -14882,10 +14915,15 @@ Test.add('Screens.doorCard dims a locked door and marks a done one, each its own
   const locked=Screens.doorCard('f1_goblin','locked');
   const done=Screens.doorCard('f1_goblin','done');
   eq(open.dataset.state,'open');eq(locked.dataset.state,'locked');eq(done.dataset.state,'done');
-  const brightness=cnv=>{const cx=cnv.getContext('2d');const d=cx.getImageData(2,2,4,4).data;
+  // Fix round 1: the lock glyph/overlay moved off the canvas into doorStack's own .doortext column
+  // (controller ruling), so the canvas itself now differentiates locked purely through its stone/
+  // torch colors -- sampled at (6,38), a point inside the arch's left jamb (a flat vertical wall for
+  // this y range, see _paintDoorCard's own comment) but outside the portrait's bounding box (which
+  // starts at x=14), so the sample reflects the jamb stone color alone, not the enemy portrait.
+  const brightness=cnv=>{const cx=cnv.getContext('2d');const d=cx.getImageData(6,38,4,4).data;
     let sum=0;for(let i=0;i<d.length;i+=4)sum+=d[i]+d[i+1]+d[i+2];return sum};
   ok(brightness(locked)<brightness(open),
-    'a locked door card must read dimmer than an open one at the same corner sample (locked overlay is opaque enough to always darken it)')});
+    'a locked door card\'s jamb must read dimmer than an open one at the same sample point (locked stone is a darker color, and the torch is unlit)')});
 Test.add('the map renders one door-card canvas per node (5 doors + boss), each reused (not rebuilt) across a re-render of the same floor',()=>{
   Save.data=Meta.defaults();
   Screens._doorCache={};

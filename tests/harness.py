@@ -468,8 +468,16 @@ def main():
                           "shop/arena/settings and asserts every visible <button> there has a real "
                           ">=44 CSS-px rect fully inside the viewport too -- one currently scrolled out "
                           "of a .path/.setrows/#shopBody internal scroll region is skipped, not failed, "
-                          "since it's reachable by scrolling rather than clipped/inaccessible. Prints a "
-                          "JSON summary and exits 1 on any check failure or page/console error")
+                          "since it's reachable by scrolling rather than clipped/inaccessible. Task 8.5 "
+                          "fix round 1: also asserts no two #mapPath .node elements' own bounding rects "
+                          "overlap, and likewise for #rosterCards .card, catching a flex-shrink layout "
+                          "bug (each row's box shrank below its own door-card/portrait-card child's "
+                          "real height, which then bled into neighboring rows) that per-button size/"
+                          "position checks alone can't see; and that the map's DOOR 1 (the door a "
+                          "player actually plays next) is fully inside the viewport with zero "
+                          "scrolling needed, even though the rest of a full floor may legitimately "
+                          "require it. Prints a JSON summary and exits 1 on any check failure or "
+                          "page/console error")
     a = ap.parse_args()
     if a.floor is not None and a.node is None:
         ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2
@@ -790,16 +798,71 @@ def main():
                     checks.append({**bt, 'skipped': False, 'ok': size_ok and inside_ok})
                 bad = [c['id'] for c in checks if not c['ok']]
                 screen_results.append({'screen': name, 'buttons': checks, 'bad': bad})
+
+            # Task 8.5 fix round 1 (controller): the map's door cards (and, defensively, the roster's
+            # portrait cards) once got flex-shrunk by their scrollable flex-column ancestor (.path/
+            # .cards) down below their own content's natural height -- each .node/.card element's own
+            # box stayed at the OLD ~44px text-row height while its taller door-card/portrait-card
+            # child rendered at its real size and (overflow:visible) bled into the row above/below it.
+            # That's a real, screenshot-visible defect no per-button size/position check above would
+            # ever catch (each individual button can still be >=44px and "inside the viewport" while
+            # overlapping its neighbor) -- so this checks the one property that actually rules it out:
+            # no two sibling node/card elements' own bounding rects may overlap on both axes. A small
+            # 0.5px tolerance absorbs sub-pixel layout rounding between genuinely-adjacent (touching,
+            # zero-gap) rects without masking a real double-digit-pixel overlap.
+            def rects_for(selector):
+                return pg2.evaluate("""(sel=>[...document.querySelectorAll(sel)].map(el=>{
+                  const r=el.getBoundingClientRect();
+                  return{left:r.left,top:r.top,right:r.right,bottom:r.bottom};
+                }))(%s)""" % json.dumps(selector))
+
+            def overlap_pairs(rects):
+                pairs = []
+                for i in range(len(rects)):
+                    for j in range(i + 1, len(rects)):
+                        ra, rb = rects[i], rects[j]
+                        if (ra['left'] < rb['right'] - 0.5 and rb['left'] < ra['right'] - 0.5 and
+                                ra['top'] < rb['bottom'] - 0.5 and rb['top'] < ra['bottom'] - 0.5):
+                            pairs.append([i, j])
+                return pairs
+
+            overlap_results = {}
+            nav_by_name = dict(SCREENS)
+            for scr_name, sel in (('map', '#mapPath .node'), ('roster', '#rosterCards .card')):
+                pg2.evaluate(nav_by_name[scr_name])
+                rects = rects_for(sel)
+                overlap_results[scr_name] = {'count': len(rects), 'bad_pairs': overlap_pairs(rects)}
+
+            # Task 8.5 fix round 1 (controller ruling, distinct from the overlap check above): "at
+            # 844x390 the first card must be fully visible without scrolling" -- a full floor with
+            # 5 doors + boss legitimately needs #mapPath to scroll (Phase 6 ruling), but the door a
+            # player actually plays next (DOOR 1, the map's own .node.open in a worst-case fresh
+            # floor) must never itself require scrolling to reach at the game's tightest supported
+            # viewport. Sampled straight off the live page (not re-derived from CSS assumptions) so
+            # a future layout change that regresses this gets caught here, not just by eye.
+            pg2.evaluate(nav_by_name['map'])
+            first_door = pg2.evaluate("""(()=>{
+              const el=document.querySelector('#mapPath .node.open')||document.querySelector('#mapPath .node');
+              if(!el)return null;
+              const r=el.getBoundingClientRect();
+              return{top:r.top,bottom:r.bottom,left:r.left,right:r.right};
+            })()""")
+            vw2, vh2 = pg2.evaluate('innerWidth'), pg2.evaluate('innerHeight')
+            first_door_ok = bool(first_door) and (
+                first_door['top'] >= -0.5 and first_door['left'] >= -0.5 and
+                first_door['bottom'] <= vh2 + 0.5 and first_door['right'] <= vw2 + 0.5)
             b2.close()
         screens_bad = [r['screen'] for r in screen_results if r['bad']]
+        overlap_bad = [name for name, v in overlap_results.items() if v['bad_pairs']]
 
         out = {'errors': errs, 'attackButtonsHidden': hidden_out, 'attackButtonsShown': shown_out,
-               'wiring_ok': wiring_ok, 'screens': screen_results, 'screenErrors': screen_errs}
+               'wiring_ok': wiring_ok, 'screens': screen_results, 'screenErrors': screen_errs,
+               'cardOverlap': overlap_results, 'firstDoor': first_door, 'firstDoorOk': first_door_ok}
         print(json.dumps(out, indent=1))
         bad = (errs or not hidden_out['aspect_ok'] or not hidden_out['fits_ok'] or hidden_out['bad_btns']
                or not hidden_out['no_hscroll'] or not shown_out['aspect_ok'] or not shown_out['fits_ok']
                or shown_out['bad_btns'] or not shown_out['no_hscroll'] or not wiring_ok
-               or screen_errs or screens_bad)
+               or screen_errs or screens_bad or overlap_bad or not first_door_ok)
         sys.exit(1 if bad else 0)
     errors, console = [], []
     with sync_playwright() as p:

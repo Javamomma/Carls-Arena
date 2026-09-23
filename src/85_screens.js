@@ -203,10 +203,12 @@ const Screens={
   // disables the door (still enterable; state/energy gating is the caller's own .disabled, set right
   // after this in renderMap). Every real FLOORS-referenced encounter carries a recLevel now, but this
   // stays defensive (no hint span at all) for any future node that doesn't.
-  // Task 8.5: doorStack now wraps a door-card canvas (the arch/torch/portrait/banner illustration
-  // below) alongside its original label + REC. LVL text, in a horizontal row -- the label/hint stay
-  // plain DOM text (not baked into the canvas) so Task 6.1's own REC. LVL test keeps working
-  // unchanged and the hint stays trivially readable/testable rather than needing pixel inspection.
+  // Task 8.5 fix round 1 (controller ruling): doorStack lays out a horizontal strip -- a fixed
+  // 72x72 door-art canvas, then a text column (.doortext) carrying the label, REC. LVL hint, and a
+  // lock/check indicator -- with the card's own height driven by whichever of the two is taller.
+  // The lock/check glyph moved off the canvas and into this DOM text column (was baked into the
+  // canvas as an overlay in the first cut of this task; the controller's fix-round ruling put it
+  // here instead), so it costs nothing to test and never depends on canvas pixel inspection.
   doorStack(label,encId,state){
     const stack=document.createElement('span');stack.className='doorstack';
     stack.appendChild(Screens.doorCard(encId,state));
@@ -220,19 +222,29 @@ const Screens={
       hint.className='reclvl'+(level<recLevel?' under':'');
       hint.textContent='REC. LVL '+recLevel;
       text.appendChild(hint)}
+    if(state==='locked'||state==='done'){
+      const mark=document.createElement('span');
+      mark.className='doormark '+state;
+      mark.textContent=state==='locked'?'\u{1F512} LOCKED':'✔ CLEARED';
+      text.appendChild(mark)}
     stack.appendChild(text);
     return stack},
   // ---- Task 8.5: map door cards --------------------------------------------------------------
   // A small procedural illustration per node -- a stone arch, a torch (Stage's own TORCH_TINT, so
-  // it reads as the same light source the in-fight stage lighting model uses), the encounter
-  // enemy's own 112px HUD bust (Rig.portrait, Task 8.1/8.2), and a floor-number banner -- replacing
-  // the old plain-text-only doorstack. Cached per node id + state (Boundaries: "no per-render redraw
-  // of every card") keyed on `encId+'|'+state`: a floor switch or a Screens.refresh() with nothing
-  // actually changed about that node hands back the exact same canvas instead of repainting it; only
-  // a real state flip (a door going open -> done on a win, or unlocking) produces a new cache entry,
-  // and the old entry for the state it left behind is simply never touched again.
+  // it reads as the same light source the in-fight stage lighting model uses), and the encounter
+  // enemy's own 112px HUD bust (Rig.portrait, Task 8.1/8.2) scaled down into the arch mouth --
+  // replacing the old plain-text-only doorstack. Fix round 1 (controller ruling): fixed 72x72
+  // square, matching the width of DOOR_W/DOOR_H below -- the floor banner and the locked/done
+  // overlay+glyph from the first cut both moved out (the banner dropped, the lock/check glyph now
+  // lives in doorStack's own .doortext column, see above) so the card stays a small, self-contained
+  // square instead of a tall rectangle a 44px map row can't actually contain without overlap.
+  // Cached per node id + state (Boundaries: "no per-render redraw of every card") keyed on
+  // `encId+'|'+state`: a floor switch or a Screens.refresh() with nothing actually changed about
+  // that node hands back the exact same canvas instead of repainting it; only a real state flip (a
+  // door going open -> done on a win, or unlocking) produces a new cache entry, and the old entry
+  // for the state it left behind is simply never touched again.
   _doorCache:{},
-  DOOR_W:80,DOOR_H:104,
+  DOOR_W:72,DOOR_H:72,
   doorCard(encId,state){
     const key=encId+'|'+state;
     let cnv=this._doorCache[key];
@@ -244,46 +256,31 @@ const Screens={
     return cnv},
   _paintDoorCard(c,encId,state){
     const W=Screens.DOOR_W,H=Screens.DOOR_H,enc=ENCOUNTERS[encId],def=DEFS[enc.enemy],look=lookFor(def);
-    const locked=state==='locked',done=state==='done';
+    const locked=state==='locked';
     c.save();
     // stone jamb + arch mouth: a plain doorway silhouette so the portrait inset reads as "standing
-    // in a doorway", not a floating headshot; a locked door's stone reads darker/flatter even before
-    // the full dim overlay below, so a quick glance (not just the lock glyph) reads "not open yet".
+    // in a doorway", not a floating headshot; a locked door's stone reads darker/flatter and its
+    // torch is unlit (below), so the card reads "not open yet" even before the .doormark text.
     c.fillStyle='#1c1f2c';c.fillRect(0,0,W,H);
     c.fillStyle=locked?'#14161f':'#262b40';
-    c.beginPath();c.moveTo(6,H-6);c.lineTo(6,28);c.quadraticCurveTo(6,6,W/2,6);
-    c.quadraticCurveTo(W-6,6,W-6,28);c.lineTo(W-6,H-6);c.closePath();c.fill();
+    c.beginPath();c.moveTo(5,H-5);c.lineTo(5,24);c.quadraticCurveTo(5,5,W/2,5);
+    c.quadraticCurveTo(W-5,5,W-5,24);c.lineTo(W-5,H-5);c.closePath();c.fill();
     c.strokeStyle=locked?'#000':'#3a3f56';c.lineWidth=2;c.stroke();
     // torch: a small flame glyph on the left jamb -- skipped on a locked door (nothing's lit yet).
     if(!locked){
-      const tx=12,ty=H-24;
+      const tx=10,ty=H-18;
       c.fillStyle=Stage.TORCH_TINT;
-      c.beginPath();c.moveTo(tx,ty+8);c.quadraticCurveTo(tx-4,ty,tx,ty-8);
-      c.quadraticCurveTo(tx+4,ty,tx,ty+8);c.fill();
-      c.fillStyle='#6a4a2a';c.fillRect(tx-1.5,ty+6,3,10)}
+      c.beginPath();c.moveTo(tx,ty+6);c.quadraticCurveTo(tx-3,ty,tx,ty-6);
+      c.quadraticCurveTo(tx+3,ty,tx,ty+6);c.fill();
+      c.fillStyle='#6a4a2a';c.fillRect(tx-1.2,ty+4,2.4,8)}
     // portrait: the encounter enemy's own 112px HUD bust, scaled down into the arch mouth -- the
     // same bitmap Rig.portrait already builds and caches for the in-fight HUD/roster, so the door
-    // card, the roster card and the fight sprite are demonstrably the same character.
-    const port=Rig.portrait(look,112),pw=48,ph=48,px=W/2-pw/2,py=20;
+    // card, the roster card and the fight sprite are demonstrably the same character. Dimmed
+    // (globalAlpha) rather than hidden on a locked door, so the enemy is still recognizable at a
+    // glance -- only the torch/stone/.doormark carry the "not open yet" signal, not a blackout.
+    const port=Rig.portrait(look,112),pw=44,ph=44,px=W/2-pw/2,py=H/2-pw/2+4;
+    c.globalAlpha=locked?.4:1;
     c.drawImage(port,px,py,pw,ph);
-    // floor banner: a small ribbon across the bottom third, state-colored, showing the floor number.
-    c.fillStyle=done?'#2c4a2c':locked?'#1a1a22':'#3a2f1a';
-    c.fillRect(6,H-20,W-12,14);
-    c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(6.5,H-19.5,W-13,13);
-    c.fillStyle=done?'#8fd18a':locked?'#555':'#f4c542';
-    c.font='bold 9px ui-monospace,monospace';c.textAlign='center';c.textBaseline='middle';
-    c.fillText('F'+enc.floor,W/2,H-13);
-    // locked/done overlay, drawn last so it covers the whole card (including the corner the
-    // brightness-comparison test above samples) -- a locked door dims hard and shows a lock glyph;
-    // a cleared one tints faintly green and shows a check, without hiding the art underneath.
-    if(locked){
-      c.fillStyle='rgba(0,0,0,.55)';c.fillRect(0,0,W,H);
-      c.fillStyle='#999';c.font='16px ui-monospace,monospace';c.textAlign='center';c.textBaseline='middle';
-      c.fillText('\u{1F512}',W/2,H/2)}
-    else if(done){
-      c.fillStyle='rgba(20,40,20,.35)';c.fillRect(0,0,W,H);
-      c.strokeStyle='#7fd18a';c.lineWidth=3;c.lineCap='round';c.lineJoin='round';
-      c.beginPath();c.moveTo(W*.28,H*.5);c.lineTo(W*.44,H*.64);c.lineTo(W*.74,H*.32);c.stroke()}
     c.restore()},
   // Task 8.5: the roster card's own portrait+frame, one canvas combining the 112px HUD bust
   // (Rig.portrait, Tasks 8.1/8.2) with the in-fight HUD's own class-gem ring (Render.portraitFrame/
