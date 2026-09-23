@@ -1716,3 +1716,11 @@ of real animation frames, so the camera lerp has converged a variable amount and
 The shots are reliable as *art* evidence and unreliable as a *diff* signal — a changed PNG does not by
 itself mean the rendering changed. The fix wave used a pixel-hash probe over every look, pose, facing
 and light level for that instead.
+
+### Phase 8 final-review fix-wave rulings (2026-09-22)
+- **Roster first card unreachable (Critical):** `.cards` uses safe-center with a flex-start fallback; `--phone-check` now asserts each map/roster row's height contains its art child, no pairwise overlap, and first-card/first-door visibility, with the four-champion fixture seeded.
+- **Tinted-bitmap cache unbounded:** clearCache/cacheCount cover all three BodyStyle caches; `G.startFight` clears them (one warm-up frame per fight, measured ~4 ms on desktop by the re-reviewer — a follow-up may pre-warm during the fight intro if a phone shows a stutter).
+- **Lighting reaches every part** (hands, feet, paws, blobs, joints, seams, hips, props) through the same tinted-bitmap path; CTM read once per fighter draw.
+- **Docs describe the shipped 72×72 door card** (no floor banner; DOM lock/cleared text); shots.sh prints a failure summary for its suppressed lines; the 276-line pre-8.x stroke rig was deleted (every look has `.body`, pinned by a test); torch flame animation gated by reduceMotion; door card draws from the 56-px portrait; Donut's barrel gained shoulder and haunch masses.
+- Known: `tools/shots.sh` output is not pixel-deterministic (camera lerp settles a variable amount before the shot); the map's top card scrolls under the header by design (column-reverse anchors DOOR 1 at the bottom).
+- Gate on the close-out commit: build --check; unit 520/0; matrix; e2e; tutorial; screens-smoke; phone-check (overlap/firstCard/firstDoor ok); perf 0.295 ms; batch n=30 t1..t5 100/70/50/36.7/23.3, f1_hob 63.3, f1_grull 26.7, f2_mother 20.0.
