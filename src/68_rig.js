@@ -904,6 +904,48 @@ const BodyStyle={
     paint(cnv.getContext('2d'),cnv.width,cnv.height);
     return this._cache[key]=cnv},
 
+  // ---- Task 8.3: torch tint overlay -------------------------------------------------------------
+  // `lit` ({tint,k,rimSide}, from Stage.lightAt) is deliberately NOT folded into the bone-part cache
+  // key above: a fighter's tint changes every frame the torches flicker, and keying the actual bone
+  // bitmaps on it would mean repainting (and re-caching) every limb/torso/head every time k ticks
+  // over a bucket -- exactly the "per-frame recolor of every bone bitmap" the controller's ruling
+  // rules out. Instead the tint is a translucent flat-color overlay, composited with 'source-atop'
+  // (so it only recolors pixels the part itself just painted, never bleeding outside its own
+  // silhouette or touching the cached bitmap underneath it) directly over the live drawImage call.
+  // The only thing that IS cached here is the {fill,alpha} pair itself, per k-bucket (0.05 steps) --
+  // a handful of string lookups, not a canvas repaint -- so flicker costs one cache lookup and one
+  // fillRect per part per frame, not a rebuilt gradient. Bucketed on k ALONE (not on lit.tint, which
+  // is Stage.lightAt's own continuous ambient<->torch blend and would never repeat two frames in a
+  // row): a k-bucket count is bounded (21 steps) forever, where keying on a continuous string would
+  // grow this cache without limit over a long session.
+  _tintCache:{},
+  _litSpec(lit){
+    if(!lit)return null;
+    const kb=Math.round(lit.k/.05)*.05,key=kb;
+    const hit=this._tintCache[key];
+    if(hit)return hit;
+    // k=0.5 is the neutral pivot (no change); below it the overlay darkens toward the ruling's -25%
+    // floor, above it the overlay brightens toward the ruling's +18% ceiling, using the SAME fixed
+    // torch-warm hue every time (brightening only ever happens near a torch, i.e. high k, so a fixed
+    // warm fill reads correctly without pulling the continuous tint string into the cache key).
+    let spec;
+    if(kb<=.5)spec={fill:'#000000',alpha:(.5-kb)/.5*.25};
+    else spec={fill:Stage.TORCH_TINT,alpha:(kb-.5)/.5*.18};
+    return this._tintCache[key]=spec},
+  _applyTint(c,lit,dx,dy,dw,dh){
+    if(!lit)return;
+    const spec=this._litSpec(lit);
+    if(!spec||spec.alpha<=0)return;
+    c.save();c.globalCompositeOperation='source-atop';c.globalAlpha=spec.alpha;c.fillStyle=spec.fill;
+    c.fillRect(dx,dy,dw,dh);c.restore()},
+  // The rim ruling's whole ask: "a single additional stroke on the torch-facing edge of the torso/
+  // head only" -- drawn live (not cached; it is one stroke, not a gradient rebuild) on whichever
+  // side lit.rimSide names, in a lightened version of the current torch tint.
+  _rimStroke(c,lit,pathFn){
+    if(!lit)return;
+    c.save();c.strokeStyle=shade(lit.tint,.55);c.globalAlpha=.55;c.lineCap='round';
+    pathFn(c);c.restore()},
+
   // ---- pose key -> face state -------------------------------------------------------------------
   // The Phase 8 ruling's six expressions, reached with no new sim state at all: Rig.poseFor already
   // turns Fighter.state into a pose key every frame, so the face rides on that. 'dash' wears the
@@ -967,6 +1009,7 @@ const BodyStyle={
     c.save();
     c.translate(x1,y1);c.rotate(Math.atan2(dy,dx));
     c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
+    this._applyTint(c,opts.lit,-half,-half,cv.width/px,cv.height/px);
     c.restore()},
   _paintLimb(g,len,w,w2,look,cloth){
     const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
@@ -1062,6 +1105,14 @@ const BodyStyle={
     c.save();
     c.transform(1,0,-sx/L,-sy/L,hip.x,hip.y);
     c.drawImage(cv,-MW/2,-(L+topPad),cv.width/px,cv.height/px);
+    this._applyTint(c,lit,-MW/2,-(L+topPad),cv.width/px,cv.height/px);
+    // The rim ruling: a single stroke along the torch-facing silhouette edge, waist to shoulder, in
+    // this same sheared torso frame (rimSide>0 is the local +x/right edge, matching lightAt's own
+    // "torch is to this world x's right" convention).
+    if(lit){const rx=lit.rimSide>=0?1:-1,sw=look.shoulderW,hw=Math.max(look.hipW,this.waistW(look));
+      this._rimStroke(c,lit,g=>{
+        g.lineWidth=Math.max(1.2,look.limb*.16);
+        g.beginPath();g.moveTo(rx*hw*.46,-L*.40);g.lineTo(rx*sw*.48,-L+look.limb*.5);g.stroke()})}
     c.restore()},
   _paintTorso(g,L,look,face){
     const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
@@ -1381,7 +1432,15 @@ const BodyStyle={
     const cv=this.cache(this.key(look,'head:'+st+':'+this._r(r),fx,zb),bw,bh,g=>{
       g.scale(px,px);g.translate(halfW,up);
       this._paintHead(g,r,look,fx,st)});
-    c.drawImage(cv,x-halfW,y-up,cv.width/px,cv.height/px)},
+    c.drawImage(cv,x-halfW,y-up,cv.width/px,cv.height/px);
+    this._applyTint(c,lit,x-halfW,y-up,cv.width/px,cv.height/px);
+    // Rim ruling: a single stroke along the torch-facing side of the skull. Head art carries no
+    // rotation transform (mirroring is baked into the cached bitmap via fx, not a live c.rotate),
+    // so this is a plain screen-space arc centered on (x,y).
+    if(lit){const rx=lit.rimSide>=0?1:-1,ang=rx>0?0:Math.PI;
+      this._rimStroke(c,lit,g=>{
+        g.lineWidth=Math.max(1,r*.11);
+        g.beginPath();g.arc(x,y,r*.94,ang-.85,ang+.85);g.stroke()})}},
   // The look's ear length rescaled to whatever radius the head is being drawn at (look.headR in a
   // fight, S*.27 in a portrait), so one head module serves both.
   earLen(look,r){return (look.earLen||r*.7)*(r/(look.headR||r))},
@@ -2536,7 +2595,7 @@ const Rig={
     c.scale(scale*face,scale);
     c.drawImage(atlas.img,sx,sy,fr.w,fr.h,-fr.anchorX,-fr.anchorY,fr.w,fr.h);
     c.restore()},
-  draw(c,F,cam,frame){
+  draw(c,F,cam,frame,lit){
     // Task 5.5: the atlas short-circuit. F.def.id doubles as the atlas lookId (it's the same key
     // LOOKS/DEFS are both keyed on -- see the DEFS[id].look=LOOKS[id] wiring loop at the bottom of
     // this file). ATLAS[lookId] only ever holds a real {img,meta} once Atlas.load's promise has
@@ -2559,14 +2618,14 @@ const Rig={
       const{key,t01}=this.poseFor(F);
       if(atlas.meta.poses[key]){this._drawAtlasFrame(c,F,cam,frame,atlas,key,t01);return}}
     const look0=lookFor(F.def);
-    if(look0.rig==='quad')return this.drawQuad(c,F,cam,frame,look0);
-    if(look0.rig==='big')return this.drawBig(c,F,cam,frame,look0);
+    if(look0.rig==='quad')return this.drawQuad(c,F,cam,frame,look0,lit);
+    if(look0.rig==='big')return this.drawBig(c,F,cam,frame,look0,lit);
     const look=look0,scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solve(look,key,t01,face);
     // Task 8.1: every human look ships a `.body` block, so this is the live path; everything below
     // it is the pre-8.1 stroke rig, kept intact as the fallback for a look that has none (the
     // lookFor() fallback target, LOOKS.carl, does have one, so nothing reaches it today).
-    if(look.body)return this._drawHuman(c,F,look,j,face,scale,key);
+    if(look.body)return this._drawHuman(c,F,look,j,face,scale,key,lit);
     const skinDark=shade(look.skin,-.35);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
     const limb=(p,q,w)=>{c.lineCap='round';
@@ -2884,14 +2943,14 @@ const Rig={
   // (unconditional — both Mongo and Grull read as "hulking brute"), and dark boots instead of Carl's
   // optional bare feet (no look.bareFeet field on either big look). look is passed through from
   // draw()'s dispatch so it doesn't re-resolve lookFor(F.def) a second time.
-  drawBig(c,F,cam,frame,look){
+  drawBig(c,F,cam,frame,look,lit){
     look=look||lookFor(F.def);
     const scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solveBig(look,key,t01,face);
     // Task 8.2: both big looks now ship a `.body` block, so this is the live path; everything
     // below it is the pre-8.2 stroke rig, kept intact as the fallback for a big look that has none
     // (there is none today). Exactly the shape of draw()'s own 8.1 short-circuit.
-    if(look.body)return this._drawBrute(c,F,look,j,face,scale,key);
+    if(look.body)return this._drawBrute(c,F,look,j,face,scale,key,lit);
     const skinDark=shade(look.skin,-.35);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
     const limb=(p,q,w)=>{c.lineCap='round';
@@ -3130,13 +3189,13 @@ const Rig={
   // horizontal body capsule (hip->spine->chest) instead of a torso hexagon. look is passed through
   // from draw()'s dispatch so it doesn't re-resolve lookFor(F.def) a second time; solveQuad's own
   // callers (tests, the dispatch below) can still call it directly without one.
-  drawQuad(c,F,cam,frame,look){
+  drawQuad(c,F,cam,frame,look,lit){
     look=look||lookFor(F.def);
     const scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solveQuad(look,key,t01,face);
     // Task 8.2: all three quad looks now ship a `.body` block, so this is the live path; everything
     // below it is the pre-8.2 stroke rig, kept intact as the fallback for a quad look that has none.
-    if(look.body)return this._drawBeast(c,F,look,j,face,key);
+    if(look.body)return this._drawBeast(c,F,look,j,face,key,lit);
     const skinDark=shade(look.skin,-.35);
     // Fix round 2 (controller review, Task 6.5): the medium kick is now a rearing double-front-paw
     // slam (see POSES_QUAD.medium's own comment) — the striking limbs are the FRONT legs, which this
