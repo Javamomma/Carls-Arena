@@ -1724,3 +1724,169 @@ and light level for that instead.
 - **Docs describe the shipped 72×72 door card** (no floor banner; DOM lock/cleared text); shots.sh prints a failure summary for its suppressed lines; the 276-line pre-8.x stroke rig was deleted (every look has `.body`, pinned by a test); torch flame animation gated by reduceMotion; door card draws from the 56-px portrait; Donut's barrel gained shoulder and haunch masses.
 - Known: `tools/shots.sh` output is not pixel-deterministic (camera lerp settles a variable amount before the shot); the map's top card scrolls under the header by design (column-reverse anchors DOOR 1 at the bottom).
 - Gate on the close-out commit: build --check; unit 520/0; matrix; e2e; tutorial; screens-smoke; phone-check (overlap/firstCard/firstDoor ok); perf 0.295 ms; batch n=30 t1..t5 100/70/50/36.7/23.3, f1_hob 63.3, f1_grull 26.7, f2_mother 20.0.
+
+## Phase 9 balance (Task 9.4, 2026-09-23): AI kit usage and the busy()-gate fix
+
+Task 9.4 closes two gaps the 9.1b review found and wires AI.make into the kit system 9.1-9.3 built:
+
+1. **Busy()-gate fix (9.1b review Important finding).** `AI.make`'s `decideBlock('hold')` and
+   `Ctrl.competent`'s own block-react both sat *behind* `me.busy()`, which is true for `BLOCKSTUN` —
+   so a scripted bot's held block dropped to `block:false` on literally every frame it spent absorbing
+   a multi-hit special, permanently zeroing `Fighter.blockAge` and defeating 9.1b's own same-frame
+   `BLOCKSTUN`→`BLOCK` re-entry for every bot in the codebase (only a real player, whose input Input.js
+   reads with no busy() gate at all, could ever exercise the 9.1b fix). Fixed by moving
+   `decideBlock('hold')` ahead of the busy() gate (mirroring `decideHeavy`/`decideBait`'s own
+   continuation checks) and reading `Ctrl.competent`'s own `me.blockAge` the same way, one line ahead
+   of its own busy() gate.
+   - A first cut (the reorder alone) still only ever absorbed 1-2 sub-hits of a real 5-hit special —
+     `st.hold`'s own short reactive-grace value (t3: `5+[0,10)` frames) burns down every frame it's
+     checked, busy or not, and is nowhere near a real special's ~40+ frame first-to-last-sub-hit span.
+     `decideBlock('hold')` now always presses block while `me.state==='BLOCKSTUN'` (no countdown
+     spent at all — BLOCKSTUN re-arms itself every sub-hit it blocks), and lets `st.hold`'s own
+     countdown govern only the post-danger grace period it was actually designed for.
+2. **`tier.kit`.** A new per-tier field (t1 `0`, t2 `0`, t3 `.5`, t4 `.8`, t5 `1`): the probability a
+   t3+ AI, once eligible to consider a special, commits to holding power for "the special whose effect
+   matters" — s3 when the foe holds ≥2 `PURIFIABLE` debuff stacks, s2 otherwise — instead of firing
+   whatever it can already afford. Gated on `p.kit>0` before it ever touches `r`, so t1/t2 draw no
+   extra rng and stay bit-for-bit identical to the pre-9.4 rule (verified against a measured pre-9.4
+   golden run: same seed-7 fight log, hp and frame count for both tiers).
+   - "≥2 debuffs" is read as **total stacks** across the six `PURIFIABLE` ids, not a count of distinct
+     ids. Measured before choosing this reading: a distinct-id reading needs two genuinely different
+     debuff types stacked at once, which this roster's own frozen kit data makes vanishingly rare for
+     carl/donut/katia and *structurally unreachable* for mongo (his only pre-S3 debuff source, S1's own
+     last-hit stun, is a single `maxStacks:1` application — no second id exists anywhere in his kit
+     before S3 itself). A total-stack reading is reachable for carl (his own heavy applies armorBreak
+     ×2 in one hit), donut and katia (their own S1s land 3-5 stacking sub-hits) — mongo remains
+     structurally stuck either way, a kit-data property, not an AI defect (see below).
+   - A first cut re-read the live debuff count every single frame while holding, which measurably
+     starved s3: the foe's own debuff clock (150-480f, `EFFECTS`' frozen durations) is routinely
+     shorter than the extra time a hold needs to climb from 200 to 300 power against a real, defending
+     opponent, so a hold that legitimately qualified for s3 at one moment watched the debuff simply
+     tick out a few dozen frames later and fell straight back to firing s2 the instant power crossed
+     200. `st.kitLockS3` now latches the target at s3 for the rest of that hold the first time ≥2
+     stacks are ever observed, even if they later decay — "the foe was significantly debuffed, so this
+     hold is for the punish special," not a frame-by-frame re-litigation of an already-satisfied
+     condition. This took mongo/katia/donut's own S3 usage in a 300-seed unprimed search from 0/300 to
+     reliably found within the first handful of seeds (carl and donut within the first 4, katia by
+     seed 39) for every champion except mongo.
+3. **Champion of the Floor's cadence, 1200f → 600f.** Real boss fights against this encounter average
+   300-620 frames (`f1_grull`/`f2_mother` rows below); the frozen 1200f interface meant the mechanic
+   almost never fired within a real fight's length. `kitText`'s own "every 20s" line updated to "every
+   10s" to match.
+4. **`mother_rat` atk 50→53.** See the balance battery below — the general tier sweep and the rest of
+   the boss/door bands landed back in band from items 1-2 alone; `f2_mother` alone sat 1.7pp over the
+   10-35% boss band at n=60/seed-base 1. Same atk-only lever every prior `mother_rat` retune in this
+   file used, hp/armor/blockProf untouched.
+5. **`tests/harness.py --matrix`'s stall floor, 0.9 → 0.85 (documented margin).** See "The one marginal
+   stall cell" below.
+
+### Donut's S1/S3 gap trims (Task 9.3 carry-over) — kept, with reason
+
+Task 9.3 trimmed donut's S1 gap 6→4 and S3 gap 8→5 when resizing both moves up to the kit table's own
+hit counts (S1 3→5 hits, S3 4→6 hits), to keep each move's own total active span proportionate to its
+new hit count. Re-examined here per the ruling ("look at Donut's S1/S3 gap trims... and keep or revert
+with a reason") now that the busy()-gate fix changes how defenders hold block across multi-sub-hit
+gaps specifically:
+- The general invariant test ("for every multi-hit move (s1/s2/s3) of every def in `MOVES`, a
+  continuously held block absorbs every non-unblockable sub-hit as a real block event") already covers
+  donut's own trimmed-gap S1/S3 and passed both before and after this task's `decideBlock` changes —
+  the trims never created a Task-9.1b-style blockstun/sub-hit-period coincidence gap.
+- Both moves still land within ±0% of their pre-resize total damage (S1 `3*1.5=4.5 -> 5*0.9=4.5`; S3
+  `4*3=12 -> 6*2.0=12`), per the 9.3 report.
+- The new tier.kit hold mechanism depends on donut's own S1 (poison + her royalDisdain passive's
+  weakness, both landing together) to seed the ≥2-debuff-stack condition her own S3 hold checks for —
+  a *shorter* S1 gap (more sub-hits landing sooner) is, if anything, a small net positive for that path
+  (more of S1's own sub-hits connect before a defender can react), not a regression.
+
+**Kept, unchanged**, for all three reasons above.
+
+### Balance battery
+
+**Tier sweep, before this task (base `95ca6e3`) vs after (this task's final commit), n=60:**
+
+```
+                 seed-base 1              seed-base 101
+tier           before   after           before   after
+t1             100.0    100.0           100.0    100.0
+t2             66.7     80.0            63.3     88.3
+t3             45.0     48.3            50.0     55.0
+t4             40.0     38.3            30.0     31.7
+t5             21.7     13.3            21.7     18.3
+t4-t5 gap      18.3pp   25.0pp          8.3pp*   13.4pp
+# before sb101: monotone OK, t5<=30 OK, but t4-t5=8.3pp < the new >=10pp bar (*not required pre-9.4)
+# after,  both: monotone OK, t1=100(>=80), t5<=30, t4-t5>=10pp -- both seed bases pass every 9.4 bar
+```
+
+n=30 (informational — noisier at this sample size, not the gate; seed-base 101 n=30 already failed
+plain monotonicity pre-9.4, `t2 56.7 < t3 60.0`, an existing small-sample artifact, not something this
+task introduced or needed to fix since the ruling scopes the hard bar to n=60):
+
+```
+                 seed-base 1              seed-base 101
+tier           before   after           before   after
+t1             100.0    100.0           100.0    100.0
+t2             70.0     76.7            56.7     90.0
+t3             50.0     50.0            60.0     66.7
+t4             36.7     33.3            33.3     40.0
+t5             23.3     16.7            13.3     10.0
+```
+
+**Doors/bosses, before vs after, n=30 (both seed bases) and n=60 (final gate):**
+
+```
+                        seed-base 1                    seed-base 101
+encounter      band     before(30) after(30) after(60)  before(30) after(30) after(60)
+f1_goblin      >=85%    100.0      100.0     100.0       93.3       100.0     100.0
+f1_skel        >=85%    100.0      100.0     100.0       96.7       100.0     100.0
+f1_goblin2     >=85%    96.7       96.7      98.3         86.7       96.7      98.3
+f1_shaman      n/a      83.3       90.0      90.0         90.0       83.3      81.7
+f1_hob         40-70%   63.3       63.3      60.0         46.7       46.7      50.0
+f1_grull       10-35%   26.7       6.7       18.3         23.3       20.0      20.0
+f2_grub        n/a      83.3       80.0      81.7         80.0       76.7      71.7
+f2_skel2       n/a      90.0       96.7      91.7         90.0       90.0      88.3
+f2_shaman2     n/a      66.7       60.0      68.3         56.7       63.3      60.0
+f2_hob2        n/a      56.7       56.7      58.3         53.3       46.7      48.3
+f2_grub2       n/a      80.0       70.0      75.0         70.0       53.3      56.7
+f2_mother      10-35%   20.0       30.0*     35.0**       23.3       30.0*     33.3**
+# *  measured before the mother_rat atk 50->53 retune (item 4 above)
+# ** measured AFTER the retune -- the number the gate is actually scored against
+```
+
+`f1_grull` at n=30/seed-base-1 (6.7%) is small-sample noise, not a real under-band result — n=60 for
+the same seed base (18.3%) sits comfortably mid-band; both n=60 numbers pass. Every required
+combination at the n=60 gate — tier sweep monotone with t1≥80/t5≤30/t4-t5≥10pp, both seed bases; doors
+1-3 ≥85%; f1_hob 40-70%; f1_grull and f2_mother 10-35% (after the mother_rat retune) — passes.
+
+### The one marginal `--matrix` stall cell
+
+Pre-9.4 (base `95ca6e3`), `mongo/hobgoblin/t5/seed2` measured `frames_total=2517, ko_ticks=722` —
+`2517+722=3239`, one tick under `3600*0.9=3240`, the exact cell and margin the 9.1b review's own
+independent re-run already found and confirmed pre-existing/unrelated to that task. Post-9.4, that
+specific cell now clears the line (`2522+722=3244`), but a *different* cell now sits on the wrong side
+of it: `carl/hobgoblin/t5/seed2` measured `frames_total=2051, ko_ticks=1187` — `2051+1187=3238`, two
+ticks under. Both cells are real, zero-error, healthy soaks (3-4 completed fights in 60s against a
+slow, defensive tank matchup) — not stalls in any meaningful sense — that happen to sit within a
+handful of ticks of an arbitrary 90%-of-budget line; this task's own busy()-gate fix and tier.kit
+shifted a few tiers' block/special cadence by exactly enough frames to move which single cell is
+closest to that line. Retuning boss/mob stats to chase whichever cell is currently marginal would just
+relocate the same coin-flip to a different cell the next time an unrelated AI change nudges the
+numbers by a few frames — not a fix for a threshold this close, and not something `retune by
+stats/AI fields only` is meant to cover. Resolved per the ruling's own second option: raised
+`tests/harness.py --matrix`'s stall floor from `0.9` to `0.85` (`tests/harness.py`, documented margin
+in the code comment) — `3600*0.85=3060` leaves both measured cells (3238, 3239) a comfortable ~180-tick
+buffer while still catching a genuine stall (frames_total+ko_ticks stuck near 0). `--matrix` measured
+clean (`exit 0`, 216 cells, 0 errors) after the change.
+
+### Full gate (this task's final commit)
+
+| Check | Result |
+|---|---|
+| `python3 tools/build.py --check` | exit 0 |
+| `python3 tests/harness.py --unit` | 600/0 (60 new: 2 tier.kit hold-target tests, 1 t1/t2 bit-identical test, 1 AI.make block-hold-through-BLOCKSTUN test, 1 Ctrl.competent block-hold test, 1 rename + 1 genuine-unprimed-usage test, plus the pre-existing far/near-medium and t4-boss-special tests updated for the new behavior, plus the Champion of the Floor cadence test updated for 600f) |
+| `python3 tests/harness.py --matrix` | exit 0, 216 cells, 0 errors |
+| `python3 tests/harness.py --e2e --seed 7` | exit 0, `errors: []` |
+| `python3 tests/harness.py --tutorial --seed 1` | exit 0, `tutorialDone:true, goldGranted:300, errors:[]` |
+| `python3 tests/harness.py --screens-smoke` | exit 0, every screen `errors: []` |
+| `python3 tests/harness.py --phone-check` | exit 0 |
+| `python3 tests/harness.py --perf 600` | exit 0, 0.31 ms/frame (well under the 6 ms gate) |
+| `python3 tests/batch.py --n 60 --seed-base 1` / `--seed-base 101` | tier sweep + doors/bosses, see tables above — all bands pass |
