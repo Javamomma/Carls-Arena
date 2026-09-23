@@ -1901,7 +1901,14 @@ const BOSSES={
   // overridden to 6 hits (pre-Phase-9) -- matches the kit table verbatim, so it now heals the attacker
   // 2% of each landed sub-hit too. buffs:['regen'] is the pre-existing flat Buffs.apply system, kept
   // exactly as-is.
-  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:50,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',impact:'blunt',
+  // Task 9.4: atk 50->53. The busy()-gate fix (55_ai.js's decideBlock('hold'), now spanning genuine
+  // BLOCKSTUN unconditionally) plus tier.kit both retuned the tier sweep back into band on their own
+  // (see docs/ARENA.md's Phase 9 balance section), but f2_mother alone landed at 36.7% (n=60, seed-
+  // base 1) — 1.7pp over the 10-35% boss band, while seed-base 101 sat right at the edge (35.0%). A
+  // small atk-only bump (hp/armor/blockProf untouched, same lever every prior mother_rat retune in
+  // this file used) restores both seeds comfortably inside band; see the task report's before/after
+  // numbers.
+  mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:53,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',impact:'blunt',
     boss:true,buffs:['regen'],
     moves:{heavy:{applies:[{id:'bleed',stacks:3,on:'hit'}]},
       s3:{dmg:2.4,hits:6,gap:5,healPct:0.02}},
