@@ -83,8 +83,24 @@ class Fight{
       this.fx.push({kind:'card',name:att.def.name,frames:72});
       this.fx.push({kind:'flash',frames:4})}}
   detect(att,def){const hb=att.hitbox();if(!hb)return null;const idx=att.hitIndex();if(idx<0||att.hits.has(idx))return null;
-    const hu=def.hurtbox();if(hb.x1<hu.x0||hb.x0>hu.x1)return null;const m=att.move,last=idx===(m.hits||1)-1;
-    if(def.inv>0||def.state==='KNOCKDOWN'||def.state==='KO'||def.state==='WIN')return{type:'miss',att,def,idx};
+    const m=att.move,last=idx===(m.hits||1)-1;
+    // Task 12.2 (frozen ruling): once a genuine dash-back dodge (def.state==='DASH'&&def.inv>0, at a
+    // real geometric encounter -- see the block just below) has caught one sub-hit of one of att's own
+    // multi-hit moves (m.hits truthy), att.dodgeSkipRemaining (50_fighter.js) latches -- every LATER
+    // sub-hit of that SAME att move instance is dodged outright too, whatever def is doing (or
+    // standing) by the time it arrives, since their own 12-frame DASH (i-frames included) routinely
+    // ends well before a later sub-hit's own (now +2f wider) gap catches up. Checked here, AHEAD of
+    // the geometry overlap check just below, so a carried skip never needs att's own hitbox to still
+    // physically reach a def who may since have run clean off its range -- once armed, this move
+    // instance is done landing anything, full stop, for the rest of its own active span.
+    if(att.dodgeSkipRemaining)return{type:'miss',att,def,idx,m,last,skipped:true};
+    const hu=def.hurtbox();if(hb.x1<hu.x0||hb.x0>hu.x1)return null;
+    if(def.inv>0||def.state==='KNOCKDOWN'||def.state==='KO'||def.state==='WIN'){
+      // Task 12.2: arm the carry the instant THIS miss is a genuine dash-back dodge (DASH specifically
+      // -- not a KNOCKDOWN/KO/WIN miss cause, none of which were ever a real dodge) of a multi-hit
+      // move -- a single-hit move's own miss here needs no carry (there's nothing left to skip).
+      if(def.state==='DASH'&&def.inv>0&&m.hits)att.dodgeSkipRemaining=true;
+      return{type:'miss',att,def,idx,m,last}}
     const blocking=def.state==='BLOCK'||def.state==='BLOCKSTUN';
     // unblockableSpecials: the attacker's special (m.cost is only set on s1/s2/s3) ignores block if
     // the attacker holds the buff, same treatment as MOVES.s3's own m.unblockable flag.
@@ -138,7 +154,21 @@ class Fight{
       // Effects.tick/emitEffect plumbing (48_effects.js) already logs a generic type:'effect' entry
       // for this; the dedicated 'dexterity' event below carries the {who,dir} shape Task 7.4 needs to
       // shake directionally, which the generic effect event has no slot for (see emitTell's comment).
-      if(def.state==='DASH'&&def.inv>0){
+      // Task 12.2 (frozen ruling): dexterity now also requires r.last -- true unconditionally for any
+      // single-hit move (idx can only ever be 0, its own last, see detect()'s own comment on this
+      // equivalence), so a plain dodge of a light/medium/heavy is completely unchanged from before
+      // this task. For a multi-hit special, an early sub-hit's own dash-dodge (r.skipped false here,
+      // the LIVE dash-dodge that just armed att.dodgeSkipRemaining in detect()) no longer banks
+      // dexterity by itself -- only the miss that actually lands on (or, via the carried
+      // dodgeSkipRemaining flag, r.skipped true) idx===last does. `dodging` covers both the live case
+      // (def still genuinely mid-DASH with i-frames up) and the carried case (r.skipped, def may be
+      // anywhere by now) -- either way, the KNOCKDOWN/KO/WIN miss causes detect() also returns never
+      // set r.skipped and never satisfy the live DASH+inv check, so they still grant nothing, same as
+      // before. A dodged final sub-hit also cancels that move's own on:'last' applies (stun/bleed/
+      // armorBreak/armorUp) for free -- the hit branch that would fire them is simply never reached
+      // for a missed sub-hit; see the roster kitText's own "(dodgeable)" notes (40_movedata.js).
+      const dodging=(def.state==='DASH'&&def.inv>0)||r.skipped;
+      if(dodging&&r.last){
         Effects.apply(this,def,'dexterity',{source:att});
         this.fx.push({kind:'afterimage',x:def.x,y:FLOOR-80,face:def.face});
         this.emitTell('dexterity',def,att.face)}
@@ -168,7 +198,12 @@ class Fight{
       // same per-node dmg (nodeDmg) the hit branch uses, so a chained light/medium chips proportionally
       // to whichever node it landed on, not a flat m.dmg.
       const attMods=Effects.mods(att);
-      const chipRef={chip:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*CHIP*(1-(def.def.blockProf||0)))};
+      // Task 12.2 (frozen interface, exact ruling): m.chipMul (s3's own 2, everything else undefined
+      // -> the neutral 1) multiplies the chip formula on top of every other factor already in it --
+      // s3 is blockable now (unblockable:false), but still a committed 3-bar special, so blocking it
+      // still costs real chip, at double the normal CHIP rate, rather than reading as free as any
+      // ordinary chained light.
+      const chipRef={chip:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*CHIP*(m.chipMul||1)*(1-(def.def.blockProf||0)))};
       // thorns lives here: the defender (the blocker) is the only side with an onBlock call.
       this.buffHook('onBlock',def,att,def,chipRef);
       const chip=chipRef.chip;
@@ -180,7 +215,19 @@ class Fight{
       // below) so a hypothetical multi-hit ignoreBlock move couldn't knock down on every sub-hit.
       if(m.ignoreBlock==='knockdown'&&(!m.hits||last))def.setState('KNOCKDOWN');
       else{def.stun=m.blockstun;def.setState('BLOCKSTUN')}
-      def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;
+      def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;
+      // Task 12.2 (bug found while making s3 blockable): gated to the move's own FINAL sub-hit
+      // (`!m.hits||last`), same pattern the ignoreBlock==='knockdown' branch just above already uses --
+      // previously unconditional, pushing the defender back on EVERY blocked sub-hit of a multi-hit
+      // move, not just its last. That was invisible before this task (no multi-hit move was ever both
+      // blockable AND wide-pushing/long-cadence enough to matter), but s3's own push(90, so 45/sub-hit)
+      // at donut's own 6-hit override (5 sub-hits accumulate 225px of pushback before the 6th) shoves
+      // the blocker clean out of s3's own 220px range before the final sub-hit's hitbox ever reaches
+      // them again -- caught by "Task 9.1b invariant: ... every sub-hit must resolve as exactly one of
+      // hit/block" (90_tests.js), which failed 5/6 for donut's s3 specifically. Matches the hit
+      // branch's own long-standing "push once, on the last blow" behavior (see its own `push` local
+      // just below in this file) -- blocked and unblocked pushback are now symmetric.
+      if(!m.hits||last)def.x+=att.face*m.push*.5;
       // Task 12.1: a blocked attack still "lands" in this codebase's own vocabulary (att.landed is set
       // identically on both branches) -- clamp any expiresAfterHit effect the ATTACKER holds (dexterity)
       // the same way the hit branch below does, so a chip through a raised guard counts as "your next
@@ -243,6 +290,17 @@ class Fight{
     const rawIntercept=def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track));
     const intercept=rawIntercept&&!att.interceptedThisMove;
     if(intercept)att.interceptedThisMove=true;
+    // Task 12.2 (frozen interface, exact ruling): backdraft -- an intercept that lands within 30
+    // frames of the ATTACKER's own dash-back out of a chain (att.lastChainExitFrame, 50_fighter.js/
+    // Task 12.1 fix round 2) gets its own BACKDRAFT! callout on top of the plain INTERCEPT! one --
+    // "swipe back after your third light, then throw a medium as they dash at you," MCoC's own named
+    // setup. Credited to the ATTACKER (the one who dashed back out of a chain and then intercepted),
+    // per the controller's own ruling, not the defender being intercepted -- read here, off att's own
+    // field, never def's. -999 (lastChainExitFrame's untouched default) makes this.frame-(-999) a huge
+    // positive number for any fight that never actually exited a chain, so it can never coincidentally
+    // satisfy the <=30 window. Mutually dependent on intercept (backdraft can never be true without
+    // it), never the reverse -- a plain intercept with no recent chain-exit is not a backdraft.
+    const backdraft=intercept&&(this.frame-att.lastChainExitFrame)<=30;
     // Task 12.1 (frozen interface, exact ruling): punish -- att's own heavy lands on a def who is
     // STILL stunned from a parry THEY caused (def.parryStunned, armed by this very resolve()'s own
     // parry branch above, on THAT earlier call's `att` -- here that fighter is `def`). Read before
@@ -264,7 +322,14 @@ class Fight{
     // and powerGain's old `att.move` read silently no-op'd. ref is a fresh object built fresh for
     // THIS resolve() call, never touched by the other side's resolve, so ref.move is always the
     // move that actually landed this call.
-    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*cls*critMul*(intercept?1.5:1)*(punish?PUNISH_MUL:1)*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
+    // Task 12.2 (frozen interface, exact ruling): the intercept multiplier now reads the ATTACKER's
+    // own landed move class (INTERCEPT_MUL, 40_movedata.js: light 1.3, medium 1.8) instead of the old
+    // flat 1.5 -- any move outside that table (heavy, or any of s1/s2/s3, all of which CAN in
+    // principle land as an intercept, since rawIntercept above is keyed purely off def's own
+    // vulnerable state, never off att's move type) falls back to the old flat 1.5, per the task
+    // report's own Deviations section.
+    const interceptMul=INTERCEPT_MUL[moveName]!==undefined?INTERCEPT_MUL[moveName]:1.5;
+    const ref={dmg:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*cls*critMul*(intercept?interceptMul:1)*(punish?PUNISH_MUL:1)*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
     this.buffHook('onHit',def,att,def,ref);this.buffHook('onHit',att,att,def,ref);
     const dmg=ref.dmg;
     def.hp=Math.max(0,def.hp-dmg);
@@ -404,6 +469,15 @@ class Fight{
     if(intercept){
       this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'INTERCEPT!',col:'#ff9d3b',big:true});
       this.emitTell('intercept',att,att.face)}
+    // Task 12.2 (frozen interface, exact ruling): backdraft's own BACKDRAFT! callout, on top of (never
+    // instead of) the INTERCEPT! popup just above -- backdraft is always also an intercept, by
+    // construction (see backdraft's own comment above), so both popups queue together, stacked at
+    // different y offsets so neither draws over the other. Credited to the ATTACKER (att, the one who
+    // dashed back out of a chain and then intercepted), the same {who,dir} emitTell shape intercept's
+    // own event already uses.
+    if(backdraft){
+      this.fx.push({kind:'popup',x:def.x,y:FLOOR-180,text:'BACKDRAFT!',col:'#ff5722',big:true});
+      this.emitTell('backdraft',att,att.face)}
     // Task 12.1 (frozen interface, exact ruling): the punish's own PUNISH! callout and event, same
     // "on top of, never instead of, the plain damage popup" shape intercept's own callout just above
     // uses. emit (not emitTell) here -- val carries the actual (already x1.25'd) damage this punish

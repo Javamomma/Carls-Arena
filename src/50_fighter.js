@@ -118,7 +118,17 @@ class Fighter{
     // resolve's block branch, 60_fight.js), so a multi-hit move (e.g. carl's S2 Boot Party, 5 hits)
     // refunds once per blocked MOVE, not once per blocked sub-hit. Reset in resetPerMove() below,
     // alongside interceptedThisMove.
-    this.refundedThisMove=false
+    this.refundedThisMove=false;
+    // dodgeSkipRemaining (Task 12.2, frozen interface): another per-move-instance flag in the same
+    // family as interceptedThisMove/refundedThisMove above, but owned by THIS fighter as the
+    // ATTACKER of the move being dodged (not the dodger) -- set true by Fight.detect (60_fight.js)
+    // the instant a genuine dash-back dodge (foe.state==='DASH'&&foe.inv>0, at a real geometric
+    // encounter) catches one sub-hit of one of THIS fighter's own multi-hit moves (m.hits truthy).
+    // Once set, every LATER sub-hit of that same move instance also reports as dodged, unconditional
+    // on whatever the dodging foe is doing (or standing) by the time it arrives -- their own 12-frame
+    // DASH, i-frames included, routinely ends well before a later sub-hit's own gap catches up. Reset
+    // in resetPerMove() below, alongside every other per-instance flag.
+    this.dodgeSkipRemaining=false
     // _mods (Task 8.0 pre-art seam): Effects.mods' own pooled result object for this fighter --
     // allocated lazily on first use (Effects.mods, 48_effects.js) and overwritten in place on every
     // call rather than a fresh {atkMul,armorDelta,critDelta} literal each time. Callers (Fight.resolve)
@@ -166,7 +176,7 @@ class Fighter{
   // parryBonus (startMove never touched either -- they're tutorial/sponsor-perk state with their own
   // owners, see the constructor's own comments); dashLeft/dashRate/effStartup (already owned and
   // computed by setupDash(), called right after this, never by a fixed reset).
-  resetPerMove(){this.hits=new Set();this.landed=false;this.interceptedThisMove=false;this.refundedThisMove=false}
+  resetPerMove(){this.hits=new Set();this.landed=false;this.interceptedThisMove=false;this.refundedThisMove=false;this.dodgeSkipRemaining=false}
   // Movement inside moves (Task 6.2): computes dashLeft/dashRate/effStartup once, from the move's own
   // track/stepIn/dash fields and the this.foeDist snapshot Fight.step wrote before this frame's act()
   // (or null, see the constructor's own comment). Three shapes, checked in this order:

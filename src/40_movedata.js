@@ -13,9 +13,32 @@ const MOVES={
   medium:{startup:10,active:4,recovery:14,dmg:1.6,range:120,hitstun:18,blockstun:11,push:24,powHit:12,powTaken:6,track:300,hitstop:5,
     chainDmg:[1.6,1.6,1.7,1.8,2.0]},
   heavy: {charge:22,startup:8,active:5,recovery:26,dmg:2.6,range:130,hitstun:26,blockstun:14,push:70,powHit:18,powTaken:9,knockdown:true,hitstop:9},
-  s1:{startup:8, active:4,recovery:22,dmg:1.5,hits:3,gap:6,range:130,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:100,knockdown:true,hitstop:6},
-  s2:{startup:10,active:4,recovery:28,dmg:1.6,hits:5,gap:6,range:150,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:200,knockdown:true,hitstop:8},
-  s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:8,range:220,hitstun:20,blockstun:0, push:90,powHit:0,powTaken:0,cost:300,knockdown:true,unblockable:true,hitstop:14}};
+  // Task 12.2 (frozen interface, exact ruling): s1/s2 gain `track` -- the exact same generic
+  // Fighter.setupDash `m.track` shape medium already uses (50_fighter.js's own setupDash never keyed
+  // that branch to a move NAME, only to the field's presence, so this is a pure data addition, no
+  // engine change) -- so a special thrown from neutral actually travels to the foe instead of
+  // whiffing in place. 300 (medium's own value) is generous on purpose: setupDash's own scaling
+  // (dashRate=max(DASH_TRACK_SPEED,dashLeft/14)) caps the EFFECTIVE startup at 14 frames for any
+  // dashLeft up to and including `track` itself -- see that function's own comment for the algebra --
+  // so raising track doesn't cost extra startup at the distances that actually matter (per the
+  // ruling's own "S1/S2 from 250 px reach the foe" test, needing only dashLeft>=180 to fully close a
+  // 250px gap); it just raises the MAXIMUM distance the special can be thrown from at all. s3 gets no
+  // track (out of this ruling's scope -- it's a committed cinematic special, not a poke).
+  // gap+2 (s2 6->8): the sub-hit cadence widening the S2/S3 dexterity-window ruling calls for -- see
+  // Fight.detect's own dash-back-mid-special comment (60_fight.js) for why a wider gap matters here
+  // (more real frames between sub-hits for a dash's own i-frames to actually catch one).
+  s1:{startup:8, active:4,recovery:22,dmg:1.5,hits:3,gap:6,range:130,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:100,knockdown:true,hitstop:6,track:300},
+  s2:{startup:10,active:4,recovery:28,dmg:1.6,hits:5,gap:8,range:150,hitstun:16,blockstun:10,push:20,powHit:0,powTaken:6,cost:200,knockdown:true,hitstop:8,track:300},
+  // Task 12.2 (frozen interface, exact ruling): s3 loses its whole-move `unblockable:true` -- it's
+  // blockable now, at `chipMul`:2 (double the normal CHIP rate, read by Fight.resolve's block branch,
+  // 60_fight.js) instead of dealing full unblocked damage every time. blockstun 0->10 is this task's
+  // own necessary follow-on (not itself named in the frozen field list, which only calls out
+  // unblockable/chipMul) -- 0 was only ever safe while s3 could never actually reach the block branch
+  // at all; now that it can, every other multi-hit special in this table already carries a real
+  // blockstun (10), and leaving s3 at 0 would make it the one special whose block recovery is
+  // functionally free (BLOCKSTUN clearing to BLOCK/IDLE the very next tick) -- see the task report's
+  // Deviations section.
+  s3:{startup:20,active:6,recovery:40,dmg:3,  hits:4,gap:10,range:220,hitstun:20,blockstun:10,push:90,powHit:0,powTaken:0,cost:300,knockdown:true,unblockable:false,chipMul:2,hitstop:14}};
 // Task 8.0 (pre-art seam): the old per-class shake/punch magnitude table moved verbatim to
 // src/72_fx.js -- this sim file no longer carries any shake/punch numbers at all. Fight.resolve
 // (60_fight.js) reports only the bare fact of what class of hit just landed
@@ -118,11 +141,15 @@ const CHAMPS={
     // Task 9.3: def.kitText = {sig,heavy,s1,s2,s3} -- short roster-card strings (85_screens.js), one
     // per signature/heavy/special, sourced verbatim from the kit table's own move names above. Never
     // read by the sim; presentation-only, same boundary CLS_GEM/sigEffect's own comments already draw.
+    // Task 12.2: "(dodgeable)" appended to every kit line whose on:'last' payload a dash-back mid-
+    // special can cancel outright (Fight.resolve's own miss branch, 60_fight.js -- a dodged final
+    // sub-hit never reaches the hit branch that applies it) -- s1's own last-hit Bleed and s3's own
+    // last-hit Stun both qualify.
     kitText:{sig:'SPITE — below 40% HP, an uncapped Fury stack builds up every 3s',
       heavy:'2 stacks of Armor Break',
-      s1:'TWO-FISTED (3 hits) — last hit Bleeds',
+      s1:'TWO-FISTED (3 hits) — last hit Bleeds (dodgeable)',
       s2:'BOOT PARTY (5 hits) — a blocked hit refunds 20 power',
-      s3:'DOORWAY DROP (4 hits) — last hit guarantees a Stun'}},
+      s3:'DOORWAY DROP (4 hits) — last hit guarantees a Stun (dodgeable)'}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
   // and Rig.solve's 'quad' branch in 68_rig.js).
   donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',impact:'energy',
@@ -171,7 +198,7 @@ const CHAMPS={
       heavy:'Refreshes the duration of every Bleed stack already on the foe',
       s1:'KNIFE WORK (5 hits) — every hit Bleeds',
       s2:'MISDIRECTION (5 hits) — every hit is a guaranteed Crit',
-      s3:'CURTAIN CALL (4 hits) — last hit Bleeds x3 and Armor Breaks'}},
+      s3:'CURTAIN CALL (4 hits) — last hit Bleeds x3 and Armor Breaks (dodgeable)'}},
   // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
   mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',impact:'blunt',
     sigEffect:{id:'armorBreak',stacks:1},
@@ -188,9 +215,9 @@ const CHAMPS={
     passive:{id:'immovable'},
     kitText:{sig:'IMMOVABLE — +1 Fury stack per 120 straight frames spent blocking, capped at 5',
       heavy:'GROUND SLAM — knocks down even through a raised guard',
-      s1:'BACKHAND (3 hits) — last hit Stuns',
+      s1:'BACKHAND (3 hits) — last hit Stuns (dodgeable)',
       s2:'BEAR HUG (5 hits) — heals 30% of the damage each hit deals',
-      s3:'DOORWAY DENIAL (4 hits) — last hit grants himself Armor Up'}}};
+      s3:'DOORWAY DENIAL (4 hits) — last hit grants himself Armor Up (dodgeable)'}}};
 // Task 6.1, ruling 3 (playtest note: "Hobgoblin Brute is impossible to defeat" at floor 1 door 3,
 // level 1): goblin/skeleton hp raised and atk lowered exactly to the plan's given numbers (360/30,
 // 320/28) -- longer, safer early fights instead of fast trades a level-1 player can lose to a bad
@@ -280,7 +307,7 @@ const BOSSES={
       heavy:'PILLAR SWING — long reach, Armor Breaks',
       s1:'3-hit flurry',
       s2:'5-hit flurry',
-      s3:'FLOOR WIPE (3 hits) — last hit Weakens'}},
+      s3:'FLOOR WIPE (3 hits) — last hit Weakens (dodgeable)'}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
   // 47_buffs.js, since disabling it entirely still left her a 20/20 wall — her offense, not the
@@ -360,6 +387,17 @@ const HEAVY_MIN_CHARGE=8;
 // parryStunned, 50_fighter.js) deals this multiplier -- see Fight.resolve's own punish branch
 // (60_fight.js) for where it's read and the 'punish' event it emits.
 const CLASS_BONUS=1.15,PARRY_WINDOW=8,PARRY_STUN=66,CHIP=.08,POWER_MAX=300,PARRY_LOCKOUT=20,CRIT_MUL_DEFAULT=1.6,PUNISH_MUL=1.25;
+// Task 12.2 (frozen interface, exact ruling): INTERCEPT_MUL -- the intercept dmg multiplier now reads
+// the ATTACKER's own landed move class (light 1.3, medium 1.8) instead of the old flat 1.5 every
+// intercepting hit used to get regardless of what actually caught the foe (see Fight.resolve's own
+// intercept comment, 60_fight.js, for exactly where this is read -- the once-per-move gate from Phase
+// 7, att.interceptedThisMove, is unchanged; only the multiplier's VALUE now depends on moveName).
+// rawIntercept itself is keyed entirely off the DEFENDER's own vulnerable state (ATTACK/startup/dash
+// or track), never off the attacker's move type, so any move -- heavy, or any of s1/s2/s3 -- can in
+// principle land as an intercept too; the frozen interface only names light/medium explicitly, so a
+// non-light/medium intercept falls back to the old flat 1.5 (INTERCEPT_MUL[moveName]||1.5 at the call
+// site) -- see the task report's Deviations section for this interpretation.
+const INTERCEPT_MUL={light:1.3,medium:1.8};
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
 const STAGE_W=1400;
 // Wall clamp half-width for Fighter.tick's x clamp. Wide enough that a fighter pinned at the wall

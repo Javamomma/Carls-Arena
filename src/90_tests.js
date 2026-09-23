@@ -54,7 +54,13 @@ Test.add('move table is complete and sane',()=>{
   for(const k of ['light','medium','heavy','s1','s2','s3']){const m=MOVES[k];ok(m,k+' missing');
     for(const f of ['startup','active','recovery','dmg','range','hitstun','blockstun','push','powHit','powTaken'])ok(typeof m[f]==='number',k+'.'+f)
     ok(m.chain===undefined,k+'.chain must not exist -- the grammar (CHAIN) replaces it')}
-  ok(MOVES.heavy.knockdown);ok(MOVES.s3.unblockable);
+  ok(MOVES.heavy.knockdown);
+  // Task 12.2 (frozen ruling): s3 loses its whole-move unblockable:true -- it's blockable now, at
+  // chipMul:2 (double chip) instead of always-unblocked full damage.
+  ok(!MOVES.s3.unblockable,'s3 must no longer be the whole-move unblockable:true');
+  eq(MOVES.s3.chipMul,2,'s3 must carry the frozen chipMul:2');
+  eq(MOVES.s2.gap,8,'s2 gap +2 (was 6)');eq(MOVES.s3.gap,10,'s3 gap +2 (was 8)');
+  ok(MOVES.s1.track>0&&MOVES.s2.track>0,'s1/s2 must gain a tracked dash-in, same shape as medium');
   eq(MOVES.s1.cost,100);eq(MOVES.s2.cost,200);eq(MOVES.s3.cost,300);
   eq(CLASS_BEATS[CLASS_BEATS[CLASS_BEATS.brawler]],'brawler');eq(CLASS_BEATS[CLASS_BEATS[CLASS_BEATS.tank]],'tank');
   ok(CHAMPS.carl.hp>0&&CHAMPS.donut.atk>0)});
@@ -212,7 +218,7 @@ Test.add('power accrues for both sides and caps',()=>{
   // (Task 12.1: 5x -> 4x, since a pure-light chain now caps at 4 hits, not 5).
   eq(f.p1.power,MOVES.light.powHit*4);eq(f.p2.power,MOVES.light.powTaken*4);
   f.p1.power=299;f.p1.hits=new Set();f.p1.power=Math.min(POWER_MAX,f.p1.power+50);eq(f.p1.power,300)});
-Test.add('S3 is unblockable, costs three bars, and (Task 9.1: carl\'s own s3 kit flag) guaranteed-stuns on the last hit',()=>{
+Test.add('S3 costs three bars and (Task 9.1: carl\'s own s3 kit flag) guaranteed-stuns on the last hit, when it lands clean',()=>{
   // Amended for Task 2.7: s3 leaving startup now arms a 72-frame cinematic freeze that raw step()
   // never decrements on its own (only G.tick does), so the freeze has to be cleared by hand here,
   // same as the dedicated cinematic test below, before the remaining three hits can land.
@@ -224,11 +230,30 @@ Test.add('S3 is unblockable, costs three bars, and (Task 9.1: carl\'s own s3 kit
   // down on last hit' / eq(f.p2.state,'KNOCKDOWN') before this task -- carl's s3 is generic MOVES.s3
   // data plus this task's own applies flag, so a bare CHAMPS.carl fight (mkFight's own default p1)
   // now genuinely ends this exchange STUNNED, not KNOCKDOWN; see the task report's Deviations section.
-  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;
+  // Task 12.2 re-pin: s3 is no longer unblockable -- this test now drives p2 as a non-blocking dummy
+  // (Ctrl.idle(), was Ctrl.hold({block:true})) so all 4 hits land as genuine unblocked hits, same as
+  // this test always intended to prove ("guaranteed-stuns on the last hit"); the paired blocked-S3
+  // test just below covers the new chip/no-popup/no-stun behavior when it IS blocked.
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}]),ctrl2:Ctrl.idle()});closeIn(f);f.p1.power=300;
   run(f,21);f.cinematic=0;run(f,90);
   eq(f.p1.power,0);eq(f.log.filter(e=>e.type==='hit').length,4);eq(f.p2.hp,1000-4*180);
   eq(f.p2.state,'STUNNED','carl\'s s3 last hit now guarantees a stun (Task 9.1 kit flag), overriding the base knockdown');
   eq(Effects.stacks(f.p2,'stun'),1)});
+Test.add('S3 blocked: 2x chip (chipMul), no UNBLOCKABLE popup, no on:\'last\' stun -- s3 loses unblockable:true (Task 12.2 frozen ruling)',()=>{
+  // Same shape/timing as the clean-landing test just above, but p2 holds block continuously instead
+  // of standing idle. base CHIP formula: round(carl.atk(60)*1*m.dmg(3,no chainDmg for s3)*CHIP(.08)*
+  // chipMul(2)*(1-blockProf(0))) = round(60*3*.08*2) = 29 per sub-hit, 4 sub-hits = 116 total.
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;
+  run(f,21);f.cinematic=0;run(f,90);
+  eq(f.p1.power,0,'the special still costs its full 300 whether or not it connects clean');
+  eq(f.log.filter(e=>e.type==='hit'&&e.who===1).length,0,'every sub-hit must resolve as a block, none as an unblocked hit');
+  const blocks=f.log.filter(e=>e.type==='block'&&e.who===1);
+  eq(blocks.length,4,'all 4 sub-hits must resolve as block events -- s3 is genuinely blockable now');
+  eq(blocks.map(e=>e.val).join(','),'29,29,29,29','each sub-hit must chip at the doubled chipMul:2 rate');
+  eq(f.p2.hp,1000-4*29,'total chip damage must be 4x the per-hit chipMul:2 chip');
+  ok(!f.fx.some(x=>x.kind==='popup'&&x.text==='UNBLOCKABLE'),'no UNBLOCKABLE popup -- this move no longer forces through an active block');
+  eq(Effects.stacks(f.p2,'stun'),0,'the on:\'last\' stun never fires -- a blocked sub-hit never reaches the hit branch that applies it');
+  ok(f.p2.state!=='STUNNED','p2 must never be genuinely STUNNED off a fully-blocked s3')});
 Test.add('class advantage adds 15%',()=>{
   const f=mkFight({p1:CHAMPS.donut,p2:CHAMPS.carl,ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.p2.hp,1000-Math.round(70*1.15))});
 Test.add('KO ends the fight with WIN/KO states',()=>{
@@ -365,9 +390,16 @@ Test.add('tier.kit: t1/t2 (kit 0) never draw the extra kit rng roll -- decideSpe
   // use). Since kit===0 for t1/t2, decideSpecial must never touch r for the hold decision, so this
   // exact fight -- same seed, same rng stream, same every-other-field -- must still play out bit-for-
   // bit identically post-9.4: same hp, same frame the fight ends on, same ordered hit log.
+  // Task 12.2 re-pin: s3's own sub-hit gap widened 8->10 (frozen ruling, "S2/S3 gap +2f") delays when
+  // s3's LAST sub-hit lands (three gaps between four sub-hits, +2f each = +6f total), which in turn
+  // delays every later hit in this scripted exchange by that same +6f -- frame 275->281 (t1) and
+  // 220->226 (t2), hp/hit-sequence otherwise bit-identical (s3 itself never travels -- no track was
+  // added to it -- and p1 never blocks in this scenario, so chipMul/blockstun/unblockable never come
+  // into play here). Re-measured against the current tree, same discipline every prior re-pin in this
+  // file already uses.
   const golden={
-    t1:{hp1:0,hp2:1000,frame:275,hits:['s3:180','s3:180','s3:180','s3:180','medium:96','medium:96','medium:96']},
-    t2:{hp1:0,hp2:1000,frame:220,hits:['s3:180','s3:180','s3:180','s3:180','medium:96','medium:96','light:60','light:63']}};
+    t1:{hp1:0,hp2:1000,frame:281,hits:['s3:180','s3:180','s3:180','s3:180','medium:96','medium:96','medium:96']},
+    t2:{hp1:0,hp2:1000,frame:226,hits:['s3:180','s3:180','s3:180','s3:180','medium:96','medium:96','light:60','light:63']}};
   for(const tier of['t1','t2']){
     const f=mkFight({ctrl1:Ctrl.idle(),ctrl2:AI.make(tier,7)});closeIn(f);f.p2.power=300;
     for(let i=0;i<400;i++){f.cinematic=0;f.step()}
@@ -400,9 +432,15 @@ Test.add('tier.kit: t1/t2 (kit 0) never draw the extra kit rng roll -- decideSpe
 // introduced, by this task's own timing shift). Now fixed at the source: both entries below read
 // their own real move name (t1's mutual-trade hit was a 'medium', t2's was an 's1').
 Test.add('Fix-wave M3: t1/t2 vs an ATTACKING p1 (exercises the block-hold reorder\'s st.hold arm/decrement path M2 documents, not just the kit field gating)',()=>{
+  // Task 12.2 re-pin: t2's own two logged hits are p2's own AI reading p1's held-medium wind-up and
+  // intercepting it with a light (55_ai.js decideIntercept) -- INTERCEPT_MUL is now class-keyed
+  // (light 1.3, was a flat 1.5), so each of those two lights drops 90->78 (round(60*1.3)=78), and
+  // p1's own hp accordingly rises 730->754 (2*(90-78)=24 less damage taken). t1's own single hit is a
+  // plain (non-intercept) medium, unaffected; frame is unaffected for both tiers (INTERCEPT_MUL only
+  // changes the multiplier's VALUE, not when the intercept itself lands).
   const golden={
     t1:{hp1:904,hp2:0,frame:234,hits:['medium:96']},
-    t2:{hp1:730,hp2:200,frame:342,hits:['light:90','light:90','s1:90']}};
+    t2:{hp1:754,hp2:200,frame:342,hits:['light:78','light:78','s1:90']}};
   for(const tier of['t1','t2']){
     const f=mkFight({ctrl1:Ctrl.hold({medium:true}),ctrl2:AI.make(tier,7)});closeIn(f);
     for(let i=0;i<400;i++){f.cinematic=0;f.step()}
@@ -4980,16 +5018,16 @@ Test.add('Phase 9 kit flags landed on real move data exactly where hit counts al
 
 // --- Task 7.3: intercept, dexterity, capped dash-in telegraph -----------------------------------
 // A light thrown from IDLE lands as a plain node-1 opener (nodeDmg 1, no crit under mkFight's default
-// noCrit:true) for a clean base of round(carl.atk(60)*1*1*1*1*1)=60 -- the frozen x1.5 intercept
-// multiplier on that clean number (90) is what the dmg assertion below checks, with no rounding
-// ambiguity either way.
-Test.add('a light landing on a foe mid-medium-startup intercepts: x1.5 damage, +15 power, hitstop 10, an intercept event',()=>{
+// noCrit:true) for a clean base of round(carl.atk(60)*1*1*1*1*1)=60 -- Task 12.2's own class-keyed
+// INTERCEPT_MUL.light (1.3, was a flat 1.5) on that clean number (78) is what the dmg assertion below
+// checks, with no rounding ambiguity either way.
+Test.add('a light landing on a foe mid-medium-startup intercepts: x1.3 damage (INTERCEPT_MUL.light), +15 power, hitstop 10, an intercept event',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});
   closeIn(f);run(f,5);
   const hit=f.log.find(e=>e.type==='hit'&&e.who===1);
   ok(hit,'the light must land');
   eq(hit.move,'light');
-  eq(hit.val,90,'base 60 dmg becomes 90 at the frozen x1.5 intercept multiplier (def is still in medium startup)');
+  eq(hit.val,78,'base 60 dmg becomes 78 at the class-keyed x1.3 light intercept multiplier (Task 12.2, def is still in medium startup)');
   eq(f.p1.power,22,"powHit(7)+the intercept's own flat +15, nothing else banked power this fight");
   eq(f.hitstop,10,"the intercept's own hitstop replaces the light's own (much shorter) m.hitstop");
   const iv=f.log.find(e=>e.type==='intercept');
@@ -5001,6 +5039,75 @@ Test.add('a light landing on a foe mid-medium-startup intercepts: x1.5 damage, +
   // dedicated FX-level "FX.hitfeel: cls intercept" test below for that half of the proof.
   ok(f.fx.some(x=>x.kind==='hitfeel'&&x.cls==='intercept'&&x.last===true),'a hitfeel descriptor with cls "intercept" must be queued');
   ok(f.fx.some(x=>x.kind==='popup'&&x.text==='INTERCEPT!'),'an INTERCEPT! popup must be queued')});
+// Task 12.2: a medium landing as the intercept gets its own, HIGHER class multiplier (1.8, vs light's
+// 1.3) -- INTERCEPT_MUL is keyed off the ATTACKER's own landed moveName, not the defender's (the
+// defender here is mid a medium's own startup either way; what changed class is the move that CAUGHT
+// them). Driven the same directness-first way the "intercept credit fires at most once" test below
+// already does (hand-built att/def state, a direct f.resolve() call) rather than choreographing real
+// medium-vs-medium dash timing, since only the multiplier's own VALUE is under test here.
+Test.add('a medium landing on a foe mid-medium-startup intercepts at the class-specific x1.8 multiplier (INTERCEPT_MUL.medium)',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  att.move=att.moveDef('medium');att.moveName='medium';att.chainNode=1;att.interceptedThisMove=false;att.hits=new Set();att.power=0;
+  def.move=def.moveDef('medium');def.moveName='medium';def.effStartup=def.move.startup;
+  def.dashLeft=0;def.dashRate=0;def.chainNode=1;def.hits=new Set();def.landed=false;def.setState('ATTACK',2);
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true,moveName:att.moveName});
+  const hit=f.log.find(e=>e.type==='hit'&&e.who===1);
+  ok(hit,'the medium must land');
+  // base: round(carl.atk(60)*1*medium.chainDmg[0](1.6)*cls(1)*critMul(1)*1.8*1*(1-armor(0))) =
+  // round(60*1.6*1.8) = round(172.8) = 173.
+  eq(hit.val,173,'base 96 dmg (60*1.6) becomes 173 at the class-keyed x1.8 medium intercept multiplier');
+  eq(att.power,27,"powHit(12)+the intercept's own flat +15");
+  eq(f.hitstop,10,"the intercept's own hitstop still replaces the landed move's own (unrelated to which class intercepted)");
+  ok(f.log.some(e=>e.type==='intercept'),'an intercept event must be logged')});
+// Task 12.2: a move outside INTERCEPT_MUL's own two named keys (light/medium) falls back to the old
+// flat 1.5 -- rawIntercept is keyed purely off the DEFENDER's own vulnerable state, so any attacking
+// move (heavy, s1/s2/s3) can in principle land as an intercept too, even though nothing in this
+// roster's own real AI/player flow currently throws one that way on purpose.
+Test.add('a heavy landing as an intercept (outside INTERCEPT_MUL\'s light/medium keys) falls back to the old flat x1.5',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  att.move=att.moveDef('heavy');att.moveName='heavy';att.interceptedThisMove=false;att.hits=new Set();att.power=0;
+  def.move=def.moveDef('medium');def.moveName='medium';def.effStartup=def.move.startup;
+  def.dashLeft=0;def.dashRate=0;def.chainNode=1;def.hits=new Set();def.landed=false;def.setState('ATTACK',2);
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true,moveName:att.moveName});
+  const hit=f.log.find(e=>e.type==='hit'&&e.who===1);
+  // base: round(carl.atk(60)*1*heavy.dmg(2.6)*1*1*1.5*1*1) = round(156*1.5) = round(234) = 234.
+  eq(hit.val,234,'a non-light/medium intercept still gets the pre-Task-12.2 flat x1.5');
+  ok(f.log.some(e=>e.type==='intercept'))});
+// Task 12.2 (frozen ruling): BACKDRAFT -- an intercept landing within 30 frames of the ATTACKER's own
+// dash-back out of a chain (att.lastChainExitFrame) gets its own BACKDRAFT! callout/event, credited to
+// the attacker (the one who dashed back and then intercepted), on top of the plain INTERCEPT! one.
+Test.add('an intercept within 30 frames of the attacker\'s own chain-exit dash-back logs a BACKDRAFT! event and popup, credited to the attacker',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  f.frame=100;att.lastChainExitFrame=90; // 10 frames ago -- inside the 30f window
+  att.move=att.moveDef('light');att.moveName='light';att.chainNode=0;att.interceptedThisMove=false;att.hits=new Set();
+  def.move=def.moveDef('medium');def.moveName='medium';def.effStartup=def.move.startup;
+  def.dashLeft=0;def.dashRate=0;def.chainNode=1;def.hits=new Set();def.landed=false;def.setState('ATTACK',2);
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true,moveName:att.moveName});
+  ok(f.log.some(e=>e.type==='intercept'),'sanity: this must land as an intercept');
+  const bd=f.log.find(e=>e.type==='backdraft');
+  ok(bd,'a backdraft event must be logged');
+  eq(bd.who,1,'credited to the interceptor -- the attacker who dashed back out of a chain');
+  eq(bd.dir,1,"dir is the attacker's own facing, same convention as intercept/dexterity");
+  ok(f.fx.some(x=>x.kind==='popup'&&x.text==='BACKDRAFT!'),'a BACKDRAFT! popup must be queued')});
+Test.add('an intercept more than 30 frames after the attacker\'s own chain-exit dash-back is NOT a backdraft',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  f.frame=100;att.lastChainExitFrame=60; // 40 frames ago -- outside the 30f window
+  att.move=att.moveDef('light');att.moveName='light';att.chainNode=0;att.interceptedThisMove=false;att.hits=new Set();
+  def.move=def.moveDef('medium');def.moveName='medium';def.effStartup=def.move.startup;
+  def.dashLeft=0;def.dashRate=0;def.chainNode=1;def.hits=new Set();def.landed=false;def.setState('ATTACK',2);
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true,moveName:att.moveName});
+  ok(f.log.some(e=>e.type==='intercept'),'sanity: still a plain intercept');
+  ok(!f.log.some(e=>e.type==='backdraft'),'no backdraft once the 30f window has closed');
+  ok(!f.fx.some(x=>x.kind==='popup'&&x.text==='BACKDRAFT!'),'no BACKDRAFT! popup once the window has closed')});
+Test.add('a plain intercept from an attacker who never dashed out of a chain (lastChainExitFrame at its untouched -999 default) is never a backdraft',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2; // att.lastChainExitFrame defaults -999 (Fighter constructor)
+  att.move=att.moveDef('light');att.moveName='light';att.chainNode=0;att.interceptedThisMove=false;att.hits=new Set();
+  def.move=def.moveDef('medium');def.moveName='medium';def.effStartup=def.move.startup;
+  def.dashLeft=0;def.dashRate=0;def.chainNode=1;def.hits=new Set();def.landed=false;def.setState('ATTACK',2);
+  eq(att.lastChainExitFrame,-999,'sanity: the untouched default');
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true,moveName:att.moveName});
+  ok(f.log.some(e=>e.type==='intercept'),'sanity: still a plain intercept');
+  ok(!f.log.some(e=>e.type==='backdraft'),'never a backdraft with no real chain-exit behind it')});
 Test.add('a hit landing on a foe already past medium startup (into recovery) is a plain hit, no intercept',()=>{
   // Hand-set p2 into a medium already in its own recovery window (f=startup+1=11, inside the
   // [startup+active,startup+active+recovery)=[14,28) recovery span 5 ticks from now, once p1's own
@@ -5072,6 +5179,74 @@ Test.add('a miss from KNOCKDOWN get-up i-frames (not a real dash-back dodge) nev
   run(f,5);
   ok(!Effects.has(f.p2,'dexterity'),'get-up invulnerability is not a dodge -- def.state must be DASH, not IDLE, to earn dexterity');
   ok(!f.log.some(e=>e.type==='dexterity'),'no dexterity event for a non-DASH miss')});
+// --- Task 12.2: dash-back mid-special skips the remaining sub-hits of that move instance -----------
+// resolve()-level: dexterity's own gating now requires r.last too -- true unconditionally for any
+// single-hit move (the pre-existing tests above/below are untouched), but for a multi-hit move only
+// the miss that lands on (or, via the carried att.dodgeSkipRemaining flag, r.skipped true) idx===last
+// grants it. Driven directly at resolve() with hand-built miss records (m/last/skipped), the same
+// "isolate the one mechanism under test" directness the "intercept credit fires at most once" test
+// elsewhere in this file already uses, rather than choreographing real dash-vs-special frame timing.
+Test.add('resolve(): a live dash-dodge (DASH+inv) of a NON-final sub-hit of a multi-hit move grants no dexterity (frozen ruling: only the final sub-hit does)',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  att.hits=new Set();def.setState('DASH');def.inv=8;
+  f.resolve({type:'miss',att,def,idx:1,m:att.moveDef('s2'),last:false});
+  ok(!Effects.has(def,'dexterity'),'no dexterity on a dodged non-final sub-hit');
+  ok(!f.log.some(e=>e.type==='dexterity'))});
+Test.add('resolve(): a live dash-dodge of the FINAL sub-hit of a multi-hit move grants dexterity, same as any single-hit dodge',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  att.hits=new Set();def.setState('DASH');def.inv=8;
+  f.resolve({type:'miss',att,def,idx:4,m:att.moveDef('s2'),last:true});
+  ok(Effects.has(def,'dexterity'),'dexterity fires on the final sub-hit');
+  ok(f.log.some(e=>e.type==='dexterity'))});
+Test.add('resolve(): a CARRIED skip (r.skipped, def no longer dashing/invulnerable by the time it arrives) still grants dexterity on the final sub-hit',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  att.hits=new Set();def.setState('IDLE');def.inv=0; // def is plain idle now -- their own DASH ended long ago
+  f.resolve({type:'miss',att,def,idx:4,m:att.moveDef('s2'),last:true,skipped:true});
+  ok(Effects.has(def,'dexterity'),'the carried skip flag alone (not def\'s live state) is what grants dexterity here');
+  ok(f.log.some(e=>e.type==='dexterity'))});
+Test.add('resolve(): a carried skip on a non-final sub-hit grants no dexterity',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  att.hits=new Set();def.setState('IDLE');def.inv=0;
+  f.resolve({type:'miss',att,def,idx:2,m:att.moveDef('s2'),last:false,skipped:true});
+  ok(!Effects.has(def,'dexterity'))});
+// detect()-level: the actual flag-latch-and-carry mechanism. Driven the same "hand-set att.f into a
+// chosen sub-hit's active window, call detect() directly" directness the "past medium startup"
+// intercept test above already uses, rather than a full real-time dash choreography.
+Test.add('detect(): a live dash-back dodge of one sub-hit of a multi-hit move latches att.dodgeSkipRemaining, and every LATER sub-hit of that move instance reports miss even once def is back to plain IDLE',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  closeIn(f);
+  const m=att.moveDef('s2');att.move=m;att.moveName='s2';att.effStartup=m.startup;att.dashLeft=0;att.hits=new Set();att.dodgeSkipRemaining=false;
+  att.setState('ATTACK',m.startup); // parked right at the start of sub-hit 0's own active window
+  def.setState('DASH',0);def.inv=8; // a live dash-dodge in progress, def.state==='DASH'&&def.inv>0
+  const r0=f.detect(att,def);
+  ok(r0&&r0.type==='miss','sub-hit 0 must be a genuine dash-dodge miss');
+  eq(r0.idx,0);ok(!r0.skipped,'this first one is the LIVE dodge, not yet a carried one');
+  ok(att.dodgeSkipRemaining,'the flag must latch on this genuine dash-dodge (m.hits truthy, DASH+inv)');
+  att.hits.add(0); // Fight.resolve would normally do this -- simulate it directly since resolve() isn't called here
+  // Jump att.f forward into sub-hit 1's own active window, and put def back in a totally ordinary
+  // IDLE state, inv 0 (their own 12-frame DASH is long since over) -- the carried flag alone must
+  // still force a miss, with no regard to def's current state at all.
+  att.f=m.startup+(m.active+m.gap)*1;
+  def.setState('IDLE');def.inv=0;
+  const r1=f.detect(att,def);
+  ok(r1&&r1.type==='miss','sub-hit 1 must still miss, purely off the carried flag, even though def is plain IDLE now');
+  ok(r1.skipped,'the carried-skip flag must be reported on the record');
+  eq(r1.idx,1);ok(!r1.last,'sub-hit 1 of 5 (idx 1) is not the move\'s own final sub-hit');
+  att.hits.add(1);
+  // Jump all the way to the FINAL sub-hit (idx 4 of s2's 5 hits) and confirm it also misses, with
+  // last:true -- this is exactly the record Fight.resolve's own dexterity gate reads.
+  att.f=m.startup+(m.active+m.gap)*4;
+  const r4=f.detect(att,def);
+  ok(r4&&r4.type==='miss'&&r4.skipped&&r4.last,'the final sub-hit (idx 4 of 5) must also miss, carried, and report last:true')});
+Test.add('detect(): a multi-hit move whose defender is never actually dash-dodged (ordinary IDLE throughout) never latches att.dodgeSkipRemaining',()=>{
+  const f=mkFight(),att=f.p1,def=f.p2;
+  closeIn(f);
+  const m=att.moveDef('s2');att.move=m;att.moveName='s2';att.effStartup=m.startup;att.dashLeft=0;att.hits=new Set();att.dodgeSkipRemaining=false;
+  att.setState('ATTACK',m.startup);
+  def.setState('IDLE');def.inv=0; // never dashes -- just stands there and eats it
+  const r0=f.detect(att,def);
+  ok(r0&&r0.type==='hit','an ordinary undefended sub-hit must land as a real hit, not a miss');
+  ok(!att.dodgeSkipRemaining,'no dash-dodge ever happened, so the carry flag must stay false')});
 Test.add('a far medium dash-in never needs more than 14 effective startup frames, at any gap (including past MOVES.medium.track itself)',()=>{
   for(const gap of[0,10,50,100,150,196,200,250,299,300,301,400,1000]){
     const F=mkFighter();F.foeDist=gap;F.act(Object.assign(Ctrl.EMPTY(),{medium:true}));
@@ -5092,6 +5267,26 @@ Test.add('an already-in-range medium keeps its old flat startup and speed (bit-i
   f.p2.x=STAGE_W/2+200;f.p1.x=f.p2.x-60-48; // foeDist=60, already inside light.range(70)
   f.step();
   eq(f.p1.effStartup,MOVES.medium.startup,'no dash needed, base startup unchanged from before this task')});
+// Task 12.2 (frozen ruling, exact interface): "MOVES.s1/s2 gain track like medium (effective startup
+// <=14 f)" -- setupDash's own m.track branch (50_fighter.js) was already generic (keyed on the FIELD's
+// presence, never a move NAME), so this is a pure data addition; the algebra that caps effStartup at
+// 14 for any dashLeft up to and including m.track itself is exactly the same one the pre-existing
+// far-medium test above already exercises.
+Test.add('S1/S2 gain a tracked dash-in like medium: neither ever needs more than 14 effective startup frames, at any gap up to and past their own track',()=>{
+  for(const key of['s1','s2']){
+    for(const gap of[0,10,100,180,250,300,301,400]){
+      const F=mkFighter();F.foeDist=gap;F.power=1000;
+      F.act(Object.assign(Ctrl.EMPTY(),{special:Number(key[1])}));
+      eq(F.moveName,key,'sanity: the special must actually have started');
+      ok(F.effStartup<=14,key+' gap '+gap+' must cap at 14, got '+F.effStartup);
+      ok(F.effStartup>=MOVES[key].startup,key+' gap '+gap+' must never go below its own base startup, got '+F.effStartup)}}});
+Test.add('a neutral S1/S2 thrown from ~250px away actually travels and lands on the foe (frozen ruling: "S1/S2 from 250 px reach the foe")',()=>{
+  for(const key of['s1','s2']){
+    const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:Number(key[1])}}]),ctrl2:Ctrl.idle()});
+    f.p1.x=f.p2.x-298; // hurtbox-edge gap ~250px (298, less the two fighters' combined 48px width)
+    f.p1.power=MOVES[key].cost;
+    run(f,60);
+    ok(f.log.some(e=>e.type==='hit'&&e.who===1&&e.move===key),key+' thrown from 250px must actually connect, not whiff in place -- it whiffed with no track at all, before this task')}});
 
 // --- Task 9.2: champion/boss passives (Spite/Royal Disdain/Understudy/Immovable/Champion of the
 // Floor/Brood) -- PASSIVES table + Passives.tick/onParry/onSpecial (49_passives.js) ----------------
@@ -5302,14 +5497,20 @@ Test.add('sim purity: 49_passives.js carries no HITFEEL/shake/punch magnitudes a
 // touched either one -- tutorial/sponsor-perk state with their own separate owners), and not
 // dashLeft/dashRate/effStartup (already owned and computed by setupDash(), a separate per-instance
 // method called right after resetPerMove in startMove, never by a fixed reset value).
-Test.add('resetPerMove clears exactly hits/landed/interceptedThisMove and touches nothing else',()=>{
+Test.add('resetPerMove clears exactly hits/landed/interceptedThisMove/refundedThisMove/dodgeSkipRemaining and touches nothing else',()=>{
+  // Task 12.2: dodgeSkipRemaining joins the per-move-instance flag set resetPerMove clears (same
+  // pattern interceptedThisMove/refundedThisMove already use) -- and refundedThisMove itself (added
+  // in Task 9.1, after this test's own title/scope was last written, but never actually exercised
+  // here) is folded in too while touching this test, closing that pre-existing coverage gap.
   const f=mkFighter();
-  f.hits=new Set([9]);f.landed=true;f.interceptedThisMove=true;
+  f.hits=new Set([9]);f.landed=true;f.interceptedThisMove=true;f.refundedThisMove=true;f.dodgeSkipRemaining=true;
   f.chainNode=3;f.guardActive=true;f.parryBonus=5;f.dashLeft=40;f.dashRate=7;f.effStartup=99;
   f.resetPerMove();
   eq(f.hits.size,0,'hits must reset to a fresh empty Set');
   eq(f.landed,false,'landed must reset to false');
   eq(f.interceptedThisMove,false,'interceptedThisMove must reset to false');
+  eq(f.refundedThisMove,false,'refundedThisMove must reset to false');
+  eq(f.dodgeSkipRemaining,false,'dodgeSkipRemaining must reset to false');
   eq(f.chainNode,3,'resetPerMove must NOT touch chainNode -- the grammar owns it');
   eq(f.guardActive,true,'resetPerMove must NOT touch guardActive -- startMove never did');
   eq(f.parryBonus,5,'resetPerMove must NOT touch parryBonus -- startMove never did');
@@ -7249,7 +7450,15 @@ Test.add('kit usage in real (unprimed) play: over a seeded set of t3+ vs Ctrl.co
   // Fighter.startMove, they just never connect before the budget runs out). A re-search over seeds
   // 1-80 (same method as the donut re-pin above) found seed 31 (carl) and seed 29 (katia) land both s2
   // and s3 well within budget; donut's own seed 2 is untouched (still lands both).
-  const cfgs=[['carl',CHAMPS.carl,'t3',31],['donut',CHAMPS.donut,'t3',2],['katia',CHAMPS.katia,'t3',29]];
+  // Task 12.2: re-searched again -- carl 31 -> 7, katia 29 -> 1. s1/s2's own new tracked dash-in, s3's
+  // own gap+2/blockable-now-at-2x-chip, and the class-keyed INTERCEPT_MUL all shift exactly when and
+  // how much of each special actually connects (a special that whiffs or gets blocked for chip instead
+  // of a clean hit still counts toward `unprimedSpecialThrown`'s own hit-OR-block reading, but the
+  // POWER curve driving when the NEXT special is even attempted shifts either way) -- under the OLD
+  // re-searched seeds, carl's S3 and katia's S3 again fail to connect within the 12000-step budget. A
+  // fresh re-search over seeds 1-150 (same method) found seed 7 (carl) and seed 1 (katia) land both s2
+  // and s3 well within budget; donut's own seed 2 is untouched (still lands both).
+  const cfgs=[['carl',CHAMPS.carl,'t3',7],['donut',CHAMPS.donut,'t3',2],['katia',CHAMPS.katia,'t3',1]];
   for(const[id,def,tier,seed]of cfgs){
     const f=new Fight({seed,p1:def,p2:BOSSES.mother_rat,ctrl1:AI.make(tier,seed),ctrl2:Ctrl.competent(seed+500),clock:600,noCrit:false});
     f.p2.hp=f.p2.maxHp=1e7;f.p1.hp=f.p1.maxHp=1e7;
@@ -7392,7 +7601,9 @@ Test.add('Task 9.5: the hp<=60% self-buff rule is scoped to self-target specials
   // play out via the pre-existing kitHold/fallback logic alone, bit-for-bit identical to the golden
   // run recorded above (which never touches hp at all -- this test isolates that the new rule is a
   // true no-op for a non-self-target kit, not just "the golden numbers happen to still match").
-  const golden={t1:{hp1:0,hp2:1000,frame:275},t2:{hp1:0,hp2:1000,frame:220}};
+  // Task 12.2 re-pin: same +6f s3-gap shift as the sibling golden test above (40_movedata.js's own
+  // s3 gap 8->10) -- p2's own hp isn't asserted here, only p1's (always 0, a full loss either way).
+  const golden={t1:{hp1:0,hp2:1000,frame:281},t2:{hp1:0,hp2:1000,frame:226}};
   for(const tier of['t1','t2']){
     const f=mkFight({ctrl1:Ctrl.idle(),ctrl2:AI.make(tier,7)});closeIn(f);
     f.p2.power=300;f.p2.hp=Math.floor(f.p2.maxHp*0.5); // below 60%, same as the mongo test above, on a fighter whose s3 targets the foe
