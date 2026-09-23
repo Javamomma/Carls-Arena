@@ -287,7 +287,25 @@ class Fighter{
         // other reset case ("taking a hit resets it"), where this natural 'done' transition never runs.
         if(this.phase()==='done'){this.clearMove();this.landed=false;this.chainNode=0;this.setState('IDLE')}break}
       case'DASH':this.x-=this.face*DASH_BACK.dist/DASH_BACK.frames;if(this.f>=DASH_BACK.frames)this.setState('IDLE');break;
-      case'HITSTUN':case'BLOCKSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
+      case'HITSTUN':case'STUNNED':if(this.f>=this.stun)this.setState('IDLE');break;
+      // Task 9.1b (controller ruling, verdict-9.1's "Block-through-specials" section): a held block
+      // must absorb EVERY sub-hit of a multi-hit special, not just the first. Fight.step runs act()
+      // (previous frame's state) then tick() (this switch) then detect()/resolve(), all in the same
+      // frame -- so a plain BLOCKSTUN->IDLE transition here left a one-frame gap whenever a move's own
+      // sub-hit cadence (active+gap) was >= its blockstun: the very frame BLOCKSTUN cleared to IDLE was
+      // also the frame the next sub-hit's hitbox went active, and act() (the only place that re-reads
+      // intent.block to re-enter BLOCK) wouldn't run again until the NEXT step, one frame too late --
+      // detect() saw IDLE, the hit landed clean, and the resulting HITSTUN outlasted the move's own
+      // cadence so every later sub-hit landed too. Fix: re-enter BLOCK on this same frame, ahead of
+      // detect(), whenever the last-read intent still held block -- reusing this.blockAge (set fresh by
+      // act(), which always runs before tick() each step; >0 iff intent.block was true THIS frame, 0
+      // otherwise, since act() unconditionally resets it every call regardless of state) rather than
+      // adding any new field, per the frozen intent contract (read the flag the controller already
+      // produced this frame, don't add one). Falls back to the old IDLE transition the instant block is
+      // released, so a genuine release still lets the next sub-hit through (see 90_tests.js's own
+      // "releasing block mid-special" regression lock). HITSTUN/STUNNED above are untouched -- this is
+      // only ever a defender-side, block-specific correction.
+      case'BLOCKSTUN':if(this.f>=this.stun)this.setState(this.blockAge>0?'BLOCK':'IDLE');break;
       case'KNOCKDOWN':if(this.f>=KNOCKDOWN.frames){this.inv=KNOCKDOWN.inv;this.setState('IDLE')}break}
     this.x=clamp(this.x,EDGE_PAD,STAGE_W-EDGE_PAD);
     this.dx=this.x-prevX}}
