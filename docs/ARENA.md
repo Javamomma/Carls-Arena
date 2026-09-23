@@ -1542,9 +1542,9 @@ No node collapsed to a near-0/near-100 wall; nothing here needed a retune.
 
 ## Phase 8 exit (2026-09-22)
 
-Tasks 8.0-8.5, commits `5bc5397..8022f2e` on `main` (Task 8.0's first commit through Task 8.5's own
-shots-regeneration commit, immediately before this section's own close-out commit). SDD ledger:
-`.superpowers/sdd/2026-09-22-phase8-art-upgrade/progress.md`.
+Tasks 8.0-8.5 plus the final-review fix wave, commits `5bc5397..52bae9a` on `main` (Task 8.0's first
+commit through the fix wave's last code commit, immediately before this section's own update commit).
+SDD ledger: `.superpowers/sdd/2026-09-22-phase8-art-upgrade/progress.md`.
 
 ### Exit table
 
@@ -1555,15 +1555,16 @@ shots-regeneration commit, immediately before this section's own close-out commi
 | 8.2 Big/quad rigs | `28436c0`, `14f08c2`, `1412bff` | 474→481 (+7) | `BodyStyle` extended to `drawBig`/`drawQuad`; layered bodies for Mongo/Grull (big) and Donut/Grub/Mother Rat (quad); cross-rig joint-seam polish (no more visible rings at elbows/knees/shoulders) |
 | 8.3 Stage lighting | `387158f`, `52d933d`, `7661eb0`, `e04ffac`, `b1dd123` | 481→496 (+15) | `Stage.build` far/torches/floor-falloff layers, `Stage.lightAt` (per-8px-column cached torch tint/rim), fighter torch-tint overlay + rim highlight — landed after a fix round (tint bled outside the fighter's own silhouette as a pale box; fixed with per-fighter tinted bitmaps) and a re-review fix (falloff step corrected to the ruled 32px) |
 | 8.4 HUD | `9c7a833`, `a6a6629`, `36cbf31` | 496→504 (+8) | Chevron-capped HUD bars (`HUD.bar`/`barFillRect`), the `CLS_GEM` class-color table (`40_movedata.js`), `HUD.portraitFrame`'s ornate ring + class-gem badge, gold italic tilted combo counter with a count-up tween — landed after a fix round correcting `CLS_GEM`'s class names to the six real `def.cls` values and recoloring the frame ring off brawler gold so the gold gem itself still reads |
-| 8.5 Screens + close-out | see below | 504→511 (+7) | Map door cards (`Screens.doorCard`, cached per node id + state: arch/torch/112px enemy portrait/floor banner, locked/done overlays) replacing the old plain-text doorstack; roster cards framed with the 112px portrait + `Render.portraitFrame`/`CLS_GEM` (`Screens.portraitCard`); `tools/shots.sh` regenerated end-to-end (see its own "Task 8.5" comment block); this section |
+| 8.5 Screens + close-out | see below | 504→511 (+7) | Map door cards (`Screens.doorCard`, cached per node id + state) replacing the old plain-text doorstack: a fixed **72×72** square carrying a stone arch, a torch and the encounter enemy's own portrait — **no floor banner**, and the locked/cleared indicator is **DOM text** (`.doormark`) in the row's text column, not a canvas overlay. `flex-shrink:0` on `.node`/`.card` is the fix for the row-compression bug that let a door card bleed into its neighbours. Roster cards framed with the 112px portrait + `Render.portraitFrame`/`CLS_GEM` (`Screens.portraitCard`); `tools/shots.sh` regenerated end-to-end (see its own "Task 8.5" comment block); this section |
+| Fix wave (final review) | `517869c`, `4647a25`, `b11a55a`, `c1a12eb`, `4a9c435`, `6fae676`, `952ded5`, `c25679c`, `52bae9a` | 511→520 (+9) | The whole-branch review's 1 Critical, 5 Important and 9 Minor, plus the parked Donut art note. See the fix-wave subsection below |
 
-**Phase 8 exit criteria:** all eleven looks have layered bodies and faces (8.1/8.2); stage lighting and
-the reference HUD shipped (8.3/8.4); door/roster art shipped (8.5, above); extent/clearance tests
-unchanged (Rig.extent/EDGE_PAD — untouched by 8.5; the map/roster DOM-clearance tests were updated,
-not broken — see the "Task 8.5 CSS/layout notes" subsection below for why); perf under budget (perf
-trend below, well under the 6ms gate throughout); shots regenerated and reviewed (`tools/shots.sh`,
-58 PNGs, including the two new `p8-map.png`/`p8-roster.png`); this is the final whole-branch review
-pass for the phase.
+**Phase 8 exit criteria:** all eleven looks have layered bodies and faces (8.1/8.2), with a standing
+shot for each one — grub and the shaman got theirs in the fix wave, which is what took the reviewable
+evidence from nine looks to eleven; stage lighting and the reference HUD shipped (8.3/8.4);
+door/roster art shipped (8.5, above); extent/clearance tests unchanged (Rig.extent/EDGE_PAD — the
+map/roster DOM-clearance tests were updated, not broken — see the "Task 8.5 CSS/layout notes"
+subsection below for why); perf under budget (perf trend below, well under the 6ms gate throughout);
+shots regenerated and reviewed (`tools/shots.sh`, 60 PNGs).
 
 ### Perf trend (8.1 → 8.5, ms/frame at `--perf 600`)
 
@@ -1577,22 +1578,35 @@ pass for the phase.
 8.5     0.283  (menu-screen door/roster art costs nothing in-fight; the 0.003ms delta from 8.4 is
                 measurement noise, not a real regression — 8.5 touches no Fight/Fighter/Render
                 fight-loop code, only Screens/CSS)
+fix-wave 0.297 (the torch tint now reaches seven more part kinds per fighter, and Donut carries two
+                more cached discs; threading the zoom bucket gave ~0.016ms of that back)
 ```
 
 All comfortably under the 6ms gate.
 
 ### Task 8.5: door cards, roster portraits, close-out
 
-- **Door cards** (`Screens.doorCard(encId, state)`, `src/85_screens.js`): an 80×104 canvas per node
-  — a stone arch/jamb, a torch (`Stage.TORCH_TINT`, the same warm color the in-fight lighting model
-  uses), the encounter enemy's own 112px HUD bust (`Rig.portrait(look, 112)`, built by Tasks 8.1/8.2
-  and unchanged here), and a floor-number banner — replacing the old plain-text `doorStack`. Cached
-  in `Screens._doorCache` keyed by `encId+'|'+state`, so a map re-render (floor switch, a
-  `Screens.refresh()` elsewhere) hands back the exact same canvas rather than repainting it; only a
-  real state flip (open→done on a win, or an unlock) produces a new cache entry. A locked door is
-  dimmed (55% black overlay) with a lock glyph; a cleared one gets a faint green tint and a check —
-  both drawn last so they cover the whole card, including the corner a unit test samples to confirm
-  "locked reads darker than open" pixel-for-pixel, not just by a class name.
+- **Door cards** (`Screens.doorCard(encId, state)`, `src/85_screens.js`): a fixed **72×72** canvas
+  per node — a stone arch/jamb, a torch (`Stage.TORCH_TINT`, the same warm color the in-fight
+  lighting model uses), and the encounter enemy's own HUD bust (`Rig.portrait`, built by Tasks
+  8.1/8.2 and unchanged here) drawn into the arch mouth at 44px — replacing the old plain-text
+  `doorStack`. Cached in `Screens._doorCache` keyed by `encId+'|'+state`, so a map re-render (floor
+  switch, a `Screens.refresh()` elsewhere) hands back the exact same canvas rather than repainting
+  it; only a real state flip (open→done on a win, or an unlock) produces a new cache entry.
+  Three things the first cut of this task had and the shipped card does not, all from fix round 1's
+  controller ruling: it was a tall 80×104 rectangle, it carried a floor-number banner, and the
+  locked/cleared indicator was a canvas overlay. The card is now a self-contained square, there is
+  **no banner**, and the indicator is **DOM text** (`.doormark`, in `doorStack`'s own text column),
+  which costs nothing to test and needs no pixel inspection. A locked door reads as "not open yet"
+  through its darker stone, its unlit torch and that text — the portrait is drawn at `globalAlpha .4`
+  rather than hidden, so the enemy stays recognizable. `flex-shrink:0` on `.node` (and defensively on
+  `.card`) is the actual fix for the row-compression bug the controller caught in `p8-map.png`: the
+  row's box was being squeezed toward its old ~44px text height while its taller card child, under
+  `overflow:visible`, bled into the neighbouring rows.
+  The fix wave changed two things here: the portrait request is **56px**, not 112, because the card
+  draws it at 44 and the 56px bust is already cached for the HUD; and `_paintDoorCard` now guards an
+  unknown encounter id the same way `doorStack` always did, so one bad node degrades to an empty
+  doorway instead of taking the whole map screen down.
 - **Roster portraits** (`Screens.portraitCard(look, size, cls)`): one canvas combining the 112px
   portrait with `Render.portraitFrame`'s own ring + `CLS_GEM` badge (Task 8.4's in-fight HUD frame,
   reused as-is — no new frame-drawing code). `renderRoster` now builds this instead of the bare 56px
@@ -1611,7 +1625,8 @@ fit the old text-sized budget:
 
 - **`#mapPath` (the map's door list).** The fix-wave-item-3 unit test used to assert *zero* overflow
   (`scrollHeight<=clientHeight`) for a full 6-row floor at 854×480, which held while a door row was
-  two lines of text (~40px tall). An 80×104 door card obviously doesn't fit that budget. `.path` was
+  two lines of text (~40px tall). A door card obviously doesn't fit that budget (80×104 as this task
+  first drew it, 72×72 as it shipped). `.path` was
   already `overflow-y:auto` (fix-wave item 8 switched it from `overflow:hidden` specifically so an
   over-tall list scrolls instead of clipping) — so the real bar was always "reachable, not clipped,"
   not "literally zero scroll." The test now asserts that directly (`overflowY` is `auto`/`scroll`,
@@ -1631,6 +1646,31 @@ fit the old text-sized budget:
 Both changes match this phase's own "scrolling lists allowed but no clipping" instruction for the
 CSS file — the fix in both cases was making sure a list that no longer fits its box scrolls, not
 clips.
+
+### Phase 8 final-review fix wave
+
+The whole-branch review (`verdict-phase8-final.md`) and the Task 8.5 review (`verdict-8.5.md`) between
+them found 1 Critical, 5 Important and 9 Minor issues plus one parked art note. All were taken.
+
+| # | Finding | What shipped |
+|---|---|---|
+| C1 | The roster's first champion card was clipped at **every reachable scroll position** — `justify-content:center` on an overflowing scroll container puts the start-side overflow outside the scroll range, measured at −53.5px (854×480) / −98.5px (844×390) | `.cards` uses `justify-content:safe center` with a plain `flex-start` fallback: a short roster still centres, an overflowing one anchors at the start. `docs/shots/p8-roster.png` re-shot from the top of the list with its own 4-champion fixture instead of a byte-identical copy of `p4-roster-4.png` |
+| I5 / 8.5-C1 | `--phone-check`'s card assertions were vacuous (a fresh save has one champion) and sampled the `.node`/`.card` parents, which provably cannot see the flex-shrink bug they were written for | The roster is seeded with the four-champion fixture; overlap is tested on the **art children** (`canvas.doorcard`/`canvas.pcard`); each row's own height must be ≥ its art child's; both lists must have their first card fully inside the viewport **and** its scroll container with the last still reachable. Proven red on `ab73246` (9 overlapping art pairs, all 6 rows shrunk) and on `9e2e717` (the roster Critical) |
+| I1 | `BodyStyle._tintedCache` grew without bound, was never cleared, and no test could see it | `clearCache()` empties all three caches; `tintedCount()`/`specCount()`/`cacheTotal()` added; `G.startFight` drops all three, so the working set is one fight's ~3.8MB instead of a session's ~180MB |
+| I4 | Torch lighting reached `limb`/`torso`/`head` and nothing else — fists, feet, hip cloth, joint caps, seams, paws, masses and held weapons stayed at full brightness | All seven remaining cached part kinds route through `_tintedBitmap`; held weapons take the same spec analytically via `BodyStyle.litCol` |
+| I3 | `zoomBucket` called `getTransform()` 27 times per fighter draw (~108 `DOMMatrix` allocations a frame) | The bucket is computed once per rig draw and threaded through the parts' options bag; measured 27 → 1 |
+| I2 / 8.5-I1,I2 | `docs/ARENA.md`, `README.md` and a test-file comment described the door card that fix round 1 replaced | This section, the exit table above, the README caption and `src/90_tests.js`'s Task 8.5 header all rewritten against the shipped 72×72 card |
+| 8.5-I3 | `tools/shots.sh`'s ten `\|\| true` lines threw their exit codes away | A `soft` helper records each one; the closing summary names any line that newly fails or newly passes |
+| M1 | ~276 lines of unreachable pre-8.x stroke rig, plus the legacy `_portrait` alias | Deleted. Proven inert by rendering all eleven looks across twelve poses, both facings and three light levels before and after: pixel-identical |
+| M2, M3 | Two stale comments (the rig's "big and quad rigs have no `.body`", the stage's split falloff-step history) | Corrected |
+| M4, M5, M6 | `_paintDoorCard` threw on an unknown encounter; it built a 112px portrait to draw at 44px; `reduceMotion` did not stop the visible torch flame | Guarded, switched to the 56px bust already cached for the HUD, and gated through the new `Stage._flameFlicker` |
+| M9 | Grub and the shaman had no standing shot anywhere in the set | `p8-grub.png` and `p8-shaman.png` added to `tools/shots.sh` and the README gallery |
+| Art note | Donut's barrel read as a white tube (the controller's note, parked since 8.2) | `LOOKS.donut.barrel`: a stronger taper (chest a third narrower than the hips), haunch and shoulder masses genuinely proud of the tube, and a drawing-only spine dip. One look only — every other quad keeps the shared default and is bit-identical |
+
+Two findings were **not** taken, both deliberately: M7 (`CLS_GEM` living in `40_movedata.js`) was the
+controller's own earlier ruling and the comment there is honest about it; M8 (p8 shots that duplicate
+earlier ones) is resolved for `p8-roster.png`, which had its own fixture, but `p8-map.png` is still the
+same fresh-save floor 1 as `p4-map.png` by design — one map screen, one fixture.
 
 ### Rulings copied from the SDD ledger (`.superpowers/sdd/2026-09-22-phase8-art-upgrade/progress.md`)
 
@@ -1652,20 +1692,27 @@ clips.
   becomes bronze so the gold gem reads; combo shot via a scripted fixture — cost if wrong: colors
   only."
 
-### Full gate (Task 8.5's own close-out commit)
+### Full gate (the fix wave's last code commit, `52bae9a`)
 
 | Command | Result |
 |---|---|
 | `python3 tools/build.py --check` | exit 0 |
-| `python3 tests/harness.py --unit` | 511 pass, 0 fail, 0 page/console errors |
+| `python3 tests/harness.py --unit` | 520 pass, 0 fail, 0 page/console errors |
 | `python3 tests/harness.py --matrix` | 216/216 cells, 0 errors |
 | `python3 tests/harness.py --e2e --seed 7` | 0 page errors; full floor-1 door run + arena loop |
 | `python3 tests/harness.py --tutorial` | steps `[1,2,3,4]` in order, `tutorialDone` true, +300 gold, 0 errors |
 | `python3 tests/harness.py --screens-smoke` | 0 errors on all 9 screens |
-| `python3 tests/harness.py --phone-check` | every button ≥44px and inside the viewport in both attack-button states; no clipping at 844×390 |
-| `python3 tests/harness.py --perf 600` | `ms_per_frame` 0.283 (`ms_step` 0.007, `ms_render` 0.276) — well under the 6ms gate |
-| `python3 tests/batch.py --n 30` | bit-identical to the `36cbf31` baseline: t1..t5 100/70/50/36.7/23.3; doors 100/100/96.7; f1_hob 63.3; f1_grull 26.7; f2_mother 20.0 |
-| `bash tools/shots.sh` | exit 0, regenerated 58 PNGs in `docs/shots/` (see its own Task 8.5 comment for the `\|\| true` fix on several pre-existing, unrelated short-sim shot lines that were already tripping the harness's soak-floor guard before this task) |
+| `python3 tests/harness.py --phone-check` | every button ≥44px and inside the viewport in both attack-button states; map 6 cards and roster 4 cards with no overlapping art and no shrunk row; both first cards fully visible with the last reachable |
+| `python3 tests/harness.py --perf 600` | `ms_per_frame` 0.297 (`ms_step` 0.007, `ms_render` 0.290) — well under the 6ms gate |
+| `python3 tests/batch.py --n 30` | bit-identical to the `36cbf31` baseline: t1..t5 100/70/50/36.7/23.3; doors 100/100/96.7/83.3; f1_hob 63.3; f1_grull 26.7; f2_mother 20.0 |
+| `bash tools/shots.sh` | exit 0, regenerated 60 PNGs in `docs/shots/`; "soak-floor shots: 12/12 exited non-zero, exactly the documented set -- no new failures" |
 
-**Phase 8 is DONE** as of this commit. Not yet pushed — see the Task 8.5 report for `git push` status
+**Phase 8 is DONE** as of this commit. Not yet pushed — see the fix-wave report for `git push` status
 at hand-off.
+
+**One caveat on the shot set.** `tools/shots.sh` run twice with no code change between the runs
+produces 11 different PNGs out of 60: a `--pose`/`--sim` screenshot is taken after an unknown number
+of real animation frames, so the camera lerp has converged a variable amount and the framing shifts.
+The shots are reliable as *art* evidence and unreliable as a *diff* signal — a changed PNG does not by
+itself mean the rendering changed. The fix wave used a pixel-hash probe over every look, pose, facing
+and light level for that instead.

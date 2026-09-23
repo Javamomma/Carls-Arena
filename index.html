@@ -15009,12 +15009,20 @@ Test.add('hud(): the enemy combo counter uses CLS_GEM[p2.def.cls] instead of a f
   eq(seenText,'3 HITS','the enemy combo text must have caught up to the real combo by the end of the tween window');
   eq(seenColor,CLS_GEM.beast,'grub (cls beast) must draw its combo counter in CLS_GEM.beast, not a fixed color')});
 // ---- Task 8.5: door cards, roster portraits, Phase 8 close-out ---------------------------------
-// Door cards: a small procedural illustration (arch, torch, the encounter enemy's own 112px HUD
-// bust, a floor-number banner, and a locked/done overlay) replacing the old plain-text doorstack,
-// cached per node id + state (Boundaries: "no per-render redraw of every card") so a map re-render
-// never repaints a card whose encounter and state haven't changed. Roster cards: the same 112px
-// portrait (Rig.portrait, already built/cached by Tasks 8.1/8.2 -- unchanged here) framed with the
-// in-fight HUD's own class-gem ring (Render.portraitFrame/CLS_GEM, Task 8.4) via Screens.portraitCard.
+// Door cards: a small procedural illustration on a fixed 72x72 canvas -- a stone arch, a torch, and
+// the encounter enemy's own HUD bust drawn into the arch mouth at 44px -- replacing the old
+// plain-text doorstack, cached per node id + state (Boundaries: "no per-render redraw of every
+// card") so a map re-render never repaints a card whose encounter and state haven't changed.
+// This comment described the FIRST cut of the card until the fix wave corrected it (Task 8.5 review,
+// Minor #1): there is no floor-number banner and no canvas-drawn locked/done overlay. Fix round 1's
+// controller ruling made the card a self-contained square and moved the lock/check indicator into
+// doorStack's own text column as real DOM text (.doormark), which is why the tests below read a
+// class name for that and only pixel-sample the card for the locked-vs-open stone brightness.
+// The bust is requested at 56px, the size the HUD already caches, not the 112px one the first cut
+// built for a 44px draw (fix-wave item 10).
+// Roster cards: the 112px portrait (Rig.portrait, already built/cached by Tasks 8.1/8.2 -- unchanged
+// here) framed with the in-fight HUD's own class-gem ring (Render.portraitFrame/CLS_GEM, Task 8.4)
+// via Screens.portraitCard.
 // ---- Fix-wave item 10 (final review, Minors #4, #5, #6) -----------------------------------------
 Test.add('Screens._paintDoorCard survives an unknown encounter id, the same way doorStack already did',()=>{
   // doorStack twelve lines above guards the same lookup (`ENCOUNTERS[encId] && ...`) and says in its

@@ -10,7 +10,7 @@ One-on-one tap-and-swipe fighter in the Dungeon Crawler Carl universe. Single HT
 |---|---|
 | ![A fight in progress, Carl vs Goblin Scavenger, gestures-only HUD](docs/shots/p2-close.png) | ![The tutorial's visible spar mode: SPAR plate, LESSON banner](docs/shots/p5-tutorial-1.png) |
 | A fight in progress — one thumb, gestures-only HUD | The tutorial's own visible sparring session |
-| ![The campaign map: door cards show an arch, a torch, the enemy's portrait, a floor banner and a REC. LVL hint](docs/shots/p8-map.png) | ![The roster: 112px class-framed portraits with a bronze ring and class gem](docs/shots/p8-roster.png) |
+| ![The campaign map: door cards show an arch, a torch, the enemy's portrait and a REC. LVL hint](docs/shots/p8-map.png) | ![The roster: 112px class-framed portraits with a bronze ring and class gem](docs/shots/p8-roster.png) |
 | The campaign map — a door card per node, locked doors dimmed with a lock glyph | The roster screen, each card framed with its champion's own class gem |
 | ![An intercept: INTERCEPT! popup, camera punch-in, directional shake](docs/shots/p7-intercept.png) | ![A crit heavy: damage popup, spark burst, the new impactBlunt ring](docs/shots/p7-heavy.png) |
 | Intercepting a foe's dash-in: punch-in camera + directional shake | A landed heavy, with its own per-class impact fx |
