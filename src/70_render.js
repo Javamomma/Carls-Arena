@@ -127,8 +127,11 @@ const Render={ctx:canvas.getContext('2d'),
   overlayScreenY(F,cam,height){
     const sy=Camera.toScreen(cam,F.x,this.overlayY(F)).sy;
     return Math.max(sy,HUD_LINE+height+2)},
+  // Fix round 1 perf follow-up: the reflection is a faint (.12 alpha) mirrored ghost -- torch tint
+  // is imperceptible at that alpha, so it draws unlit (as it always did pre-8.3) rather than paying
+  // BodyStyle._tintedBitmap's lookup cost a second time per fighter per frame for no visible gain.
   reflection(c,F,cam,frame){c.save();c.beginPath();c.rect(0,FLOOR,STAGE_W,90);c.clip();
-    c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.12;Rig.draw(c,F,cam,frame,Stage.lightAt(F.x));c.restore()},
+    c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.12;Rig.draw(c,F,cam,frame);c.restore()},
   // A grounding contact shadow at the fighter's feet — the mirrored reflection alone reads as a
   // detached ghost. A flattened dark ellipse under the floor art, sized off shoulderW (a stand-in
   // for the character's overall footprint) so bigger/scaled-up looks (the hobgoblin) get a bigger

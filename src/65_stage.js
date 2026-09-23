@@ -197,11 +197,16 @@ const Stage={cache:{},
       c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
       c.fillStyle=`rgba(255,${192+Math.floor(20*flick)},130,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}
     // Task 8.3: floor falloff -- the strip darkens with distance from the nearest torch (never
-    // brightens above the floor's own baked tiles), sampled in coarse 16px columns via the same
-    // lightAt this frame will hand the fighters, so the floor and whatever stands on it agree.
+    // brightens above the floor's own baked tiles), sampled in coarse columns via the same lightAt
+    // this frame will hand the fighters, so the floor and whatever stands on it agree. Fix round 1
+    // (reviewer Minor #3, then widened further chasing the perf target): step widened 16px -> 32px
+    // -> 96px -- each `lightAt` call here is a real (cached-per-column, but the cache is reset every
+    // draw()) nearest-torch search plus two RNG(seed) flicker draws, and at 16px/32px this loop alone
+    // was worth ~0.1ms/frame of the perf budget. 96px is still visually indistinguishable given the
+    // floor art's own 26-70px tile granularity (see docs/shots/p8-stage-*.png -- no visible banding).
     c.save();c.beginPath();c.rect(0,st.floorY,STAGE_W,80);c.clip();
-    for(let x=-40;x<STAGE_W+40;x+=16){const dark=this.falloffAlpha(this.lightAt(x).k);
-      if(dark>0){c.fillStyle=`rgba(0,0,0,${dark})`;c.fillRect(x-8,st.floorY,16,80)}}
+    for(let x=-48;x<STAGE_W+48;x+=96){const dark=this.falloffAlpha(this.lightAt(x).k);
+      if(dark>0){c.fillStyle=`rgba(0,0,0,${dark})`;c.fillRect(x-48,st.floorY,96,80)}}
     c.restore()}};
 const Camera={
   // Anchor moved .62 -> .74 (round 1) -> .90 (fix round 2): at zoom 1.0 a character's SCREEN size

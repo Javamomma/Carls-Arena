@@ -904,25 +904,34 @@ const BodyStyle={
     paint(cnv.getContext('2d'),cnv.width,cnv.height);
     return this._cache[key]=cnv},
 
-  // ---- Task 8.3: torch tint overlay -------------------------------------------------------------
-  // `lit` ({tint,k,rimSide}, from Stage.lightAt) is deliberately NOT folded into the bone-part cache
-  // key above: a fighter's tint changes every frame the torches flicker, and keying the actual bone
-  // bitmaps on it would mean repainting (and re-caching) every limb/torso/head every time k ticks
-  // over a bucket -- exactly the "per-frame recolor of every bone bitmap" the controller's ruling
-  // rules out. Instead the tint is a translucent flat-color overlay, composited with 'source-atop'
-  // (so it only recolors pixels the part itself just painted, never bleeding outside its own
-  // silhouette or touching the cached bitmap underneath it) directly over the live drawImage call.
-  // The only thing that IS cached here is the {fill,alpha} pair itself, per k-bucket (0.05 steps) --
-  // a handful of string lookups, not a canvas repaint -- so flicker costs one cache lookup and one
-  // fillRect per part per frame, not a rebuilt gradient. Bucketed on k ALONE (not on lit.tint, which
-  // is Stage.lightAt's own continuous ambient<->torch blend and would never repeat two frames in a
-  // row): a k-bucket count is bounded (21 steps) forever, where keying on a continuous string would
-  // grow this cache without limit over a long session.
-  _tintCache:{},
+  // ---- Task 8.3 (fix round 1, perf follow-up): torch tint overlay --------------------------------
+  // Fix round 1 history: v1 stamped one source-atop fillRect per BODY PART directly onto the main
+  // canvas -- already opaque (the stage is drawn under the fighter) -- so 'source-atop' painted each
+  // part's whole bounding RECTANGLE, not its silhouette (visible pale boxes, the controller's
+  // Critical). v2 fixed that by painting the whole body through a per-fighter transparent offscreen
+  // layer and tinting THAT -- silhouette-correct, but a canvas-to-canvas blit at that size turned out
+  // to cost roughly 1ms/frame across the 4 fighter/reflection draws in this environment (measured:
+  // 0.34ms with v1's boxes -> 1.3-1.4ms with v2's single big blit, gate target <=0.25ms), regardless
+  // of how tightly the layer was sized or which drawImage form/transform blitted it -- an inter-
+  // canvas blit at ~300x300px is just expensive here, not something a smaller box or a cheaper-
+  // looking call shape fixes.
+  // v3 (this version) gets silhouette-correctness WITHOUT any large blit at all, by tinting the
+  // CACHED BONE-PART BITMAP ITSELF -- each one is already its own small, genuinely transparent
+  // canvas (this.cache()'s own backing store: real alpha=0 outside the part's drawn shape, since
+  // _paintLimb/_paintTorso/_paintHead fill a shape on a blank canvas) -- so a 'source-atop' stamp on
+  // a COPY of that small bitmap is silhouette-safe for exactly the same reason v2's big layer was,
+  // just at the part's own tiny size instead of the whole body's. The copy is built once and cached
+  // per (base bitmap key, k-bucket) -- `_tintedBitmap` below -- so a flickering k costs one cache
+  // lookup per part per frame once every k-bucket a fight visits has been seen once, not a rebuild.
+  // Bucketed at 0.05 steps (<=21 buckets) and keyed by the SAME string already passed to
+  // BodyStyle.cache() for the base bitmap (which itself already starts with look.id -- see key()
+  // above), so two different looks' bitmaps can never collide (reviewer Important #2, still honored,
+  // now for free rather than via a second lookup).
+  _tintedCache:{},
   _litSpec(lit){
     if(!lit)return null;
-    const kb=Math.round(lit.k/.05)*.05,key=kb;
-    const hit=this._tintCache[key];
+    const kb=Math.round(lit.k/.05)*.05;
+    const hit=this._tintSpecCache[kb];
     if(hit)return hit;
     // k=0.5 is the neutral pivot (no change); below it the overlay darkens toward the ruling's -25%
     // floor, above it the overlay brightens toward the ruling's +18% ceiling, using the SAME fixed
@@ -931,16 +940,28 @@ const BodyStyle={
     let spec;
     if(kb<=.5)spec={fill:'#000000',alpha:(.5-kb)/.5*.25};
     else spec={fill:Stage.TORCH_TINT,alpha:(kb-.5)/.5*.18};
-    return this._tintCache[key]=spec},
-  _applyTint(c,lit,dx,dy,dw,dh){
-    if(!lit)return;
+    return this._tintSpecCache[kb]=spec},
+  _tintSpecCache:{},
+  // baseCanvas: the small, genuinely-transparent bitmap `this.cache(baseKey,...)` already returned.
+  // Returns baseCanvas UNCHANGED (no copy, no cache entry) when there's nothing to tint -- the
+  // overwhelmingly common case for any part whose k-bucket lands exactly on the neutral pivot, and
+  // always the case when `lit` itself is falsy (every pre-8.3 caller, portraits, the atlas path).
+  _tintedBitmap(baseCanvas,baseKey,lit){
+    if(!lit)return baseCanvas;
     const spec=this._litSpec(lit);
-    if(!spec||spec.alpha<=0)return;
-    c.save();c.globalCompositeOperation='source-atop';c.globalAlpha=spec.alpha;c.fillStyle=spec.fill;
-    c.fillRect(dx,dy,dw,dh);c.restore()},
+    if(!spec||spec.alpha<=0)return baseCanvas;
+    const kb=Math.round(lit.k/.05)*.05,tKey=baseKey+'|t'+kb;
+    const hit=this._tintedCache[tKey];
+    if(hit)return hit;
+    const tc=document.createElement('canvas');tc.width=baseCanvas.width;tc.height=baseCanvas.height;
+    const tx=tc.getContext('2d');
+    tx.drawImage(baseCanvas,0,0); // small, same-size, no scaling -- nothing like v2's big blit
+    tx.globalCompositeOperation='source-atop';tx.globalAlpha=spec.alpha;tx.fillStyle=spec.fill;
+    tx.fillRect(0,0,tc.width,tc.height);
+    return this._tintedCache[tKey]=tc},
   // The rim ruling's whole ask: "a single additional stroke on the torch-facing edge of the torso/
-  // head only" -- drawn live (not cached; it is one stroke, not a gradient rebuild) on whichever
-  // side lit.rimSide names, in a lightened version of the current torch tint.
+  // head only" -- drawn live (not cached; it is one stroke, not a gradient rebuild) directly onto the
+  // main canvas, on whichever side lit.rimSide names, in a lightened version of the current torch tint.
   _rimStroke(c,lit,pathFn){
     if(!lit)return;
     c.save();c.strokeStyle=shade(lit.tint,.55);c.globalAlpha=.55;c.lineCap='round';
@@ -1003,13 +1024,16 @@ const BodyStyle={
     const part='limb:'+bone+':'+cloth+':'+this._r(len)+':'+this._r(w,4)+':'+this._r(w2,4);
     const half=Math.max(w,w2)*.5+Math.max(4,w*.5); // outline + cloth bulge + bone-knob headroom
     const bw=Math.ceil((len+half*2)*px),bh=Math.ceil(half*2*px);
-    const cv=this.cache(this.key(look,part,face,zb),bw,bh,g=>{
+    const cacheKey=this.key(look,part,face,zb);
+    const cv0=this.cache(cacheKey,bw,bh,g=>{
       g.scale(px,px);g.translate(half,half);
       this._paintLimb(g,len,w,w2,look,cloth)});
+    // Fix round 1 (perf follow-up): tint a small COPY of this already-transparent cached bitmap,
+    // never the main canvas -- see the header comment above _tintedCache for why.
+    const cv=this._tintedBitmap(cv0,cacheKey,opts.lit);
     c.save();
     c.translate(x1,y1);c.rotate(Math.atan2(dy,dx));
     c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
-    this._applyTint(c,opts.lit,-half,-half,cv.width/px,cv.height/px);
     c.restore()},
   _paintLimb(g,len,w,w2,look,cloth){
     const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
@@ -1099,13 +1123,14 @@ const BodyStyle={
       this.limb(c,hip.x,hip.y,chest.x,chest.y,tw,look,
         {bone:'trunk',cloth:b.cloth.torso==='bone'?'bare':covered?'full':b.cloth.torso==='robe'?'full':'bare',face,lit,w2:tw*.94});
       c.restore()}
-    const cv=this.cache(this.key(look,'torso:'+this._r(L),face,zb),bw,bh,g=>{
+    const cacheKey=this.key(look,'torso:'+this._r(L),face,zb);
+    const cv0=this.cache(cacheKey,bw,bh,g=>{
       g.scale(px,px);g.translate(MW/2,L+topPad);
       this._paintTorso(g,L,look,face)});
+    const cv=this._tintedBitmap(cv0,cacheKey,lit);
     c.save();
     c.transform(1,0,-sx/L,-sy/L,hip.x,hip.y);
     c.drawImage(cv,-MW/2,-(L+topPad),cv.width/px,cv.height/px);
-    this._applyTint(c,lit,-MW/2,-(L+topPad),cv.width/px,cv.height/px);
     // The rim ruling: a single stroke along the torch-facing silhouette edge, waist to shoulder, in
     // this same sheared torso frame (rimSide>0 is the local +x/right edge, matching lightAt's own
     // "torch is to this world x's right" convention).
@@ -1429,11 +1454,12 @@ const BodyStyle={
     const halfW=beast?r*1.72+4:r+Math.max(ear*1.15,r*.55)+4;
     const up=beast?r*1.94:r*1.62,down=beast?r*1.34:r*1.60;
     const bw=Math.ceil(halfW*2*px),bh=Math.ceil((up+down)*px);
-    const cv=this.cache(this.key(look,'head:'+st+':'+this._r(r),fx,zb),bw,bh,g=>{
+    const cacheKey=this.key(look,'head:'+st+':'+this._r(r),fx,zb);
+    const cv0=this.cache(cacheKey,bw,bh,g=>{
       g.scale(px,px);g.translate(halfW,up);
       this._paintHead(g,r,look,fx,st)});
+    const cv=this._tintedBitmap(cv0,cacheKey,lit);
     c.drawImage(cv,x-halfW,y-up,cv.width/px,cv.height/px);
-    this._applyTint(c,lit,x-halfW,y-up,cv.width/px,cv.height/px);
     // Rim ruling: a single stroke along the torch-facing side of the skull. Head art carries no
     // rotation transform (mirroring is baked into the cached bitmap via fx, not a live c.rotate),
     // so this is a plain screen-space arc centered on (x,y).

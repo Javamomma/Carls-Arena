@@ -5428,3 +5428,106 @@ Test.add('Rig.draw/drawBig/drawQuad tolerate a missing lit argument (existing ca
   ok(!threw(()=>Rig.draw(c,big,cam,0)),'big rig must not throw with lit omitted');
   const quad=new Fighter(DEFS.donut,1,Ctrl.idle());
   ok(!threw(()=>Rig.draw(c,quad,cam,0)),'quad rig must not throw with lit omitted')});
+
+// ---- Task 8.3 fix round 1: torch tint must never paint outside the fighter's own silhouette -----
+// Controller-found Critical: the first version stamped one source-atop fillRect per BODY PART onto
+// the MAIN canvas (already opaque -- the stage is drawn under the fighter), so 'source-atop' painted
+// each part's whole bounding rectangle rather than its silhouette -- visible as pale boxes around
+// every fighter in the shots.
+//
+// v2 fixed the silhouette bug by drawing the whole body through a per-fighter transparent offscreen
+// layer canvas and tinting that once before blitting it onto the main canvas -- correct, but a
+// canvas-to-canvas blit at that size (~300x300px) turned out to cost roughly 1ms/frame across the 4
+// fighter/reflection draws in this environment (measured: 0.34ms with v1's per-part boxes -> 1.3-
+// 1.4ms with v2's single big blit -- no per-fighter box shrink or blit-form change moved that
+// number), blowing well past the <=0.25ms perf target.
+//
+// v3 (what ships) gets silhouette-correctness from the SAME insight (source-atop against real,
+// silhouette-shaped alpha is safe; against an opaque background it isn't) applied to something that
+// was ALREADY small, transparent and cached: the bone-part bitmap itself. `BodyStyle._tintedBitmap`
+// builds and caches a tinted COPY of each small cached limb/torso/head bitmap, keyed by (that
+// bitmap's own cache key -- which already starts with look.id -- , k-bucket), and every draw call
+// just picks base-or-tinted and does the exact same small drawImage v1/pre-8.3 always did. No per-
+// fighter layer, no large blit, no `slot` concept at all.
+Test.add('Fix round 1 (Critical): torch tint never recolors a pixel outside the fighter\'s own silhouette',()=>{
+  BodyStyle.clearCache();BodyStyle._tintedCache={};
+  const CW=320,CH=340;
+  const render=lit=>{
+    const cv=document.createElement('canvas');cv.width=CW;cv.height=CH;
+    const c=cv.getContext('2d');
+    // A flat, saturated color nothing in any look's palette produces -- stands in for "the stage,
+    // already drawn under the fighter" (exactly the opaque-background condition that exposed the bug).
+    c.fillStyle='#ff00ff';c.fillRect(0,0,CW,CH);
+    c.save();c.setTransform(1,0,0,1,160,300); // world (0,0) -> canvas (160,300): floor near the bottom, room above for a standing rig
+    const F=mkFighter();F.x=0;F.state='IDLE';F.f=0;
+    Rig.draw(c,F,{x:0,zoom:1},0,lit);
+    c.restore();
+    return c.getImageData(0,0,CW,CH).data};
+  const isStage=(d,i)=>d[i]===255&&d[i+1]===0&&d[i+2]===255&&d[i+3]===255;
+  const unlit=render(null);
+  // k=0 (maximum darken, black fill) is the easiest case to catch a leak in: any bled pixel reads
+  // visibly darker than pure stage-magenta, no color-math ambiguity.
+  const lit=render({tint:'#000000',k:0,rimSide:1});
+  let checked=0,bad=0,firstBad=null;
+  for(let y=0;y<CH;y+=2)for(let x=0;x<CW;x+=2){
+    const i=(y*CW+x)*4;
+    if(isStage(unlit,i)){ // truly outside the fighter's silhouette, confirmed by the lit-free render
+      checked++;
+      if(!isStage(lit,i)){bad++;if(!firstBad)firstBad={x,y,px:[lit[i],lit[i+1],lit[i+2],lit[i+3]]}}}}
+  ok(checked>3000,'sanity: the sampled canvas must contain plenty of untouched stage background to check against, got '+checked);
+  eq(bad,0,bad+' pixel(s) outside the silhouette were recolored by the tint (first at '+JSON.stringify(firstBad)+
+    ') -- the pre-fix-round-1 bug: a source-atop stamp on the opaque main canvas paints the whole part rectangle');
+  BodyStyle._tintedCache={}});
+Test.add('Fix round 1 perf follow-up: BodyStyle._tintedBitmap builds a tinted copy once per (bitmap, k-bucket) and reuses it, never rebuilding on a cache hit',()=>{
+  BodyStyle.clearCache();BodyStyle._tintedCache={};
+  const c=document.createElement('canvas').getContext('2d');c.setTransform(1,0,0,1,160,300);
+  const F=mkFighter();F.x=0;F.state='IDLE';
+  const lit={tint:'#ffb060',k:.6,rimSide:1};
+  Rig.draw(c,F,{x:0,zoom:1},0,lit);
+  const after1=Object.keys(BodyStyle._tintedCache).length;
+  ok(after1>0,'the first lit draw must actually populate the tinted-bitmap cache, got '+after1);
+  const firstEntries={};
+  for(const k of Object.keys(BodyStyle._tintedCache))firstEntries[k]=BodyStyle._tintedCache[k];
+  // 120 more frames at the SAME k -- same bitmaps, same k-bucket -- must add no new entries and
+  // must never replace an existing one with a different canvas object (a rebuild, not a cache hit).
+  for(let fr=1;fr<=120;fr++){F.f=fr%60;Rig.draw(c,F,{x:0,zoom:1},fr,lit)}
+  eq(Object.keys(BodyStyle._tintedCache).length,after1,'120 further frames at the same k must add no new tinted-bitmap entries');
+  for(const k in firstEntries)ok(BodyStyle._tintedCache[k]===firstEntries[k],
+    'entry '+k+' must be the SAME canvas object after 120 more frames, not rebuilt');
+  BodyStyle._tintedCache={}});
+Test.add('Fix round 1 perf follow-up: the tinted-bitmap cache is bounded by k-bucket (<=21 per base bitmap), not one entry per distinct flicker value',()=>{
+  BodyStyle.clearCache();BodyStyle._tintedCache={};
+  const c=document.createElement('canvas').getContext('2d');c.setTransform(1,0,0,1,160,300);
+  const F=mkFighter();F.x=0;F.state='IDLE';
+  for(let fr=0;fr<400;fr++){
+    const k=(fr%97)/97; // near-continuous, like a real flicker stream
+    Rig.draw(c,F,{x:0,zoom:1},fr,{tint:Stage._mix(Stage.AMBIENT_TINT,Stage.TORCH_TINT,k),k,rimSide:fr%2?1:-1})}
+  const byBase={};
+  for(const key of Object.keys(BodyStyle._tintedCache)){
+    const base=key.slice(0,key.lastIndexOf('|t'));
+    byBase[base]=(byBase[base]||0)+1}
+  for(const base in byBase)
+    ok(byBase[base]<=21,'base bitmap '+base+' has '+byBase[base]+' tinted variants, expected <=21 (k in 0.05 steps)');
+  BodyStyle._tintedCache={}});
+Test.add('Fix round 1 perf follow-up: two different looks\' tinted bitmaps never collide (each base cache key already starts with look.id)',()=>{
+  BodyStyle.clearCache();BodyStyle._tintedCache={};
+  const c=document.createElement('canvas').getContext('2d');c.setTransform(1,0,0,1,160,300);
+  const lit={tint:'#ffb060',k:0,rimSide:1}; // k=0: guaranteed non-trivial darken, so a real entry is always cached
+  const carl=mkFighter();carl.x=0;carl.state='IDLE';
+  Rig.draw(c,carl,{x:0,zoom:1},0,lit);
+  const mongo=new Fighter(DEFS.mongo,1,Ctrl.idle());mongo.x=0;mongo.state='IDLE';
+  Rig.draw(c,mongo,{x:0,zoom:1},0,lit);
+  const keys=Object.keys(BodyStyle._tintedCache);
+  ok(keys.some(k=>k.indexOf('carl|')===0),'carl must have its own tinted-bitmap entries');
+  ok(keys.some(k=>k.indexOf('mongo|')===0),'mongo must have its own tinted-bitmap entries');
+  BodyStyle._tintedCache={}});
+Test.add('Fix round 1: BodyStyle tint bounds still hold (k=0.5 neutral, k=0/k=1 bounded)',()=>{
+  BodyStyle._tintSpecCache={};
+  const spec=BodyStyle._litSpec({tint:'#ffb060',k:.5,rimSide:1});
+  eq(spec.alpha,0,'k=0.5 is the neutral pivot: no darkening, no brightening');
+  const dark=BodyStyle._litSpec({tint:'#ffb060',k:0,rimSide:1});
+  ok(dark.alpha>0&&dark.alpha<=.25,'k=0 must darken, bounded at the ruling\'s 25% ceiling');
+  const bright=BodyStyle._litSpec({tint:'#ffb060',k:1,rimSide:1});
+  ok(bright.alpha>0&&bright.alpha<=.18,'k=1 must brighten, bounded at the ruling\'s 18% ceiling');
+  ok(Object.keys(BodyStyle._tintSpecCache).length<=21,
+    '{fill,alpha} specs themselves are also bounded to <=21 k-buckets, got '+Object.keys(BodyStyle._tintSpecCache).length)});
