@@ -17,7 +17,7 @@ const PASSIVES={
   spite:{hpBelow:.40,every:180,apply:{id:'fury',stacks:1,uncapped:true},ceiling:10},
   royalDisdain:{onSpecial:{id:'weakness',stacks:1,doubleIfDebuffed:true}},
   understudy:{onParry:{id:'critDmg',stacks:1}},
-  immovable:{whileBlocking:{every:120,apply:{id:'fury',stacks:1},max:5}},
+  immovable:{whileBlocking:{every:60,apply:{id:'fury',stacks:1},max:5}},
   // Task 9.4 (9.2/9.3 review carry-over, controller ruling): every 1200 -> 600 frames -- measured
   // real boss fights (tests/batch.py's f1_grull/f2_mother rows) average roughly 300-620 frames long,
   // so the frozen interface's own 1200f cadence meant Grull's own signature ability -- a full

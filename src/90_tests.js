@@ -4873,19 +4873,20 @@ Test.add('Spite\'s own 180-frame timer resets the instant hp climbs back to/abov
   f.p1.hp=f.p1.maxHp*0.39; // dip below again
   for(let i=0;i<150;i++){f.frame++;Passives.tick(f,f.p1)} // only 150 more frames, not the 30 that would complete the OLD timer
   eq(Effects.stacks(f.p1,'fury'),0,'the earlier 150 frames must not have carried over')});
-Test.add('Immovable (Mongo): +1 fury stack every 120 frames spent in BLOCK or BLOCKSTUN (both states count toward the same timer), capped at 5',()=>{
-  const f=mkFight({p1:CHAMPS.mongo});
+Test.add('Immovable (Mongo): +1 fury stack every 60 frames spent in BLOCK or BLOCKSTUN (both states count toward the same timer), capped at 5 -- controller halved 120->60 after the fix wave measured a 2.5% natural fire rate',()=>{
+  const f=mkFight({p1:CHAMPS.mongo}),E=PASSIVES.immovable.whileBlocking.every;
+  eq(E,60,'the ruled cadence');
   f.p1.state='BLOCK';
-  for(let i=0;i<120;i++){f.frame++;Passives.tick(f,f.p1)}
-  eq(Effects.stacks(f.p1,'fury'),1,'one stack after 120 BLOCK frames');
+  for(let i=0;i<E;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),1,'one stack after 60 BLOCK frames');
   f.p1.state='BLOCKSTUN';
-  for(let i=0;i<120;i++){f.frame++;Passives.tick(f,f.p1)}
+  for(let i=0;i<E;i++){f.frame++;Passives.tick(f,f.p1)}
   eq(Effects.stacks(f.p1,'fury'),2,'BLOCKSTUN frames count toward the same timer as BLOCK');
   f.p1.state='IDLE';
-  for(let i=0;i<120;i++){f.frame++;Passives.tick(f,f.p1)}
+  for(let i=0;i<E;i++){f.frame++;Passives.tick(f,f.p1)}
   eq(Effects.stacks(f.p1,'fury'),2,'no stacks accrue while not blocking');
   f.p1.state='BLOCK';
-  for(let i=0;i<120*4;i++){f.frame++;Passives.tick(f,f.p1)}
+  for(let i=0;i<E*4;i++){f.frame++;Passives.tick(f,f.p1)}
   eq(Effects.stacks(f.p1,'fury'),5,'capped at 5, never exceeded however long the blocking continues')});
 Test.add('Champion of the Floor (Grull): purifies every currently-held debuff and grants +3 fury every 360 frames (fight.frame % 360) -- fix-wave item 4 (I4) halved the cadence again from 600f (measured: 600f still only landed a beat inside 4/40 real Grull fights, a 475-frame average real fight)',()=>{
   const f=mkFight({p1:BOSSES.grull});
@@ -6781,18 +6782,18 @@ Test.add('impact fx tags only include applies entries that actually fired THIS l
 // not consecutive -- this reverses the Task 9.3 ruling the carry-over test below used to pin.
 // Measured (final review): a consecutive-only requirement produced 0/160 real fights with Immovable
 // ever firing, since a scripted bot's own react/hold/block-plan cycling rarely holds an unbroken
-// 120-frame block streak against a live opponent. See PASSIVES.immovable's own comment for the full
+// 60-frame cumulative blocked-frame budget against a live opponent. See PASSIVES.immovable's own comment for the full
 // ruling text.
 Test.add('Immovable\'s block counter is CUMULATIVE across the fight -- an interruption (a hit landing) does not reset it back to 0 (fix-wave item 4, I4, reverses the old carry-over-#1 consecutive ruling)',()=>{
   const f=mkFight({p1:CHAMPS.mongo});
   f.p1.state='BLOCK';
-  for(let i=0;i<90;i++){f.frame++;Passives.tick(f,f.p1)} // 90 blocked frames, short of the 120 threshold
+  for(let i=0;i<45;i++){f.frame++;Passives.tick(f,f.p1)} // 45 blocked frames, short of the 60 threshold
   f.p1.state='HITSTUN'; // "a hit" -- leaves BLOCK/BLOCKSTUN, but must NOT reset the cumulative counter
   f.frame++;Passives.tick(f,f.p1);
-  eq(Effects.stacks(f.p1,'fury'),0,'no stack yet -- only 90 of the 120 needed blocked frames have accumulated');
+  eq(Effects.stacks(f.p1,'fury'),0,'no stack yet -- only 45 of the 60 needed blocked frames have accumulated');
   f.p1.state='BLOCK';
-  for(let i=0;i<30;i++){f.frame++;Passives.tick(f,f.p1)} // 30 more -- 90+30=120 cumulative, across the interruption
-  eq(Effects.stacks(f.p1,'fury'),1,'90 blocked + an interruption + 30 more blocked must still sum to 120 and grant a stack')});
+  for(let i=0;i<15;i++){f.frame++;Passives.tick(f,f.p1)} // 15 more -- 45+15=60 cumulative, across the interruption
+  eq(Effects.stacks(f.p1,'fury'),1,'45 blocked + an interruption + 15 more blocked must still sum to 60 and grant a stack')});
 
 // --- carry-over #2 (9.2 review): Passives.onSpecial reuses _fire with a target parameter ---------
 Test.add('Passives._fire (carry-over from the 9.2 review): an explicit 7th `target` arg redirects the Effects.apply, while emitPassive still always credits the passive\'s OWNER',()=>{
