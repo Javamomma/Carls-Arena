@@ -65,18 +65,67 @@ const DASH_TRACK_SPEED=14,DASH_STEPIN_SPEED=22;
 // Fight.resolve's landed-hit branch (60_fight.js) to push a per-class impact fx (FX.push's
 // 'impactBlunt'/'impactBlade'/'impactEnergy' cases, 72_fx.js) alongside the existing spark/dustArc
 // hit fx. Exact per-id values are the controller's own ruling, verbatim.
+// Task 9.1 (kit flags, controller ruling): per the docs/design/mcoc-comparison-notes.md §3 kit table,
+// a champion's own moves override below gets a new flag/applies entry ONLY where the move already
+// exists in MOVES (or the champion's own prior override) with the exact hit count the kit table
+// calls for -- landing a flag on a move whose hit count doesn't match yet would be changing that
+// count, which is Task 9.3's job, not this one's. Where the kit table's own duration for an applied
+// effect (e.g. carl S3's "stun 120f", grull S3's "weakness 600f") doesn't match that effect's own
+// frozen EFFECTS[id].dur (stun:60, weakness:480 -- Phase 7/9.1 frozen, no per-call duration override
+// exists in the frozen interfaces), the flag still lands using the effect's real frozen duration; see
+// the task report's Deviations section. Champions/bosses whose kit line needs a move's own hit count
+// changed (donut S1 5-hit/S3 6-hit) or a bespoke mechanic outside this task's flag set (katia's heavy
+// "refresh bleed duration", grull's heavy reach/dash bump) carry nothing here -- Task 9.2/9.3 own those.
 const CHAMPS={
   carl: {id:'carl', name:'CARL',           cls:'brawler',  hp:1000,atk:60,color:'#f4c542',armor:0,  crit:.10,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blunt',
-    sigEffect:{id:'fury',stacks:1,target:'self'}},
+    sigEffect:{id:'fury',stacks:1,target:'self'},
+    // heavy 2 armorBreak stacks (single-hit, matches base MOVES.heavy's implicit 1-hit shape); s2 Boot
+    // Party (base MOVES.s2 hits:5, matches) refunds 20 power when blocked; s3 Doorway Drop (base
+    // MOVES.s3 hits:4, matches) last hit stuns -- the kit table's own "120f" duration is EFFECTS.
+    // stun's frozen 60f here (see the header comment above and the task report).
+    // Deviation (task report): s1 Two-Fisted's own kit line ("3 hits, last->bleed 1") is NOT landed
+    // here despite matching base MOVES.s1's hit count -- carl's s1 is the exact special the Task 5.3
+    // tutorial (src/80_game.js's G.startTutorial + BUFFS.tutorialGuard, 47_buffs.js, neither in this
+    // task's file scope) fires against its guarded, "cannot be KO'd" dummy. tutorialGuard only caps
+    // the special's own onHit damage inside Fight.resolve; a bleed stack's own DOT (Effects.tick,
+    // 48_effects.js) subtracts the dummy's hp directly, bypassing that cap entirely, and could push
+    // the guarded dummy to 0 hp mid-tutorial. Flagged for the controller/a later task to resolve
+    // (extend tutorialGuard, or have the tutorial script a different special) rather than silently
+    // shipping a tutorial-breaking real-data flag from this one.
+    moves:{heavy:{applies:[{id:'armorBreak',stacks:2,on:'hit'}]},
+      s2:{refundOnBlock:20},
+      s3:{applies:[{id:'stun',stacks:1,on:'last'}]}}},
   // rig:'quad' — Donut is a real cat (Task 3.4's RigQuad, a four-legged bone set; see LOOKS.donut
   // and Rig.solve's 'quad' branch in 68_rig.js).
   donut:{id:'donut',name:'PRINCESS DONUT', cls:'caster',   hp:820, atk:70,color:'#e8a0d8',armor:0,  crit:.18,critMul:1.6,blockProf:0,  scale:1,   rig:'quad',impact:'energy',
-    sigEffect:{id:'weakness',stacks:1}},
+    sigEffect:{id:'weakness',stacks:1},
+    // heavy burns 30 power (single-hit, matches); s2 Regal Pounce (base MOVES.s2 hits:5, matches) is
+    // unblockable. S1 Hairball (kit: 5 hits) and S3 Sponsor Meltdown (kit: 6 hits) don't match base
+    // MOVES.s1/s3's own hit counts (3/4) yet, so they carry nothing here -- Task 9.3 resizes them.
+    moves:{heavy:{applies:[{id:'powerBurn',stacks:1,potency:30,on:'hit'}]},
+      s2:{unblockable:true}}},
   katia:{id:'katia',name:'KATIA',          cls:'trickster',hp:900, atk:64,color:'#7fb0a8',armor:0,  crit:.22,critMul:1.6,blockProf:0,  scale:1,   rig:'human',impact:'blade',
-    moves:{s1:{hits:5,gap:4,dmg:1.2}},sigEffect:{id:'bleed',stacks:1}},
+    // s1 Knife Work already overridden to 5 hits (pre-Phase-9) -- matches the kit table verbatim, so
+    // each landed hit now also bleeds 1. s2 Misdirection (base MOVES.s2 hits:5, matches) crits every
+    // sub-hit. s3 Curtain Call (base MOVES.s3 hits:4, matches) last hit bleeds 3 and armor-breaks 1.
+    // Heavy's "refreshes every bleed stack's duration" isn't a flag this task's frozen interfaces
+    // cover (no move flag refreshes another effect's clock) -- left for a later task.
+    moves:{s1:{hits:5,gap:4,dmg:1.2,applies:[{id:'bleed',stacks:1,on:'hit'}]},
+      s2:{critChance:1.0},
+      s3:{applies:[{id:'bleed',stacks:3,on:'last'},{id:'armorBreak',stacks:1,on:'last'}]}},
+    sigEffect:{id:'bleed',stacks:1}},
   // rig:'big' — Mongo is Task 3.5's brute bone set (Rig.solveBig/drawBig; see LOOKS.mongo, 68_rig.js).
   mongo:{id:'mongo',name:'MONGO',          cls:'tank',     hp:1300,atk:66, color:'#a3742f',armor:.15,crit:.08,critMul:1.6,blockProf:.15,scale:1.25,rig:'big',impact:'blunt',
-    sigEffect:{id:'armorBreak',stacks:1}}};
+    sigEffect:{id:'armorBreak',stacks:1},
+    // heavy Ground Slam (single-hit, matches) still knocks a blocker down. s1 Backhand (base MOVES.s1
+    // hits:3, matches) last hit stuns (kit's own "60f" is EFFECTS.stun's actual frozen dur -- an exact
+    // match, unlike carl/grull's own duration mismatches noted above). s2 Bear Hug (base MOVES.s2
+    // hits:5, matches) heals 30% of each landed sub-hit. s3 Doorway Denial (base MOVES.s3 hits:4,
+    // matches) last hit grants the attacker (target:'self') armorUp.
+    moves:{heavy:{ignoreBlock:'knockdown'},
+      s1:{applies:[{id:'stun',stacks:1,on:'last'}]},
+      s2:{healPct:0.30},
+      s3:{applies:[{id:'armorUp',stacks:1,on:'last',target:'self'}]}}}};
 // Task 6.1, ruling 3 (playtest note: "Hobgoblin Brute is impossible to defeat" at floor 1 door 3,
 // level 1): goblin/skeleton hp raised and atk lowered exactly to the plan's given numbers (360/30,
 // 320/28) -- longer, safer early fights instead of fast trades a level-1 player can lose to a bad
@@ -142,8 +191,18 @@ const BOSSES={
   // competent's own sustained DPS roughly doubled (see 55_ai.js's own tier-gate retune comment for the
   // measured before/after) — the t4 AI_TIERS retune alone still left this boss at 40% (n=30), over the
   // 10-35% band; the atk bump alone (hp untouched) brings it back to 26.7% (n=30).
+  // Task 9.1: heavy Pillar Swing (single-hit, matches) armor-breaks the foe -- the kit line's own
+  // "longer reach: dash 40" is a move-shape change (not one of this task's flags), left for Task 9.3.
+  // s3 Floor Wipe already overridden to 3 hits (pre-Phase-9) -- matches the kit table verbatim, so its
+  // last hit now also weakens (kit's own "600f" duration is EFFECTS.weakness's frozen 480f here, same
+  // "no per-call duration override" note as carl/mongo's own comments above). buffs:['armorUp'] is the
+  // separate, pre-existing flat Buffs.apply system (47_buffs.js) -- a different id namespace from the
+  // new EFFECTS.armorUp this task adds (mongo's own S3 grants that one to himself); unrelated, and this
+  // boss's own long-standing buff is untouched.
   grull:{id:'grull',name:'GRULL',cls:'tank',hp:1300,atk:50,color:'#5c2f2f',armor:.2,crit:.05,critMul:1.6,blockProf:.15,scale:.94,rig:'big',impact:'blunt',
-    boss:true,buffs:['armorUp'],moves:{s3:{dmg:3.6,hits:3,gap:10}}},
+    boss:true,buffs:['armorUp'],
+    moves:{heavy:{applies:[{id:'armorBreak',stacks:1,on:'hit'}]},
+      s3:{dmg:3.6,hits:3,gap:10,applies:[{id:'weakness',stacks:1,on:'last'}]}}},
   // rig:'quad' — Task 3.4's four-legged bone set at boss scale (LOOKS.mother_rat, 68_rig.js).
   // Fix-wave item 2: atk 62->50 (see grull's comment above; regen itself was also retuned, in
   // 47_buffs.js, since disabling it entirely still left her a 20/20 wall — her offense, not the
@@ -170,8 +229,14 @@ const BOSSES={
   // past the 35% ceiling at seed-base 101 (20.0%/36.7% at seed-base 1/101, n=30) -- a boss-specific
   // atk bump (same lever as every prior retune here, hp left alone) restores both seeds into band
   // (20.0%/23.3%) without touching the shared t5 tier the general sweep already passes.
+  // Task 9.1: heavy Tail Sweep (single-hit, matches) bleeds the foe 3 stacks. s3 Swarm already
+  // overridden to 6 hits (pre-Phase-9) -- matches the kit table verbatim, so it now heals the attacker
+  // 2% of each landed sub-hit too. buffs:['regen'] is the pre-existing flat Buffs.apply system, kept
+  // exactly as-is.
   mother_rat:{id:'mother_rat',name:'MOTHER RAT',cls:'beast',hp:1350,atk:50,color:'#4a3040',armor:.1,crit:.1,critMul:1.6,blockProf:.05,scale:1.15,rig:'quad',impact:'blunt',
-    boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
+    boss:true,buffs:['regen'],
+    moves:{heavy:{applies:[{id:'bleed',stacks:3,on:'hit'}]},
+      s3:{dmg:2.4,hits:6,gap:5,healPct:0.02}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
 // Task 8.4 ruling: CLS_GEM maps a def's own cls (CHAMPS/MOBS/BOSSES above) to the portrait-frame

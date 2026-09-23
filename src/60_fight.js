@@ -79,8 +79,17 @@ class Fight{
       // window by that many frames -- see Fighter.act's own parryLock-arming comment (50_fighter.js)
       // for why its two bounds have to widen by the exact same amount, in lockstep with this one.
       if(def.blockAge<=PARRY_WINDOW+def.parryBonus&&def.parryLock===0&&!m.cost)return{type:'parry',att,def,idx};
-      return{type:'block',att,def,idx,m}}
-    return{type:'hit',att,def,idx,m,last}}
+      // Task 9.1: `last` (already computed above, unconditionally) rides along on the block branch too
+      // now -- mongo's Ground Slam (m.ignoreBlock:'knockdown') needs it in resolve()'s block branch to
+      // gate the knockdown to the move's own final sub-hit, the same "last blow only" scope every other
+      // multi-hit bonus (push/knockdown/hitstop) already gets.
+      return{type:'block',att,def,idx,m,last}}
+    // Task 9.1: `forcedThroughBlock` records that def WAS actually blocking when this hit's own
+    // move.unblockable (or the unblockableSpecials buff) bypassed the block branch entirely -- a bare
+    // fact for resolve()'s hit branch to read (no behavior change here: m.unblockable already ignores
+    // block unconditionally for the whole move, exactly as before this task); resolve() uses it only to
+    // decide whether to queue the presentation-only UNBLOCKABLE popup.
+    return{type:'hit',att,def,idx,m,last,forcedThroughBlock:blocking&&unblockable}}
   // Task 7.2: the landed move's own effective per-node damage -- MOVES.light/medium each carry a
   // chainDmg[] indexed by chainNode (1..CHAIN.nodes), the frozen node multiplier table; every other
   // move (heavy, s1-s3) has no chainDmg at all and falls back to its own flat m.dmg, bit-identical to
@@ -107,7 +116,7 @@ class Fight{
     if(type==='parry'){def.parryLock=0;def._parried=true;att.clearMove();att.stun=PARRY_STUN;att.setState('STUNNED');att.combo=0;att.chainNode=0;def.setState('IDLE');
       this.fx.push({kind:'flash',frames:6});this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:'PARRY!',col:'#8cf',big:false});
       return this.emit('parry',def,att,0)}
-    if(type==='block'){const m=r.m;
+    if(type==='block'){const m=r.m,last=r.last;
       // Task 7.2 ruling: chip must scale by the attacker's own Effects.mods.atkMul (fury/weakness),
       // computed here exactly as the hit branch below computes it for its own dmg formula -- a fury
       // stack chips harder through a raised guard too, not just on an unblocked hit. Also reads the
@@ -118,15 +127,29 @@ class Fight{
       // thorns lives here: the defender (the blocker) is the only side with an onBlock call.
       this.buffHook('onBlock',def,att,def,chipRef);
       const chip=chipRef.chip;
-      def.hp=Math.max(0,def.hp-chip);def.stun=m.blockstun;def.setState('BLOCKSTUN');
+      def.hp=Math.max(0,def.hp-chip);
+      // Task 9.1 (frozen interface, exact ruling): m.ignoreBlock==='knockdown' (mongo's heavy Ground
+      // Slam) still knocks the blocker down despite the block -- chip damage same as any other blocked
+      // hit (above), just the state transition below swaps BLOCKSTUN for a real KNOCKDOWN. Gated to the
+      // move's own final sub-hit (`!m.hits||last`, mirroring the hit branch's own knockdown-on-last gate
+      // below) so a hypothetical multi-hit ignoreBlock move couldn't knock down on every sub-hit.
+      if(m.ignoreBlock==='knockdown'&&(!m.hits||last))def.setState('KNOCKDOWN');
+      else{def.stun=m.blockstun;def.setState('BLOCKSTUN')}
       def.power=Math.min(POWER_MAX,def.power+m.powTaken);att.landed=true;att.combo=0;def.x+=att.face*m.push*.5;
-      // Task 7.1: m.applies (move data may carry applies:[{id,stacks?,potency?,on:'hit'|'crit'|'block'}])
-      // -- the on:'block' entries land here, applied to the defender (the blocker), after chip/state are
-      // already set so an applied stun's own onApply (EFFECTS.stun, 48_effects.js) can still override
-      // BLOCKSTUN with STUNNED the same way it overrides HITSTUN below. No move carries `applies` yet
-      // (Task 7.2 wires the first one), so this loop is a no-op in every fight today.
+      // Task 9.1 (frozen interface, exact ruling): m.refundOnBlock (carl's S2 Boot Party) refunds the
+      // ATTACKER that many power once per blocked MOVE INSTANCE, not once per blocked sub-hit -- gated
+      // by att.refundedThisMove, the same per-move-instance flag pattern interceptedThisMove already
+      // uses (50_fighter.js), reset in Fighter.resetPerMove() alongside it.
+      if(m.refundOnBlock&&!att.refundedThisMove){att.power=Math.min(POWER_MAX,att.power+m.refundOnBlock);att.refundedThisMove=true}
+      // Task 7.1: m.applies (move data may carry applies:[{id,stacks?,potency?,on:'hit'|'crit'|'block'|
+      // 'last',target?:'foe'|'self'}]) -- the on:'block' entries land here, applied by default to the
+      // defender (the blocker), after chip/state are already set so an applied stun's own onApply
+      // (EFFECTS.stun, 48_effects.js) can still override BLOCKSTUN with STUNNED the same way it
+      // overrides HITSTUN below. Task 9.1 adds `target`: 'self' redirects the apply onto the ATTACKER
+      // instead (no real kit move needs this on the block branch yet, but the frozen interface names it
+      // generically for both branches, so both honor it identically).
       if(m.applies)for(let i=0;i<m.applies.length;i++){const ap=m.applies[i];
-        if(ap.on==='block')Effects.apply(this,def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
+        if(ap.on==='block')Effects.apply(this,ap.target==='self'?att:def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
       this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip,att.moveName)}
     const m=r.m,last=r.last;
     const cls=CLASS_BEATS[att.def.cls]===def.def.cls?CLASS_BONUS:1;
@@ -139,8 +162,16 @@ class Fight{
     // anything yet) leaves every float bit-identical to the pre-Phase-7 formula below.
     const attMods=Effects.mods(att),defMods=Effects.mods(def);
     // Crit rolls once per landed hit, after the class bonus and before armor.
-    const crit=!this.noCrit&&this.rng.next()<(att.def.crit+attMods.critDelta);
-    const critMul=crit?(att.def.critMul||CRIT_MUL_DEFAULT):1;
+    // Task 9.1 (frozen interface, exact ruling): m.critChance (Katia's S2 Misdirection) still rolls the
+    // fight's rng exactly once per landed sub-hit -- draw-count parity with every other landed hit is
+    // required (a scripted test counts fight.rng draws) -- but the roll is compared against
+    // m.critChance instead of the normal att.def.crit+attMods.critDelta chance when the move carries
+    // it, so a critChance:1.0 move crits every sub-hit (any draw below 1.0, which every RNG() draw
+    // always is) while a future fractional value would work as a real overridden probability too.
+    const crit=!this.noCrit&&(m.critChance!==undefined?this.rng.next()<m.critChance:this.rng.next()<(att.def.crit+attMods.critDelta));
+    // Task 9.1: critDmg (Effects.mods.critMul) adds on top of the base critMul, only on an actual crit
+    // -- same "only matters on a crit" gate att.def.critMul/CRIT_MUL_DEFAULT already have.
+    const critMul=crit?((att.def.critMul||CRIT_MUL_DEFAULT)+attMods.critMul):1;
     // Task 7.3 (frozen interface, exact ruling): intercept -- att's hit catches def still in the
     // STARTUP of def's own move, and that move is one that actually advances def toward the foe
     // (def.move.dash||def.move.track -- true for light's own dash/stepIn and every medium's track;
@@ -174,7 +205,13 @@ class Fight{
     const ref={dmg:Math.round(att.def.atk*attMods.atkMul*this.nodeDmg(att,m)*cls*critMul*(intercept?1.5:1)*(1-(def.def.armor+defMods.armorDelta))),powHit:m.powHit,powTaken:m.powTaken,move:m};
     this.buffHook('onHit',def,att,def,ref);this.buffHook('onHit',att,att,def,ref);
     const dmg=ref.dmg;
-    def.hp=Math.max(0,def.hp-dmg);att.landed=true;att.combo++;def.combo=0;
+    def.hp=Math.max(0,def.hp-dmg);
+    // Task 9.1 (frozen interface, exact ruling): m.healPct (mongo's S2 Bear Hug, mother_rat's S3
+    // Swarm) heals the ATTACKER this fraction of the damage THIS sub-hit actually dealt, rounded, per
+    // landed sub-hit (not once per move instance, unlike refundOnBlock) -- capped at att.maxHp, same
+    // clamp regen's own tick hook (48_effects.js) uses.
+    if(m.healPct)att.hp=Math.min(att.maxHp,att.hp+Math.round(dmg*m.healPct));
+    att.landed=true;att.combo++;def.combo=0;
     att.power=Math.min(POWER_MAX,att.power+ref.powHit+(intercept?15:0));def.power=Math.min(POWER_MAX,def.power+ref.powTaken);
     // Task 7.2: CHAIN.enders (light:{}/medium:{push,knockdown}) only applies to the landed hit that's
     // actually the chain's node-5 finisher (a plain light/medium at nodes 1-4 gets no bonus, so an
@@ -191,12 +228,18 @@ class Fight{
     def.clearMove();if(knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
     def.chainNode=0; // Task 7.2 ruling: taking a hit resets the DEFENDER's own chain (they were interrupted mid-recovery)
     // Task 7.1: m.applies -- on:'hit' entries fire on every landed hit, on:'crit' entries only when
-    // this landed hit actually crit; both apply to the defender (the struck fighter), after the
-    // HITSTUN/KNOCKDOWN transition above so an applied stun's own onApply (EFFECTS.stun) can still
-    // override it with STUNNED, exactly like the block branch's own applies loop. No move carries
-    // `applies` yet, so this is a no-op in every fight today -- see the "bit-identical" test.
+    // this landed hit actually crit; both apply to the defender (the struck fighter) by default, after
+    // the HITSTUN/KNOCKDOWN transition above so an applied stun's own onApply (EFFECTS.stun) can still
+    // override it with STUNNED, exactly like the block branch's own applies loop.
+    // Task 9.1 additions (frozen interface, exact ruling): on:'last' fires once, only on the move's own
+    // final sub-hit -- reuses the same `last` predicate hitstop's own `!m.hits||last` gate already uses
+    // (a single-hit move's one sub-hit always IS its own last, so on:'last' and on:'hit' are equivalent
+    // there). `target`:'self' redirects the apply onto the ATTACKER instead of the defender (mongo's S3
+    // Doorway Denial applies its own armorUp to himself) -- defaults to the defender ('foe') when
+    // omitted, same default the frozen interface's own sigEffect target already uses just below.
     if(m.applies)for(let i=0;i<m.applies.length;i++){const ap=m.applies[i];
-      if(ap.on==='hit'||(ap.on==='crit'&&crit))Effects.apply(this,def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
+      if(ap.on==='hit'||(ap.on==='crit'&&crit)||(ap.on==='last'&&last))
+        Effects.apply(this,ap.target==='self'?att:def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
     // Task 7.2: the in-combo heavy ender (m.sig:true, only ever true for CHAIN.enders.heavy's own
     // merged move data) fires the ATTACKER's own def.sigEffect once it lands -- a champion-signature
     // bonus effect (Carl fury targets himself; Donut weakness/Katia bleed/Mongo armorBreak all target
@@ -238,6 +281,11 @@ class Fight{
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
     // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
     this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
+    // Task 9.1 (frozen interface, controller ruling): r.forcedThroughBlock (set by detect() above) --
+    // def was actually holding block when this move's own unblockable flag bypassed the block branch
+    // entirely. Presentation-only, queued on top of (never instead of) the plain damage popup just
+    // above: {kind:'popup',text:'UNBLOCKABLE'} is the frozen shape.
+    if(r.forcedThroughBlock)this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'UNBLOCKABLE',col:'#fff',big:true});
     // Task 8.0 (pre-art seam): the sim no longer knows any shake/punch magnitude, or even which
     // classes get one -- it only reports the bare fact of what just landed. cls is the landed
     // move's own moveName, or the fixed 'intercept' when this hit is itself an intercept (an

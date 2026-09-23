@@ -75,7 +75,13 @@ class Fighter{
     // FRESH vulnerable dash-in before the special's later sub-hits land, would otherwise re-credit the
     // x1.5 dmg/+15 power/INTERCEPT! event a second time off what is, from the attacker's side, still
     // one single move activation. See Fight.resolve's own comment for exactly where this is read/set.
-    this.interceptedThisMove=false
+    this.interceptedThisMove=false;
+    // refundedThisMove (Task 9.1): mirrors interceptedThisMove's own per-move-instance flag pattern --
+    // set true the first time THIS move instance's m.refundOnBlock actually refunds power (Fight.
+    // resolve's block branch, 60_fight.js), so a multi-hit move (e.g. carl's S2 Boot Party, 5 hits)
+    // refunds once per blocked MOVE, not once per blocked sub-hit. Reset in resetPerMove() below,
+    // alongside interceptedThisMove.
+    this.refundedThisMove=false
     // _mods (Task 8.0 pre-art seam): Effects.mods' own pooled result object for this fighter --
     // allocated lazily on first use (Effects.mods, 48_effects.js) and overwritten in place on every
     // call rather than a fresh {atkMul,armorDelta,critDelta} literal each time. Callers (Fight.resolve)
@@ -112,7 +118,7 @@ class Fighter{
   // parryBonus (startMove never touched either -- they're tutorial/sponsor-perk state with their own
   // owners, see the constructor's own comments); dashLeft/dashRate/effStartup (already owned and
   // computed by setupDash(), called right after this, never by a fixed reset).
-  resetPerMove(){this.hits=new Set();this.landed=false;this.interceptedThisMove=false}
+  resetPerMove(){this.hits=new Set();this.landed=false;this.interceptedThisMove=false;this.refundedThisMove=false}
   // Movement inside moves (Task 6.2): computes dashLeft/dashRate/effStartup once, from the move's own
   // track/stepIn/dash fields and the this.foeDist snapshot Fight.step wrote before this frame's act()
   // (or null, see the constructor's own comment). Three shapes, checked in this order:

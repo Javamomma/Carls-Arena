@@ -199,13 +199,23 @@ Test.add('power accrues for both sides and caps',()=>{
   // node) -- the old per-node 7/7/7/8/10 and 4/4/4/4/5 ladders are gone; a flat 5x7 / 5x4 replaces them.
   eq(f.p1.power,MOVES.light.powHit*5);eq(f.p2.power,MOVES.light.powTaken*5);
   f.p1.power=299;f.p1.hits=new Set();f.p1.power=Math.min(POWER_MAX,f.p1.power+50);eq(f.p1.power,300)});
-Test.add('S3 is unblockable, costs three bars, knocks down on last hit',()=>{
+Test.add('S3 is unblockable, costs three bars, and (Task 9.1: carl\'s own s3 kit flag) guaranteed-stuns on the last hit',()=>{
   // Amended for Task 2.7: s3 leaving startup now arms a 72-frame cinematic freeze that raw step()
   // never decrements on its own (only G.tick does), so the freeze has to be cleared by hand here,
   // same as the dedicated cinematic test below, before the remaining three hits can land.
+  // Task 9.1: carl's own s3 (Doorway Drop, the default mkFight p1) now carries a real kit flag --
+  // applies:[{id:'stun',stacks:1,on:'last'}] -- so the final hit's own base MOVES.s3.knockdown:true
+  // transition (still set first, in Fight.resolve's hit branch) is immediately overridden by
+  // EFFECTS.stun's own onApply (48_effects.js), the same "stun always wins" behavior fix-wave M3
+  // already established for a stun landing on ANY mid-move/knocked-down holder. Was 'S3 ... knocks
+  // down on last hit' / eq(f.p2.state,'KNOCKDOWN') before this task -- carl's s3 is generic MOVES.s3
+  // data plus this task's own applies flag, so a bare CHAMPS.carl fight (mkFight's own default p1)
+  // now genuinely ends this exchange STUNNED, not KNOCKDOWN; see the task report's Deviations section.
   const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;
   run(f,21);f.cinematic=0;run(f,90);
-  eq(f.p1.power,0);eq(f.log.filter(e=>e.type==='hit').length,4);eq(f.p2.hp,1000-4*180);eq(f.p2.state,'KNOCKDOWN')});
+  eq(f.p1.power,0);eq(f.log.filter(e=>e.type==='hit').length,4);eq(f.p2.hp,1000-4*180);
+  eq(f.p2.state,'STUNNED','carl\'s s3 last hit now guarantees a stun (Task 9.1 kit flag), overriding the base knockdown');
+  eq(Effects.stacks(f.p2,'stun'),1)});
 Test.add('class advantage adds 15%',()=>{
   const f=mkFight({p1:CHAMPS.donut,p2:CHAMPS.carl,ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.p2.hp,1000-Math.round(70*1.15))});
 Test.add('KO ends the fight with WIN/KO states',()=>{
@@ -4292,6 +4302,170 @@ Test.add('Effects module and every EFFECTS[id] hook stay presentation-free and R
     const e=EFFECTS[id];
     for(const hook of['tick','onApply','mod'])
       if(e[hook])ok(!EFF_PURITY.test(e[hook].toString()),'EFFECTS.'+id+'.'+hook+' must stay presentation- and RNG-free')}});
+
+// --- Task 9.1: new effects (critDmg/poison/armorUp), uncapped, purify, and the new move flags ---
+Test.add('critDmg raises critMul by .4 per stack (maxStacks 1), read additively by Fight.resolve on a crit',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),noCrit:false});closeIn(f);
+  Effects.apply(f,f.p1,'critDmg',{stacks:1});
+  f.rng.next=()=>0; // force the crit roll to succeed
+  run(f,5);
+  const dmg=Math.round(CHAMPS.carl.atk*1*MOVES.light.dmg*1*(CRIT_MUL_DEFAULT+0.4)*1*(1-CHAMPS.carl.armor));
+  eq(f.p2.hp,1000-dmg,'crit damage must include the +0.4 critMul from a single critDmg stack')});
+Test.add('critDmg maxStacks is 1 -- a second apply cannot push it past +0.4',()=>{
+  const f=mkFight();
+  Effects.apply(f,f.p1,'critDmg',{stacks:1});
+  Effects.apply(f,f.p1,'critDmg',{stacks:1});
+  eq(Effects.stacks(f.p1,'critDmg'),1);
+  eq(Effects.mods(f.p1).critMul,0.4)});
+Test.add('poison drains 0.3% maxHp per second per stack, ignoring armor, over its full 300-frame duration',()=>{
+  const f=mkFight({p2:Object.assign({},CHAMPS.carl,{armor:.5})}); // armor must be ignored by poison
+  Effects.apply(f,f.p2,'poison',{stacks:3});
+  let hp=f.p2.hp;for(let i=0;i<300;i++)hp=Math.max(0,hp-f.p2.maxHp*0.003*3/60);
+  run(f,300);
+  eq(f.p2.hp,hp);
+  eq(f.p2.effects.length,0,'poison must be gone once its own 300-frame duration has fully ticked')});
+Test.add('armorUp raises the holder\'s own effective armor by .6 per stack for 600 frames (maxStacks 1)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);
+  Effects.apply(f,f.p2,'armorUp',{stacks:1});
+  run(f,5);
+  const dmg=Math.round(CHAMPS.carl.atk*1*MOVES.light.dmg*1*1*(1-(CHAMPS.carl.armor+0.6)));
+  eq(f.p2.hp,1000-dmg);
+  eq(EFFECTS.armorUp.dur,600,'the frozen 600f duration')});
+Test.add('Effects.apply({uncapped:true}) bypasses maxStacks for that one call (Spite\'s fury stacking)',()=>{
+  const f=mkFight();
+  Effects.apply(f,f.p1,'fury',{stacks:3});
+  Effects.apply(f,f.p1,'fury',{stacks:4,uncapped:true});
+  eq(Effects.stacks(f.p1,'fury'),7,'uncapped must skip the maxStacks(5) clamp entirely, even past it');
+  Effects.apply(f,f.p1,'fury',{stacks:100});
+  eq(Effects.stacks(f.p1,'fury'),5,'a later NON-uncapped call still clamps normally, down to maxStacks')});
+Test.add('Effects.purify removes only the debuff set (bleed/stun/armorBreak/weakness/poison/powerBurn), leaving every buff untouched',()=>{
+  const f=mkFight();
+  for(const id of['bleed','weakness','armorBreak','poison','stun'])Effects.apply(f,f.p1,id,{});
+  for(const id of['fury','regen','dexterity','critDmg','armorUp'])Effects.apply(f,f.p1,id,{});
+  Effects.purify(f.p1);
+  for(const id of['bleed','weakness','armorBreak','poison','stun'])ok(!Effects.has(f.p1,id),id+' must be purified');
+  for(const id of['fury','regen','dexterity','critDmg','armorUp'])ok(Effects.has(f.p1,id),id+' is not a debuff -- purify must leave it alone');
+  Effects.apply(f,f.p1,'powerBurn',{potency:1});
+  Effects.purify(f.p1);
+  ok(!Effects.has(f.p1,'powerBurn'),'powerBurn must be purified too, before it would naturally expire on its own')});
+Test.add('Fight.resolve reads Effects.mods into locals before any Effects.apply this resolve -- a same-hit self-target apply (fury) does not retroactively buff the hit that granted it',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{light:{applies:[{id:'fury',stacks:5,on:'hit',target:'self'}]}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([L(0)])});closeIn(f);
+  run(f,5);
+  const baseDmg=Math.round(CHAMPS.carl.atk*1*MOVES.light.dmg*1*1*(1-CHAMPS.carl.armor));
+  eq(1000-f.p2.hp,baseDmg,'the landed hit\'s own damage must be the pre-buff amount, not boosted by the fury it just granted itself');
+  eq(Effects.stacks(f.p1,'fury'),5,'the fury must still land on the attacker afterward, for the NEXT hit to benefit from')});
+Test.add('move data applies:[{...,target:"self"}] redirects the apply onto the ATTACKER instead of the defender',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{light:{applies:[{id:'fury',stacks:2,on:'hit',target:'self'}]}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
+  eq(Effects.stacks(f.p1,'fury'),2,'target:"self" must land on the attacker');
+  eq(Effects.stacks(f.p2,'fury'),0,'not on the defender')});
+Test.add('move data applies:[{...,on:"last"}] fires exactly once, only on the move\'s own final sub-hit',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{s1:{applies:[{id:'bleed',stacks:1,on:'last'}]}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([{f:0,intent:{special:1}}])});closeIn(f);f.p1.power=100;
+  run(f,15);
+  ok(f.log.filter(e=>e.type==='hit'&&e.who===1).length<MOVES.s1.hits,'sanity: not all sub-hits have landed yet');
+  eq(Effects.stacks(f.p2,'bleed'),0,'on:"last" must not fire before the final sub-hit');
+  run(f,60);
+  eq(f.log.filter(e=>e.type==='hit'&&e.who===1).length,MOVES.s1.hits,'every sub-hit of the 3-hit s1 must land');
+  eq(Effects.stacks(f.p2,'bleed'),1,'bleed must have applied exactly once, not once per sub-hit')});
+// --- Task 9.1: the same behaviors, exercised through the real kit moves they actually landed on ---
+Test.add('donut\'s real S2 Regal Pounce (unblockable) lands every sub-hit through a held block for full damage, with an UNBLOCKABLE popup',()=>{
+  const f=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;
+  run(f,90);
+  const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
+  eq(hits.length,5,'Regal Pounce is a 5-hit special; unblockable ignores the block branch entirely, not just the last hit');
+  ok(!f.log.some(e=>e.type==='block'&&e.who===1),'no sub-hit should resolve as a block event');
+  ok(f.fx.some(x=>x.kind==='popup'&&x.text==='UNBLOCKABLE'),'an UNBLOCKABLE popup must be queued');
+  eq(f.p2.state,'KNOCKDOWN','base MOVES.s2 still carries knockdown:true on its own last hit')});
+// Note: MOVES.s2's own blockstun (10) exactly equals its sub-hit period (active+gap=10), so a
+// continuously-held block only actually catches the FIRST sub-hit as a real 'block' event -- BLOCKSTUN
+// clears (Fighter.tick) on the very frame the next sub-hit's hitbox goes active, and Fighter.act (which
+// alone re-reads intent.block to re-enter BLOCK) doesn't run again until the NEXT step, one frame later
+// -- a pre-existing MOVES.s2 timing coincidence, untouched by this task, not something to retune here
+// (Task 9.4 owns balance/timing). The refund-fires-once invariant itself is proven below with a
+// synthetic generous-blockstun move so every sub-hit genuinely blocks; this real-move case only checks
+// the net power outcome.
+Test.add('carl\'s real S2 Boot Party (refundOnBlock 20) refunds the attacker power, net of the special\'s own cost',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=300;
+  run(f,90);
+  ok(f.log.some(e=>e.type==='block'&&e.who===1),'sanity: at least one sub-hit of Boot Party must actually be blocked');
+  eq(f.p1.power,300-MOVES.s2.cost+20,'power = 300 - the 200 special cost + one 20-power refund')});
+Test.add('refundOnBlock fires exactly once per blocked MOVE INSTANCE, not once per blocked sub-hit (synthetic move, generous blockstun so every sub-hit genuinely blocks)',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{s1:{refundOnBlock:20,blockstun:200}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([{f:0,intent:{special:1}}]),ctrl2:Ctrl.hold({block:true})});closeIn(f);f.p1.power=100;
+  run(f,60);
+  const blocks=f.log.filter(e=>e.type==='block'&&e.who===1);
+  eq(blocks.length,MOVES.s1.hits,'every sub-hit of the 3-hit s1 must genuinely block with a 200-frame blockstun');
+  eq(f.p1.power,20,'power = 100 - the 100 special cost + exactly one 20-power refund, not 20 x 3')});
+Test.add('mongo\'s real S2 Bear Hug (healPct .30) heals the attacker 30% of each landed sub-hit\'s own damage, rounded, capped at maxHp',()=>{
+  const f=mkFight({p1:CHAMPS.mongo,ctrl1:Ctrl.script([{f:0,intent:{special:2}}])});closeIn(f);f.p1.power=300;f.p1.hp=1;
+  run(f,90);
+  const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
+  eq(hits.length,5,'Bear Hug is a 5-hit special');
+  let hp=1;for(const h of hits)hp=Math.min(f.p1.maxHp,hp+Math.round(h.val*0.30));
+  eq(f.p1.hp,hp)});
+Test.add('mongo\'s real heavy Ground Slam (ignoreBlock:"knockdown") still knocks a blocker down, taking chip damage not a full hit',()=>{
+  const f=mkFight({p1:CHAMPS.mongo,ctrl1:Ctrl.hold({heavy:true}),ctrl2:Ctrl.hold({block:true})});closeIn(f);
+  run(f,50); // lands mid-KNOCKDOWN (~30 frames to land the hit, well inside the 40-frame window), not after it clears
+  const block=f.log.find(e=>e.type==='block'&&e.who===1);
+  ok(block,'Ground Slam must still resolve as a block event (chip path), not a plain unblockable hit');
+  eq(1000-f.p2.hp,block.val,'hp lost must equal the logged chip, not a full hit');
+  ok(block.val>0&&block.val<CHAMPS.mongo.atk,'a chip is small relative to a real hit, not full damage');
+  eq(f.p2.state,'KNOCKDOWN','ignoreBlock:"knockdown" must still knock the blocker down despite the block')});
+Test.add('katia\'s real S2 Misdirection (critChance 1.0) crits every sub-hit, consuming exactly one rng draw per sub-hit',()=>{
+  const f=mkFight({p1:CHAMPS.katia,ctrl1:Ctrl.script([{f:0,intent:{special:2}}]),noCrit:false});closeIn(f);f.p1.power=300;
+  let draws=0;const raw=f.rng.next.bind(f.rng);f.rng.next=()=>{draws++;return raw()};
+  run(f,90);
+  const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
+  eq(hits.length,5,'Misdirection is a 5-hit special');
+  eq(draws,5,'exactly one rng draw per landed sub-hit, even though critChance forces the result');
+  const critPopups=f.fx.filter(x=>x.kind==='popup'&&x.big===true&&x.text!=='UNBLOCKABLE');
+  eq(critPopups.length,5,'every sub-hit must crit')});
+Test.add('katia\'s real S3 Curtain Call applies bleed 3 + armorBreak 1 only once, after the LAST of its 4 hits',()=>{
+  const f=mkFight({p1:CHAMPS.katia,ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;
+  run(f,21);f.cinematic=0; // s3 arms a 72-frame cinematic freeze -- clear it by hand, same as the existing s3 tests
+  run(f,25);
+  ok(f.log.filter(e=>e.type==='hit'&&e.who===1).length<MOVES.s3.hits,'sanity: not all 4 hits have landed yet');
+  eq(Effects.stacks(f.p2,'bleed'),0,'on:"last" must not fire before the final sub-hit');
+  run(f,60);
+  eq(f.log.filter(e=>e.type==='hit'&&e.who===1).length,MOVES.s3.hits,'all 4 hits of Curtain Call must land');
+  eq(Effects.stacks(f.p2,'bleed'),3,'bleed applies once, at exactly 3 stacks, not accumulated per sub-hit');
+  eq(Effects.stacks(f.p2,'armorBreak'),1,'armorBreak applies once, at exactly 1 stack')});
+Test.add('mongo\'s real S3 Doorway Denial applies armorUp to himself (target:"self"), only once, after the last of its 4 hits',()=>{
+  const f=mkFight({p1:CHAMPS.mongo,ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;
+  run(f,21);f.cinematic=0;run(f,25);
+  eq(Effects.stacks(f.p1,'armorUp'),0,'must not fire before the final sub-hit');
+  eq(Effects.stacks(f.p2,'armorUp'),0,'must never land on the defender');
+  run(f,60);
+  eq(f.log.filter(e=>e.type==='hit'&&e.who===1).length,MOVES.s3.hits,'all 4 hits of Doorway Denial must land');
+  eq(Effects.stacks(f.p1,'armorUp'),1,'armorUp must land on MONGO HIMSELF, exactly once');
+  eq(Effects.stacks(f.p2,'armorUp'),0,'never on the foe')});
+Test.add('Phase 9 kit flags landed on real move data exactly where hit counts already matched the kit table (data lock)',()=>{
+  const cH=CHAMPS.carl.moves.heavy.applies[0];eq(cH.id,'armorBreak');eq(cH.stacks,2);eq(cH.on,'hit');
+  ok(!CHAMPS.carl.moves.s1,'carl S1\'s kit bleed does not land on real data -- it collides with the Task 5.3 tutorial\'s guarded dummy (see the task report\'s Deviations section)');
+  eq(CHAMPS.carl.moves.s2.refundOnBlock,20);
+  const cS3=CHAMPS.carl.moves.s3.applies[0];eq(cS3.id,'stun');eq(cS3.stacks,1);eq(cS3.on,'last');
+  const dH=CHAMPS.donut.moves.heavy.applies[0];eq(dH.id,'powerBurn');eq(dH.potency,30);eq(dH.on,'hit');
+  eq(CHAMPS.donut.moves.s2.unblockable,true);
+  ok(!CHAMPS.donut.moves.s1,'donut S1\'s kit hit count (5) does not match base MOVES.s1 (3) yet -- no flag lands until Task 9.3 resizes it');
+  ok(!CHAMPS.donut.moves.s3,'donut S3\'s kit hit count (6) does not match base MOVES.s3 (4) yet -- no flag lands until Task 9.3 resizes it');
+  eq(CHAMPS.katia.moves.s1.hits,5,'katia\'s own pre-existing s1 override, untouched');
+  const kS1=CHAMPS.katia.moves.s1.applies[0];eq(kS1.id,'bleed');eq(kS1.stacks,1);eq(kS1.on,'hit');
+  eq(CHAMPS.katia.moves.s2.critChance,1.0);
+  eq(CHAMPS.katia.moves.s3.applies.length,2);
+  eq(CHAMPS.katia.moves.s3.applies[0].id,'bleed');eq(CHAMPS.katia.moves.s3.applies[0].stacks,3);eq(CHAMPS.katia.moves.s3.applies[0].on,'last');
+  eq(CHAMPS.katia.moves.s3.applies[1].id,'armorBreak');eq(CHAMPS.katia.moves.s3.applies[1].stacks,1);eq(CHAMPS.katia.moves.s3.applies[1].on,'last');
+  eq(CHAMPS.mongo.moves.heavy.ignoreBlock,'knockdown');
+  const mS1=CHAMPS.mongo.moves.s1.applies[0];eq(mS1.id,'stun');eq(mS1.stacks,1);eq(mS1.on,'last');
+  eq(CHAMPS.mongo.moves.s2.healPct,0.30);
+  const mS3=CHAMPS.mongo.moves.s3.applies[0];eq(mS3.id,'armorUp');eq(mS3.stacks,1);eq(mS3.on,'last');eq(mS3.target,'self');
+  const gH=BOSSES.grull.moves.heavy.applies[0];eq(gH.id,'armorBreak');eq(gH.stacks,1);eq(gH.on,'hit');
+  eq(BOSSES.grull.moves.s3.hits,3,'grull\'s own pre-existing s3 override, untouched');
+  const gS3=BOSSES.grull.moves.s3.applies[0];eq(gS3.id,'weakness');eq(gS3.stacks,1);eq(gS3.on,'last');
+  const rH=BOSSES.mother_rat.moves.heavy.applies[0];eq(rH.id,'bleed');eq(rH.stacks,3);eq(rH.on,'hit');
+  eq(BOSSES.mother_rat.moves.s3.hits,6,'mother_rat\'s own pre-existing s3 override, untouched');
+  eq(BOSSES.mother_rat.moves.s3.healPct,0.02)});
 
 // --- Task 7.3: intercept, dexterity, capped dash-in telegraph -----------------------------------
 // A light thrown from IDLE lands as a plain node-1 opener (nodeDmg 1, no crit under mkFight's default
