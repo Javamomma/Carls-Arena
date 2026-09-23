@@ -85,12 +85,22 @@ eight: **bleed** (DoT, ignores armor, stacks), **stun** (reuses the existing `ST
 
 | Champion | Signature | Heavy | S1 / S2 / S3 | Passive |
 |---|---|---|---|---|
-| **Carl** (brawler) | *Spite*: below 40% hp, +1 Fury every 3 s, uncapped | Haymaker — 2 armor break stacks, 8 s | S1 Two-Fisted, 3 hits, last applies bleed · S2 Boot Party, 5 hits, refunds 20 power on block · S3 Doorway Drop, 4 hits, guaranteed 2 s stun | −10% damage from the class he beats |
+| **Carl** (brawler) | *Spite*: below 40% hp, +1 Fury every 3 s, uncapped | Haymaker — 2 armor break stacks, 8 s | S1 Two-Fisted, 3 hits, last applies bleed · S2 Boot Party, 5 hits, refunds 20 power on block · S3 Doorway Drop, 4 hits, guaranteed 2 s stun[^shipped-durs] | −10% damage from the class he beats |
 | **Princess Donut** (caster) | *Royal Disdain*: every special applies Weakness, doubled if the foe is already debuffed | Feline Contempt — power burn 30 | S1 Hairball, 5 hits, poison DoT · S2 Regal Pounce, 5 hits, unblockable final hit · S3 Sponsor Meltdown, 4 hits, strips every enemy buff first | +50% power from hits taken |
 | **Katia** (trickster) | *Understudy*: a parry grants 3 s of +40% crit damage | Quickdraw — refreshes every bleed stack | S1 Knife Work, 5 hits (already tuned, `40_movedata.js:19`), each bleeds · S2 Misdirection, 5 hits, 100% crit · S3 Curtain Call, 4 hits, damage scales with active bleed stacks | Crits apply 1 bleed stack |
 | **Mongo** (tank) | *Immovable*: while blocking, +1 Fury every 2 s, max 5 | Ground Slam — knockdown that ignores block | S1 Backhand, 3 hits, stun on the third · S2 Bear Hug, 5 hits, self-heal 30% of damage dealt · S3 Doorway Denial, 4 hits, +60% armor for 10 s | Unstoppable during heavy; keeps blockProf 0.15 (`40_movedata.js:21`) |
-| **Grull** (boss, tank) | *Champion of the Floor*: every 20 s, purify and gain 3 Fury | Pillar Swing — long range, armor break | S3 Floor Wipe, 3 hits (already), applies 10 s Weakness | Keeps `armorUp` (`45_encounter.js:39`) |
+| **Grull** (boss, tank) | *Champion of the Floor*: every 20 s, purify and gain 3 Fury | Pillar Swing — long range, armor break | S3 Floor Wipe, 3 hits (already), applies 10 s Weakness[^shipped-durs] | Keeps `armorUp` (`45_encounter.js:39`) |
 | **Mother Rat** (boss, beast) | *Brood*: below 50% hp, regen triples and she gains Power Gain | Tail Sweep — 3 bleed stacks | S3 Swarm, 6 hits (already), each heals her 2% | Keeps retuned `regen` (`47_buffs.js:8-15`) |
+
+[^shipped-durs]: **Phase 9 close-out annotation (Task 9.5):** these two durations, as actually
+implemented (Tasks 9.1/9.3), don't match this table's own numbers. There is no per-call duration
+override in the frozen `applies`/effect interfaces (`move.applies` carries `{id,stacks,potency,on,
+target}`, never a duration) — an applied effect always runs for its own `EFFECTS[id].dur`
+(`48_effects.js`), so where this table's duration and an effect's frozen `dur` disagreed, the frozen
+`EFFECTS` duration shipped, not the table: Carl's S3 stun is `EFFECTS.stun.dur` = **60f (1s)**, not
+this table's 2s/120f; Grull's S3 weakness is `EFFECTS.weakness.dur` = **480f (8s)**, not this table's
+10s/600f. See `40_movedata.js`'s own Task 9.1 header comment and `docs/ARENA.md`'s Phase 9 exit
+section for the full ruling.
 
 **Hitstop and camera per move class.** Light 3 f, no shake, no camera. Medium 5 f, 4 px directional
 shake, 2% punch-in over 6 f. Heavy 9 f, 8 px, 4% punch-in held 10 f. Intercept 10 f, 10 px, 5%

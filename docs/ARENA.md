@@ -1725,6 +1725,161 @@ and light level for that instead.
 - Known: `tools/shots.sh` output is not pixel-deterministic (camera lerp settles a variable amount before the shot); the map's top card scrolls under the header by design (column-reverse anchors DOOR 1 at the bottom).
 - Gate on the close-out commit: build --check; unit 520/0; matrix; e2e; tutorial; screens-smoke; phone-check (overlap/firstCard/firstDoor ok); perf 0.295 ms; batch n=30 t1..t5 100/70/50/36.7/23.3, f1_hob 63.3, f1_grull 26.7, f2_mother 20.0.
 
+## Phase 9 exit (2026-09-23)
+
+Tasks 9.1-9.5, commits `03a9e78..HEAD` on `task-9.1-kit-flags` (base `daf4d8c`, the last Phase 8
+commit, through Task 9.5's own close-out commit, which is the one that wrote this section). SDD
+ledger: `.superpowers/sdd/2026-09-22-phase9-champion-kits/progress.md`.
+
+### Exit table
+
+| Task | Commit(s) | Tests added | What shipped |
+|---|---|---|---|
+| 9.1 Kit flags/effects | `03a9e78`, `cfb7569`, `e38f98a` | 520→543 (+23) | `critDmg`/`poison`/`armorUp` effects, uncapped stacking (`Effects.apply(...,{uncapped:true})`), `Effects.purify`; per-move kit flags read by `Fight.resolve` (`move.applies` with `on:'hit'\|'last'\|'block'`/`target:'self'\|'foe'`, `unblockable` two-valued, `refundOnBlock`, `healPct`, `ignoreBlock`, `critChance`) and the first real kit move data; fix round 1 (`unblockable:'last'` scope, a DOT-tick tutorial-guard hook, Carl's S1 bleed) |
+| 9.1b Held-block fix | `e9ce68e`, `ca0728e` | 543→545 (+2) | A held block absorbs every sub-hit of a multi-hit special, not just the first — a fighter leaving BLOCKSTUN re-enters BLOCK on the same frame, before hitboxes are checked (the `act()`/`tick()` ordering had been leaking sub-hits 2..n whenever a move's cadence ≥ blockstun) |
+| 9.2 Passives | `6fdd550`, `3ca8359` | 545→567 (+22) | `Passives` module (`Passives.tick`/`.onParry`/`.onSpecial`), `Fight`/`Fighter` hooks, all six champion/boss passives wired (Spite, Royal Disdain, Understudy, Immovable, Champion of the Floor, Brood); the passive-event banner fx |
+| 9.3 Champion kits | `8e26278`, `95ca6e3` | 567→594 (+27) | Every champion's real heavy/S1/S2/S3 kit data (the full table below); `def.kitText` roster-card strings; commentary lines; the ruling-5 in-page kit-usage soak (each kit effect proven to land at least once across a seeded AI-vs-AI run) |
+| 9.4 AI kit usage + balance | `5db0191`, `488a099`, `f9cc146`, `394d243`, `186feff`, `03f3853` | 594→600 (+6) | `tier.kit` (AI holds power for the special whose effect matters); the `AI.make`/`Ctrl.competent` block-hold-through-BLOCKSTUN fix (a bot can now actually sustain the 9.1b mechanic); Champion of the Floor's cadence halved (1200f→600f, so it can fire within a real boss fight's length); `mother_rat` atk retune restoring the 10-35% boss band; `--matrix`'s stall-floor margin raised (0.9→0.85, documented, not a real stall); the balance battery recorded |
+| 9.5 Close-out | `4e31cb9`, this commit | 600→602 (+2) | The Mongo self-buff S3 AI rule (below); this section, the kit table, and the copied rulings; `README.md`'s Champions section; `tools/shots.sh`'s four p9 shots; the program file's Phase 9 row; the `mcoc-comparison-notes.md` duration annotation |
+
+**Phase 9 exit criteria:** all six kits (four champions, two bosses) are live and visible in real
+combat, not just move-table data (see the kit table and the p9 shots below); every passive fires
+deterministically (RNG-free — `Passives.tick`/`.onParry`/`.onSpecial` never touch `fight.rng`); the
+AI actually uses kits in real, unprimed play (`tier.kit`'s hold logic, Task 9.4, plus Task 9.5's
+self-buff rule for the one kit `tier.kit`'s own foe-debuff count structurally can't reach); the
+balance bands hold with the t4/t5 gap restored (Task 9.4's own ≥10pp ruling, re-confirmed bit-
+identical after 9.5 below); docs and shots are current; the full gate is clean on the close-out
+commit (below). **Not yet pushed** — per this task's own instructions, no `git push` was run.
+
+### Kit table
+
+Every champion's signature, heavy, and S1/S2/S3, verbatim from `def.kitText` (`src/40_movedata.js`)
+— the same strings the roster card shows in-game. A kit effect always lands on the **foe** unless
+its own line says "(self)"; hit counts and specific behavior are frozen data, not summaries.
+
+| Champion | Signature (in-combo heavy ender) | Heavy | S1 | S2 | S3 | Passive |
+|---|---|---|---|---|---|---|
+| **Carl** (brawler) | Fury (self) | 2 stacks of Armor Break | Two-Fisted, 3 hits — last hit Bleeds | Boot Party, 5 hits — a blocked hit refunds 20 power | Doorway Drop, 4 hits — last hit guarantees a Stun (60f/1s — see the design-doc annotation) | Spite: below 40% hp, an uncapped Fury stack (self) every 3s, capped at 10 by the passive itself |
+| **Princess Donut** (caster) | Weakness | Burns 30 power | Hairball, 5 hits — every hit Poisons | Regal Pounce, 5 hits — last hit is Unblockable | Sponsor Meltdown, 6 hits — every hit Weakens | Royal Disdain: every special she throws Weakens the foe (2 stacks if already debuffed) |
+| **Katia** (trickster) | Bleed | Refreshes every Bleed stack's duration on the foe | Knife Work, 5 hits — every hit Bleeds | Misdirection, 5 hits — every hit is a guaranteed crit | Curtain Call, 4 hits — last hit Bleeds x3 and Armor Breaks | Understudy: a successful parry grants +1 Crit Damage stack (self, 3s) |
+| **Mongo** (tank) | Armor Break | Ground Slam — knockdown that ignores block | Backhand, 3 hits — last hit Stuns | Bear Hug, 5 hits — heals himself 30% of the damage each hit deals | Doorway Denial, 4 hits — last hit grants himself Armor Up (self, 600f/10s) | Immovable: +1 Fury stack (self) per 120 consecutive frames spent blocking, capped at 5 |
+| **Grull** (boss, tank) | *(none — mobs/bosses carry no `sigEffect`)* | Pillar Swing — long reach, Armor Breaks | 3-hit flurry (no kit effect) | 5-hit flurry (no kit effect) | Floor Wipe, 3 hits — last hit Weakens (480f/8s — see the design-doc annotation) | Champion of the Floor: every 600f/10s, purifies every debuff on himself and gains 3 Fury (self) |
+| **Mother Rat** (boss, beast) | *(none)* | Tail Sweep — Bleeds x3 | 3-hit flurry (no kit effect) | 5-hit flurry (no kit effect) | Swarm, 6 hits — every hit heals her 2% of the damage it deals | Brood: below 50% hp, gains a Power Gain stack (self) and her regen triples |
+
+### Rulings (copied from the SDD ledger)
+
+- `unblockable:'last'` for Donut's S2 (kit line says "last unblockable"); `true` stays whole-move —
+  cost if wrong: one flag value.
+- `tutorialGuard` caps `Effects` DOT ticks at hp−1 via a fighter-level hook (no effect-id special
+  cases); Carl's S1 last→bleed lands — cost if wrong: the spar dummy could die to bleed (tutorial
+  test guards it).
+- Task 9.1b (new, sim state machine): when block is held, a fighter leaving BLOCKSTUN re-enters
+  BLOCK on the same frame before hitboxes are checked, so a held block absorbs every sub-hit of a
+  special except flagged unblockable ones — why: the `act()`/`tick()` ordering leaks sub-hits 2..n
+  whenever a move's cadence ≥ blockstun (reviewer traced it) — cost if wrong: block gets stronger;
+  tables recorded, 9.4 rebalances.
+- Spite keeps `uncapped` but the passive stops applying above 10 fury stacks (passive-level ceiling)
+  — cost if wrong: Carl's late-fight damage curve.
+- Task 9.4 removes the `busy()` gate for the block-hold branch in `AI.make` (and `Ctrl.competent`) so
+  a bot in BLOCKSTUN keeps `intent.block` when its hold decision is live; tier gate will move; 9.4
+  retunes — why: otherwise humans get a stronger block than the AI and the sweeps never measure the
+  mechanic — cost if wrong: one balance round.
+- Immovable counts CONSECUTIVE BLOCK/BLOCKSTUN frames (reset on leaving) — the table says "while
+  blocking" — fix in 9.3. Royal Disdain doubled = 2 stacks (accepted). Champion of the Floor cadence
+  1200→600f is a 9.4 balance input. Per-effect impact tints implemented in 9.3 (`IMPACTS` opts).
+  `onSpecial` reuses `_fire` with a target param (9.3 tidy).
+- Bands are evaluated at n=60 on both seed bases (n=30 informational) — `f1_grull`'s 6.7% at
+  n=30/sb1 is within binomial noise of 18% — reviewer asked to check — cost if wrong: floor-1 boss
+  too hard for some players; hand-play will tell.
+- Mongo S3: accept as a self-buff finisher; the AI selects a `target:'self'` S3 at 3 bars when its
+  own hp ≤ 60% (a tank pops armor when hurt) — 9.5 adds the rule with a test — cost if wrong: Mongo
+  throws S3 a little early.
+
+### Task 9.5: the Mongo self-buff S3 AI rule
+
+Mongo's Doorway Denial (S3) grants `armorUp` to himself (`move.applies` has a `target:'self'` entry)
+— the only kit in the roster shaped like this. Task 9.4's own `tier.kit` hold logic (`55_ai.js`'s
+`decideSpecial`) can never target it: its `st.kitLockS3` latch reads the FOE's total `PURIFIABLE`
+debuff stacks, and there is nothing on the foe for a self-buff special to ever set that. Measured
+(Task 9.4's own "kit usage in real (unprimed) play" test): 0 real S3 throws for Mongo across a
+300-seed search.
+
+Accepted reading (`verdict-9.4.md`): a self-buff finisher is thrown when its holder is hurt, not when
+the foe is debuffed — "a tank pops armor up when he's hurt." `isSelfBuffSpecial(fighter)` reads this
+generically off the move's own `applies` data (`fighter.moveDef('s3').applies.some(x=>x.target===
+'self')`), not a hard-coded champion id, so any future self-target special is picked up the same way.
+
+**Design note (deviation from the brief's literal wording, same outcome).** The brief's own wording
+— "a rng-free branch... selected at 3 bars when the holder's hp ≤ 60%" — first shipped as a
+standalone check ahead of the `kitHold` roll, gated on `power>=300`. Measured empirically to be
+unreachable: for a t3+ Mongo, `kitHold` commits on the very first eligible frame most of the time
+(`kit` .5-1), and its own foe-debuff lock then fires S2 (cost 200) the instant power crosses 200 on
+every hold (Mongo's foe never holds a real debuff) — power never climbed to 300 in the first place
+for a pre-`kitHold` check to ever see. Folded into the SAME `st.kitLockS3` latch the foe-debuff check
+already uses instead: it also latches once the holder's own hp drops to or below 60%, same "sticky
+once true" shape the debuff lock already has. Still entirely rng-free (no `r.next()` draw added), so
+t1/t2 (`kit:0`, never enter this block at all) and every other tier's own `kitHold` roll sequence
+stay untouched — this only changes which target a committed hold locks onto, verified against the
+existing t1/t2 golden bit-identical test (`src/90_tests.js`) plus a new negative guard proving a
+non-self-target kit (Carl) is never forced into S3 by low hp.
+
+**Test** (TDD, failed first against the unimplemented branch): an unprimed t4 Mongo whose own hp is
+scaled to 55% of a padded max (preserving the ≤60% ratio while keeping absolute hp high enough that
+real, unprimed `Ctrl.competent` damage can't KO him before 300 power is banked — power itself is
+never written by the test, only earned through real combat) throws S3 in at least one of 5 seeds.
+A second test locks in the negative guard above.
+
+**Full gate** (this task's own final commit): `build --check` clean; `--unit` 602/0; `--matrix` 216
+cells, 0 errors; `--e2e --seed 7` clean; `--tutorial --seed 1` clean (`tutorialDone:true,
+goldGranted:300`); `--screens-smoke` clean; `--phone-check` clean; `--perf 600` 0.298 ms/frame (well
+under the 6ms gate).
+
+**Balance battery, n=60, both seed bases — bit-identical to Task 9.4's own recorded numbers.** Mongo
+never appears as the AI side of any battery encounter (the tier sweep and every floor node/boss use
+`--p1 carl`; Mongo is a playable champion only, never a mob/boss), so this task's AI change cannot
+touch the battery — confirmed by re-running it rather than assumed:
+
+```
+                 seed-base 1              seed-base 101
+tier           9.4        9.5           9.4        9.5
+t1             100.0      100.0         100.0      100.0
+t2             80.0       80.0          88.3       88.3
+t3             48.3       48.3          55.0       55.0
+t4             38.3       38.3          31.7       31.7
+t5             13.3       13.3          18.3       18.3
+# monotone OK both, t1=100(>=80), t5<=30, t4-t5 gap 25.0pp/13.4pp -- unchanged from 9.4
+
+encounter      band     9.4(sb1) 9.5(sb1)  9.4(sb101) 9.5(sb101)
+f1_hob         40-70%   60.0     60.0      50.0       50.0
+f1_grull       10-35%   18.3     18.3      20.0       20.0
+f2_mother      10-35%   35.0     35.0      33.3       33.3
+```
+
+No retune performed — none needed, exactly as the ruling anticipated ("no retune expected; if a band
+breaks, retune minimally and say so").
+
+### Shots (Task 9.5)
+
+`tools/shots.sh` adds four shots proving a kit effect actually lands in real combat (every earlier
+`sN` shot in the file is either a frozen pose or the generic S3 name-card, neither of which shows an
+effect connecting) — see the script's own Phase 9 comment block for exactly how each fixture reaches
+its special deterministically (`--eval` driving a real `Ctrl.script`-fired special against a
+padded-hp opponent, polling the real fight log for the effect, never a hand-picked frame):
+
+- `p9-carl-s3.png` — Doorway Drop's guaranteed Stun landing on the 4th sub-hit (a gold "STUN" banner
+  and its damage popup); the loop deliberately skips past the S3 name-card's own 72-frame fx
+  lifetime (already shown separately in `p2-card.png`/`p7-s3.png`) rather than screenshotting through it.
+- `p9-donut-s2.png` — Regal Pounce's last hit landing on a defender holding block the whole time (a
+  white "UNBLOCKABLE" banner), with sub-hits 1-4 visibly chipped through a real held block first.
+- `p9-katia-s2.png` — Misdirection's guaranteed crit (a big red damage popup and red spark burst,
+  `Fight.resolve`'s own crit-vs-normal popup styling — there's no separate "CRIT" text).
+- `p9-mongo-s2.png` — Bear Hug's heal-per-hit, shown as Mongo's own hp bar (dented to 700/1300 first,
+  a real starting value, not padded) climbing across landed sub-hits.
+
+Every shot was viewed after generation (see the task report's Shots section for what was checked in
+each one). `tools/shots.sh` was run start to finish; all 64 PNGs regenerated, the soak-floor soft-fail
+set unchanged from Phase 8 (12/12, exactly the documented set).
+
 ## Phase 9 balance (Task 9.4, 2026-09-23): AI kit usage and the busy()-gate fix
 
 Task 9.4 closes two gaps the 9.1b review found and wires AI.make into the kit system 9.1-9.3 built:
@@ -1753,11 +1908,15 @@ Task 9.4 closes two gaps the 9.1b review found and wires AI.make into the kit sy
    - "≥2 debuffs" is read as **total stacks** across the six `PURIFIABLE` ids, not a count of distinct
      ids. Measured before choosing this reading: a distinct-id reading needs two genuinely different
      debuff types stacked at once, which this roster's own frozen kit data makes vanishingly rare for
-     carl/donut/katia and *structurally unreachable* for mongo (his only pre-S3 debuff source, S1's own
-     last-hit stun, is a single `maxStacks:1` application — no second id exists anywhere in his kit
-     before S3 itself). A total-stack reading is reachable for carl (his own heavy applies armorBreak
-     ×2 in one hit), donut and katia (their own S1s land 3-5 stacking sub-hits) — mongo remains
-     structurally stuck either way, a kit-data property, not an AI defect (see below).
+     carl/donut/katia and *structurally unreachable* for mongo — his kit has **no AI-reachable pre-S3
+     debuff source** that can ever reach 2 stacks: S1's own last-hit stun is his only debuff anywhere
+     in his kit before S3 itself, a single `maxStacks:1` application (`stun` is one of the six
+     `PURIFIABLE` ids, but `maxStacks:1` caps it at 1 stack forever, one short of the ≥2 this rule
+     needs, under either reading). A total-stack reading is reachable for carl (his own heavy applies
+     armorBreak ×2 in one hit), donut and katia (their own S1s land 3-5 stacking sub-hits) — mongo
+     remains structurally stuck either way, a kit-data property, not an AI defect (see below; Task
+     9.5 adds a dedicated hp-based rule for exactly this case, since the debuff-count rule structurally
+     never can be).
    - A first cut re-read the live debuff count every single frame while holding, which measurably
      starved s3: the foe's own debuff clock (150-480f, `EFFECTS`' frozen durations) is routinely
      shorter than the extra time a hold needs to climb from 200 to 300 power against a real, defending
@@ -1882,7 +2041,7 @@ clean (`exit 0`, 216 cells, 0 errors) after the change.
 | Check | Result |
 |---|---|
 | `python3 tools/build.py --check` | exit 0 |
-| `python3 tests/harness.py --unit` | 600/0 (60 new: 2 tier.kit hold-target tests, 1 t1/t2 bit-identical test, 1 AI.make block-hold-through-BLOCKSTUN test, 1 Ctrl.competent block-hold test, 1 rename + 1 genuine-unprimed-usage test, plus the pre-existing far/near-medium and t4-boss-special tests updated for the new behavior, plus the Champion of the Floor cadence test updated for 600f) |
+| `python3 tests/harness.py --unit` | 600/0 (6 new — controller-corrected count, this row previously said "60 new": 2 tier.kit hold-target tests, 1 t1/t2 bit-identical test, 1 AI.make block-hold-through-BLOCKSTUN test, 1 Ctrl.competent block-hold test, 1 genuine-unprimed-usage test — plus the pre-existing far/near-medium and t4-boss-special tests updated for the new behavior, and the Champion of the Floor cadence test updated for 600f, none of which add to the count) |
 | `python3 tests/harness.py --matrix` | exit 0, 216 cells, 0 errors |
 | `python3 tests/harness.py --e2e --seed 7` | exit 0, `errors: []` |
 | `python3 tests/harness.py --tutorial --seed 1` | exit 0, `tutorialDone:true, goldGranted:300, errors:[]` |

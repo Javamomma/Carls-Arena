@@ -183,6 +183,62 @@ soft p8-stage-sewers $H --sim --seconds 4 --encounter f2_mother --shot "$S/p8-st
 $H --reset-save --screen map --shot "$S/p8-map.png"
 $H --reset-save --pre "Save.data.roster.carl={stars:3,rank:2,level:14,xp:22,shards:2};Save.data.roster.katia={stars:2,rank:2,level:9,xp:30,shards:4};Save.data.roster.donut={stars:2,rank:1,level:6,xp:12,shards:1};Save.data.roster.mongo={stars:1,rank:1,level:3,xp:5,shards:0};Save.data.iso=400;Save.put()" --screen roster --shot "$S/p8-roster.png"
 
+# ---- Phase 9: kit specials actually connecting in real combat (Task 9.5) ----------------------
+# Every earlier "sN" shot in this file is a frozen POSE (--pose s3, no sim ticking, no hitbox ever
+# resolves) or the generic --cinematic S3 name-card (p2-card.png/p7-s3.png). None of those show a
+# kit's own listed EFFECT actually landing. These four use `--eval` (which runs after the harness's
+# own startFight but before --shot's screenshot) to drive a real, deterministic connect: closeIn(f)
+# (the same test-file helper every scripted unit test uses, concatenated into index.html along with
+# everything else in src/90_tests.js, so it's callable here too) puts the two fighters adjacent,
+# the attacker's own power is set directly to the special's exact cost (100/200/300 -- not "primed"
+# gameplay, just the harness's own debug-state convention every other fixture in this file already
+# uses, e.g. p4/p5's `--pre "Save.data...=...;Save.put()"`), and `Ctrl.script([{f:0,intent:{special:
+# N}}])` (30_input.js's own frozen script-controller shape, identical to the one src/90_tests.js's
+# scripted tests already use) fires it on the very next tick. The opponent's hp/maxHp are padded so
+# a multi-hit special can't KO them before its own LAST sub-hit -- the one carrying the kit's listed
+# effect -- ever lands. Each loop below polls the real fight log (`f.log`, the same shape every
+# other test/tool in this repo already reads) for the exact event that proves the kit effect landed,
+# not just "a hit happened", then ticks a small fixed buffer further so the popup/banner fx (each
+# with its own short lifetime -- see 72_fx.js) are still fresh on screen, same "a few ticks past the
+# event, inside every fx kind's own lifetime" convention p7-intercept.png/p7-heavy.png above already
+# use. Each shot was viewed after generation to confirm it actually shows the claimed effect (see
+# the Task 9.5 report's Shots section for what was checked in each one).
+#
+# p9-carl-s3.png: Doorway Drop's guaranteed stun, on the LAST of its 4 sub-hits only -- naively
+# breaking out of the tick loop on the FIRST 's3' hit (sub-hit 1) catches the moment `Fight.
+# checkCinematic` (60_fight.js) arms the 72-frame S3 name-card freeze, which is a real (and already
+# separately shot, p7-s3.png/p2-card.png) but DIFFERENT beat than this shot's subject -- its own
+# gold ribbon fx has a longer on-screen lifetime than the tick budget below and would just cover the
+# fighters. Polling instead for the real `{type:'effect',who:-1,id:'stun',applied:true}` log entry
+# (48_effects.js's own frozen log shape; who:-1 is p2's side, not p1's -- see the golden bit-identical
+# test in src/90_tests.js for the same convention) waits past that card (which auto-clears once its
+# own 72-frame lifetime elapses, well before the stun fires on sub-hit 4) and lands on the real STUN
+# banner + the guaranteed hit's own damage popup instead.
+$H --sim --seconds 1 --bot idle --ai dummy --p1 carl --p2 goblin --eval "(()=>{const f=G.fight;closeIn(f);f.p2.hp=f.p2.maxHp=5000;f.p1.power=300;f.p1.ctrl=Ctrl.script([{f:0,intent:{special:3}}]);let applied=false;for(let i=0;i<400&&!applied;i++){G.tick();if(f.log.some(e=>e.type==='effect'&&e.who===-1&&e.id==='stun'&&e.applied))applied=true}for(let i=0;i<8;i++)G.tick();return{applied}})()" --shot "$S/p9-carl-s3.png"
+# p9-donut-s2.png: Regal Pounce's own `unblockable:'last'` flag (Task 9.1's fix round 1) only shows
+# its {kind:'popup',text:'UNBLOCKABLE'} fx (60_fight.js) when the defender is ACTUALLY holding block
+# the instant that final sub-hit lands -- sub-hits 1-4 chip through a real held block normally. p2's
+# own ctrl is overridden to `Ctrl.script([{f:0,until:300,intent:{block:true}}])` (a continuously-held
+# block, the same shape 9.1b's own "held block absorbs every sub-hit" fixtures use) so sub-hits 1-4
+# log as real `type:'block'` entries and only sub-hit 5 -- unblockable -- logs `type:'hit'`, which is
+# what the loop polls for.
+$H --sim --seconds 1 --bot idle --ai dummy --p1 donut --p2 hobgoblin --eval "(()=>{const f=G.fight;closeIn(f);f.p2.hp=f.p2.maxHp=5000;f.p2.ctrl=Ctrl.script([{f:0,until:300,intent:{block:true}}]);f.p1.power=200;f.p1.ctrl=Ctrl.script([{f:0,intent:{special:2}}]);let landed=false;for(let i=0;i<400&&!landed;i++){G.tick();if(f.log.some(e=>e.type==='hit'&&e.who===1&&e.move==='s2'))landed=true}for(let i=0;i<6;i++)G.tick();return{landed}})()" --shot "$S/p9-donut-s2.png"
+# p9-katia-s2.png: Misdirection's own `critChance:1.0` forces a real crit roll on every sub-hit (a
+# real rng draw still happens -- see 40_movedata.js's own frozen-interface comment -- it just always
+# resolves true), which Fight.resolve's own damage-popup fx (60_fight.js) already renders differently
+# for a crit (bigger, red `#ff4444`, vs a normal hit's gold `#ffd86b`) -- no separate "CRIT" text
+# exists, so the shot's own evidence is that red/big popup. Opponent is left on the harness's usual
+# `--ai dummy` (no block-holding needed here, unlike donut's S2 above); the loop just waits for a
+# few real sub-hits to land so a fresh one is on screen at shot time.
+$H --sim --seconds 1 --bot idle --ai dummy --p1 katia --p2 hobgoblin --eval "(()=>{const f=G.fight;closeIn(f);f.p2.hp=f.p2.maxHp=5000;f.p1.power=200;f.p1.ctrl=Ctrl.script([{f:0,intent:{special:2}}]);let hits=0;for(let i=0;i<400&&hits<3;i++){G.tick();hits=f.log.filter(e=>e.type==='hit'&&e.who===1&&e.move==='s2').length}for(let i=0;i<4;i++)G.tick();return{hits}})()" --shot "$S/p9-katia-s2.png"
+# p9-mongo-s2.png: Bear Hug's `healPct:0.30` (60_fight.js: `att.hp=Math.min(att.maxHp,att.hp+Math.
+# round(dmg*m.healPct))`) has no dedicated fx of its own -- it's a bare hp restore, so the only real
+# evidence is mongo's OWN hp bar climbing. `f.p1.hp=700` dents him first (mongo's real hp is 1300, so
+# this is a real mid-fight hp value, not a padded one -- only p2's hp/maxHp are padded, same as every
+# other shot above) so the recovery across a few landed sub-hits is visible against a real baseline
+# rather than starting already at full.
+$H --sim --seconds 1 --bot idle --ai dummy --p1 mongo --p2 hobgoblin --eval "(()=>{const f=G.fight;closeIn(f);f.p2.hp=f.p2.maxHp=5000;f.p1.hp=700;f.p1.power=200;f.p1.ctrl=Ctrl.script([{f:0,intent:{special:2}}]);let hits=0;for(let i=0;i<400&&hits<3;i++){G.tick();hits=f.log.filter(e=>e.type==='hit'&&e.who===1&&e.move==='s2').length}for(let i=0;i<4;i++)G.tick();return{hits}})()" --shot "$S/p9-mongo-s2.png"
+
 echo "shots.sh: regenerated $(ls "$S"/*.png | wc -l | tr -d ' ') PNGs in $S"
 # Task 8.5 review, Important #3: the one-line summary. Sorted so the comparison against
 # EXPECTED_SOFT_FAIL is order-independent, and both directions are reported -- a line that newly

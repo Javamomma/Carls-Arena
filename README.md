@@ -18,8 +18,13 @@ One-on-one tap-and-swipe fighter in the Dungeon Crawler Carl universe. Single HT
 | The in-fight HUD — chevron bars, class-gem portrait frames, a tilted gold combo counter | Floor 2's boss fight |
 | ![The grub: a segmented chitin-plated larva with a dark head-end and six stubby legs](docs/shots/p8-grub.png) | ![The shaman: a robed caster with a sash, staff arm raised](docs/shots/p8-shaman.png) |
 | The grub — banded chitin plates on the quad rig's own body language | The shaman — the sixth human-rig look, in robe and sash |
+| ![Carl's Doorway Drop landing: a STUN banner and damage popup](docs/shots/p9-carl-s3.png) | ![Princess Donut's Regal Pounce landing through a held block: an UNBLOCKABLE banner](docs/shots/p9-donut-s2.png) |
+| Carl's S3, Doorway Drop — the guaranteed Stun landing on its last hit | Princess Donut's S2, Regal Pounce — its last hit ignores a held block |
+| ![Katia's Misdirection landing a guaranteed crit: a big red damage popup](docs/shots/p9-katia-s2.png) | ![Mongo's Bear Hug landing: his own hp bar climbing mid-fight](docs/shots/p9-mongo-s2.png) |
+| Katia's S2, Misdirection — every hit is a guaranteed crit | Mongo's S2, Bear Hug — healing 30% of the damage each hit deals |
 
-The [S3 cinematic card](docs/shots/p7-s3.png) (Carl's SPECIAL 3) rounds out `docs/shots/p7-*.png`.
+The [S3 cinematic card](docs/shots/p7-s3.png) (Carl's SPECIAL 3) rounds out `docs/shots/p7-*.png`. See
+"Champions" below for every champion's full kit.
 
 ### Art
 
@@ -135,24 +140,63 @@ throwing the hit):
 
 ### Status effects
 
-Nine timed, stacking effect ids exist (eight below, plus dexterity — see "Intercept and dexterity"
-above). Today, only four are actually reachable in a fight, and only one way: the in-combo heavy
-ender's signature effect (see "Chaining" above) — Carl applies fury to himself, Donut applies
-weakness to the foe, Katia applies bleed to the foe, Mongo applies armor break to the foe. Stun, power
-gain, power burn and regen are fully wired (`Effects.apply`/`.tick`/`.mods`, HUD badges, timed
-expiry) but have no producer yet — no move or champion kit applies them — because Phase 9's champion
-kits are what will hand them out. Badges show on the HUD for whoever's holding a live effect:
+Twelve timed, stacking effect ids exist (eleven below, plus dexterity — see "Intercept and
+dexterity" above), all wired through the same `Effects.apply`/`.tick`/`.mods` pipeline with HUD
+badges and timed expiry. Every champion's heavy-ender signature (see "Chaining" above) and every
+champion/boss's own kit (see "Champions" below) hands one or more of these out; **regen** is the one
+id in the registry with no real producer today — `Buffs.regen` (a separate, older, non-stacking
+mechanism) is what actually heals Mother Rat, not this timed effect.
 
-| Effect | What it does | Reachable today? |
+| Effect | What it does | Producers |
 |---|---|---|
-| **Fury** | Raises the holder's own outgoing damage, up to 5 stacks | Yes — Carl's heavy-ender signature |
-| **Weakness** | Lowers the holder's own outgoing damage, up to 3 stacks | Yes — Donut's heavy-ender signature |
-| **Bleed** | Damage over time, up to 5 stacks | Yes — Katia's heavy-ender signature |
-| **Armor break** | Lowers the holder's armor, up to 3 stacks | Yes — Mongo's heavy-ender signature |
-| **Stun** | Locks the holder in place for a beat (reuses the parry-stun state) | Phase 9 |
-| **Power gain** | Slowly banks power over time | Phase 9 |
-| **Power burn** | An instant hit: drains a chunk of the holder's own banked power as damage | Phase 9 |
-| **Regen** | Heals over time, up to 3 stacks | Phase 9 |
+| **Fury** | Raises the holder's own outgoing damage, up to 5 stacks | Carl's heavy-ender signature and his own Spite passive (both self); Mongo's Immovable passive (self, while blocking); Grull's Champion of the Floor passive (self) |
+| **Weakness** | Lowers the holder's own outgoing damage, up to 3 stacks | Donut's Royal Disdain passive (every special she throws) and her S3 Sponsor Meltdown (every hit); Grull's S3 Floor Wipe (last hit) — all on the foe |
+| **Bleed** | Damage over time, up to 5 stacks | Katia's heavy-ender signature, her S1 Knife Work (every hit) and S3 Curtain Call (last hit, x3); Carl's S1 Two-Fisted (last hit); Mother Rat's heavy Tail Sweep (x3) — all on the foe |
+| **Armor break** | Lowers the holder's armor, up to 3 stacks | Mongo's heavy-ender signature; Carl's heavy (x2); Katia's S3 Curtain Call (last hit); Grull's heavy Pillar Swing — all on the foe |
+| **Stun** | Locks the holder in place for a beat (reuses the parry-stun state) | Carl's S3 Doorway Drop (last hit, guaranteed) and Mongo's S1 Backhand (last hit) — both on the foe |
+| **Poison** | Damage over time that ignores armor, up to 3 stacks | Donut's S1 Hairball (every hit, on the foe) |
+| **Power burn** | An instant hit: drains a chunk of the holder's own banked power as damage | Donut's heavy (on the foe) |
+| **Power gain** | Slowly banks power over time | Mother Rat's Brood passive (self, below 50% hp) |
+| **Crit damage** | Raises the holder's own crit multiplier, +40%, one stack only | Katia's Understudy passive (self, on a successful parry) |
+| **Armor up** | Raises the holder's own armor, +60% | Mongo's S3 Doorway Denial (self, last hit, 10s) — Grull keeps a separate, older, permanent armor-up buff of his own (`47_buffs.js`), not this timed effect |
+| **Regen** | Heals over time, up to 3 stacks | No producer — see above |
+
+## Champions
+
+Four playable champions and two floor bosses. Every champion has a passive, a signature effect (see
+"Chaining" above), and three real specials (**S1**/**S2**/**S3**, costing 1/2/3 power bars) each with
+its own hit count and kit effect; the two bosses only carry a signature **S3**. A special's own kit
+effect always lands on the **foe** unless noted "(self)". Duration numbers below are each effect's
+real, shipped duration — see "Status effects" above; two of these disagree with an earlier design
+note by name (`docs/design/mcoc-comparison-notes.md`'s own footnote has the detail): Carl's S3 stun
+is 1s, not 2s, and Grull's S3 weakness is 8s, not 10s.
+
+- **Carl** (brawler) — *Spite*: below 40% hp, an uncapped Fury stack (self) builds up every 3s, up to
+  10. Heavy: 2 stacks of Armor Break. **S1, Two-Fisted** (3 hits): last hit Bleeds. **S2, Boot Party**
+  (5 hits): a blocked hit refunds 20 power. **S3, Doorway Drop** (4 hits): last hit guarantees a 1s
+  Stun. Signature: Fury (self).
+- **Princess Donut** (caster) — *Royal Disdain*: every special she throws Weakens the foe (2 stacks
+  if the foe is already debuffed). Heavy: burns 30 power. **S1, Hairball** (5 hits): every hit
+  Poisons. **S2, Regal Pounce** (5 hits): last hit is Unblockable, even through a held block. **S3,
+  Sponsor Meltdown** (6 hits): every hit Weakens. Signature: Weakness.
+- **Katia** (trickster) — *Understudy*: a successful parry grants +1 Crit Damage stack (self, +40%
+  crit damage, 3s). Heavy: refreshes the duration of every Bleed stack already on the foe. **S1,
+  Knife Work** (5 hits): every hit Bleeds. **S2, Misdirection** (5 hits): every hit is a guaranteed
+  crit. **S3, Curtain Call** (4 hits): last hit Bleeds x3 and Armor Breaks. Signature: Bleed.
+- **Mongo** (tank) — *Immovable*: +1 Fury stack (self) per 120 consecutive frames spent blocking,
+  capped at 5. Heavy, Ground Slam: knocks down even through a raised guard. **S1, Backhand** (3
+  hits): last hit Stuns. **S2, Bear Hug** (5 hits): heals him 30% of the damage each hit deals. **S3,
+  Doorway Denial** (4 hits): last hit grants himself Armor Up (+60% armor, 10s) — the AI throws this
+  one automatically once its own hp drops to 60% or below and 3 bars are banked, rather than waiting
+  for a debuffed foe the way every other champion's AI does (Mongo's own kit gives the foe nothing to
+  debuff-count). Signature: Armor Break.
+- **Grull** (boss, tank, floor 1) — *Champion of the Floor*: every 10s, purifies every debuff on
+  himself and gains 3 Fury (self). Heavy, Pillar Swing: long reach, Armor Breaks the foe. **S3, Floor
+  Wipe** (3 hits): last hit Weakens the foe for 8s. Keeps a separate, permanent Armor Up buff of his
+  own (an older mechanism, not the timed effect above).
+- **Mother Rat** (boss, beast, floor 2) — *Brood*: below 50% hp, gains a Power Gain stack (self) and
+  her regen triples. Heavy, Tail Sweep: Bleeds the foe x3. **S3, Swarm** (6 hits): every hit heals
+  her 2% of the damage it deals.
 
 ## Development
 
