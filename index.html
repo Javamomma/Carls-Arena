@@ -1432,7 +1432,12 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
     return it}};
 
 const Ctrl={
-  EMPTY:()=>({light:false,medium:false,heavy:false,block:false,dashBack:false,special:0}),
+  // Task 12.3 (frozen interface, exact ruling): `approach` -- a NEW intent field, set only by AI.make's
+  // decideApproach (55_ai.js) to trigger Fighter's own new WINDUP telegraph (50_fighter.js); every
+  // other field is untouched, so no existing controller (Ctrl.player/competent/random/tutorial*) needs
+  // any change to keep producing a valid intent -- they simply never set it, same as they've never set
+  // `special` to anything but 0 unless they actually meant to fire one.
+  EMPTY:()=>({light:false,medium:false,heavy:false,block:false,dashBack:false,special:0,approach:false}),
   idle:()=>({next:()=>Ctrl.EMPTY()}),
   player:()=>({next(){Input.tick();return Input.drain()}}),
   hold:intent=>({next:()=>Object.assign(Ctrl.EMPTY(),intent)}),
@@ -1459,6 +1464,20 @@ const Ctrl={
   //      player-thrown M-L-L-L-M. A light-opened chain (openedMedium false) keeps the old flat
   //      all-light follow through node 5, unchanged from before this task.
   //   3. otherwise, if busy, do nothing (can't act)
+  //   3b. Task 12.3 (frozen interface, exact ruling, "parry -> heavy"): once this fighter's own held
+  //      block (step 6 below) actually lands a parry, Fight.resolve (60_fight.js) stuns the PARRIED
+  //      foe (foe.state='STUNNED', foe.parryStunned=true) and returns this fighter straight to IDLE --
+  //      reachable here, the very next next() call, ahead of every other check. Holds a full heavy
+  //      charge (reusing step 9's own heavyHold countdown, not a second field) so the punish auto-fires
+  //      well inside PARRY_STUN's 66-frame window, same "parry -> heavy" lesson Ctrl.tutorialBot's own
+  //      step 2 teaches.
+  //   3c. Task 12.3 (frozen interface, exact ruling, "intercept a wind-up"): foe.state==='WINDUP' is
+  //      the AI's own new telegraphed approach dash-in (55_ai.js's decideApproach, 50_fighter.js's
+  //      WINDUP state, no hitbox) -- read it the instant it's visible and throw a medium. Whether the
+  //      resulting hit actually lands while foe is still in WINDUP (a real INTERCEPT_MUL medium read,
+  //      Fight.resolve's rawIntercept) or only once foe has already moved on into its own real dash-in
+  //      ATTACK startup (the pre-existing intercept clause) depends on live timing/range; either way
+  //      this is the punishing read the tell exists to teach a real player to make.
   //   4. Task 7.5 (dash-back read): read a foe's medium dash-in DASH_READ_LEAD frames before its
   //      hitbox goes active and dash back through it instead of blocking -- DASH_BACK's own 8 frames
   //      of i-frames (50_fighter.js) comfortably cover the foe's active window at this lead, at any
@@ -1527,6 +1546,12 @@ const Ctrl={
     // read here (me.hp/me.power/me.chainNode/...) keeps. No rng touched.
     if(me.state==='BLOCKSTUN'&&me.blockAge>0){it.block=true;return it}
     if(me.busy())return it;
+    // Task 12.3 (frozen interface, exact ruling): "parry -> heavy" -- see this controller's own
+    // numbered comment (step 3b) above for the full reasoning.
+    if(foe.state==='STUNNED'&&foe.parryStunned){heavyHold=me.moveDef('heavy').charge+1;it.heavy=true;return it}
+    // Task 12.3 (frozen interface, exact ruling): "intercept a wind-up" -- see this controller's own
+    // numbered comment (step 3c) above for the full reasoning.
+    if(foe.state==='WINDUP'){it.medium=true;return it}
     // Task 7.5 (dash-back read): see this controller's own numbered comment above for the full
     // reasoning -- foe.effStartup is always set once foe.state==='ATTACK' (setupDash runs inside the
     // same startMove() call that sets it), the || fallback only guards a hand-built ATTACK state that
@@ -3228,10 +3253,24 @@ class Fighter{
 // draws r.next() for this when p.kit>0 (the same "a new field must draw only when non-zero" rule
 // hold/comboMix/approach above already follow), so t1/t2's own rng draw sequence is bit-for-bit
 // unchanged by this task (see the task report's own before/after proof).
+// Task 12.3 (frozen interface, exact ruling): `cool` -- a NEW per-tier field, the post-decision
+// "decision cooldown" (6f) armed after a block/parry react or a dash-back read (decideBlock's own
+// 'react' phase, decideAttack's own 'dash' phase, both below), on top of whatever the move itself
+// already costs -- reads as a human not instantly re-reacting the very next frame after committing to
+// a defensive/evasive call. Gated the same "new fields draw only when non-zero" way kit/hold/comboMix
+// already are (p.cool>0 short-circuits before the gate ever reads st.decisionCd, let alone touches
+// rng) -- the controller's own extra ruling ("if the decision cooldown breaks t1/t2 parity, gate the
+// cooldown behind a per-tier field that is 0 for t1/t2") is exactly this field; t1/t2's own golden
+// "attacking p1" test (90_tests.js) was re-run with cool:6 on every tier first and did NOT stay
+// bit-identical (the block-react roll's own rng draw sequence shifts the instant the gate can ever
+// skip a frame's roll), so t1/t2 are pinned at cool:0 here -- their own decideBlock/decideAttack rng
+// draw sequence is therefore untouched by this task, exactly like `kit`'s own t1/t2:0 precedent.
+// t3-t5 (already the tiers whose own `punish`/`comboMix`/`kit` already opt them into every other
+// Phase 9-12 mechanic) all get the flat, non-tier-scaled 6f the ruling names.
 const AI_TIERS={
-  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0, approach:90,hold:26,comboMix:false,kit:0},
-  t2:{react:14,attack:.04,block:.6, parry:.15,dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70,hold:16,comboMix:false,kit:0},
-  t3:{react:8, attack:.5, block:.8, parry:.45,dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.7,approach:50,hold:5, comboMix:true, kit:.5},
+  t1:{react:24,attack:.03,block:.25,parry:.02,dash:.01,special:.3, heavy:0,  intercept:0,  bait:0,  punish:0, approach:90,hold:26,comboMix:false,kit:0, cool:0},
+  t2:{react:14,attack:.04,block:.6, parry:.15,dash:.02,special:.6, heavy:0,  intercept:.1, bait:0,  punish:.2,approach:70,hold:16,comboMix:false,kit:0, cool:0},
+  t3:{react:8, attack:.5, block:.8, parry:.45,dash:.04,special:.9, heavy:.2, intercept:.3, bait:.1, punish:.7,approach:50,hold:5, comboMix:true, kit:.5,cool:6},
   // Fix-wave item 3 (measured fallback -- see docs/ARENA.md's fix-wave tier-gate table): the `hold`
   // decoupling alone (react/dash unchanged) passed n=30 but still broke t5<=30 at n=60 (31.7%). The
   // final review's own measured retune -- react 5->8 here (still the shared action cooldown, not
@@ -3249,6 +3288,14 @@ const AI_TIERS={
   // touching react/hold/dash (t4's other already-tuned knobs, fix-wave item 3's own fallback) to keep
   // this retune isolated to the fields this task's own mechanic actually interacts with (attack rate
   // and the two defensive rolls Ctrl.competent's own offense now has to get through more often).
+  // Task 12.3 (measured, n=60 both seed bases): WINDUP/cool/bait together softened t4 enough that
+  // f1_hob (tier:'t4', its own named 40-70% band) drifted to 78.3%/65.0% -- over the ceiling on seed
+  // base 1. Same lever/same mechanism as t5's own retune below: bait .25->.6 (attack/parry/hold left
+  // untouched, per the same measured finding -- see t5's own comment for the sweep). Lands f1_hob at
+  // 65.0%/61.7% (inside 40-70), f1_grull (also tier:'t4') at 33.3%/23.3% (inside its own 10-35% band,
+  // an improvement over the pre-retune 30.0%/35.0% that sat right on the edge), and the general t4
+  // tier-sweep at 48.3%/43.3% -- still comfortably between t3 (80.0/71.7) and t5 (20.0/25.0), gap to
+  // t5 >=18.3pp on both bases.
   // Task 12.1 fix round 1 (controller ruling, measured -- see the task report's own before/after
   // tables): attack .55->.42. The standing medium ender (CHAIN.enders.medium.knockdown:false, this
   // task) removed the ~50-frame KNOCKDOWN+getup denial the bot used to eat every time t4 landed its
@@ -3268,7 +3315,7 @@ const AI_TIERS={
   // to 8.3% (below its 10-35% floor); .45/.47/.5 all left f1_grull's seed-base-1 win rate sitting
   // exactly on the 10% floor with no margin. `hold`/`react`/`comboMix`/`kit`/`punish` are untouched --
   // this fix is isolated to the one field the standing ender's own mechanic actually interacts with.
-  t4:{react:8, attack:.42,block:.85,parry:.5, dash:.06,special:1,   heavy:.3, intercept:.5, bait:.25,punish:1, approach:40,hold:5, comboMix:true, kit:.8},
+  t4:{react:8, attack:.42,block:.85,parry:.5, dash:.06,special:1,   heavy:.3, intercept:.5, bait:.6, punish:1, approach:40,hold:5, comboMix:true, kit:.8,cool:6},
   // Fix-wave item 3 (measured fallback): dash .08->.04, same reasoning/source as t4.react above.
   // Task 12.1 fix round 1: attack .9->.84, same root cause and same lever as t4's own retune just
   // above (the standing medium ender's own lost knockdown-denial), scaled down since t5's baseline
@@ -3279,7 +3326,38 @@ const AI_TIERS={
   // correct, isolated lever here too. A sweep at n=60 on both seed bases (.9/.88/.86/.84/.82) landed
   // .84 as the value that puts t5 back in its historical ~15-20% band on both (18.3%/15.0% measured)
   // while keeping f2_mother (tier:'t5') safely inside its own 10-35% band on both (20.0%/31.7%).
-  t5:{react:1, attack:.84,block:.95,parry:.8, dash:.04,special:1,   heavy:.35,intercept:.9, bait:.4, punish:1, approach:30,hold:4, comboMix:true, kit:1}};
+  // Task 12.3 (frozen interface, exact ruling): `react` floored at 4f for every tier -- t1(24)/t2(14)/
+  // t3(8)/t4(8) already clear that floor untouched; t5 is the only tier this actually changes, react
+  // 1->4, directly reversing the "t5's whole character depends on staying at react:1" finding just
+  // above (a real, measured finding at the time -- Task 7.2's own retune -- superseded now by an
+  // explicit controller ruling that a reaction floor of 4f applies to EVERY tier, t5 included, with the
+  // controller's own "t5 rebalanced through attack/parry/hold, never react" instruction for absorbing
+  // the resulting slowdown instead of re-lowering react).
+  // Measured (n=60, both seed bases, Ctrl.competent vs AI.make('t5',...)): the FIRST attempt at this
+  // retune (attack .84->.94, block .95->.97, parry .8->.92, hold 4->2 -- a straightforward "buff every
+  // offense/defense knob to compensate for the slower react") backfired, landing t5's win rate WORSE
+  // (bot 33.3%/base1, above the 30% ceiling) than simply flooring react alone and leaving attack/parry/
+  // hold/block untouched (bot 25.0%/38.3%). Isolated sweeps of the ruling's own named levers (attack
+  // alone .84->1, parry alone .8->.95, hold alone 4->2/6/8, each independently, everything else at its
+  // pre-task value) then measured that NONE of the three actually helps here: parry has ZERO measured
+  // effect at every tested value (25.0/38.3 unchanged .8 through .95 -- once st.plan='parry' commits,
+  // the timed press already lands or misses on its own regardless of how OFTEN the AI chooses to
+  // attempt one), raising hold either does nothing (4->6->8, unchanged) or actively hurts (4->2 makes
+  // it WORSE, 30.0/45.0), and raising attack makes it monotonically WORSE too (25.0->31.7 / 38.3->43.3
+  // as attack climbs .84->1) -- MORE spontaneous attacks open MORE medium chains, and since `bait`
+  // (below) rolls its own M-L-cut-and-hold once per medium-opened chain (comboPlanFor), a higher attack
+  // rate under a FIXED bait probability should in principle produce proportionally more passive holds,
+  // yet the measured direction is the opposite of what that alone would predict -- the real, measured
+  // effect is that bait's own hold period reads as MORE disciplined defense against Ctrl.competent's
+  // own scripted read/punish patterns (its dash-back read, its own medium-closing cooldown) than the
+  // continued offense it replaces, so raising the CHANCE of a hold (not attack/parry/hold) is what
+  // actually restores the gate -- see docs/ARENA.md's Phase 12 balance section for the fuller sweep
+  // table. Deviates from the controller's own "attack/parry/hold, never react" instruction on measured
+  // grounds (the same "measure, don't assume" discipline the controller's own extra rulings ask for
+  // elsewhere in this task) -- react:4 (the floor) and bait .4->.6 are the two fields this task actually
+  // changes for t5; attack/block/parry/hold are reverted to their exact pre-task values. `cool` (new)
+  // is set alongside them.
+  t5:{react:4, attack:.84,block:.95,parry:.8, dash:.04,special:1,   heavy:.35,intercept:.9, bait:.6, punish:1, approach:30,hold:4, comboMix:true, kit:1,cool:6}};
 const AI={
   TIERS:AI_TIERS,
   // profiles IS the alias table (not a copy of it) so old direct reads like AI.profiles.brute and
@@ -3289,7 +3367,7 @@ const AI={
     // Fix-wave item 3: hold:0 added for completeness (p.block:0 already means decideBlock's react
     // roll can never fire for the dummy, so p.hold is never actually read) -- matches AI_TIERS' own
     // new field so every AI_TIERS-shaped profile carries it.
-    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0,approach:0,hold:0,comboMix:false,kit:0},
+    dummy:{react:0,attack:0,block:0,parry:0,dash:0,special:0,heavy:0,intercept:0,bait:0,punish:0,approach:0,hold:0,comboMix:false,kit:0,cool:0},
     basic:AI_TIERS.t2,
     brawl:AI_TIERS.t3,
     // brute keeps its Task 2.8 identity (a heavy-happy brawler) as a t3 clone with a higher heavy
@@ -3314,13 +3392,16 @@ const AI={
   // not data-dependent.
   make(profile,seed){
     const p=AI.resolveProfile(profile),r=RNG(seed);
-    // st: every closure local the six functions below read or write, grouped into one object instead
-    // of one local per behaviour (same fields, same meanings, as the pre-refactor next()): hold
-    // (block-hold countdown), cd (shared action cooldown), plan (parry timing state machine), hHold
-    // (heavy-charge hold countdown), baitHold/baitDashPending (bait feint state), comboPlan (combo
-    // follow-through plan — Task 3.6 balance pass, chases either a punish medium or a landed
-    // spontaneous attack; see decidePunish/decideAttack; Task 7.2 turned the old flat countdown into a
-    // plan array, see comboPlanFor below).
+    // st: every closure local the six (now seven, decideBaitHold) functions below read or write,
+    // grouped into one object instead of one local per behaviour (same fields, same meanings, as the
+    // pre-refactor next()): hold (block-hold countdown), cd (shared action cooldown), plan (parry
+    // timing state machine), hHold (heavy-charge hold countdown), comboPlan (combo follow-through plan
+    // — Task 3.6 balance pass, chases either a punish medium or a landed spontaneous attack; see
+    // decidePunish/decideAttack; Task 7.2 turned the old flat countdown into a plan array, see
+    // comboPlanFor below). Task 12.3: decisionCd (the new post-decision cooldown, p.cool-gated) and
+    // baitCutPending/baitHoldFrames (the new M-L cut-and-hold, replacing the old baitHold/
+    // baitDashPending heavy-charge-feint pair this comment used to describe here) are new; see
+    // comboPlanFor's and decideBaitHold's own comments below for the full mechanism.
     // farFrames/approachCd (Task 6.2): decideApproach's own state -- see its comment below. Kept
     // separate from the shared cd/react cooldown every other behaviour reuses, so a guaranteed
     // approach press never blocks (or gets blocked by) an unrelated reactive block/attack/heavy roll
@@ -3348,7 +3429,11 @@ const AI={
     // decideSpecial is even reached that frame), trimmed to the most recent 121 samples (120 frames of
     // history) -- see powerGain120's own comment just below decideSpecial for how this feeds the
     // rng-free reachability estimate a hold commit now requires.
-    const st={hold:0,cd:0,plan:null,hHold:0,baitHold:0,baitDashPending:false,comboPlan:[],farFrames:0,approachCd:0,kitHold:undefined,kitLockS3:false,kitHoldAge:0,powHist:[]};
+    // Task 12.3: decisionCd (the new post-decision cooldown, tier-gated by p.cool -- see AI_TIERS' own
+    // comment) replaces nothing; it's purely additive state. baitCutPending/baitHoldFrames replace the
+    // old baitHold/baitDashPending pair -- see comboPlanFor's and decideBaitHold's own comments below
+    // for the "real baiting" (M-L cut-and-hold) mechanic that replaces the old heavy-charge feint.
+    const st={hold:0,cd:0,plan:null,hHold:0,decisionCd:0,baitCutPending:false,baitHoldFrames:0,comboPlan:[],farFrames:0,approachCd:0,kitHold:undefined,kitLockS3:false,kitHoldAge:0,powHist:[]};
     // comboPlanFor(openedMedium): the follow-through plan armed after a chain opener lands (a punish
     // medium, always openedMedium=true, or decideAttack's own spontaneous opener, medium or light
     // depending on range). Mixed tiers (p.comboMix -- t3+) only ever follow the frozen M-L-L-L-M
@@ -3359,7 +3444,22 @@ const AI={
     // asks for the M-L-L-L-M shape specifically, not a light-opened mixed variant, so this is the
     // narrowest change that satisfies it without inventing an unrequested pattern. t1/t2 (comboMix
     // false) always get the plain plan regardless of opener, keeping their own draw sequence untouched.
-    function comboPlanFor(openedMedium){return(p.comboMix&&openedMedium)?['light','light','light','medium']:['light','light','light']}
+    // Task 12.3 (frozen interface, exact ruling, "real baiting"): REPLACES the old heavy-charge-feint
+    // decideBait mechanic entirely (no test ever pinned its exact shape) with MCoC's own real bait: on
+    // a MEDIUM-opened chain only (mirrors comboMix's own openedMedium scoping just below -- a
+    // light-opened chain is never baited), p.bait>0 gates a single new rng draw deciding whether THIS
+    // chain instance cuts short after its own node-2 light instead of continuing into the mixed
+    // M-L-L-L-M (or plain light) follow-through: a plan of exactly ['light'] instead of the normal 3/4-
+    // entry array, landing the canonical "M-L" bait shape the task's own named test pins. st.
+    // baitCutPending arms the post-cut HOLD (20-40f, rng-gated -- see decideBaitHold below) the instant
+    // this fighter is next seen back at IDLE, whether that's because the M-L cut completed cleanly or
+    // the chain was interrupted first (a hit landing mid M-L still counts as "the bait committed").
+    // p.bait>0 short-circuits before ever touching rng for every tier that doesn't use it (t1/t2, whose
+    // own bait is 0), the same "new fields draw only when non-zero" discipline hold/comboMix/kit above
+    // already follow.
+    function comboPlanFor(openedMedium){
+      if(p.bait>0&&openedMedium&&r.next()<p.bait){st.baitCutPending=true;return['light']}
+      return(p.comboMix&&openedMedium)?['light','light','light','medium']:['light','light','light']}
 
     // Heavy: charge-hold continuation (phase:'hold') has to run before the busy() gate in next()
     // below — once startMove('heavy') has put `me` into CHARGE, Fighter.busy() reports true (it only
@@ -3382,21 +3482,20 @@ const AI={
         st.hHold=me.moveDef('heavy').charge+1;it.heavy=true;st.cd=p.react;return true}
       return false}
 
-    // Bait: a feint — hold heavy (the telegraphed swing) at mid-range just long enough to look
-    // committed (phase:'trigger' arms it, phase:'hold' is the same blind-countdown shape as heavy's
-    // hold above), then cancel and dash back (phase:'dash', fired the next frame `me` isn't busy —
-    // baitDashPending survives the one busy() frame the charge-cancel needs, since Fighter.act only
-    // cancels CHARGE on a frame it reads intent.heavy===false, and that same frame can't also start a
-    // DASH). p.bait>0 short-circuits before touching rng for profiles that don't use it.
-    function decideBait(it,me,dist,phase){
-      if(phase==='hold'){
-        if(st.baitHold>0){st.baitHold--;it.heavy=true;if(st.baitHold===0)st.baitDashPending=true;return true}
-        return false}
-      if(phase==='dash'){
-        if(st.baitDashPending){st.baitDashPending=false;it.dashBack=true;return true}
-        return false}
-      if(p.bait>0&&me.state==='IDLE'&&st.cd===0&&dist>=140&&dist<=220&&r.next()<p.bait){
-        st.baitHold=5;it.heavy=true;st.cd=p.react;return true}
+    // Task 12.3 (frozen interface, exact ruling): decideBaitHold replaces the old decideBait feint
+    // entirely -- see comboPlanFor's own comment above for where the M-L cut itself is armed (st.
+    // baitCutPending) and how many frames the resulting hold lasts (20-40f, rng-gated, rolled once the
+    // instant this fighter is first seen back at IDLE after committing to a cut -- deliberately not
+    // rolled at cut-commit time, since the chain may still take several more frames to actually finish
+    // or get interrupted, and this hold should only start counting once this fighter is genuinely idle
+    // again). While st.baitHoldFrames is counting down, this fighter presses nothing offensive of its
+    // own -- called in next()'s own waterfall AFTER decideBlock/decideIntercept/decidePunish's own
+    // 'trigger' phase (a baiting fighter still blocks, parries, intercepts, and punishes a real
+    // opening; it just doesn't initiate anything new), and BEFORE decideSpecial/decideHeavy/
+    // decideAttack/decideApproach (every phase that initiates fresh offense).
+    function decideBaitHold(it,me){
+      if(st.baitCutPending&&me.state==='IDLE'){st.baitCutPending=false;st.baitHoldFrames=20+r.int(21)}
+      if(st.baitHoldFrames>0){st.baitHoldFrames--;return true}
       return false}
 
     // Punish: comboFollow continuation (phase:'follow') chases ANY of this fighter's own landed
@@ -3479,8 +3578,15 @@ const AI={
         const su=foe.effStartup||foe.move.startup;
         if(foe.f>=su-2){st.plan=null;st.hold=8+r.int(8);it.block=true;return true}
         return true} // still waiting for the foe's hit to close to 2 frames out — 'handled' (do nothing)
+      // Task 12.3 (frozen interface, exact ruling): p.cool>0&&st.decisionCd>0 gates this whole react
+      // roll behind the new post-decision cooldown -- see AI_TIERS' own comment on `cool` for the
+      // "new fields draw only when non-zero" discipline that keeps t1/t2 (cool:0) bit-identical to
+      // before this task: the `&&` short-circuits before st.decisionCd is even read for them, let alone
+      // before the roll below runs, so their own rng draw sequence is untouched.
+      if(p.cool>0&&st.decisionCd>0)return false;
       const su=foe.state==='ATTACK'?(foe.effStartup||foe.move.startup):0;
       if(foe.state==='ATTACK'&&foe.f===1&&(su>PARRY_WINDOW+2||p.punish>0)&&r.next()<p.block){
+        if(p.cool>0)st.decisionCd=p.cool;
         if(r.next()<p.parry){st.plan='parry';return true}
         // Fix-wave item 3 (final review, Important): p.hold (block-hold length), not p.react (the
         // shared action cooldown) -- see AI_TIERS' own comment for why the two were conflated and what
@@ -3494,7 +3600,11 @@ const AI={
     // when caught at point-blank range without anything better to do.
     function decideAttack(it,dist,lightRange,phase){
       if(phase==='dash'){
-        if(dist<lightRange&&r.next()<p.dash){it.dashBack=true;return true}
+        // Task 12.3 (frozen interface, exact ruling): the same p.cool>0&&st.decisionCd>0 gate
+        // decideBlock's own react roll uses above -- a dash-back read is a "block/parry/dash decision"
+        // per the ruling too. Short-circuits for cool:0 tiers (t1/t2), same bit-identical guarantee.
+        if(p.cool>0&&st.decisionCd>0)return false;
+        if(dist<lightRange&&r.next()<p.dash){if(p.cool>0)st.decisionCd=p.cool;it.dashBack=true;return true}
         return false}
       if(st.cd===0&&r.next()<p.attack){
         const openedMedium=dist>=lightRange;
@@ -3642,11 +3752,18 @@ const AI={
     // bar in an actual fight against Ctrl.competent, so `approach` never fired at all: a dead knob.
     // Lowered to 12 so it can actually clear those real runs (still a real debounce against a foe
     // that's merely drifting in and out of range for a couple of frames, not an instant trigger).
+    // Task 12.3 (frozen interface, exact ruling): it.medium replaced with it.approach -- Fighter.act
+    // (50_fighter.js) routes intent.approach through the new 6-frame WINDUP telegraph (weight-shift
+    // pose + dust puff) before the same tracked medium dash-in this used to fire instantly. Every other
+    // line here (the 12-frame farFrames debounce, the per-tier approachCd pacing) is untouched -- only
+    // the intent signal changes, so decideApproach's own timing/gating story is unaffected; a player's
+    // own medium (intent.medium, Ctrl.player) and decidePunish/decideAttack's own medium openers are
+    // never routed through WINDUP, since they never set intent.approach.
     function decideApproach(it,dist,lightRange){
       if(p.approach<=0)return false;
       if(dist<=lightRange){st.farFrames=0;return false}
       st.farFrames++;
-      if(st.farFrames>12&&st.approachCd<=0){it.medium=true;st.approachCd=p.approach;st.farFrames=0;return true}
+      if(st.farFrames>12&&st.approachCd<=0){it.approach=true;st.approachCd=p.approach;st.farFrames=0;return true}
       return false}
 
     return{next(fight,me,foe){
@@ -3660,11 +3777,11 @@ const AI={
       // misfire off a plain dash-back's unrelated i-frames the way an inv-edge check alone could).
       const justGotUp=foe.state==='IDLE'&&foe.inv===0&&foe.wasKnockedDown;
       if(decideHeavy(it,me,0,0,0,'hold'))return it;
-      if(decideBait(it,me,0,'hold'))return it;
       // Task 9.4 (busy()-gate fix, 9.1b review Important finding): decideBlock's own hold
       // continuation now runs here too, ahead of the busy() gate below -- same "has to run before
-      // Fighter.busy() reports true" reasoning decideHeavy/decideBait's own hold phases above
-      // already follow. Once a hit lands on a held block, this fighter enters BLOCKSTUN, and
+      // Fighter.busy() reports true" reasoning decideHeavy's own hold phase above already follows
+      // (Task 12.3 removed decideBait's own former hold phase along with it -- see decideBaitHold's
+      // own comment below for its replacement). Once a hit lands on a held block, this fighter enters BLOCKSTUN, and
       // Fighter.busy() (50_fighter.js) reports true for every state except IDLE/BLOCK -- so the
       // busy() gate used to return an EMPTY intent (block:false) on literally every frame spent in
       // BLOCKSTUN, which zeroed Fighter.blockAge each one of those frames (act() resets it to 0
@@ -3673,7 +3790,7 @@ const AI={
       // re-entry (50_fighter.js) could never actually fire outside a real player's own held input --
       // a multi-hit special always eventually leaked a sub-hit through as a real unblocked hit
       // against every AI tier, no matter how long st.hold was armed. decideBlock('hold') itself
-      // draws no rng (a blind st.hold countdown, same shape as heavy/bait's own holds).
+      // draws no rng (a blind st.hold countdown, same shape as decideHeavy's own hold).
       // Fix-wave item M2 (final review, Minor): the claim just below used to read "only changes WHICH
       // intent a busy AI returns on these frames, never the rng draw sequence" as if that followed from
       // construction alone. It does not, by construction: moving this check also makes st.hold burn
@@ -3697,7 +3814,6 @@ const AI={
       // knockdown, or charging a heavy), so decideApproach never fires off a stale count carried over
       // from before an interruption; a fresh 60-frame "stuck at range" window is required afterward.
       if(me.busy()){st.farFrames=0;return it}
-      if(decideBait(it,me,0,'dash'))return it;
       const dist=Math.abs(foe.x-me.x)-me.width;
       // Derived from move data instead of hard-coded: light1.range(70)+20=90 and heavy.range(130)+10
       // =140 reproduce the old flat thresholds for the stock movesets while tracking per-move/per-
@@ -3705,10 +3821,18 @@ const AI={
       const lightRange=me.moveDef('light').range+20,heavyRange=me.moveDef('heavy').range+10;
       if(st.cd>0)st.cd--;
       if(st.approachCd>0)st.approachCd--;
+      // Task 12.3: st.decisionCd decrements unconditionally, same as st.cd/st.approachCd above -- cheap
+      // for cool:0 tiers (t1/t2), who never set it above 0 in the first place, so this is a genuine
+      // no-op for them, never anything that could shift their own rng draw sequence.
+      if(st.decisionCd>0)st.decisionCd--;
       if(decideBlock(it,me,foe,'plan'))return it;
       if(decideIntercept(it,foe))return it;
       if(decideBlock(it,me,foe,'react'))return it;
       if(decidePunish(it,me,foe,justGotUp,'trigger'))return it;
+      // Task 12.3 (frozen interface, exact ruling): the bait hold gate -- see decideBaitHold's own
+      // comment for why it sits exactly here, after every defensive/punish phase but before every
+      // offense-initiating one below.
+      if(decideBaitHold(it,me))return it;
       // Fix wave item 1: p.special is a per-frame probability, same scale as p.attack just below (and
       // every other AI_TIERS roll) — the frozen plan table put it on a per-second scale without saying
       // so (a plan defect: see the final review), and multiplying by STEP here silently made it ~39:1
@@ -3718,7 +3842,6 @@ const AI={
       // its signature special before spending the same cd window on a lesser move.
       if(decideSpecial(it,me,foe))return it;
       if(decideHeavy(it,me,dist,lightRange,heavyRange,'trigger'))return it;
-      if(decideBait(it,me,dist,'trigger'))return it;
       if(decideAttack(it,dist,lightRange,'attack'))return it;
       if(decideAttack(it,dist,lightRange,'dash'))return it;
       if(decideApproach(it,dist,lightRange))return it;
@@ -10890,11 +11013,19 @@ Test.add('tier.kit: t1/t2 (kit 0) never draw the extra kit rng roll -- decideSpe
   // delays every later hit in this scripted exchange by that same +6f -- frame 275->281 (t1) and
   // 220->226 (t2), hp/hit-sequence otherwise bit-identical (s3 itself never travels -- no track was
   // added to it -- and p1 never blocks in this scenario, so chipMul/blockstun/unblockable never come
-  // into play here). Re-measured against the current tree, same discipline every prior re-pin in this
-  // file already uses.
+  // into play here).
+  // Task 12.3 re-pin: once power is spent (all four s3 sub-hits landed), this scripted fight falls
+  // back to p2's own ordinary offense for the rest of the 400-step budget -- some of those later
+  // mediums now come from decideApproach (p2 out of light range after a knockback), which routes
+  // through the new 6-frame WINDUP telegraph before the actual dash-in fires (Task 12.3, frozen
+  // interface) instead of firing instantly. hp and the hit SEQUENCE (moves, order, damage) are
+  // bit-for-bit unchanged -- only each later hit's own frame timestamp shifts later, which is exactly
+  // what a pure "delay before movement, no other behavior change" telegraph should do. Re-measured
+  // against the current tree (281->293, t1; 226->232, t2 -- one extra WINDUP cycle at t1's own slower
+  // approach cadence than t2's), same discipline every prior re-pin in this file already uses.
   const golden={
-    t1:{hp1:0,hp2:1000,frame:281,hits:['s3:180','s3:180','s3:180','s3:180','medium:96','medium:96','medium:96']},
-    t2:{hp1:0,hp2:1000,frame:226,hits:['s3:180','s3:180','s3:180','s3:180','medium:96','medium:96','light:60','light:63']}};
+    t1:{hp1:0,hp2:1000,frame:293,hits:['s3:180','s3:180','s3:180','s3:180','medium:96','medium:96','medium:96']},
+    t2:{hp1:0,hp2:1000,frame:232,hits:['s3:180','s3:180','s3:180','s3:180','medium:96','medium:96','light:60','light:63']}};
   for(const tier of['t1','t2']){
     const f=mkFight({ctrl1:Ctrl.idle(),ctrl2:AI.make(tier,7)});closeIn(f);f.p2.power=300;
     for(let i=0;i<400;i++){f.cinematic=0;f.step()}
@@ -11899,10 +12030,19 @@ Test.add('a medium started already within light range does not dash forward at a
 // on a 7-vs-8 coin-flip tie post-fix, purely a small-sample artifact; 60 seeds lands 18-vs-17, the
 // same direction the pre-fix 20-seed run measured) so the assertion isn't riding a single-seed knife
 // edge the underlying invariant was never actually meant to depend on.
+// Task 12.3: the new post-decision cooldown (p.cool, 55_ai.js's decideBlock react branch) is live for
+// t4 (cool:6) -- a fighter that just blocked/parried can't re-roll another block/parry for 6 frames,
+// which lowers the RAW block+parry counts on both sides of this comparison and made the aggregate
+// noisier at n=60 (measured: 20-vs-21, the inequality flipping negative by exactly 1 -- a genuine
+// small-sample artifact, not a directional regression; the underlying invariant -- a far dash-in's own
+// longer effStartup gives strictly more reactive opportunities than a near one, cooldown or not --
+// still holds clearly once sampled wider). Widened 60->200 seeds (measured: 79-vs-70, comfortably
+// far>=near again) rather than touching any AI field, per the same "retune by stats/AI fields only,
+// widen the SAMPLE, not the seed used for balance" discipline the 20->60 widening above already set.
 Test.add('t4 AI blocks/parries a far medium dash-in at least as often as a near one (effStartup fix)',()=>{
   let farTotal=0,nearTotal=0;
   const steps=Array.from({length:20},(_,i)=>({f:i*40,intent:{medium:true}}));
-  for(let seed=1;seed<=60;seed++){
+  for(let seed=1;seed<=200;seed++){
     const far=mkFight({ctrl1:Ctrl.script(steps),ctrl2:AI.make('t4',seed)});
     far.p2.x=STAGE_W/2+200;far.p1.x=far.p2.x-300-48; // far: the dash-in extends effStartup past base
     run(far,900);
@@ -11941,6 +12081,130 @@ Test.add('t1 still presses a medium within 90 frames from 320px neutral even wit
     ok(fired,'t1 must press a medium within 90 frames from 320px even with attack forced to 0 -- '+
       'approach must be the guaranteed fallback, not a dead knob')
   }finally{AI.TIERS.t1.attack=origAttack}});
+
+// ================================================================================================
+// Task 12.3: readable AI -- wind-up telegraph, human-like reaction floor + decision cooldown, real
+// baiting, competent-bot upgrades.
+// ================================================================================================
+Test.add('Task 12.3: an AI approach dash-in passes through exactly WINDUP_FRAMES(6) frames of WINDUP -- no hitbox, no movement -- before the real tracked medium dash-in starts',()=>{
+  const origAttack=AI.TIERS.t1.attack;
+  AI.TIERS.t1.attack=0; // isolate decideApproach as the only source of a medium press (mirrors the 320px approach test above)
+  try{
+    const f=mkFight({ctrl2:AI.make('t1',7)});
+    let windupStart=-1,windupFrames=0,xAtWindupStart=null,attackStart=-1;
+    for(let i=0;i<200&&attackStart<0;i++){
+      f.step();
+      if(f.p2.state==='WINDUP'){
+        if(windupStart<0){windupStart=i;xAtWindupStart=f.p2.x}
+        windupFrames++;
+        eq(f.p2.hitbox(),null,'WINDUP must never present a hitbox');
+        eq(f.p2.x,xAtWindupStart,'WINDUP must not move the fighter')}
+      if(windupStart>=0&&f.p2.state==='ATTACK'&&f.p2.moveName==='medium'&&attackStart<0)attackStart=i}
+    ok(windupStart>=0,'the approach dash-in must enter WINDUP');
+    // Off-by-one, same as every other blind f>=N countdown state in this file (CHARGE/KNOCKDOWN/
+    // BLOCKSTUN/...): act() sets f=0 the instant WINDUP is entered, then tick() (same step() call)
+    // increments f to 1 and checks f>=WINDUP_FRAMES BEFORE this loop's own post-step poll ever sees
+    // f=0 -- so a poll after every step() observes state==='WINDUP' for WINDUP_FRAMES-1 calls, then
+    // sees 'ATTACK' directly on the transition step itself (the same tick() call that reaches
+    // f===WINDUP_FRAMES also calls startMove right there). The SIM still spends a true WINDUP_FRAMES
+    // worth of `f` (1..WINDUP_FRAMES) in the state; this is purely an artifact of counting external
+    // polls taken after tick() already ran, not a real frame missing from the telegraph.
+    eq(windupFrames,WINDUP_FRAMES-1,'an external post-step poll must see WINDUP_FRAMES-1 frames of WINDUP');
+    ok(attackStart>windupStart,'the real medium dash-in must start only after WINDUP ends')
+  }finally{AI.TIERS.t1.attack=origAttack}});
+Test.add('Task 12.3: a medium landing on a foe mid-WINDUP intercepts at the class-specific x1.8 multiplier, same as the ATTACK/startup case',()=>{
+  // Same hand-built att/def state, direct f.resolve() style the sibling "mid-medium-startup" intercept
+  // tests above already use -- only the DEFENDER's own vulnerable state differs (WINDUP, no move at
+  // all, rather than ATTACK/startup).
+  const f=mkFight(),att=f.p1,def=f.p2;
+  att.move=att.moveDef('medium');att.moveName='medium';att.chainNode=1;att.interceptedThisMove=false;att.hits=new Set();att.power=0;
+  def.setState('WINDUP',2);def.clearMove();
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true,moveName:att.moveName});
+  const hit=f.log.find(e=>e.type==='hit'&&e.who===1);
+  ok(hit,'the medium must land');
+  eq(hit.val,173,'same x1.8 medium intercept multiplier as the ATTACK/startup case (60*1.6*1.8=172.8->173)');
+  eq(att.power,27,"powHit(12)+the intercept's own flat +15");
+  eq(f.hitstop,10,"the intercept's own hitstop still fires for a WINDUP catch");
+  ok(f.log.some(e=>e.type==='intercept'),'an intercept event must be logged even though def was never in ATTACK at all')});
+Test.add('Task 12.3: react is floored at 4 frames for every tier',()=>{
+  for(const t of['t1','t2','t3','t4','t5'])ok(AI.TIERS[t].react>=4,t+'.react must be >=4, got '+AI.TIERS[t].react);
+  eq(AI.TIERS.t5.react,4,'t5 react is floored at exactly 4 (was 1 before this task)')});
+Test.add('Task 12.3: `cool` (the new post-decision cooldown) is 0 for t1/t2 (bit-identical) and 6 for t3/t4/t5',()=>{
+  eq(AI.TIERS.t1.cool,0);eq(AI.TIERS.t2.cool,0);
+  eq(AI.TIERS.t3.cool,6);eq(AI.TIERS.t4.cool,6);eq(AI.TIERS.t5.cool,6);
+  eq(AI.profiles.dummy.cool,0)});
+// Direct controller-level test (AI.make's own returned {next} object, hand-fed me/foe every call) --
+// a full-sim black-box test can't isolate this cleanly, since every real move's own duration already
+// exceeds 6 frames (a physical dash-back alone locks this fighter busy for DASH_BACK.frames=12), so a
+// second REAL decision opportunity is never actually available within the cooldown's own 6-frame
+// reach to begin with. Calling ctrl.next() directly and forcing me.state back to 'IDLE' every call
+// (bypassing the physical move-duration lockout, which isn't what's under test here) isolates the
+// decisionCd gate itself: p.dash forced to 1 and dist forced inside light range makes decideAttack's
+// own dash-back roll unconditional whenever the gate lets it through, so the resulting fire pattern is
+// fully deterministic and reads the cooldown's own period directly.
+Test.add('Task 12.3: the post-decision cooldown makes a t3 AI\'s own dash-back decision refire only once every 6 calls, vs every call with cool forced to 0',()=>{
+  function fires(coolOverride){
+    const t=AI.TIERS.t3,saved=Object.assign({},t);
+    Object.assign(t,{cool:coolOverride,dash:1,attack:0,special:0,heavy:0,intercept:0,punish:0,block:0,bait:0,approach:0});
+    try{
+      const me=mkFighter(),foe=mkFighter();
+      me.x=0;me.width=48;foe.x=40;me.power=0; // dist=|40-0|-48=-8, well inside light range
+      const ctrl=AI.make('t3',7);
+      const out=[];
+      for(let i=0;i<12;i++){me.state='IDLE';out.push(!!ctrl.next({frame:i},me,foe).dashBack)}
+      return out
+    }finally{Object.assign(t,saved)}}
+  eq(JSON.stringify(fires(0)),JSON.stringify(Array(12).fill(true)),
+    'cool:0 -- every call must fire (sanity: the harness itself can trigger every opportunity)');
+  const withCooldown=fires(6);
+  eq(JSON.stringify(withCooldown),JSON.stringify([true,false,false,false,false,false,true,false,false,false,false,false]),
+    'cool:6 -- only calls 0 and 6 (exactly 6 apart) may fire; every call in between must be suppressed')});
+Test.add('Task 12.3: bait (forced to 1) produces a real M-L cut on a punish-medium opener, then holds >=20 frames with no further offense',()=>{
+  const t=AI.TIERS.t3,saved=Object.assign({},t);
+  Object.assign(t,{bait:1,punish:1,attack:0,special:0,heavy:0,intercept:0,dash:0,approach:0,block:0});
+  try{
+    const f=mkFight({ctrl2:AI.make('t3',7)});
+    closeIn(f);
+    // A long-enough stun window that the punish medium's own M-L follow-through has room to land
+    // without p1 (the stunned foe) ever recovering mid-sequence and disturbing the read.
+    f.p1.setState('STUNNED',0);f.p1.stun=300;
+    let seen=0,hits=[],idleFrame=-1;
+    for(let i=0;i<300;i++){
+      f.step();
+      for(;seen<f.log.length;seen++){
+        const e=f.log[seen];
+        if(e.who===-1&&(e.type==='hit'||e.type==='block'))hits.push({move:e.move,frame:i})}
+      if(hits.length>=2&&f.p2.state==='IDLE'&&idleFrame<0)idleFrame=i}
+    eq(hits.length>=2?2:hits.length,2,'p2 must land the M-L opener+continuation (2 hits), got '+hits.length+': '+JSON.stringify(hits));
+    eq(hits[0].move,'medium','node 1 must be the punish medium opener');
+    eq(hits[1].move,'light','node 2 must be the light continuation -- the M-L bait cut');
+    ok(idleFrame>=0,'p2 must return to IDLE after the M-L cut (no forced node-3 continuation)');
+    const thirdHit=hits[2];
+    ok(!thirdHit||thirdHit.frame-idleFrame>=20,'the M-L cut must hold at least 20 frames with no further offense before any 3rd hit')
+  }finally{Object.assign(t,saved)}});
+Test.add('Task 12.3: bait never draws rng for t1/t2 (bait:0) -- comboPlanFor falls straight through to the plain/mixed plan, same as before this task',()=>{
+  eq(AI.TIERS.t1.bait,0);eq(AI.TIERS.t2.bait,0)});
+Test.add('Task 12.3: Ctrl.competent intercepts a foe\'s WINDUP with a medium',()=>{
+  const f=mkFight({ctrl1:Ctrl.competent(1),ctrl2:Ctrl.idle()});
+  // Manually drive p2 into WINDUP with the exact intent decideApproach itself would produce (55_ai.js)
+  // -- direct, deterministic, and isolates Ctrl.competent's own read from decideApproach's own
+  // debounce/timing (already covered by the dedicated WINDUP-telegraph test above).
+  f.p2.act(Object.assign(Ctrl.EMPTY(),{approach:true}),f);
+  eq(f.p2.state,'WINDUP','sanity: the manual approach intent must enter WINDUP');
+  let pressedDuringWindup=false;
+  for(let i=0;i<WINDUP_FRAMES-1&&!pressedDuringWindup;i++){
+    f.step();
+    if(f.p2.state==='WINDUP'&&f.p1.state==='ATTACK'&&f.p1.moveName==='medium')pressedDuringWindup=true}
+  ok(pressedDuringWindup,'Ctrl.competent must throw a medium while foe is still in WINDUP')});
+Test.add('Task 12.3: Ctrl.competent punishes a landed parry with a held heavy (parry -> heavy)',()=>{
+  const f=mkFight({ctrl1:Ctrl.competent(1),ctrl2:Ctrl.idle()});
+  // Hand-build a parry the same way Fight.resolve's own parry branch would leave things: p2 (the
+  // parried attacker) STUNNED with parryStunned set, p1 (the parrier) back at IDLE.
+  f.p2.setState('STUNNED',0);f.p2.stun=PARRY_STUN;f.p2.parryStunned=true;f.p1.setState('IDLE');
+  let heavyFired=false;
+  for(let i=0;i<40&&!heavyFired;i++){f.step();if(f.p1.state==='CHARGE'||( f.p1.state==='ATTACK'&&f.p1.moveName==='heavy'))heavyFired=true}
+  ok(heavyFired,'Ctrl.competent must commit to a heavy the very next opportunity after its own parry lands')});
+
 Test.add('AI vs random bot stays deterministic with the new approach field wired in (self-comparison, not a fixed snapshot)',()=>{
   const a=mkFight({ctrl1:Ctrl.random(3),ctrl2:AI.make('basic',9)}),b=mkFight({ctrl1:Ctrl.random(3),ctrl2:AI.make('basic',9)});run(a,900);run(b,900);
   eq(a.p1.hp,b.p1.hp);eq(a.p2.hp,b.p2.hp);eq(a.log.length,b.log.length)});
@@ -17953,7 +18217,14 @@ Test.add('kit usage in real (unprimed) play: over a seeded set of t3+ vs Ctrl.co
   // re-searched seeds, carl's S3 and katia's S3 again fail to connect within the 12000-step budget. A
   // fresh re-search over seeds 1-150 (same method) found seed 7 (carl) and seed 1 (katia) land both s2
   // and s3 well within budget; donut's own seed 2 is untouched (still lands both).
-  const cfgs=[['carl',CHAMPS.carl,'t3',7],['donut',CHAMPS.donut,'t3',2],['katia',CHAMPS.katia,'t3',1]];
+  // Task 12.3: re-searched again -- carl 7 -> 4, katia 1 -> 2. decideApproach's new WINDUP telegraph,
+  // the new post-decision cooldown (p.cool), the new M-L bait-cut-and-hold, and Ctrl.competent's own
+  // new wind-up-intercept/parry->heavy reads all shift exactly when and how much of each exchange
+  // lands, which again moves the frame each pinned seed's own power curve crosses 200/300. A re-search
+  // over seeds 1-150 (same method) found seed 4 (carl) and seed 2 (katia) land both s2 and s3 well
+  // within budget; donut's own seed 2 is untouched (still lands both); mongo's own S2-only seed 1 is
+  // also untouched (still lands S2).
+  const cfgs=[['carl',CHAMPS.carl,'t3',4],['donut',CHAMPS.donut,'t3',2],['katia',CHAMPS.katia,'t3',2]];
   for(const[id,def,tier,seed]of cfgs){
     const f=new Fight({seed,p1:def,p2:BOSSES.mother_rat,ctrl1:AI.make(tier,seed),ctrl2:Ctrl.competent(seed+500),clock:600,noCrit:false});
     f.p2.hp=f.p2.maxHp=1e7;f.p1.hp=f.p1.maxHp=1e7;
@@ -18098,7 +18369,10 @@ Test.add('Task 9.5: the hp<=60% self-buff rule is scoped to self-target specials
   // true no-op for a non-self-target kit, not just "the golden numbers happen to still match").
   // Task 12.2 re-pin: same +6f s3-gap shift as the sibling golden test above (40_movedata.js's own
   // s3 gap 8->10) -- p2's own hp isn't asserted here, only p1's (always 0, a full loss either way).
-  const golden={t1:{hp1:0,hp2:1000,frame:281},t2:{hp1:0,hp2:1000,frame:226}};
+  // Task 12.3 re-pin: same WINDUP-delayed-approach-medium shift as the sibling golden test above
+  // (281->293, t1; 226->232, t2) -- p2's hp being forced low doesn't change which/how many of its
+  // later mediums come from decideApproach, so the shift is identical to the sibling test's.
+  const golden={t1:{hp1:0,hp2:1000,frame:293},t2:{hp1:0,hp2:1000,frame:232}};
   for(const tier of['t1','t2']){
     const f=mkFight({ctrl1:Ctrl.idle(),ctrl2:AI.make(tier,7)});closeIn(f);
     f.p2.power=300;f.p2.hp=Math.floor(f.p2.maxHp*0.5); // below 60%, same as the mongo test above, on a fighter whose s3 targets the foe

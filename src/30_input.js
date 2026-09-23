@@ -263,7 +263,12 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
     return it}};
 
 const Ctrl={
-  EMPTY:()=>({light:false,medium:false,heavy:false,block:false,dashBack:false,special:0}),
+  // Task 12.3 (frozen interface, exact ruling): `approach` -- a NEW intent field, set only by AI.make's
+  // decideApproach (55_ai.js) to trigger Fighter's own new WINDUP telegraph (50_fighter.js); every
+  // other field is untouched, so no existing controller (Ctrl.player/competent/random/tutorial*) needs
+  // any change to keep producing a valid intent -- they simply never set it, same as they've never set
+  // `special` to anything but 0 unless they actually meant to fire one.
+  EMPTY:()=>({light:false,medium:false,heavy:false,block:false,dashBack:false,special:0,approach:false}),
   idle:()=>({next:()=>Ctrl.EMPTY()}),
   player:()=>({next(){Input.tick();return Input.drain()}}),
   hold:intent=>({next:()=>Object.assign(Ctrl.EMPTY(),intent)}),
@@ -290,6 +295,20 @@ const Ctrl={
   //      player-thrown M-L-L-L-M. A light-opened chain (openedMedium false) keeps the old flat
   //      all-light follow through node 5, unchanged from before this task.
   //   3. otherwise, if busy, do nothing (can't act)
+  //   3b. Task 12.3 (frozen interface, exact ruling, "parry -> heavy"): once this fighter's own held
+  //      block (step 6 below) actually lands a parry, Fight.resolve (60_fight.js) stuns the PARRIED
+  //      foe (foe.state='STUNNED', foe.parryStunned=true) and returns this fighter straight to IDLE --
+  //      reachable here, the very next next() call, ahead of every other check. Holds a full heavy
+  //      charge (reusing step 9's own heavyHold countdown, not a second field) so the punish auto-fires
+  //      well inside PARRY_STUN's 66-frame window, same "parry -> heavy" lesson Ctrl.tutorialBot's own
+  //      step 2 teaches.
+  //   3c. Task 12.3 (frozen interface, exact ruling, "intercept a wind-up"): foe.state==='WINDUP' is
+  //      the AI's own new telegraphed approach dash-in (55_ai.js's decideApproach, 50_fighter.js's
+  //      WINDUP state, no hitbox) -- read it the instant it's visible and throw a medium. Whether the
+  //      resulting hit actually lands while foe is still in WINDUP (a real INTERCEPT_MUL medium read,
+  //      Fight.resolve's rawIntercept) or only once foe has already moved on into its own real dash-in
+  //      ATTACK startup (the pre-existing intercept clause) depends on live timing/range; either way
+  //      this is the punishing read the tell exists to teach a real player to make.
   //   4. Task 7.5 (dash-back read): read a foe's medium dash-in DASH_READ_LEAD frames before its
   //      hitbox goes active and dash back through it instead of blocking -- DASH_BACK's own 8 frames
   //      of i-frames (50_fighter.js) comfortably cover the foe's active window at this lead, at any
@@ -358,6 +377,12 @@ const Ctrl={
     // read here (me.hp/me.power/me.chainNode/...) keeps. No rng touched.
     if(me.state==='BLOCKSTUN'&&me.blockAge>0){it.block=true;return it}
     if(me.busy())return it;
+    // Task 12.3 (frozen interface, exact ruling): "parry -> heavy" -- see this controller's own
+    // numbered comment (step 3b) above for the full reasoning.
+    if(foe.state==='STUNNED'&&foe.parryStunned){heavyHold=me.moveDef('heavy').charge+1;it.heavy=true;return it}
+    // Task 12.3 (frozen interface, exact ruling): "intercept a wind-up" -- see this controller's own
+    // numbered comment (step 3c) above for the full reasoning.
+    if(foe.state==='WINDUP'){it.medium=true;return it}
     // Task 7.5 (dash-back read): see this controller's own numbered comment above for the full
     // reasoning -- foe.effStartup is always set once foe.state==='ATTACK' (setupDash runs inside the
     // same startMove() call that sets it), the || fallback only guards a hand-built ATTACK state that
