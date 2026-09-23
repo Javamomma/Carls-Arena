@@ -101,12 +101,22 @@ class Fight{
       // now -- mongo's Ground Slam (m.ignoreBlock:'knockdown') needs it in resolve()'s block branch to
       // gate the knockdown to the move's own final sub-hit, the same "last blow only" scope every other
       // multi-hit bonus (push/knockdown/hitstop) already gets.
-      return{type:'block',att,def,idx,m,last}}
+      // Task 12.1 fix round 1 (found while re-pinning the medium-ender-knockdown golden test):
+      // moveName snapshots att.moveName HERE, at detect() time -- Fight.step runs detect() for both
+      // c1/c2 before resolving either (see step()'s own comment), but on a true mutual trade the
+      // FIRST resolve() call (c1) can call def.clearMove() on a fighter who is THIS record's own
+      // attacker (that same fighter is c2's att, since a mutual trade means both sides are attacking
+      // each other) -- clearMove() nulls moveName, so a live `att.moveName` read inside resolve()
+      // (isChainEnder, the punish check, the dustArc/hfCls fx picks, and the final emit's own `move`
+      // field) could silently read null instead of the move that's actually landing THIS hit. `m`
+      // just above already avoids the identical class of staleness for the move's own DATA; this is
+      // the same fix for its NAME. See Fight.resolve's own comment at each read site.
+      return{type:'block',att,def,idx,m,last,moveName:att.moveName}}
     // Task 9.1: `forcedThroughBlock` records that def WAS actually blocking when this hit's own
     // move.unblockable (whole-move `true`, this-sub-hit-only `'last'`, or the unblockableSpecials
     // buff) bypassed the block branch entirely -- a bare fact for resolve()'s hit branch to read;
     // resolve() uses it only to decide whether to queue the presentation-only UNBLOCKABLE popup.
-    return{type:'hit',att,def,idx,m,last,forcedThroughBlock:blocking&&unblockable}}
+    return{type:'hit',att,def,idx,m,last,forcedThroughBlock:blocking&&unblockable,moveName:att.moveName}}
   // Task 7.2: the landed move's own effective per-node damage -- MOVES.light/medium each carry a
   // chainDmg[] indexed by chainNode (1..CHAIN.nodes), the frozen node multiplier table; every other
   // move (heavy, s1-s3) has no chainDmg at all and falls back to its own flat m.dmg, bit-identical to
@@ -115,7 +125,7 @@ class Fight{
   // hand-built fixture that skipped startMove entirely (a few unit tests construct hit/block records
   // directly rather than driving a real chain).
   nodeDmg(att,m){return m.chainDmg?m.chainDmg[Math.max(1,Math.min(att.chainNode||1,m.chainDmg.length))-1]:m.dmg}
-  resolve(r){const{type,att,def,idx}=r;att.hits.add(idx);
+  resolve(r){const{type,att,def,idx,moveName}=r;att.hits.add(idx);
     if(type==='miss'){
       // Task 7.3 (frozen interface, exact ruling): dexterity -- def dodged this hit specifically by
       // dashing back through it with i-frames still up (def.state==='DASH'&&def.inv>0; detect() also
@@ -182,7 +192,7 @@ class Fight{
       // generically for both branches, so both honor it identically).
       if(m.applies)for(let i=0;i<m.applies.length;i++){const ap=m.applies[i];
         if(ap.on==='block')Effects.apply(this,ap.target==='self'?att:def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
-      this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip,att.moveName)}
+      this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip,moveName)}
     const m=r.m,last=r.last;
     const cls=CLASS_BEATS[att.def.cls]===def.def.cls?CLASS_BONUS:1;
     // Task 7.1: Effects.mods(holder) -> {atkMul,armorDelta,critDelta}, neutral (1,0,0) whenever holder
@@ -235,7 +245,7 @@ class Fight{
     // this resolve() call regardless of what move actually landed it. Mutually exclusive with intercept
     // by construction: a parry-stunned fighter is in STUNNED, never ATTACK, so rawIntercept can never
     // also be true for the same def on the same call.
-    const punish=!!(def.parryStunned&&att.moveName==='heavy');
+    const punish=!!(def.parryStunned&&moveName==='heavy');
     if(def.parryStunned)def.parryStunned=false;
     // ref carries dmg, the two power deltas, and the move itself so armorUp/powerGain can adjust
     // them before either is applied; defender-side hooks run first, then attacker-side, both against
@@ -269,8 +279,8 @@ class Fight{
     // see Fighter.act's node-4 branch) needs no override at all here: CHAIN.enders.heavy only carries
     // {charge,sig}, so m (already merged with that override in startMove) still carries base MOVES.
     // heavy's own knockdown/push untouched, same as a plain neutral heavy.
-    const isChainEnder=(att.moveName==='light'||att.moveName==='medium')&&att.chainNode===CHAIN.nodes;
-    const ender=isChainEnder?CHAIN.enders[att.moveName]:null;
+    const isChainEnder=(moveName==='light'||moveName==='medium')&&att.chainNode===CHAIN.nodes;
+    const ender=isChainEnder?CHAIN.enders[moveName]:null;
     const knockdown=ender?!!ender.knockdown:!!m.knockdown;
     def.clearMove();if(knockdown&&last)def.setState('KNOCKDOWN');else{def.stun=m.hitstun;def.setState('HITSTUN')}
     def.chainNode=0; // Task 7.2 ruling: taking a hit resets the DEFENDER's own chain (they were interrupted mid-recovery)
@@ -330,7 +340,7 @@ class Fight{
     // touching hitstop/shake, so the sim stays exactly as deterministic as it already was. att.face
     // (not def's) is the kick's own forward direction, since the dust sweeps the way the kicking
     // attacker is facing, into the defender.
-    if(att.moveName==='medium')this.fx.push({kind:'dustArc',x:def.x,y:FLOOR,face:att.face});
+    if(moveName==='medium')this.fx.push({kind:'dustArc',x:def.x,y:FLOOR,face:att.face});
     else this.fx.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:crit?'#ff5a4a':'#ffd86b'});
     // Task 7.4 (frozen interface, exact ruling): a per-class impact fx (dust ring/arc slash/caster
     // ring, keyed off the ATTACKER's own def.impact -- 40_movedata.js) layered on top of (never
@@ -371,7 +381,7 @@ class Fight{
     // unconditionally, every landed sub-hit, and the presentation-side hitfeel resolver (72_fx.js,
     // hung off the FX object) is the only place that reads
     // `last` to decide whether a multi-hit special's own early sub-hit should stay silent).
-    const hfCls=intercept?'intercept':att.moveName;
+    const hfCls=intercept?'intercept':moveName;
     this.fx.push({kind:'hitfeel',cls:hfCls,dir:att.face,last});
     // Task 7.3 (frozen interface, exact ruling): the intercept's own read/reward gets its own
     // INTERCEPT! callout, on top of (never instead of) the plain damage popup/spark just pushed
@@ -388,7 +398,7 @@ class Fight{
     // tell shape, since nothing downstream needs a facing for this one.
     if(punish)this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'PUNISH!',col:'#ff5a4a',big:true});
     if(punish)this.emit('punish',att,def,dmg);
-    this.emit('hit',att,def,dmg,att.moveName)}
+    this.emit('hit',att,def,dmg,moveName)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
     this.winner=a.hp<=0?b:b.hp<=0?a:(a.hp/a.maxHp>=b.hp/b.maxHp?a:b);
     a.setState(a===this.winner?'WIN':'KO');b.setState(b===this.winner?'WIN':'KO');

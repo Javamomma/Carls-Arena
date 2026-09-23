@@ -86,9 +86,37 @@ const AI_TIERS={
   // touching react/hold/dash (t4's other already-tuned knobs, fix-wave item 3's own fallback) to keep
   // this retune isolated to the fields this task's own mechanic actually interacts with (attack rate
   // and the two defensive rolls Ctrl.competent's own offense now has to get through more often).
-  t4:{react:8, attack:.55,block:.85,parry:.5, dash:.06,special:1,   heavy:.3, intercept:.5, bait:.25,punish:1, approach:40,hold:5, comboMix:true, kit:.8},
+  // Task 12.1 fix round 1 (controller ruling, measured -- see the task report's own before/after
+  // tables): attack .55->.42. The standing medium ender (CHAIN.enders.medium.knockdown:false, this
+  // task) removed the ~50-frame KNOCKDOWN+getup denial the bot used to eat every time t4 landed its
+  // own comboMix-follow M-L-L-L-M -- isolating that ONE field (CHAIN.enders.medium.knockdown reverted
+  // to true, nothing else touched) restored t3(48.3%)<t4(36.7%) monotonicity outright at n=30, seed
+  // base 1 (vs t3=58.3/t4=66.7 with the standing ender in), confirming the standing ender -- not a
+  // bug anywhere else -- is what inflated t4. The straightforward fix (buff attack/block/hold to make
+  // t4 chase harder) backfired: RAISING attack (.55->.7/.85), hold, block, or dash all pushed the
+  // bot's own win rate UP further, not down, because t4's own spontaneous attack roll opens with a
+  // dash-in MEDIUM whenever out of light range (decideAttack, below) -- exactly the move type Ctrl.
+  // competent's own dash-back read (30_input.js) punishes hardest (a clean dodge + free dexterity crit
+  // buff, no chip taken at all). MORE spontaneous attacks meant MORE free reads for the bot, net
+  // weakening t4. LOWERING attack (fewer of exactly that free-read opportunity) is what actually
+  // restores monotonicity: a sweep at n=60 on both seed bases (.4/.42/.45/.47/.5) landed .42 as the
+  // one value keeping every affected floor band (f1_hob, f1_grull, both tier:'t4') comfortably inside
+  // its own gate too, not just the donut tier-sweep -- .4 pushed f1_grull's own seed-base-101 win rate
+  // to 8.3% (below its 10-35% floor); .45/.47/.5 all left f1_grull's seed-base-1 win rate sitting
+  // exactly on the 10% floor with no margin. `hold`/`react`/`comboMix`/`kit`/`punish` are untouched --
+  // this fix is isolated to the one field the standing ender's own mechanic actually interacts with.
+  t4:{react:8, attack:.42,block:.85,parry:.5, dash:.06,special:1,   heavy:.3, intercept:.5, bait:.25,punish:1, approach:40,hold:5, comboMix:true, kit:.8},
   // Fix-wave item 3 (measured fallback): dash .08->.04, same reasoning/source as t4.react above.
-  t5:{react:1, attack:.9, block:.95,parry:.8, dash:.04,special:1,   heavy:.35,intercept:.9, bait:.4, punish:1, approach:30,hold:4, comboMix:true, kit:1}};
+  // Task 12.1 fix round 1: attack .9->.84, same root cause and same lever as t4's own retune just
+  // above (the standing medium ender's own lost knockdown-denial), scaled down since t5's baseline
+  // win rate against the bot had crashed much further (6.7% at n=60 seed base 1, vs its own pre-task
+  // ~15-23% band) -- t5.react is deliberately left untouched: a same-style probe (react 1->2) rather
+  // than attack collapsed the bot's own win rate to 68-75% almost immediately, confirming t5's whole
+  // character depends on staying at react:1 (frozen since the Task 7.2 retune) and attack is the
+  // correct, isolated lever here too. A sweep at n=60 on both seed bases (.9/.88/.86/.84/.82) landed
+  // .84 as the value that puts t5 back in its historical ~15-20% band on both (18.3%/15.0% measured)
+  // while keeping f2_mother (tier:'t5') safely inside its own 10-35% band on both (20.0%/31.7%).
+  t5:{react:1, attack:.84,block:.95,parry:.8, dash:.04,special:1,   heavy:.35,intercept:.9, bait:.4, punish:1, approach:30,hold:4, comboMix:true, kit:1}};
 const AI={
   TIERS:AI_TIERS,
   // profiles IS the alias table (not a copy of it) so old direct reads like AI.profiles.brute and

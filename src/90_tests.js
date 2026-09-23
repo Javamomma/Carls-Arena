@@ -236,10 +236,41 @@ Test.add('KO ends the fight with WIN/KO states',()=>{
   ok(f.over);eq(f.winner,f.p1);eq(f.p1.state,'WIN');eq(f.p2.state,'KO');eq(f.log[f.log.length-1].type,'ko');run(f,10);eq(f.p1.state,'WIN')});
 Test.add('time-up picks the higher health percentage',()=>{
   const f=mkFight({p1:CHAMPS.carl,p2:CHAMPS.donut,clock:.05});f.p1.hp=500;run(f,5);ok(f.over);eq(f.winner,f.p2)});
-Test.add('a mirrored simultaneous trade lands both hits, not just p1\'s',()=>{
+// Task 12.1 fix round 1: also pins each hit's own `move` field. Fight.step resolves c1 (p1 attacks
+// p2) before c2 (p2 attacks p1) -- resolving c1's own 'hit' branch calls def.clearMove() on p2 (the
+// defender of THAT hit), which used to null p2.moveName before c2's own resolve() call ever read it
+// (p2 is c2's OWN attacker, on this exact mutual trade). Before this fix, this exact scenario logged
+// p2's own hit as move:null instead of move:'light' -- surfaced (not introduced) by Task 12.1's own
+// grammar/ender timing shift in an unrelated golden-run test, traced back to this real, pre-existing
+// bug and fixed here: detect() now snapshots each side's own moveName at detect time (same "avoid
+// reading a field the OTHER side's resolve() call may have already cleared this frame" discipline
+// `m`/ref.move already use), and resolve() reads that snapshot everywhere it used to read the live,
+// possibly-already-nulled field.
+Test.add('a mirrored simultaneous trade lands both hits, not just p1\'s, and both hits log their own real move name (not a stale/nulled one)',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([L(0)])});
   f.p1.x=W/2-40;f.p2.x=W/2+40;run(f,5);
-  eq(f.p1.hp,940);eq(f.p2.hp,940);eq(f.log.filter(e=>e.type==='hit').length,2)});
+  eq(f.p1.hp,940);eq(f.p2.hp,940);
+  const hits=f.log.filter(e=>e.type==='hit');
+  eq(hits.length,2);
+  ok(hits.every(e=>e.move==='light'),'both sides of a true mutual trade must log move:\'light\', never move:null: '+JSON.stringify(hits.map(e=>e.move)))});
+// A mixed-move mutual trade (medium vs light, not two identical lights) -- proves the fix reads each
+// side's OWN move name correctly, not just coincidentally matching because both happened to be the
+// same move. p2's own medium is the one whose moveName Fight.step's own clearMove()-then-read hazard
+// (see the test just above) would have nulled, since p1 (c1's attacker) resolves first.
+Test.add('a mixed-move mutual trade (p1 light, p2 medium) logs each side\'s own correct move name',()=>{
+  // p1's own light is thrown 5 controller-calls after p2's medium (medium's 10-frame startup minus
+  // light's own 5-frame startup) so their active windows land on the SAME sim frame -- thrown together
+  // (L(0) both sides), the light's own shorter startup would always land first and interrupt p2's
+  // medium before it ever reaches its own active window (verified empirically: off<5 landed only
+  // p1's light, off>5 landed only p2's medium -- 5 is the one offset that lands both).
+  const f=mkFight({ctrl1:Ctrl.script([L(5)]),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}])});
+  f.p1.x=W/2-40;f.p2.x=W/2+40;
+  run(f,20);
+  const hits=f.log.filter(e=>e.type==='hit');
+  eq(hits.length,2,'both the light and the medium must land');
+  const p1hit=hits.find(e=>e.who===1),p2hit=hits.find(e=>e.who===-1);
+  ok(p1hit&&p1hit.move==='light','p1\'s own hit must log move:\'light\'');
+  ok(p2hit&&p2hit.move==='medium','p2\'s own hit must log move:\'medium\', not a stale/nulled value from p1\'s own resolve() running first')});
 Test.add('combo resets after the defender is free for 20 frames',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);eq(f.p1.combo,1);run(f,60);eq(f.p1.combo,0)});
 Test.add('dummy AI never attacks',()=>{const f=mkFight({ctrl2:AI.make('dummy',3)});run(f,600);eq(f.log.filter(e=>e.type==='hit'&&e.who===-1).length,0)});
@@ -364,17 +395,14 @@ Test.add('tier.kit: t1/t2 (kit 0) never draw the extra kit rng roll -- decideSpe
 // -- so a held medium repeats M-M, not M-M-M-M-M), and the medium ender no longer knocks down either,
 // both of which genuinely change this exchange's own tempo/outcome -- re-measured against the current
 // tree the same way the file's own prior fix-wave/task re-pins already do.
-// One measured entry carries move:'null' (a pre-existing, out-of-scope quirk, NOT introduced by this
-// task): on a true mutual trade Fight.step resolves p1's own hit first, which clears p2.moveName via
-// def.clearMove() before p2's OWN hit this same frame is logged via att.moveName (60_fight.js's plain
-// `this.emit('hit',att,def,dmg,att.moveName)` reads it after that clear) -- see the fix-wave item 6
-// comment just above ref.move's own identical mutual-trade care, which never covered this second read.
-// Newly surfaced here because the grammar/knockdown changes shifted exactly which frame this exchange
-// lands a mutual trade on; left as-is (out of this task's own scope) and flagged in the task report.
+// Task 12.1 fix round 1: one entry per tier used to carry move:'null' (a genuine, pre-existing bug --
+// see the mutual-trade moveName-snapshot fix, 60_fight.js/detect()'s own comment -- surfaced, not
+// introduced, by this task's own timing shift). Now fixed at the source: both entries below read
+// their own real move name (t1's mutual-trade hit was a 'medium', t2's was an 's1').
 Test.add('Fix-wave M3: t1/t2 vs an ATTACKING p1 (exercises the block-hold reorder\'s st.hold arm/decrement path M2 documents, not just the kit field gating)',()=>{
   const golden={
-    t1:{hp1:904,hp2:0,frame:234,hits:['null:96']},
-    t2:{hp1:730,hp2:200,frame:342,hits:['light:90','light:90','null:90']}};
+    t1:{hp1:904,hp2:0,frame:234,hits:['medium:96']},
+    t2:{hp1:730,hp2:200,frame:342,hits:['light:90','light:90','s1:90']}};
   for(const tier of['t1','t2']){
     const f=mkFight({ctrl1:Ctrl.hold({medium:true}),ctrl2:AI.make(tier,7)});closeIn(f);
     for(let i=0;i<400;i++){f.cinematic=0;f.step()}
@@ -1436,7 +1464,7 @@ Test.add('Task 12.1: the medium ender (chainNode===CHAIN.nodes) pushes the defen
   const f=mkFight(),att=f.p1,def=f.p2;
   att.move=att.moveDef('medium');att.moveName='medium';att.chainNode=CHAIN.nodes;att.hits=new Set();
   def.hp=1000;def.x=att.x+200;const xBefore=def.x;
-  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true});
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true,moveName:att.moveName});
   eq(def.x-xBefore,att.face*CHAIN.enders.medium.push,'the medium ender must push the defender exactly CHAIN.enders.medium.push(90) px, in the attacker\'s own facing');
   eq(def.state,'HITSTUN','the medium ender must leave the foe standing in HITSTUN, never KNOCKDOWN')});
 // Task 12.1 (frozen ruling, exact test bullet): "M-M does not continue" -- CHAIN.rule.maxMediums(2)
@@ -1466,6 +1494,27 @@ Test.add('chain grammar: L-M-L-M lands four hits (a medium is a valid continuati
   eq(f.p1.chainLights,2,'sanity: light count never reached its own cap (4)');
   eq(f.p1.chainMediums,2,'sanity: the chain closed because the medium cap, not the light cap, was reached');
   eq(f.p1.chainNode,0,'the chain must have fully closed on the 2nd medium -- no 5th node ever offered')});
+// Task 12.1 fix round 1 (controller ruling): a pinned-damage test for the third legal five-hit
+// string, alongside M-L-L-L-M and L-L-L-L-M above -- sourced directly from the gameplay study's own
+// §1.2 ("M-L-L-L-L -- ends on the fourth light instead. Shorter recovery, so it is the safer string
+// against an opponent who counter-attacks the instant your combo ends."). Reachable because the
+// medium opener never gets anywhere near its own 2-medium cap (chainMediums stays at 1 the whole
+// chain), so all four lights land freely and the 4th one is what actually closes it.
+Test.add('chain grammar: M-L-L-L-L lands five hits (MCoC\'s own real "ends on the fourth light" alt string, gameplay study §1.2) -- the medium opener never caps out, so all four lights land and the last one closes the chain',()=>{
+  const hits=[];
+  const f=mkFight({ctrl1:chainSeq(['medium','light','light','light','light']),
+    onEvent:(type,a,b,val)=>{if(type==='hit'&&a.side===1)hits.push(val)}});
+  closeIn(f);
+  for(let i=0;i<300&&hits.length<5;i++)f.step();
+  eq(hits.length,5,'all five nodes of M-L-L-L-L must land');
+  const mL=MOVES.light.chainDmg,mM=MOVES.medium.chainDmg,atk=CHAMPS.carl.atk;
+  const expect=[Math.round(atk*mM[0]),Math.round(atk*mL[1]),Math.round(atk*mL[2]),Math.round(atk*mL[3]),Math.round(atk*mL[4])];
+  eq(JSON.stringify(hits),JSON.stringify(expect),'per-node damage must follow each node\'s own move type');
+  ok(f.p2.state!=='KNOCKDOWN','the ender here is light (CHAIN.enders.light is {}) -- no push/knockdown bonus, same as any light-ended chain');
+  run(f,30); // let the 5th (ender) hit's own recovery fully elapse -- chainNode only resets at phase 'done'
+  eq(f.p1.chainLights,4,'sanity: the light cap (4) is exactly what ends this chain');
+  eq(f.p1.chainMediums,1,'sanity: only the opener was ever a medium -- well under its own cap (2)');
+  eq(f.p1.chainNode,0,'chainNode resets to 0 once the ender\'s own recovery ends')});
 Test.add('chain grammar: a whiff resets chainNode to 0',()=>{
   // Default (non-closeIn) spawn distance is beyond light range, so this light simply whiffs.
   const f=mkFight({ctrl1:Ctrl.script([L(0)])});
@@ -1569,7 +1618,7 @@ Test.add('Task 12.1: a buffered special dropped if underpowered by the time it w
   att.act(Object.assign(Ctrl.EMPTY(),{special:1}));
   eq(att.bufferedSpecial,1,'sanity: a fresh buffered press while still mid the ender\'s recovery');
   def.hits=new Set();def.hp=1000; // def is the ATTACKER of the hit driven below (def.hits.add(idx) is resolve()'s own first line)
-  f.resolve({type:'hit',att:def,def:att,idx:0,m:def.moveDef('light'),last:true}); // def hits att
+  f.resolve({type:'hit',att:def,def:att,idx:0,m:def.moveDef('light'),last:true,moveName:'light'}); // def hits att
   eq(att.bufferedSpecial,0,'a hit landing on the buffering fighter must drop the buffer outright')});
 // Task 12.1 (frozen interface): the AI's own comboPlanFor (55_ai.js, out of this task's file list)
 // produces at most ['light','light','light'] or ['light','light','light','medium'] after an opener --
@@ -1592,7 +1641,7 @@ Test.add('Task 12.1: a heavy landing on a parry-stunned foe deals PUNISH_MUL(x1.
   const f=mkFight({noCrit:true}),att=f.p1,def=f.p2;
   def.hp=1000;def.stun=PARRY_STUN;def.setState('STUNNED');def.parryStunned=true;
   att.move=att.moveDef('heavy');att.moveName='heavy';att.chainNode=0;att.hits=new Set();
-  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true});
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true,moveName:att.moveName});
   const dmg=1000-def.hp;
   const expect=Math.round(CHAMPS.carl.atk*MOVES.heavy.dmg*PUNISH_MUL);
   eq(dmg,expect,'the punish must deal exactly PUNISH_MUL(1.25x) the plain heavy damage, in the SAME rounding step');
@@ -1603,13 +1652,13 @@ Test.add('Task 12.1: a LIGHT landing on a parry-stunned foe deals no punish bonu
   const f=mkFight({noCrit:true}),att=f.p1,def=f.p2;
   def.hp=1000;def.stun=PARRY_STUN;def.setState('STUNNED');def.parryStunned=true;
   att.move=att.moveDef('light');att.moveName='light';att.chainNode=0;att.hits=new Set();
-  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true});
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true,moveName:att.moveName});
   eq(1000-def.hp,Math.round(CHAMPS.carl.atk*MOVES.light.dmg),'a light on a parry-stunned foe must deal its own plain damage, no punish bonus');
   ok(!f.log.some(e=>e.type==='punish'),'no punish event for a non-heavy landing on a parry-stunned foe');
   const g=mkFight({noCrit:true}),att2=g.p1,def2=g.p2;
   def2.hp=1000;def2.stun=EFFECTS.stun.dur;def2.setState('STUNNED');def2.parryStunned=false; // a plain EFFECTS.stun, not a parry
   att2.move=att2.moveDef('heavy');att2.moveName='heavy';att2.chainNode=0;att2.hits=new Set();
-  g.resolve({type:'hit',att:att2,def:def2,idx:0,m:att2.move,last:true});
+  g.resolve({type:'hit',att:att2,def:def2,idx:0,m:att2.move,last:true,moveName:att2.moveName});
   eq(1000-def2.hp,Math.round(CHAMPS.carl.atk*MOVES.heavy.dmg),'a heavy on a plain (non-parry) STUNNED foe must deal its own plain damage, no punish bonus');
   ok(!g.log.some(e=>e.type==='punish'),'no punish event when the stun wasn\'t a real parry')});
 // Task 12.1 (frozen interface, exact test bullet): "dexterity expires 12 f after the next landed
@@ -1623,7 +1672,7 @@ Test.add('Task 12.1: dexterity expires 12 frames after the holder\'s next landed
   ok(Effects.has(f.p1,'dexterity'),'sanity: still active well before the 180f cap with no hit landed');
   const att=f.p1,def=f.p2;
   att.move=att.moveDef('light');att.moveName='light';att.chainNode=0;att.hits=new Set();def.hp=1000;
-  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true}); // the holder's own next landed hit
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:true,moveName:att.moveName}); // the holder's own next landed hit
   ok(Effects.has(f.p1,'dexterity'),'the buff must not vanish the instant the hit lands -- it still has its own 12f fuse to burn');
   const e=f.p1.effects.find(x=>x.id==='dexterity');
   eq(e.left,12,'the landed hit must clamp the remaining duration down to exactly expiresAfterHit(12)');
@@ -1637,7 +1686,7 @@ Test.add('Task 12.1: dexterity gained from a block (chip through a raised guard 
   const att=f.p1,def=f.p2;
   att.move=att.moveDef('light');att.moveName='light';att.chainNode=0;att.hits=new Set();
   def.hp=1000;def.setState('BLOCK'); // resolve() is driven directly with type:'block' -- detect()'s own parry-vs-block branch point never runs
-  f.resolve({type:'block',att,def,idx:0,m:att.move,last:true});
+  f.resolve({type:'block',att,def,idx:0,m:att.move,last:true,moveName:att.moveName});
   const e=f.p1.effects.find(x=>x.id==='dexterity');
   eq(e.left,12,'a blocked (chipped) attack must clamp the attacker\'s own dexterity just like a clean hit')});
 Test.add('block chip scales by the attacker\'s own Effects.mods.atkMul (a fury stack chips harder on block)',()=>{
@@ -4959,14 +5008,14 @@ Test.add('intercept credit (dmg/power/event) fires at most once per attacking mo
   const armVulnerable=()=>{def.hp=1000;def.move=def.moveDef('medium');def.moveName='medium';def.effStartup=def.move.startup;
     def.dashLeft=0;def.dashRate=0;def.chainNode=1;def.hits=new Set();def.landed=false;def.setState('ATTACK',2)};
   armVulnerable();
-  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:false});
+  f.resolve({type:'hit',att,def,idx:0,m:att.move,last:false,moveName:att.moveName});
   ok(f.log.some(e=>e.type==='intercept'),'sub-hit 0 must be credited as an intercept (def was mid medium-startup)');
   eq(att.power,115,'sub-hit 0 banks powHit(0, s1\'s own value)+the intercept\'s flat +15');
   const hit0=f.log.find(e=>e.type==='hit'&&e.who===1);
   ok(hit0,'sub-hit 0 must land');
   armVulnerable(); // re-arm a FRESH vulnerable dash-in before the special's next sub-hit -- the double-dip risk
   const powerBefore=att.power;
-  f.resolve({type:'hit',att,def,idx:1,m:att.move,last:false});
+  f.resolve({type:'hit',att,def,idx:1,m:att.move,last:false,moveName:att.moveName});
   eq(att.power,powerBefore,'a second sub-hit of the SAME move instance must bank no extra +15 even though def is freshly vulnerable again');
   eq(f.log.filter(e=>e.type==='intercept').length,1,'only one intercept event total, not one per qualifying sub-hit');
   const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
