@@ -5792,6 +5792,58 @@ Test.add('hud(): the enemy combo counter uses CLS_GEM[p2.def.cls] instead of a f
 // never repaints a card whose encounter and state haven't changed. Roster cards: the same 112px
 // portrait (Rig.portrait, already built/cached by Tasks 8.1/8.2 -- unchanged here) framed with the
 // in-fight HUD's own class-gem ring (Render.portraitFrame/CLS_GEM, Task 8.4) via Screens.portraitCard.
+// ---- Fix-wave item 10 (final review, Minors #4, #5, #6) -----------------------------------------
+Test.add('Screens._paintDoorCard survives an unknown encounter id, the same way doorStack already did',()=>{
+  // doorStack twelve lines above guards the same lookup (`ENCOUNTERS[encId] && ...`) and says in its
+  // own comment that it "stays defensive for any future node that doesn't carry a recLevel";
+  // _paintDoorCard dereferenced enc.enemy straight away and threw. One of the two was wrong about
+  // the threat model, and it was the one that takes the whole map screen down with it.
+  Screens._doorCache={};
+  let cnv=null;
+  ok(!threw(()=>{cnv=Screens.doorCard('no_such_encounter','open')}),
+    'an unknown encounter id must not throw -- a map with one bad node must still render');
+  ok(cnv instanceof HTMLCanvasElement,'it must still return a real canvas of the usual size');
+  eq(cnv.width,Screens.DOOR_W);eq(cnv.height,Screens.DOOR_H);
+  // The arch and jamb still draw, so the node reads as a door with no occupant rather than a blank.
+  const d=cnv.getContext('2d').getImageData(Screens.DOOR_W/2,10,1,1).data;
+  ok(d[3]>0&&(d[0]+d[1]+d[2])>0,'the stone arch must still be painted for an unknown encounter');
+  Screens._doorCache={}});
+Test.add('the door card asks for the 56px portrait it draws at 44px, not the 112px one',()=>{
+  // It rendered Rig.portrait(look,112) into a 44px box: a second bitmap four times the size of the
+  // 56px bust that is already built and cached for the HUD for every one of these enemies, for a
+  // downscale that starts from further away.
+  Screens._doorCache={};
+  const orig=Rig.portrait,sizes=[];
+  try{
+    Rig.portrait=function(look,size){sizes.push(size);return orig.apply(this,arguments)};
+    Screens.doorCard('f1_goblin','open');
+  }finally{Rig.portrait=orig}
+  eq(sizes.length,1,'the door card must request exactly one portrait');
+  eq(sizes[0],56,'it must be the 56px bust the HUD already caches, not a 112px one built for a 44px draw');
+  Screens._doorCache={}});
+Test.add('reduceMotion freezes the visible torch flame, not just the light it casts',()=>{
+  // Stage._torchFlicker (which drives lightAt, the fighter tint and the specular streak) was gated
+  // correctly; the flame's own radius/alpha/tip height rode ((frame*7+i*13)%17)/17 with no settings
+  // check, so under reduceMotion the light stopped moving while the flame kept dancing.
+  const saved=Save.data.settings.reduceMotion;
+  const st=Stage.build('doorway'),t=st.torches[0];
+  const cnv=document.createElement('canvas');cnv.width=STAGE_W;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const near=frame=>{c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,cnv.width,cnv.height);
+    Stage.draw(c,{x:STAGE_W/2,zoom:1},frame,st);
+    return [...c.getImageData(Math.round(t.x)-14,Math.round(t.y)-20,28,34).data].join(',')};
+  try{
+    Save.data.settings.reduceMotion=false;
+    ok(Stage._flameFlicker(0,0)!==Stage._flameFlicker(9,0),
+      'with motion allowed the flame value must vary by frame -- otherwise the pixel check below proves nothing');
+    Save.data.settings.reduceMotion=true;
+    eq(Stage._flameFlicker(0,0),Stage._flameFlicker(9,0),'reduceMotion must freeze the flame value');
+    eq(Stage._flameFlicker(3,1),.5,'frozen to the same 0.5 midpoint Stage._torchFlicker collapses to');
+    Save.data.settings.reduceMotion=false;
+    ok(near(0)!==near(9),'with reduceMotion off the flame must actually animate -- otherwise this test proves nothing');
+    Save.data.settings.reduceMotion=true;
+    eq(near(0),near(9),'with reduceMotion on, two different frames must paint the same flame');
+  }finally{Save.data.settings.reduceMotion=saved}});
 Test.add('Screens.doorCard returns a fixed-size canvas cached per encounter id + state -- a repeat call with the same key never repaints',()=>{
   Screens._doorCache={};
   const a=Screens.doorCard('f1_goblin','open');
@@ -5805,15 +5857,20 @@ Test.add('Screens.doorCard returns a fixed-size canvas cached per encounter id +
   ok(d!==a&&d!==b,'"done" gets its own cached canvas too');
   const c=Screens.doorCard('f1_skel','open');
   ok(c!==a,'a different encounter must be its own cached canvas')});
-Test.add('Screens.doorCard paints the encounter enemy\'s own 112px portrait (Rig.portrait), not a generic placeholder',()=>{
+// Fix-wave item 10 (final review, Minor #5) changed the size this asserts from 112 to 56. The
+// property the test exists for is unchanged and is the interesting one: the door card shows the
+// encounter enemy's OWN look, so the card, the HUD bust and the fight sprite are the same character.
+// The size moved because the card draws into a 44px box and the 56px bust is already built and
+// cached for the HUD for every one of these enemies.
+Test.add('Screens.doorCard paints the encounter enemy\'s own portrait (Rig.portrait), not a generic placeholder',()=>{
   Screens._doorCache={};
   const realPortrait=Rig.portrait;
   const calls=[];
   Rig.portrait=function(look,size){calls.push({look,size});return realPortrait.apply(Rig,arguments)};
   try{Screens.doorCard('f1_skel','open')}finally{Rig.portrait=realPortrait}
   const want=lookFor(DEFS[ENCOUNTERS.f1_skel.enemy]);
-  ok(calls.some(c=>c.look===want&&c.size===112),
-    'doorCard must call Rig.portrait with the encounter enemy\'s own look at size 112, not the 56px HUD bust')});
+  ok(calls.some(c=>c.look===want&&c.size===56),
+    'doorCard must call Rig.portrait with the encounter enemy\'s own look at the 56px HUD bust size')});
 Test.add('Screens.doorCard dims a locked door and marks a done one, each its own cached state -- a locked card reads visibly darker than an open one',()=>{
   Screens._doorCache={};
   const open=Screens.doorCard('f1_goblin','open');

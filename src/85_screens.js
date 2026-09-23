@@ -255,7 +255,15 @@ const Screens={
     this._doorCache[key]=cnv;
     return cnv},
   _paintDoorCard(c,encId,state){
-    const W=Screens.DOOR_W,H=Screens.DOOR_H,enc=ENCOUNTERS[encId],def=DEFS[enc.enemy],look=lookFor(def);
+    // Fix-wave item 10 (final review, Minor #4): `ENCOUNTERS[encId].enemy` used to be dereferenced
+    // on this line and threw on an unknown id, while doorStack twelve lines above guards the same
+    // lookup and says in its own comment that it "stays defensive for any future node that doesn't
+    // carry a recLevel". One of the two was wrong about the threat model, and it was this one -- a
+    // single bad node id takes the whole map screen down, where doorStack would have degraded to a
+    // door with no REC. LVL hint. Guarded the same way: the arch, jamb and torch still paint, only
+    // the occupant is missing, so the node reads as an empty doorway rather than a blank card.
+    const W=Screens.DOOR_W,H=Screens.DOOR_H,enc=ENCOUNTERS[encId];
+    const def=enc&&DEFS[enc.enemy],look=def&&lookFor(def);
     const locked=state==='locked';
     c.save();
     // stone jamb + arch mouth: a plain doorway silhouette so the portrait inset reads as "standing
@@ -278,9 +286,14 @@ const Screens={
     // card, the roster card and the fight sprite are demonstrably the same character. Dimmed
     // (globalAlpha) rather than hidden on a locked door, so the enemy is still recognizable at a
     // glance -- only the torch/stone/.doormark carry the "not open yet" signal, not a blackout.
-    const port=Rig.portrait(look,112),pw=44,ph=44,px=W/2-pw/2,py=H/2-pw/2+4;
-    c.globalAlpha=locked?.4:1;
-    c.drawImage(port,px,py,pw,ph);
+    // Fix-wave item 10 (final review, Minor #5): 56, not 112. This draws into a 44px box, and the
+    // 56px bust is already built and cached on the look for the HUD for every one of these enemies
+    // -- asking for 112 allocated a second bitmap four times the size for a downscale that starts
+    // from further away. 56 -> 44 is still a downsample, which is the direction that reads cleanly.
+    if(look){
+      const port=Rig.portrait(look,56),pw=44,ph=44,px=W/2-pw/2,py=H/2-pw/2+4;
+      c.globalAlpha=locked?.4:1;
+      c.drawImage(port,px,py,pw,ph)}
     c.restore()},
   // Task 8.5: the roster card's own portrait+frame, one canvas combining the 112px HUD bust
   // (Rig.portrait, Tasks 8.1/8.2) with the in-fight HUD's own class-gem ring (Render.portraitFrame/

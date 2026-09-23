@@ -155,6 +155,17 @@ const Stage={cache:{},
   _torchFlicker(t){
     if(Save.data&&Save.data.settings&&Save.data.settings.reduceMotion)return .5;
     return RNG((t.flicker^Math.imul(this._activeFrame,2654435761))>>>0).next()},
+  // Fix-wave item 10 (final review, Minor #6): the VISIBLE flame's own animation, split out of
+  // draw() so it has the same reduceMotion gate _torchFlicker already had. Ruling 5 says reduceMotion
+  // disables flicker, and _torchFlicker honoured it for everything the light DOES (lightAt, the
+  // fighter tint, the specular streak) -- but the flame glyph painted on top of the torch rode
+  // ((frame*7+i*13)%17)/17 with no settings check, so under reduceMotion the light stopped moving
+  // while the flame kept dancing. Same 0.5 midpoint _torchFlicker collapses to, so a frozen flame is
+  // the average of its own range rather than either extreme. This animation predates Phase 8; the
+  // phase is where the ruling was written.
+  _flameFlicker(frame,i){
+    if(Save.data&&Save.data.settings&&Save.data.settings.reduceMotion)return .5;
+    return ((frame*7+i*13)%17)/17},
   lightAt(x){
     const st=this._active;
     if(!st)return{tint:this.TORCH_TINT,k:.5,rimSide:1};
@@ -191,7 +202,7 @@ const Stage={cache:{},
     // from the paler yellow-white the fix-wave art pass originally tuned (each channel nudged down,
     // green more than blue so the hue itself shifts warm, not just dims), plus a touch more glow
     // alpha so the warmth actually reads at a glance. Radius/flicker timing unchanged.
-    for(let i=0;i<st.torches.length;i++){const t=st.torches[i],flick=((frame*7+i*13)%17)/17,rad=52+12*flick;
+    for(let i=0;i<st.torches.length;i++){const t=st.torches[i],flick=this._flameFlicker(frame,i),rad=52+12*flick;
       const g=c.createRadialGradient(t.x,t.y,0,t.x,t.y,rad);
       g.addColorStop(0,`rgba(255,185,105,${.66+.25*flick})`);g.addColorStop(.45,`rgba(255,120,45,${.4+.16*flick})`);g.addColorStop(1,'rgba(255,95,25,0)');
       c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
