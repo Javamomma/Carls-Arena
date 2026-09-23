@@ -5105,6 +5105,13 @@ Test.add('every rig lays its joint balls under both segments, inside the limb, a
 // enumerations are the Phase 8 frozen interface, spelled out again here deliberately: a typo'd
 // token fails silently (BodyStyle's switches fall through to "draw nothing"), which is exactly the
 // failure mode a schema test exists to catch.
+//
+// Fix-wave item 8 (final review, Minor #1) gave this test a second job. Rig.draw, drawBig and
+// drawQuad each carried a pre-8.x stroke rig behind an `if(look.body) return ...` guard -- 276 lines
+// in total, all unreachable, all conceding it in their own comments -- and all three are now
+// deleted. The `ok(b, ...)` assertion below is what makes that deletion provable rather than
+// hopeful: a look without a .body block cannot exist without turning this test red first, and there
+// is no longer anywhere for such a look to fall through to.
 Test.add('every look in LOOKS carries a complete .body block with only schema-legal values',()=>{
   const TORSO=['shirt','vest','bare','robe','chitin','fur','bone','plate'];
   const LEGS=['pants','shorts','bare','robe','fur','bone'];

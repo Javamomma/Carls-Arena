@@ -2705,115 +2705,14 @@ const Rig={
     if(look0.rig==='big')return this.drawBig(c,F,cam,frame,look0,lit);
     const look=look0,scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solve(look,key,t01,face);
-    // Task 8.1: every human look ships a `.body` block, so this is the live path; everything below
-    // it is the pre-8.1 stroke rig, kept intact as the fallback for a look that has none (the
-    // lookFor() fallback target, LOOKS.carl, does have one, so nothing reaches it today).
-    if(look.body)return this._drawHuman(c,F,look,j,face,scale,key,lit);
-    const skinDark=shade(look.skin,-.35);
-    c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
-    const limb=(p,q,w)=>{c.lineCap='round';
-      c.lineWidth=w+3;c.strokeStyle=skinDark;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke();
-      c.lineWidth=w;c.strokeStyle=look.skin;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke()};
-    // A small rounded rect at each ankle joint so legs end in feet instead of a bare round line cap:
-    // bare skin-toned for a barefoot look (Carl), a dark boot otherwise. Nudged slightly forward of
-    // the ankle (in the facing direction) for a heel-planted, toe-forward read.
-    const foot=(p)=>{const w=look.limb*1.05,h=look.limb*.62,fx=p.x+face*w*.3,fy=p.y+h*.22;
-      const bare=!!look.bareFeet;c.fillStyle=bare?look.skin:'#241a12';c.strokeStyle=bare?skinDark:'#120c08';
-      c.lineWidth=1.3;c.beginPath();
-      if(c.roundRect)c.roundRect(fx-w/2,fy-h/2,w,h,Math.min(w,h)*.45);else c.rect(fx-w/2,fy-h/2,w,h);
-      c.fill();c.stroke()};
-    // back limbs first (behind the torso), then torso/head, then front limbs, then props on top.
-    // Thighs/upper arms noticeably thicker than shins/forearms, per limb.
-    limb(j.lHip,j.lKnee,look.limb);limb(j.lKnee,j.lFoot,look.limb*.82);foot(j.lFoot);
-    limb(j.lShoulder,j.lElbow,look.limb*.85);limb(j.lElbow,j.lHand,look.limb*.68);
-    // Torso as a waist-tapered hexagon (hip -> waist -> shoulder, mirrored) for a real V-taper build,
-    // plus a chest highlight and ab-line shading for definition. Shading uses whatever the base torso
-    // fill color is, so it also enhances a bare-chested look like Carl's open vest.
-    const waistW=look.waistW!==undefined?look.waistW:(look.hipW+look.shoulderW)/2*.8;
-    const lWaist={x:j.waist.x-face*waistW/2,y:j.waist.y},rWaist={x:j.waist.x+face*waistW/2,y:j.waist.y};
-    c.beginPath();c.moveTo(j.lHip.x,j.lHip.y);c.lineTo(lWaist.x,lWaist.y);c.lineTo(j.lShoulder.x,j.lShoulder.y);
-    c.lineTo(j.rShoulder.x,j.rShoulder.y);c.lineTo(rWaist.x,rWaist.y);c.lineTo(j.rHip.x,j.rHip.y);c.closePath();
-    c.fillStyle=look.skin;c.fill();c.lineWidth=2;c.strokeStyle=skinDark;c.stroke();
-    c.fillStyle=shade(look.skin,.2);c.beginPath();
-    c.ellipse((j.lShoulder.x+j.rShoulder.x)/2,(j.lShoulder.y+j.rShoulder.y)/2+look.torsoLen*.14,
-      look.shoulderW*.3,look.torsoLen*.15,0,0,Math.PI*2);c.fill();
-    c.strokeStyle=shade(look.skin,-.3);c.lineWidth=1.5;
-    c.beginPath();c.moveTo(j.waist.x-2,j.waist.y-2);c.lineTo(j.torso.x-2,j.torso.y+2);c.stroke();
-    c.beginPath();c.moveTo(j.waist.x+2,j.waist.y-2);c.lineTo(j.torso.x+2,j.torso.y+2);c.stroke();
-    c.fillStyle=look.skin;c.beginPath();c.arc(j.head.x,j.head.y,look.headR,0,Math.PI*2);c.fill();
-    c.lineWidth=1.5;c.strokeStyle=skinDark;c.stroke();
-    if(look.hair){c.fillStyle=look.hair;c.beginPath();
-      c.arc(j.head.x,j.head.y-look.headR*.3,look.headR*1.05,Math.PI*1.05,Math.PI*1.95);c.fill()}
-    if(look.earLen){ // long pointed triangles angled up-back, outlined so they read against the head fill
-      const el=look.earLen;c.fillStyle=look.skin;c.strokeStyle=skinDark;c.lineWidth=1.5;
-      c.beginPath();c.moveTo(j.head.x-look.headR*.7,j.head.y-look.headR*.15);
-      c.lineTo(j.head.x-look.headR*.9-el*.9,j.head.y-el*.85);
-      c.lineTo(j.head.x-look.headR*.3,j.head.y+look.headR*.3);c.closePath();c.fill();c.stroke();
-      c.beginPath();c.moveTo(j.head.x+look.headR*.7,j.head.y-look.headR*.15);
-      c.lineTo(j.head.x+look.headR*.9+el*.9,j.head.y-el*.85);
-      c.lineTo(j.head.x+look.headR*.3,j.head.y+look.headR*.3);c.closePath();c.fill();c.stroke()}
-    c.fillStyle='#141414';c.beginPath();c.arc(j.head.x+face*look.headR*.35,j.head.y-1,1.6,0,Math.PI*2);c.fill();
-    limb(j.rHip,j.rKnee,look.limb);limb(j.rKnee,j.rFoot,look.limb*.82);foot(j.rFoot);
-    limb(j.rShoulder,j.rElbow,look.limb*.85);limb(j.rElbow,j.rHand,look.limb*.68);
-    for(const p of look.props||[]){
-      if(p==='vest'||p==='rags'){
-        c.fillStyle=look.primary;
-        c.beginPath();c.moveTo(j.lShoulder.x,j.lShoulder.y-2);c.lineTo(j.lShoulder.x-6*face,j.lShoulder.y+8);
-        c.lineTo(j.lHip.x-3*face,j.lHip.y+4);c.lineTo((j.lHip.x+j.hip.x)/2-3*face,j.lHip.y+2);
-        c.lineTo(j.lShoulder.x+9*face,j.lShoulder.y+3);c.closePath();c.fill();
-        c.beginPath();c.moveTo(j.rShoulder.x,j.rShoulder.y-2);c.lineTo(j.rShoulder.x+6*face,j.rShoulder.y+8);
-        c.lineTo(j.rHip.x+3*face,j.rHip.y+4);c.lineTo((j.rHip.x+j.hip.x)/2+3*face,j.rHip.y+2);
-        c.lineTo(j.rShoulder.x-9*face,j.rShoulder.y+3);c.closePath();c.fill();
-        c.strokeStyle=shade(look.primary,-.4);c.lineWidth=1.5;c.stroke()}
-      if(p==='boxers'){
-        const hw=look.hipW/2+7;c.fillStyle=look.secondary;
-        c.fillRect(j.hip.x-hw,j.hip.y-3,hw*2,15);
-        c.fillStyle='#ff9fd0';
-        for(const dx of[-hw*.45,0,hw*.45]){const hx=j.hip.x+dx,hy=j.hip.y+6,s=2.6;
-          c.beginPath();c.moveTo(hx,hy+s*.3);
-          c.bezierCurveTo(hx-s,hy-s*.6,hx-s*1.6,hy+s*.4,hx,hy+s*1.4);
-          c.bezierCurveTo(hx+s*1.6,hy+s*.4,hx+s,hy-s*.6,hx,hy+s*.3);c.fill()}}
-      if(p==='bandages'){c.strokeStyle='#e8ded0';c.lineWidth=3;
-        for(const hand of[j.lHand,j.rHand]){c.beginPath();c.arc(hand.x,hand.y,5,0,Math.PI*2);c.stroke()}}
-      if(p==='gear'){ // full-coverage practical outfit: torso fill + sleeve/pant overlays on the limbs
-        c.fillStyle=look.primary;
-        c.beginPath();c.moveTo(j.lHip.x,j.lHip.y);c.lineTo(j.lShoulder.x,j.lShoulder.y);
-        c.lineTo(j.rShoulder.x,j.rShoulder.y);c.lineTo(j.rHip.x,j.rHip.y);c.closePath();c.fill();
-        c.strokeStyle=shade(look.primary,-.4);c.lineWidth=2;c.stroke();
-        const sleeve=(a,b,w)=>{c.lineCap='round';c.strokeStyle=look.primary;c.lineWidth=w;
-          c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);c.stroke()};
-        sleeve(j.lShoulder,j.lElbow,look.limb*.8);sleeve(j.rShoulder,j.rElbow,look.limb*.8);
-        sleeve(j.lHip,j.lKnee,look.limb*.95);sleeve(j.rHip,j.rKnee,look.limb*.95);
-        sleeve(j.lKnee,j.lFoot,look.limb*.85);sleeve(j.rKnee,j.rFoot,look.limb*.85);
-        c.strokeStyle=look.secondary;c.lineWidth=3;
-        c.beginPath();c.moveTo(j.lHip.x,j.lHip.y-4);c.lineTo(j.rHip.x,j.rHip.y-4);c.stroke()}
-      if(p==='dagger'){ // a filled blade (not a thin stroke) with a crossguard and grip, ~45% of arm length
-        const h=j.rHand,len=look.armLen*.46,ux=face,uy=-.32,n=Math.hypot(ux,uy),dx=ux/n,dy=uy/n,px=-dy,py=dx;
-        const tipX=h.x+dx*len,tipY=h.y+dy*len,baseX=h.x+dx*3,baseY=h.y+dy*3,w=4.2;
-        c.fillStyle='#e4e4e4';
-        c.beginPath();c.moveTo(baseX+px*w,baseY+py*w);c.lineTo(tipX,tipY);c.lineTo(baseX-px*w,baseY-py*w);c.closePath();c.fill();
-        c.strokeStyle='#5a5a5a';c.lineWidth=1.3;c.stroke();
-        c.strokeStyle='#fbfbfb';c.lineWidth=1.2;
-        c.beginPath();c.moveTo(baseX+dx*2,baseY+dy*2);c.lineTo(tipX-dx*2,tipY-dy*2);c.stroke();
-        c.strokeStyle=look.secondary;c.lineWidth=3.6;
-        c.beginPath();c.moveTo(baseX+px*6,baseY+py*6);c.lineTo(baseX-px*6,baseY-py*6);c.stroke();
-        c.strokeStyle='#3a2f22';c.lineWidth=4;c.lineCap='round';
-        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(baseX,baseY);c.stroke()}
-      if(p==='club'){const h=j.rHand;
-        // Fix round 2 (controller review, Task 3.5 fix round 2): shaft shortened 30->9 (knob spacing
-        // to match) — Hobgoblin's held club extended past his hand in every pose he holds it in
-        // (block's own raised guard, not just an attack, ended up the tallest once 'heavy' was
-        // trimmed), and propExtra's matching formula (kept in sync with this shape) was what pinned
-        // carl×hobgoblin's zoom cap below 1.12/1.28 under the old per-fight worst-case cap.
-        // Fix-wave item 4: restored to its real length (shaft back out to face*12,-30, knobs spread
-        // back along it) now that G's zoom cap is per-frame (Rig.topAt/G.topNow) — a tall prop only
-        // taxes the frames it's actually held up in, not the whole fight, so there's no reason left
-        // to keep it artificially short.
-        c.strokeStyle=look.secondary;c.lineWidth=10;c.lineCap='round';
-        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*12,h.y-30);c.stroke();
-        c.fillStyle='#3a2f22';for(let i=0;i<3;i++){c.beginPath();
-          c.arc(h.x+face*(4+i*4),h.y-10-i*10,3,0,Math.PI*2);c.fill()}}}
-    c.restore()},
+    // Task 8.1 shipped a `.body` block for every human look, and the pre-8.1 stroke rig below this
+    // line became unreachable the moment it did. Fix-wave item 8 (final review, Minor #1) deleted
+    // it: 105 lines of it here, 73 in drawBig, 98 in drawQuad, all guarded by this same test, all
+    // conceding in their own comments that nothing reaches them. What makes the deletion provable
+    // rather than hopeful is the test that reads every LOOKS entry and asserts it has a .body
+    // block ('every look in LOOKS carries a complete .body block...', 90_tests.js), so a look that
+    // could reach the old fallback cannot exist without turning that test red first.
+    return this._drawHuman(c,F,look,j,face,scale,key,lit)},
   // Which limb cloth each bone of the human rig wears, derived from the look's own cloth block
   // rather than from a per-look list -- one wardrobe decision (cloth.torso/cloth.legs) dresses the
   // whole body consistently, so a new look cannot end up with a shirt and bare sleeves.
@@ -3039,83 +2938,9 @@ const Rig={
     look=look||lookFor(F.def);
     const scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solveBig(look,key,t01,face);
-    // Task 8.2: both big looks now ship a `.body` block, so this is the live path; everything
-    // below it is the pre-8.2 stroke rig, kept intact as the fallback for a big look that has none
-    // (there is none today). Exactly the shape of draw()'s own 8.1 short-circuit.
-    if(look.body)return this._drawBrute(c,F,look,j,face,scale,key,lit);
-    const skinDark=shade(look.skin,-.35);
-    c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
-    const limb=(p,q,w)=>{c.lineCap='round';
-      c.lineWidth=w+3;c.strokeStyle=skinDark;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke();
-      c.lineWidth=w;c.strokeStyle=look.skin;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke()};
-    const foot=(p)=>{const w=look.limb*1.15,h=look.limb*.68,fx=p.x+face*w*.3,fy=p.y+h*.22;
-      c.fillStyle='#241a12';c.strokeStyle='#120c08';c.lineWidth=1.4;c.beginPath();
-      if(c.roundRect)c.roundRect(fx-w/2,fy-h/2,w,h,Math.min(w,h)*.4);else c.rect(fx-w/2,fy-h/2,w,h);
-      c.fill();c.stroke()};
-    const fist=(p)=>{const r=(look.limb/2)*1.5;c.fillStyle=look.skin;c.strokeStyle=skinDark;c.lineWidth=1.8;
-      c.beginPath();c.arc(p.x,p.y,r,0,Math.PI*2);c.fill();c.stroke()};
-    limb(j.lHip,j.lKnee,look.limb);limb(j.lKnee,j.lFoot,look.limb*.85);foot(j.lFoot);
-    limb(j.lShoulder,j.lElbow,look.limb*.95);limb(j.lElbow,j.lHand,look.limb*.8);fist(j.lHand);
-    // Torso: drawn as TWO separate quads (hip->waist pelvis, waist->shoulder chest) with a visible
-    // seam stroke between them, not one hip-to-shoulder hexagon. A big look's torsoLen (needed for
-    // height — see LOOKS.mongo's Fix round 1 note) is long enough that one unbroken hexagon reads as
-    // a featureless slab regardless of width tuning; splitting it at the waist and stroking a seam
-    // there gives the eye a torso/pelvis joint to read, at any torsoLen.
-    const waistW=look.waistW!==undefined?look.waistW:(look.hipW+look.shoulderW)/2*.7;
-    const lWaist={x:j.waist.x-face*waistW/2,y:j.waist.y},rWaist={x:j.waist.x+face*waistW/2,y:j.waist.y};
-    c.beginPath();c.moveTo(j.lHip.x,j.lHip.y);c.lineTo(lWaist.x,lWaist.y);c.lineTo(rWaist.x,rWaist.y);c.lineTo(j.rHip.x,j.rHip.y);c.closePath();
-    c.fillStyle=shade(look.skin,-.08);c.fill();c.lineWidth=2;c.strokeStyle=skinDark;c.stroke();
-    c.beginPath();c.moveTo(lWaist.x,lWaist.y);c.lineTo(j.lShoulder.x,j.lShoulder.y);c.lineTo(j.rShoulder.x,j.rShoulder.y);c.lineTo(rWaist.x,rWaist.y);c.closePath();
-    c.fillStyle=look.skin;c.fill();c.lineWidth=2.4;c.strokeStyle=skinDark;c.stroke();
-    c.strokeStyle=shade(look.skin,-.3);c.lineWidth=1.8;
-    c.beginPath();c.moveTo(lWaist.x,lWaist.y);c.lineTo(rWaist.x,rWaist.y);c.stroke();
-    c.fillStyle=shade(look.skin,.16);c.beginPath();
-    c.ellipse((j.lShoulder.x+j.rShoulder.x)/2,(j.lShoulder.y+j.rShoulder.y)/2+look.torsoLen*.08,
-      look.shoulderW*.26,look.torsoLen*.1,0,0,Math.PI*2);c.fill();
-    // Thick neck: a short wide stroke from the neck joint up to the head, drawn UNDER the head fill
-    // (so only its width past the head's own radius reads) — the human rig's own neckNeckLen leaves
-    // nothing at all drawn between shoulders and head, which for a brute reads as a floating head
-    // rather than "thick neck" (final review, look-and-feel note 4, on Mongo specifically).
-    c.lineCap='round';c.lineWidth=look.headR*1.15;c.strokeStyle=skinDark;
-    c.beginPath();c.moveTo(j.neck.x,j.neck.y);c.lineTo(j.head.x,j.head.y);c.stroke();
-    c.lineWidth=look.headR*.85;c.strokeStyle=look.skin;
-    c.beginPath();c.moveTo(j.neck.x,j.neck.y);c.lineTo(j.head.x,j.head.y);c.stroke();
-    c.fillStyle=look.skin;c.beginPath();c.arc(j.head.x,j.head.y,look.headR,0,Math.PI*2);c.fill();
-    c.lineWidth=1.6;c.strokeStyle=skinDark;c.stroke();
-    // Heavy brow ridge: a thick dark arc across the upper-front third of the head.
-    c.strokeStyle=shade(look.skin,-.42);c.lineWidth=look.headR*.32;c.lineCap='round';
-    c.beginPath();c.arc(j.head.x,j.head.y-look.headR*.08,look.headR*.76,D(195),D(345));c.stroke();
-    if(look.hair){c.fillStyle=look.hair;c.beginPath();
-      c.arc(j.head.x,j.head.y-look.headR*.3,look.headR*1.05,Math.PI*1.05,Math.PI*1.95);c.fill()}
-    c.fillStyle='#141414';c.beginPath();c.arc(j.head.x+face*look.headR*.3,j.head.y+look.headR*.1,1.8,0,Math.PI*2);c.fill();
-    limb(j.rHip,j.rKnee,look.limb);limb(j.rKnee,j.rFoot,look.limb*.85);foot(j.rFoot);
-    limb(j.rShoulder,j.rElbow,look.limb*.95);limb(j.rElbow,j.rHand,look.limb*.8);fist(j.rHand);
-    for(const p of look.props||[]){
-      if(p==='trousers'){ // dark trousers with a belt, down to mid-thigh — a bare barrel chest above
-        const hw=look.hipW/2+10,topY=j.hip.y-4,botY=j.hip.y+look.legLen*.42;
-        c.fillStyle=look.primary;
-        c.beginPath();c.moveTo(j.hip.x-hw,topY);c.lineTo(j.hip.x+hw,topY);
-        c.lineTo(j.hip.x+hw*.7,botY);c.lineTo(j.hip.x+hw*.15,botY-6);
-        c.lineTo(j.hip.x-hw*.15,botY-6);c.lineTo(j.hip.x-hw*.7,botY);c.closePath();c.fill();
-        c.strokeStyle=shade(look.primary,-.4);c.lineWidth=1.6;c.stroke();
-        c.fillStyle=look.secondary||shade(look.primary,-.5);c.fillRect(j.hip.x-hw,topY-3,hw*2,6)}
-      if(p==='scars'){ // a couple of jagged lighter lines across the bare chest
-        c.strokeStyle=shade(look.skin,.35);c.lineWidth=2;c.lineCap='round';
-        const cx=(j.lShoulder.x+j.rShoulder.x)/2,cy=(j.lShoulder.y+j.rShoulder.y)/2+look.torsoLen*.16;
-        for(const dx of[-10,8]){c.beginPath();c.moveTo(cx+dx-6,cy-14);c.lineTo(cx+dx+5,cy+16);c.stroke()}}
-      if(p==='horns'){ // two curved horns sweeping up and back from the temples
-        c.strokeStyle='#e8ded0';c.lineWidth=5;c.lineCap='round';
-        for(const s of[-1,1]){c.beginPath();c.moveTo(j.head.x+s*look.headR*.5,j.head.y-look.headR*.7);
-          c.quadraticCurveTo(j.head.x+s*look.headR*1.3,j.head.y-look.headR*1.5,
-            j.head.x+s*look.headR*1.05,j.head.y-look.headR*2.1);c.stroke()}}
-      if(p==='spikedclub'){ // a bigger, spiked take on the human rig's 'club' prop
-        const h=j.rHand,len=look.armLen*.6;
-        c.strokeStyle=look.secondary;c.lineWidth=16;c.lineCap='round';
-        c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*len*.3,h.y-len);c.stroke();
-        c.fillStyle='#c9c2b0';
-        for(let i=0;i<4;i++){const t=.25+i*.2,px=h.x+face*len*.3*t,py=h.y-len*t;
-          c.beginPath();c.moveTo(px,py);c.lineTo(px+face*7,py-3);c.lineTo(px,py+5);c.closePath();c.fill()}}}
-    c.restore()},
+    // Task 8.2 gave both big looks a `.body` block; fix-wave item 8 deleted the 73 unreachable
+    // lines of pre-8.2 stroke rig that used to follow. See draw()'s own note for why that is safe.
+    return this._drawBrute(c,F,look,j,face,scale,key,lit)},
   // The layered quadruped body (Task 8.2). The load-bearing idea is that a quadruped is not a chain
   // of tubes: it is three MASSES -- haunch, barrel, shoulder -- strung on the hip->spine->chest
   // chain, with four legs, a neck and a tail hanging off them. The pre-8.2 rig drew the whole body
@@ -3287,107 +3112,9 @@ const Rig={
     look=look||lookFor(F.def);
     const scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solveQuad(look,key,t01,face);
-    // Task 8.2: all three quad looks now ship a `.body` block, so this is the live path; everything
-    // below it is the pre-8.2 stroke rig, kept intact as the fallback for a quad look that has none.
-    if(look.body)return this._drawBeast(c,F,look,j,face,key,lit);
-    const skinDark=shade(look.skin,-.35);
-    // Fix round 2 (controller review, Task 6.5): the medium kick is now a rearing double-front-paw
-    // slam (see POSES_QUAD.medium's own comment) — the striking limbs are the FRONT legs, which this
-    // function already draws last (in front of the body), so unlike fix round 1's now-reverted
-    // hind-leg-specific draw-order hack, no reordering is needed here at all; `slamming` only gates the
-    // front paws' own look (a darker tint + a visible pad, see paw() below), not layering.
-    const slamming=key==='medium';
-    c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
-    const limb=(p,q,w,col)=>{c.lineCap='round';
-      c.lineWidth=w+3;c.strokeStyle=shade(col||look.skin,-.35);c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke();
-      c.lineWidth=w;c.strokeStyle=col||look.skin;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke()};
-    // pad: an optional second/third arg draws a bigger, tinted "slam paw" -- a visible paw pad (a
-    // smaller lighter oval set into the fill, the same "shade a highlight into a flat fill" trick
-    // drawBig's own scars/brow-ridge props already use) instead of the ordinary flat ellipse, so the
-    // striking paw itself reads as a deliberate foot with claws/pad, not just a leg-end. col overrides
-    // the fill/stroke entirely (the slamming front paws' own darker tint, see below); undefined keeps
-    // the ordinary look every non-kick pose still uses.
-    const paw=(p,col,pad)=>{const r=look.legW*(pad?.68:.58);
-      c.fillStyle=col||look.skin;c.strokeStyle=shade(col||look.skin,-.35);c.lineWidth=1.2;
-      c.beginPath();c.ellipse(p.x,p.y,r,r*.72,0,0,Math.PI*2);c.fill();c.stroke();
-      if(pad){c.fillStyle=look.earInner||shade(col||look.skin,.32);
-        c.beginPath();c.ellipse(p.x,p.y+r*.06,r*.46,r*.32,0,0,Math.PI*2);c.fill()}};
-    // back legs first (behind the body), then the tail (base tucks under the hip). Upper legs
-    // noticeably thicker than lower (.55 taper, was .78 in round 1 — art review called the whole rig
-    // "wire-bodied" and this taper is part of giving it real limb volume, matching the human rig's
-    // own thigh/shin taper).
-    limb(j.blHip,j.bl1,look.legW);limb(j.bl1,j.bl2,look.legW*.55);paw(j.bl2);
-    limb(j.brHip,j.br1,look.legW);limb(j.br1,j.br2,look.legW*.55);paw(j.br2);
-    limb(j.hip,j.tail1,look.legW*.6,look.tailTint);limb(j.tail1,j.tail2,look.legW*.42,look.tailTint);
-    c.fillStyle=look.tailTint||look.skin;c.beginPath();c.arc(j.tail2.x,j.tail2.y,look.legW*.26,0,Math.PI*2);c.fill();
-    // Filled body: art review (Fix round 1) called the original hip->chest stroke (width
-    // look.legW*2.1, ~31.5 for donut over a 170-unit body) a "noodle" next to the human rig's filled
-    // torso. bodyW is now tied to bodyLen itself (0.42x) instead of leg thickness, so trimming
-    // bodyLen (also done this round) and widening the body are the same lever — a round, low body
-    // instead of a thin long one. Still drawn as a thick round-capped/joined stroke along
-    // hip->spine->chest (so it follows the spine's pitch bend during pounces/rear-ups instead of a
-    // rigid ellipse), plus a rounder-chest roundel at the front end and a lighter belly band.
-    c.lineCap='round';c.lineJoin='round';
-    const bodyW=look.bodyLen*.42;
-    c.lineWidth=bodyW+4;c.strokeStyle=skinDark;
-    c.beginPath();c.moveTo(j.hip.x,j.hip.y);c.lineTo(j.spine.x,j.spine.y);c.lineTo(j.chest.x,j.chest.y);c.stroke();
-    c.lineWidth=bodyW;c.strokeStyle=look.skin;
-    c.beginPath();c.moveTo(j.hip.x,j.hip.y);c.lineTo(j.spine.x,j.spine.y);c.lineTo(j.chest.x,j.chest.y);c.stroke();
-    c.fillStyle=look.skin;c.beginPath();c.ellipse(j.chest.x,j.chest.y,bodyW*.62,bodyW*.58,0,0,Math.PI*2);c.fill();
-    c.lineWidth=1.5;c.strokeStyle=skinDark;c.stroke();
-    c.fillStyle=shade(look.skin,.2);c.beginPath();
-    c.ellipse((j.hip.x+j.chest.x)/2,(j.hip.y+j.chest.y)/2+bodyW*.26,look.bodyLen*.36,bodyW*.26,0,0,Math.PI*2);c.fill();
-    limb(j.chest,j.neck,bodyW*.5);
-    // head: a distinct headFill for the grub's dark capsule, otherwise the body's own skin color
-    const headFill=look.headFill||look.skin;
-    c.fillStyle=headFill;c.beginPath();c.arc(j.head.x,j.head.y,look.headR,0,Math.PI*2);c.fill();
-    c.lineWidth=1.5;c.strokeStyle=shade(headFill,-.35);c.stroke();
-    if(look.species==='cat'||look.species==='rat'){ // cat: small pointed ears; rat: bigger rounded ears
-      // ey pulls the ear's base well above the head-circle center (not just "above center") so the
-      // tip clears the head's own top edge (-headR) by a visible margin instead of reading as a
-      // notch cut into the head silhouette — round 1 (ey:-.55) left the ear mostly hidden inside the
-      // head circle, which is why the first donut screenshot pass showed no visible ears.
-      const big=look.species==='rat',er=look.headR*(big?.78:.7),ex=look.headR*(big?.6:.6),ey=-look.headR*.98;
-      for(const s of[-1,1]){
-        const bx=j.head.x+s*ex*face,by=j.head.y+ey;
-        c.fillStyle=headFill;c.strokeStyle=shade(headFill,-.35);c.lineWidth=1.3;c.beginPath();
-        if(big)c.ellipse(bx,by,er*.9,er,0,0,Math.PI*2);
-        else{c.moveTo(bx-er*.7,by+er*.6);c.lineTo(bx,by-er);c.lineTo(bx+er*.7,by+er*.6);c.closePath()}
-        c.fill();c.stroke();
-        if(look.earInner){c.fillStyle=look.earInner;c.beginPath();
-          if(big)c.ellipse(bx,by,er*.5,er*.56,0,0,Math.PI*2);
-          else{c.moveTo(bx-er*.4,by+er*.35);c.lineTo(bx,by-er*.5);c.lineTo(bx+er*.4,by+er*.35);c.closePath()}
-          c.fill()}}}
-    c.fillStyle=look.eye||'#141414';
-    c.beginPath();c.arc(j.head.x+face*look.headR*.45,j.head.y-look.headR*.05,look.headR*.14,0,Math.PI*2);c.fill();
-    // front legs, drawn last of the limbs so they sit in front of the body -- which is exactly why the
-    // medium slam (Fix round 2) needs no special draw-order handling at all, unlike fix round 1's now-
-    // reverted hind-leg version: the striking limbs are already the last (frontmost) thing drawn here.
-    // `slamming` only swaps in the tinted, pad-marked paw() variant for legibility ("claws/paw pads
-    // visible" per the review) -- a shade darker than the body fill so the striking paws separate from
-    // it even where they overlap it, matching Fix round 1's own paw-pad treatment, just correctly
-    // applied to the limb that's actually doing the striking this round.
-    const slamCol=slamming?shade(look.skin,-.22):undefined;
-    limb(j.flHip,j.fl1,look.legW,slamCol);limb(j.fl1,j.fl2,look.legW*.55,slamCol);paw(j.fl2,slamCol,slamming);
-    limb(j.frHip,j.fr1,look.legW,slamCol);limb(j.fr1,j.fr2,look.legW*.55,slamCol);paw(j.fr2,slamCol,slamming);
-    for(const p of look.props||[]){
-      if(p==='tiara'){ // a small gold crown resting between the ears
-        const w=look.headR*.7,h=look.headR*.42,cx=j.head.x,cy=j.head.y-look.headR*.9;
-        c.fillStyle=look.accent||'#f4c542';c.strokeStyle='#8a6a10';c.lineWidth=1;
-        c.beginPath();c.moveTo(cx-w,cy+h);c.lineTo(cx-w,cy);c.lineTo(cx-w*.5,cy+h*.5);
-        c.lineTo(cx,cy-h*.2);c.lineTo(cx+w*.5,cy+h*.5);c.lineTo(cx+w,cy);c.lineTo(cx+w,cy+h);
-        c.closePath();c.fill();c.stroke()}
-      if(p==='whiskers'){c.strokeStyle='#4a4238';c.lineWidth=1.1;
-        const wx=j.head.x+face*look.headR*.68,wy=j.head.y+look.headR*.12;
-        for(const dy of[-9,0,9]){c.beginPath();c.moveTo(wx,wy+dy*.35);c.lineTo(wx+face*look.headR*1.35,wy+dy);c.stroke()}}
-      if(p==='teeth'){const tx=j.head.x+face*look.headR*.85,ty=j.head.y+look.headR*.25;
-        c.fillStyle=look.teeth||'#e8d24a';c.strokeStyle='#8a7a1a';c.lineWidth=.8;
-        c.beginPath();c.moveTo(tx,ty);c.lineTo(tx+face*4,ty+6);c.lineTo(tx,ty+7);c.closePath();c.fill();c.stroke()}
-      if(p==='segments'){ // a few dark banding rings across the body capsule, larva-style
-        c.strokeStyle=look.segDark||skinDark;c.lineWidth=2;
-        for(let i=1;i<4;i++){const t=i/4,px=j.hip.x+(j.chest.x-j.hip.x)*t,py=j.hip.y+(j.chest.y-j.hip.y)*t;
-          c.beginPath();c.ellipse(px,py,3,bodyW*.55,0,0,Math.PI*2);c.stroke()}}}
-    c.restore()},
+    // Task 8.2 gave all three quad looks a `.body` block; fix-wave item 8 deleted the 98
+    // unreachable lines of pre-8.2 stroke rig that used to follow. See draw()'s own note.
+    return this._drawBeast(c,F,look,j,face,key,lit)},
   // HUD portrait: a small front-facing head-and-shoulders bust built straight from the look's
   // palette/proportions (not a crop of the side-view fight rig, which has no front-facing pose).
   // Cached on the look object itself, so it's built once per character regardless of how many
@@ -3404,7 +3131,6 @@ const Rig={
     look._portraits=look._portraits||{};
     if(look._portraits[S])return look._portraits[S];
     if(look.body)return look._portraits[S]=this._portraitBody(look,S);
-    if(look._portrait)return look._portraits[S]=look._portrait;
     const cnv=document.createElement('canvas');cnv.width=S;cnv.height=S;
     const c=cnv.getContext('2d'),skinDark=shade(look.skin,-.35);
     const cx=S/2,headR=Math.min(16,look.headR*1.3),headY=S*0.42,shW=Math.min(S*0.92,look.shoulderW*1.7),shY=S*0.64;
@@ -3427,7 +3153,7 @@ const Rig={
     c.fillStyle='#141414';
     c.beginPath();c.arc(cx-headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
     c.beginPath();c.arc(cx+headR*.35,headY-1,1.4,0,Math.PI*2);c.fill();
-    look._portrait=cnv;look._portraits[S]=cnv;return cnv},
+    look._portraits[S]=cnv;return cnv},
   _portraitBody(look,S){
     const b=look.body,cl=b.cloth;
     const cnv=document.createElement('canvas');cnv.width=S;cnv.height=S;
@@ -3472,8 +3198,7 @@ const Rig={
     // the bust is BodyStyle.head's own front-facing branch, so the HUD portrait, the roster card and
     // the fight sprite are demonstrably the same animal. Looks with none keep the pre-8.2 bust below.
     if(look.body){const c2=this._portraitBeast(look,S0);
-      look._portraits[S0]=c2;if(S0===56)look._portrait=c2;return c2}
-    if(look._portrait)return look._portraits[S0]=look._portrait;
+      look._portraits[S0]=c2;return c2}
     const S=56,cnv=document.createElement('canvas');cnv.width=S;cnv.height=S;
     const c=cnv.getContext('2d'),skinDark=shade(look.skin,-.35);
     const cx=S/2,headR=Math.min(18,look.headR*.72),headY=S*0.46,shW=Math.min(S*0.85,look.bodyLen*.3),shY=S*0.7;
@@ -3498,7 +3223,7 @@ const Rig={
       c.fillStyle=headFill;c.beginPath();c.arc(hx,capY,hr,0,Math.PI*2);c.fill();
       c.lineWidth=1.4;c.strokeStyle=shade(headFill,-.3);c.stroke();
       c.fillStyle=look.eye||'#141414';c.beginPath();c.arc(hx-hr*.2,capY-1,1.3,0,Math.PI*2);c.fill();
-      look._portrait=cnv;return cnv}
+      look._portraits[S0]=cnv;return cnv}
     if(look.species==='cat'||look.species==='rat'){ // drawn behind the head so the head fill covers each ear's base
       const big=look.species==='rat',er=headR*(big?.7:.55),ex=headR*(big?.62:.65),ey=-headR*.82;
       for(const s of[-1,1]){const bx=cx+s*ex,by=headY+ey;
@@ -3529,7 +3254,7 @@ const Rig={
     if(props.includes('teeth')){c.fillStyle=look.teeth||'#e8d24a';c.strokeStyle='#8a7a1a';c.lineWidth=.7;
       for(const s of[-1,1]){c.beginPath();c.moveTo(cx+s*headR*.28,headY+headR*.55);c.lineTo(cx+s*headR*.5,headY+headR*.55);
         c.lineTo(cx+s*headR*.39,headY+headR*.8);c.closePath();c.fill();c.stroke()}}
-    look._portrait=cnv;look._portraits[S0]=cnv;return cnv},
+    look._portraits[S0]=cnv;return cnv},
   // The quad bust: the species head straight out of BodyStyle at face 0, on a short neck over a
   // chest wedge in the coat's own colour. Same construction as _portraitBody, with the quad rig's
   // own proportions -- a smaller head radius relative to the frame, because a cat's or a rat's ears
