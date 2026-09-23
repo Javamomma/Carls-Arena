@@ -268,6 +268,22 @@ class Fighter{
         if(this.power>=this.moveDef('s'+sp).cost)return this.startMove('s'+sp,undefined,undefined,fight)}
       if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special,undefined,undefined,fight);
       if(intent.dashBack){this.inv=DASH_BACK.inv;return this.setState('DASH')}
+      // Task 12.3 (frozen interface, exact ruling): intent.approach -- a NEW intent field, set only by
+      // AI.make's decideApproach (55_ai.js), never by Ctrl.player/Ctrl.competent/Ctrl.random/the
+      // tutorial controllers -- so a human player's own swipe-right medium (intent.medium) is
+      // completely untouched by this branch and still fires instantly, same as before this task. Only
+      // the AI's own guaranteed "close the distance" dash-in routes through WINDUP -- decidePunish's
+      // punish medium and decideAttack's spontaneous medium both still set intent.medium directly and
+      // still fire instantly too, per the controller's own "every AI APPROACH" (not "every AI medium")
+      // scope. clearMove() drops any stale move/moveName left over from a previous ATTACK so
+      // phase()/hitbox() (both gated on state==='ATTACK') can't misread it while this fighter sits in
+      // WINDUP with no hitbox of its own; the dust puff fx (72_fx.js's existing 'dust' descriptor,
+      // reused rather than inventing a new fx kind) is pushed here, once, on WINDUP entry -- `fight` is
+      // optional (Fight.step's own act(i,this) call, same as every other fight-optional site in this
+      // file), so a bare unit-test F.act(intent) with no 2nd arg just skips the fx push, same as
+      // startMove's own optional Passives.onSpecial hook does. See Fighter.tick's own WINDUP case
+      // (below) for the blind 6-frame (WINDUP_FRAMES) countdown into the actual tracked medium dash-in.
+      if(intent.approach){this.clearMove();if(fight)fight.fx.push({kind:'dust',x:this.x,y:FLOOR});return this.setState('WINDUP')}
       // Task 7.2: openers (CHAIN.openers) always start a brand-new chain at node 1, regardless of
       // whatever chainNode a previous, already-finished chain left behind (it's already been reset to
       // 0 by tick()'s own 'done' transition or Fight.resolve's hit-taken reset by the time IDLE/BLOCK
@@ -384,6 +400,21 @@ class Fighter{
     if(this._kdCounter>0)this._kdCounter--;
     switch(this.state){
       case'CHARGE':if(this.f>=this.move.charge)this.setState('ATTACK');break;
+      // Task 12.3 (frozen interface, exact ruling): WINDUP -- a blind, uninterruptible-by-intent
+      // countdown (same shape as CHARGE just above: act() never re-reads intent while state is
+      // WINDUP, there's no case for it in act()'s own switch, so a player/AI's held block/dashBack
+      // during these 6 frames is simply ignored, exactly like a committed heavy charge ignores
+      // everything but intent.heavy). Once WINDUP_FRAMES have elapsed, starts the real tracked medium
+      // dash-in as a fresh chain opener (node 1) -- chainLights/chainMediums armed here, at the moment
+      // the move actually starts, mirroring the IDLE/BLOCK branch's own opener bookkeeping (act(),
+      // above) rather than at WINDUP entry, so a fighter hit mid-WINDUP (see Fight.resolve's hit
+      // branch, 60_fight.js) never leaves a stale {1,0} chain count armed for a medium that never
+      // actually started. `fight` rides through to startMove purely so a real fight reference is
+      // available the same way Fight.step's own tick(this) call already threads it through for the
+      // ATTACK 'done' case's lastChainExitFrame stamp -- unused by startMove for a plain medium
+      // (Passives.onSpecial only ever fires for s1/s2/s3, see startMove's own regex guard), but kept
+      // for signature consistency with every other startMove call site that has a live fight.
+      case'WINDUP':if(this.f>=WINDUP_FRAMES){this.chainLights=0;this.chainMediums=1;this.startMove('medium',1,undefined,fight)}break;
       // Dash-in movement (Task 6.2): consumes this.dashLeft (set once by setupDash) at up to
       // this.dashRate px/frame, through this.effStartup -- same '<=' boundary the old flat-dash check
       // used (this.f<=m.startup), so a move's last dash increment still lands on the same frame its

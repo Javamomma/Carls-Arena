@@ -2023,6 +2023,13 @@ const CLASS_BONUS=1.15,PARRY_WINDOW=8,PARRY_STUN=66,CHIP=.08,POWER_MAX=300,PARRY
 // non-light/medium intercept falls back to the old flat 1.5 (INTERCEPT_MUL[moveName]||1.5 at the call
 // site) -- see the task report's Deviations section for this interpretation.
 const INTERCEPT_MUL={light:1.3,medium:1.8};
+// Task 12.3 (frozen interface, exact ruling): WINDUP_FRAMES -- every AI-decided approach dash-in
+// (55_ai.js's decideApproach, the guaranteed distance-closer) now telegraphs 6 frames of a committed,
+// no-hitbox weight-shift pose (68_rig.js's own 'windup' pose, plus a dust puff, 50_fighter.js's
+// Fighter.act) before the actual tracked medium dash-in starts -- see Fighter.tick's own WINDUP case
+// for where this is read. A single named constant (not a literal 6 sprinkled at both the sim-side
+// timeout and the rig's own t01 denominator) so the two can never drift apart.
+const WINDUP_FRAMES=6;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
 const STAGE_W=1400;
 // Wall clamp half-width for Fighter.tick's x clamp. Wide enough that a fighter pinned at the wall
@@ -2956,6 +2963,22 @@ class Fighter{
         if(this.power>=this.moveDef('s'+sp).cost)return this.startMove('s'+sp,undefined,undefined,fight)}
       if(intent.special&&this.power>=this.moveDef('s'+intent.special).cost)return this.startMove('s'+intent.special,undefined,undefined,fight);
       if(intent.dashBack){this.inv=DASH_BACK.inv;return this.setState('DASH')}
+      // Task 12.3 (frozen interface, exact ruling): intent.approach -- a NEW intent field, set only by
+      // AI.make's decideApproach (55_ai.js), never by Ctrl.player/Ctrl.competent/Ctrl.random/the
+      // tutorial controllers -- so a human player's own swipe-right medium (intent.medium) is
+      // completely untouched by this branch and still fires instantly, same as before this task. Only
+      // the AI's own guaranteed "close the distance" dash-in routes through WINDUP -- decidePunish's
+      // punish medium and decideAttack's spontaneous medium both still set intent.medium directly and
+      // still fire instantly too, per the controller's own "every AI APPROACH" (not "every AI medium")
+      // scope. clearMove() drops any stale move/moveName left over from a previous ATTACK so
+      // phase()/hitbox() (both gated on state==='ATTACK') can't misread it while this fighter sits in
+      // WINDUP with no hitbox of its own; the dust puff fx (72_fx.js's existing 'dust' descriptor,
+      // reused rather than inventing a new fx kind) is pushed here, once, on WINDUP entry -- `fight` is
+      // optional (Fight.step's own act(i,this) call, same as every other fight-optional site in this
+      // file), so a bare unit-test F.act(intent) with no 2nd arg just skips the fx push, same as
+      // startMove's own optional Passives.onSpecial hook does. See Fighter.tick's own WINDUP case
+      // (below) for the blind 6-frame (WINDUP_FRAMES) countdown into the actual tracked medium dash-in.
+      if(intent.approach){this.clearMove();if(fight)fight.fx.push({kind:'dust',x:this.x,y:FLOOR});return this.setState('WINDUP')}
       // Task 7.2: openers (CHAIN.openers) always start a brand-new chain at node 1, regardless of
       // whatever chainNode a previous, already-finished chain left behind (it's already been reset to
       // 0 by tick()'s own 'done' transition or Fight.resolve's hit-taken reset by the time IDLE/BLOCK
@@ -3072,6 +3095,21 @@ class Fighter{
     if(this._kdCounter>0)this._kdCounter--;
     switch(this.state){
       case'CHARGE':if(this.f>=this.move.charge)this.setState('ATTACK');break;
+      // Task 12.3 (frozen interface, exact ruling): WINDUP -- a blind, uninterruptible-by-intent
+      // countdown (same shape as CHARGE just above: act() never re-reads intent while state is
+      // WINDUP, there's no case for it in act()'s own switch, so a player/AI's held block/dashBack
+      // during these 6 frames is simply ignored, exactly like a committed heavy charge ignores
+      // everything but intent.heavy). Once WINDUP_FRAMES have elapsed, starts the real tracked medium
+      // dash-in as a fresh chain opener (node 1) -- chainLights/chainMediums armed here, at the moment
+      // the move actually starts, mirroring the IDLE/BLOCK branch's own opener bookkeeping (act(),
+      // above) rather than at WINDUP entry, so a fighter hit mid-WINDUP (see Fight.resolve's hit
+      // branch, 60_fight.js) never leaves a stale {1,0} chain count armed for a medium that never
+      // actually started. `fight` rides through to startMove purely so a real fight reference is
+      // available the same way Fight.step's own tick(this) call already threads it through for the
+      // ATTACK 'done' case's lastChainExitFrame stamp -- unused by startMove for a plain medium
+      // (Passives.onSpecial only ever fires for s1/s2/s3, see startMove's own regex guard), but kept
+      // for signature consistency with every other startMove call site that has a live fight.
+      case'WINDUP':if(this.f>=WINDUP_FRAMES){this.chainLights=0;this.chainMediums=1;this.startMove('medium',1,undefined,fight)}break;
       // Dash-in movement (Task 6.2): consumes this.dashLeft (set once by setupDash) at up to
       // this.dashRate px/frame, through this.effStartup -- same '<=' boundary the old flat-dash check
       // used (this.f<=m.startup), so a move's last dash increment still lands on the same frame its
@@ -3975,7 +4013,14 @@ class Fight{
     // for the full reasoning; mirrors the "once per move" property hitstop's own `!m.hits||last` gate
     // already gives hitstop, applied here via a live flag instead since intercept's own trigger is
     // state-based, not sub-hit-index-based.
-    const rawIntercept=def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track));
+    // Task 12.3 (frozen interface, exact ruling): rawIntercept also fires while def sits in the new
+    // WINDUP state (50_fighter.js) -- the AI's own telegraphed approach dash-in, no hitbox, no
+    // def.move at all (clearMove() runs on WINDUP entry). A defender caught mid-WINDUP is read the
+    // same way as one caught in a dash-in's own pre-hitbox startup: att's landed move class picks the
+    // multiplier via INTERCEPT_MUL just below (light 1.3, medium 1.8) exactly as before -- this state
+    // check is the only change; interceptMul/backdraft/the INTERCEPT! popup are all already generic
+    // over WHY def was vulnerable, not just the pre-existing ATTACK/startup case.
+    const rawIntercept=(def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track)))||def.state==='WINDUP';
     const intercept=rawIntercept&&!att.interceptedThisMove;
     if(intercept)att.interceptedThisMove=true;
     // Task 12.2 (frozen interface, exact ruling): backdraft -- an intercept that lands within 30

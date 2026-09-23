@@ -398,6 +398,13 @@ const CLASS_BONUS=1.15,PARRY_WINDOW=8,PARRY_STUN=66,CHIP=.08,POWER_MAX=300,PARRY
 // non-light/medium intercept falls back to the old flat 1.5 (INTERCEPT_MUL[moveName]||1.5 at the call
 // site) -- see the task report's Deviations section for this interpretation.
 const INTERCEPT_MUL={light:1.3,medium:1.8};
+// Task 12.3 (frozen interface, exact ruling): WINDUP_FRAMES -- every AI-decided approach dash-in
+// (55_ai.js's decideApproach, the guaranteed distance-closer) now telegraphs 6 frames of a committed,
+// no-hitbox weight-shift pose (68_rig.js's own 'windup' pose, plus a dust puff, 50_fighter.js's
+// Fighter.act) before the actual tracked medium dash-in starts -- see Fighter.tick's own WINDUP case
+// for where this is read. A single named constant (not a literal 6 sprinkled at both the sim-side
+// timeout and the rig's own t01 denominator) so the two can never drift apart.
+const WINDUP_FRAMES=6;
 const DASH_BACK={frames:12,dist:90,inv:8},KNOCKDOWN={frames:40,inv:10};
 const STAGE_W=1400;
 // Wall clamp half-width for Fighter.tick's x clamp. Wide enough that a fighter pinned at the wall

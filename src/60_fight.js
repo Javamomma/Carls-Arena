@@ -287,7 +287,14 @@ class Fight{
     // for the full reasoning; mirrors the "once per move" property hitstop's own `!m.hits||last` gate
     // already gives hitstop, applied here via a live flag instead since intercept's own trigger is
     // state-based, not sub-hit-index-based.
-    const rawIntercept=def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track));
+    // Task 12.3 (frozen interface, exact ruling): rawIntercept also fires while def sits in the new
+    // WINDUP state (50_fighter.js) -- the AI's own telegraphed approach dash-in, no hitbox, no
+    // def.move at all (clearMove() runs on WINDUP entry). A defender caught mid-WINDUP is read the
+    // same way as one caught in a dash-in's own pre-hitbox startup: att's landed move class picks the
+    // multiplier via INTERCEPT_MUL just below (light 1.3, medium 1.8) exactly as before -- this state
+    // check is the only change; interceptMul/backdraft/the INTERCEPT! popup are all already generic
+    // over WHY def was vulnerable, not just the pre-existing ATTACK/startup case.
+    const rawIntercept=(def.state==='ATTACK'&&def.phase()==='startup'&&!!(def.move&&(def.move.dash||def.move.track)))||def.state==='WINDUP';
     const intercept=rawIntercept&&!att.interceptedThisMove;
     if(intercept)att.interceptedThisMove=true;
     // Task 12.2 (frozen interface, exact ruling): backdraft -- an intercept that lands within 30
