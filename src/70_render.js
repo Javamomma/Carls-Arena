@@ -197,10 +197,21 @@ const Render={ctx:canvas.getContext('2d'),
       c.moveTo(x+w,y);c.lineTo(x+skew,y);c.lineTo(x,y+h/2);c.lineTo(x+skew,y+h);c.lineTo(x+w,y+h)}
     else c.rect(x,y,w,h);
     c.closePath()},
+  // Task 8.4: the plain fillRect drawn inside barPath's chevron clip, factored to a pure function of
+  // (x,y,w,h,pct,bevel) -- same "geometry as a testable pure function" pattern as streakGeom below --
+  // so "the filled region is exactly w*pct, anchored to the correct edge for each side" is assertable
+  // at 0/50/100% without a canvas. bevel 'left' (hpBarGrad's own p2 bevel) anchors the fill to the
+  // bar's right edge, matching hpBarGrad's pre-8.4 `fx=x+w-fw` exactly; anything else (hpBar's own
+  // 'right' bevel, or no bevel at all) anchors to the left, matching hpBar's pre-8.4 plain
+  // `fillRect(x,y,w*pct,h)` exactly -- this refactor changes no pixel either call site already drew.
+  barFillRect(x,y,w,h,pct,bevel){
+    const fw=w*clamp(pct,0,1);
+    return bevel==='left'?{x:x+w-fw,y,w:fw,h}:{x,y,w:fw,h}},
   hpBar(c,x,y,w,h,pct,col,bevel){
     this.barPath(c,x,y,w,h,bevel);c.save();c.clip();
     c.fillStyle='#1a1a1a';c.fillRect(x,y,w,h);
-    c.fillStyle=col;c.fillRect(x,y,w*clamp(pct,0,1),h);
+    const fr=this.barFillRect(x,y,w,h,pct,bevel);
+    c.fillStyle=col;c.fillRect(fr.x,fr.y,fr.w,fr.h);
     c.restore();
     this.barPath(c,x,y,w,h,bevel);c.strokeStyle='#f4c542';c.lineWidth=1.75;c.stroke()},
   // p2's fill drains from the bar's right edge (matches "right" in the rendition) and is a
@@ -208,9 +219,9 @@ const Render={ctx:canvas.getContext('2d'),
   hpBarGrad(c,x,y,w,h,pct,bevel){
     this.barPath(c,x,y,w,h,bevel);c.save();c.clip();
     c.fillStyle='#1a1a1a';c.fillRect(x,y,w,h);
-    const fw=w*clamp(pct,0,1),fx=x+w-fw;
-    if(fw>0){const g=c.createLinearGradient(fx,0,fx+fw,0);g.addColorStop(0,'#c62828');g.addColorStop(1,'#ffa726');
-      c.fillStyle=g;c.fillRect(fx,y,fw,h)}
+    const fr=this.barFillRect(x,y,w,h,pct,bevel);
+    if(fr.w>0){const g=c.createLinearGradient(fr.x,0,fr.x+fr.w,0);g.addColorStop(0,'#c62828');g.addColorStop(1,'#ffa726');
+      c.fillStyle=g;c.fillRect(fr.x,fr.y,fr.w,fr.h)}
     c.restore();
     this.barPath(c,x,y,w,h,bevel);c.strokeStyle='#f4c542';c.lineWidth=1.75;c.stroke()},
   // 1-letter code per buff id, for the small gold badge squares under the enemy hp bar.
@@ -302,6 +313,33 @@ const Render={ctx:canvas.getContext('2d'),
     c.fillStyle='#7fd18a';c.font='bold 13px ui-monospace,monospace';c.textAlign='center';c.textBaseline='middle';
     c.fillText('SPAR',x+w/2+sw,cy);
     c.restore()},
+  // Task 8.4: the point the class-gem badge is centered on, a few px below the portrait frame's own
+  // bottom edge. A pure function of (x,y,size) -- same "geometry as a testable pure function" pattern
+  // as streakGeom/barFillRect -- so portraitFrame's own test can sample the exact pixel the gem fills
+  // without re-deriving the layout math.
+  gemCenter(x,y,size){return{x:x+size/2,y:y+size+6}},
+  // Task 8.4 ruling: an ornate class-gem portrait frame, replacing the plain gold strokeRect that used
+  // to ring each 56px portrait bust (Rig.portrait) -- a two-ring beveled frame (dark outer bevel + gold
+  // inner ring, four short corner ticks for the "ornate" read) plus a small diamond gem tinted per the
+  // fighter's own class via CLS_GEM (40_movedata.js), centered at gemCenter(x,y,size) above. Purely
+  // decorative: draws AROUND the existing 56x56 portrait image already drawn at (x,y) by hud(), never
+  // changes the portrait's own pixel size or any of hud()'s p1x/p2x/barX layout numbers the HUD-
+  // clearance and phone-layout tests already pin. Bottom extent (y+size+11, see gemCenter's +6 plus
+  // this gem's own 5px radius) stays comfortably clear of HUD_LINE (104) -- see 10_util.js's own
+  // HUD_LINE comment, updated alongside this.
+  portraitFrame(c,x,y,size,cls){
+    const gem=CLS_GEM[cls]||CLS_GEM.default;
+    c.save();
+    c.strokeStyle='#000';c.lineWidth=3;c.strokeRect(x-1.5,y-1.5,size+3,size+3);
+    c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(x+1,y+1,size-2,size-2);
+    c.strokeStyle='#f4c542';c.lineWidth=1.5;
+    const tick=6;
+    [[x-1.5,y-1.5,1,1],[x+size+1.5,y-1.5,-1,1],[x-1.5,y+size+1.5,1,-1],[x+size+1.5,y+size+1.5,-1,-1]]
+      .forEach(([cx,cy,dx,dy])=>{c.beginPath();c.moveTo(cx,cy+dy*tick);c.lineTo(cx,cy);c.lineTo(cx+dx*tick,cy);c.stroke()});
+    const gp=this.gemCenter(x,y,size),r=5;
+    c.beginPath();c.moveTo(gp.x,gp.y-r);c.lineTo(gp.x+r,gp.y);c.lineTo(gp.x,gp.y+r);c.lineTo(gp.x-r,gp.y);c.closePath();
+    c.fillStyle=gem;c.fill();c.strokeStyle='#000';c.lineWidth=1;c.stroke();
+    c.restore()},
   pauseGlyph(c){const r=this.pauseRect,rr=6;
     c.fillStyle='rgba(0,0,0,.4)';c.strokeStyle='#f4c542';c.lineWidth=1.5;
     c.beginPath();c.moveTo(r.x+rr,r.y);c.lineTo(r.x+r.w-rr,r.y);c.arcTo(r.x+r.w,r.y,r.x+r.w,r.y+rr,rr);
@@ -320,10 +358,32 @@ const Render={ctx:canvas.getContext('2d'),
     const g=c.createRadialGradient(W/2,H/2,H*.35,W/2,H/2,H*.78);
     g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,.28)');
     c.save();c.fillStyle=g;c.fillRect(0,0,W,H);c.restore()},
+  // Task 8.4 ruling: gold italic 900-weight, tilted +-6deg as before (deg is still supplied by each
+  // call site, unchanged) -- only the italic style is new here, added to the existing font string.
   combo(c,x,y,text,deg,col,align){
     c.save();c.translate(x,y);c.rotate(D(deg));c.textAlign=align;c.textBaseline='alphabetic';
-    c.font='900 26px ui-monospace,monospace';c.lineWidth=3;c.strokeStyle='#000';c.strokeText(text,0,0);
+    c.font='italic 900 26px ui-monospace,monospace';c.lineWidth=3;c.strokeStyle='#000';c.strokeText(text,0,0);
     c.fillStyle=col;c.fillText(text,0,0);c.restore()},
+  // Task 8.4 ruling: the combo counter's shown digit count-up-tweens to the real combo over at most
+  // CB_TWEEN_FRAMES, never overshooting it. State lives on Render itself (presentation-only, never
+  // touches Fighter/Fight), keyed by side ('p1'/'p2') so each HUD half tweens independently.
+  // On a rising target it ramps `shown` from wherever it currently sits toward the new target,
+  // measured from the frame the rise was first seen (so a later, still-climbing call keeps the same
+  // ramp instead of restarting one every frame); on a falling target -- a combo reset, a shorter new
+  // combo, or hud() itself parking the tween at 0 while combo<=1 -- it snaps immediately, since
+  // "never overshoot" also means never lingering on a stale HIGHER count once the real one has
+  // dropped. A never-before-seen side starts its state at 0 (not the target), so even a combo
+  // counter's first-ever appearance ramps up rather than snapping in fully formed.
+  CB_TWEEN_FRAMES:8,
+  comboDisplay(side,target,frame){
+    this._comboTween=this._comboTween||{};
+    const st=this._comboTween[side]||(this._comboTween[side]={shown:0,from:0,to:0,startFrame:frame});
+    if(target<st.shown){st.shown=target;st.from=target;st.to=target;st.startFrame=frame;return st.shown}
+    if(target>st.to){st.from=st.shown;st.to=target;st.startFrame=frame}
+    if(st.shown<st.to){
+      const span=Math.max(1,frame-st.startFrame),t=Math.min(1,span/this.CB_TWEEN_FRAMES);
+      st.shown=Math.min(st.to,Math.round(st.from+(st.to-st.from)*t))}
+    return st.shown},
   // Three chevron cells, filled from p1's power (the rendition shows one power bar for the player,
   // not a per-side pair), one cell per 100 power toward the POWER_MAX of 300. Draws whichever of the
   // 4 baked fill-level variants (0..3) matches, instead of rebuilding the polygon paths every frame.
@@ -334,7 +394,9 @@ const Render={ctx:canvas.getContext('2d'),
     // Portraits + numeric hp bars: p1 left (green), p2 right (red->orange, drains from the right).
     const p1x=18,p2x=W-74,barW=300,barH=18,p1barX=84,p2barX=W-74-10-barW;
     c.drawImage(Rig.portrait(a.def.look),p1x,14,56,56);c.drawImage(Rig.portrait(b.def.look),p2x,14,56,56);
-    c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(p1x+1,15,54,54);c.strokeRect(p2x+1,15,54,54);
+    // Task 8.4: the plain gold strokeRect this used to be is now portraitFrame's own ornate ring +
+    // class-gem badge, keyed off each side's own def.cls (CLS_GEM, 40_movedata.js).
+    this.portraitFrame(c,p1x,14,56,a.def.cls);this.portraitFrame(c,p2x,14,56,b.def.cls);
     c.textBaseline='alphabetic';
     c.font='bold 14px ui-monospace,monospace';c.textAlign='left';c.fillStyle='#fff';c.fillText(a.def.name,p1barX,25);
     {const entry=Save.data.roster[G.champ];this.p1Sub(c,p1barX,39,entry?entry.level:1,entry?entry.stars:1)}
@@ -374,8 +436,18 @@ const Render={ctx:canvas.getContext('2d'),
     // floorLine() only redraws its offscreen text when the label string itself changes.
     this.floorLine(c,G.encounter?(G.encounter.floor!=null?('FLOOR '+G.encounter.floor+' • '+G.encounter.name):G.encounter.name):'EXHIBITION • DOORWAY');
     this.viewersHud(c);
-    if(a.combo>1)this.combo(c,56,190,a.combo+' HITS',-6,'#f4c542','left');
-    if(b.combo>1)this.combo(c,W-56,190,b.combo+' HITS',6,'#f66','right');
+    // Task 8.4 ruling: count-up tween (comboDisplay above) drives the shown digit, and the enemy
+    // (p2) side now colors itself with the enemy's own CLS_GEM entry instead of a fixed red -- the
+    // gate below still reads the REAL combo (a.combo/b.combo), so the counter appears the instant a
+    // combo actually starts even if the tweened digit briefly reads lower while it ramps up. The
+    // `else` branches park the tween at 0 while no combo is showing, so the next one always ramps up
+    // from zero instead of resuming from a stale earlier count.
+    if(a.combo>1){const shown=this.comboDisplay('p1',a.combo,f.frame);
+      this.combo(c,56,190,shown+' HITS',-6,'#f4c542','left')}
+    else this.comboDisplay('p1',0,f.frame);
+    if(b.combo>1){const shown=this.comboDisplay('p2',b.combo,f.frame),col=CLS_GEM[b.def.cls]||CLS_GEM.default;
+      this.combo(c,W-56,190,shown+' HITS',6,col,'right')}
+    else this.comboDisplay('p2',0,f.frame);
     this.chevrons(c,a.power);
     if(f.over){c.textAlign='center';c.fillStyle='#fff';c.font='bold 40px ui-monospace,monospace';c.fillText('K.O.',W/2,H/2)}},
   frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;

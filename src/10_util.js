@@ -2,9 +2,11 @@
 const W=854,H=480,FLOOR=400,STEP=1/60;
 const canvas=document.getElementById('game');
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
-// Screen-space y a rig's topmost point must clear: portraits/hp bars end around y=70, the floor-line
-// text around y=96, so 104 leaves a few px of breathing room. Shared by Camera's per-fight zoom cap
-// (65_stage.js/80_game.js) and its own regression test (90_tests.js) so all three read one number.
+// Screen-space y a rig's topmost point must clear: portraits/hp bars end around y=70 (Task 8.4's
+// class-gem badge below each portrait frame reaches a few px further, to y=81 -- see 70_render.js's
+// gemCenter), the floor-line text around y=96, so 104 leaves a few px of breathing room. Shared by
+// Camera's per-fight zoom cap (65_stage.js/80_game.js) and its own regression test (90_tests.js) so
+// all three read one number.
 const HUD_LINE=104;
 // xorshift32; deterministic per seed. Never use Math.random inside the sim.
 // Fix-wave item 4 (final review, Important): xorshift32's first output from a small, low-entropy seed

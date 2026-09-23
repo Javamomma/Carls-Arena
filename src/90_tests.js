@@ -5531,3 +5531,81 @@ Test.add('Fix round 1: BodyStyle tint bounds still hold (k=0.5 neutral, k=0/k=1 
   ok(bright.alpha>0&&bright.alpha<=.18,'k=1 must brighten, bounded at the ruling\'s 18% ceiling');
   ok(Object.keys(BodyStyle._tintSpecCache).length<=21,
     '{fill,alpha} specs themselves are also bounded to <=21 k-buckets, got '+Object.keys(BodyStyle._tintSpecCache).length)});
+// Task 8.4: HUD from the reference (chevron bars, class-gem portrait frames, gold italic combo
+// counter). See src/70_render.js's barFillRect/portraitFrame/gemCenter/comboDisplay and
+// src/40_movedata.js's CLS_GEM for the implementations these tests pin.
+Test.add('Render.barFillRect (chevron bar geometry): the filled region is exactly w*pct at 0/50/100%, anchored to each side\'s own draining edge',()=>{
+  const x=10,y=5,w=200,h=18;
+  // p1 (bevel 'right', hpBar's own bevel): fills from the bar's left edge, shrinking toward x as pct drops
+  for(const pct of[0,.5,1]){
+    const fr=Render.barFillRect(x,y,w,h,pct,'right');
+    eq(fr.x,x,'p1 fill must always start at the bar\'s left edge, pct='+pct);
+    eq(fr.w,w*pct,'p1 fill width must be exactly w*pct at pct='+pct);
+    eq(fr.y,y);eq(fr.h,h)}
+  // p2 (bevel 'left', hpBarGrad's own bevel): fills anchored to the bar's right edge (x+w), so it
+  // empties from its own inner/pointed edge first -- matches hpBarGrad's pre-8.4 fx=x+w-fw exactly.
+  for(const pct of[0,.5,1]){
+    const fr=Render.barFillRect(x,y,w,h,pct,'left');
+    eq(fr.x+fr.w,x+w,'p2 fill\'s right edge must stay pinned at x+w, pct='+pct);
+    eq(fr.w,w*pct,'p2 fill width must be exactly w*pct at pct='+pct)}
+  // a full bar (pct=1) is the same rect regardless of which edge it's anchored to
+  const full1=Render.barFillRect(x,y,w,h,1,'right'),full2=Render.barFillRect(x,y,w,h,1,'left');
+  eq(full1.x,full2.x,'a full bar must start at the same x on both sides');
+  eq(full1.w,full2.w,'a full bar must have the same width on both sides')});
+Test.add('HUD.portraitFrame draws a class-gem badge colored by CLS_GEM[cls], with a defined fallback for a def.cls the ruling\'s table doesn\'t cover',()=>{
+  const cnv=document.createElement('canvas');cnv.width=80;cnv.height=90;
+  const c=cnv.getContext('2d');
+  const hex=h=>{const n=parseInt(h.slice(1),16);return[(n>>16)&255,(n>>8)&255,n&255]};
+  // brawler/beast/caster are in the ruling's own CLS_GEM table verbatim; 'tank' is a real def.cls
+  // (mongo/hobgoblin/grull) the ruling's table never names -- exercises CLS_GEM.default.
+  for(const cls of['brawler','beast','caster','tank']){
+    c.clearRect(0,0,80,90);
+    Render.portraitFrame(c,8,8,56,cls);
+    const p=Render.gemCenter(8,8,56);
+    const d=c.getImageData(Math.round(p.x),Math.round(p.y),1,1).data;
+    const want=hex(CLS_GEM[cls]||CLS_GEM.default);
+    eq(d[0],want[0],cls+' gem red channel');eq(d[1],want[1],cls+' gem green channel');eq(d[2],want[2],cls+' gem blue channel')}
+  ok(CLS_GEM.brawler!==CLS_GEM.default,'sanity: a mapped class and the fallback must actually be different colors')});
+Test.add('Render.comboDisplay tweens the shown combo count up to the real count over at most 8 frames, never exceeding it',()=>{
+  Render._comboTween={};
+  eq(Render.comboDisplay('p1',0,0),0,'a fresh, never-started combo must show 0');
+  const seen=[];
+  for(let fr=1;fr<=20;fr++){
+    const s=Render.comboDisplay('p1',7,fr);
+    ok(s<=7,'shown ('+s+') must never exceed the real combo (7) at frame '+fr);
+    seen.push(s)}
+  for(let i=1;i<seen.length;i++)
+    ok(seen[i]>=seen[i-1],'shown must never count back down while climbing toward a higher target (frame '+(i+1)+')');
+  eq(seen[seen.length-1],7,'by frame 20 the tween must have fully caught up to the real count');
+  const idx=seen.findIndex(v=>v===7);
+  ok(idx>=0&&idx<=8,'must reach the real count within 8 frames of the target first rising, reached at loop index '+idx)});
+Test.add('Render.comboDisplay snaps down immediately (never overshoots) when the real combo drops -- a combo reset or a shorter new one',()=>{
+  Render._comboTween={};
+  for(let fr=1;fr<=10;fr++)Render.comboDisplay('p2',5,fr);
+  eq(Render.comboDisplay('p2',5,10),5,'sanity: must have caught up to 5 by frame 10');
+  eq(Render.comboDisplay('p2',2,11),2,'a dropped target must snap immediately, never showing a stale higher count');
+  eq(Render.comboDisplay('p2',0,12),0,'a fully reset combo must also snap to 0 immediately, not tween down')});
+Test.add('Render.combo() renders 900-weight italic, tilted as before, and fills with whatever color it\'s given',()=>{
+  const c=document.createElement('canvas').getContext('2d');
+  const origFillText=c.fillText.bind(c);
+  let seen=null;
+  c.fillText=function(text,x,y){seen={font:c.font,fillStyle:c.fillStyle};return origFillText(text,x,y)};
+  Render.combo(c,0,0,'5 HITS',6,CLS_GEM.beast,'right');
+  c.fillText=origFillText;
+  ok(seen,'combo() must actually call fillText');
+  ok(seen.font.indexOf('italic')!==-1,'combo text must render in an italic font, got '+JSON.stringify(seen.font));
+  ok(seen.font.indexOf('900')!==-1,'combo text must keep its 900 weight, got '+JSON.stringify(seen.font));
+  eq(seen.fillStyle,CLS_GEM.beast,'combo() must fill with the color it\'s given, unchanged')});
+Test.add('hud(): the enemy combo counter uses CLS_GEM[p2.def.cls] instead of a fixed color, settling to the real count within the tween window',()=>{
+  Save.data=Meta.defaults();
+  Render._comboTween={};
+  const c=document.createElement('canvas').getContext('2d');
+  const fight=mkFight({p1:CHAMPS.carl,p2:MOBS.grub}); // grub: cls 'beast'
+  fight.p2.combo=3;
+  let seenText=null,seenColor=null;
+  const origFillText=c.fillText.bind(c);
+  c.fillText=function(text,x,y){if(/ HITS$/.test(text)){seenText=text;seenColor=c.fillStyle}return origFillText(text,x,y)};
+  for(fight.frame=0;fight.frame<=8;fight.frame++)Render.hud(c,fight);
+  c.fillText=origFillText;
+  eq(seenText,'3 HITS','the enemy combo text must have caught up to the real combo by the end of the tween window');
+  eq(seenColor,CLS_GEM.beast,'grub (cls beast) must draw its combo counter in CLS_GEM.beast, not a fixed color')});

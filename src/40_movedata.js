@@ -174,6 +174,18 @@ const BOSSES={
     boss:true,buffs:['regen'],moves:{s3:{dmg:2.4,hits:6,gap:5}}}};
 const DEFS=Object.assign({},CHAMPS,MOBS,BOSSES);
 const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',beast:'trickster',trickster:'tank'};
+// Task 8.4 ruling: CLS_GEM maps a def's own cls (CHAMPS/MOBS/BOSSES above) to the portrait-frame
+// gem / enemy combo-counter color the HUD draws (70_render.js's portraitFrame/hud) -- presentation
+// reads this table, the sim never does, same boundary CLASS_BEATS above already draws for the
+// pre-fight matchup arrow (that one the sim DOES read; this one only ever reaches a canvas draw).
+// The controller's ruling gives five entries verbatim -- brawler/beast/caster/undead/brute -- kept
+// exactly as given rather than renamed. The roster's actual def.cls vocabulary (see CHAMPS/MOBS/
+// BOSSES above) is brawler/rogue/caster/tank/beast/trickster: 'undead' and 'brute' don't label any
+// current def, and 'rogue'/'tank'/'trickster' aren't in the ruling's table -- `default` covers those
+// so every real roster member still gets a defined gem color instead of an `undefined` fillStyle.
+// See the task report's Concerns for the follow-up this asymmetry flags.
+const CLS_GEM={brawler:'#f4c542',beast:'#5fbf6a',caster:'#9b6bd6',undead:'#d8d0c0',brute:'#c0623a',
+  default:'#9aa0a6'};
 // Fix-wave item 5 (final review, Important): the minimum CHARGE frames a released heavy still swings
 // at, instead of cancelling outright -- see Fighter.act's own CHARGE branch comment (50_fighter.js).
 // A flat frame count, independent of any per-champion moves.heavy.charge override (goblin 14, hobgoblin
