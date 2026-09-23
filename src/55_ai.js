@@ -482,9 +482,23 @@ const AI={
       // re-entry (50_fighter.js) could never actually fire outside a real player's own held input --
       // a multi-hit special always eventually leaked a sub-hit through as a real unblocked hit
       // against every AI tier, no matter how long st.hold was armed. decideBlock('hold') itself
-      // draws no rng (a blind st.hold countdown, same shape as heavy/bait's own holds), so moving it
-      // here only changes WHICH intent a busy AI returns on these frames, never the rng draw
-      // sequence -- see the task report's before/after tables for the balance impact this has.
+      // draws no rng (a blind st.hold countdown, same shape as heavy/bait's own holds).
+      // Fix-wave item M2 (final review, Minor): the claim just below used to read "only changes WHICH
+      // intent a busy AI returns on these frames, never the rng draw sequence" as if that followed from
+      // construction alone. It does not, by construction: moving this check also makes st.hold burn
+      // down on BUSY frames where it previously did not (the pre-reorder busy() gate would have
+      // returned an empty intent before ever reaching decideBlock('hold'), leaving st.hold untouched
+      // that frame), and a differently-timed st.hold expiry can in principle cascade into a different
+      // later react/plan roll -- a REAL rng-sequence risk, not a non-issue. What actually makes it a
+      // non-issue here is empirical: st.hold is only ever armed from a non-busy state (the react/plan
+      // branches below, which both require foe.state==='ATTACK' and this fighter not already
+      // committed) and consistently burns down to 0 again before this fighter becomes busy itself, so
+      // the reorder measured ZERO occurrences of a busy-frame decrement across 10,377 frames of real
+      // t1/t2 play (the golden test just below pins this against an ATTACKING p1, the scenario that
+      // actually exercises it -- the pre-fix golden only ever ran against Ctrl.idle(), which never
+      // arms st.hold at all). True by measurement on this move roster's own timing, not by
+      // construction -- a future move whose active window outlasts a typical st.hold value could
+      // reopen the cascade this comment used to claim was structurally impossible.
       if(decideBlock(it,me,foe,'hold'))return it;
       if(decidePunish(it,me,foe,justGotUp,'follow'))return it;
       // Task 6.2 fix round 1: farFrames resets (not just pauses) the instant `me` is busy -- covers

@@ -333,6 +333,31 @@ Test.add('tier.kit: t1/t2 (kit 0) never draw the extra kit rng roll -- decideSpe
     eq(f.frame,g.frame,tier+': the fight must end on the exact same frame as the pre-9.4 golden run');
     eq(f.log.filter(e=>e.who===-1&&e.type==='hit').map(e=>e.move+':'+e.val).join(','),g.hits.join(','),
       tier+': p2\'s own hit sequence (move+damage, in order) must match the pre-9.4 golden run exactly')}});
+// Fix-wave item M3 (final review, Minor): the golden test just above runs p2's own AI against
+// Ctrl.idle() -- p1 never attacks, so foe.state is never 'ATTACK', decideBlock's react/plan branches
+// (55_ai.js) never arm st.hold, and the block-hold reorder M2 documents (decideBlock('hold') now
+// running ahead of the busy() gate in next()) is never actually exercised by that test -- it only pins
+// the `kit` field's own rng gating. This companion golden pits t1/t2 against an ATTACKING p1
+// (Ctrl.hold({medium:true}), a scripted, deterministic, permanently-pressed medium -- the same
+// pattern several kit tests elsewhere in this file already use for a scripted attacker), the exact
+// scenario M2's own measurement (10,377 frames of real t1/t2 play) covers: p2's own react/plan
+// branches now have real attacks to roll block against, arming and burning down st.hold on frames
+// where this fighter may also be busy, which is precisely what the reorder changes. Golden values
+// below are measured against the current (fixed) tree -- a regression in the reorder's own frame
+// ordering would change p2's hp/frame/hit-sequence here without touching the Ctrl.idle() golden above.
+Test.add('Fix-wave M3: t1/t2 vs an ATTACKING p1 (exercises the block-hold reorder\'s st.hold arm/decrement path M2 documents, not just the kit field gating)',()=>{
+  const golden={
+    t1:{hp1:910,hp2:0,frame:200,hits:['light:90']},
+    t2:{hp1:715,hp2:608,frame:371,hits:['medium:96','light:60','light:63','light:66']}};
+  for(const tier of['t1','t2']){
+    const f=mkFight({ctrl1:Ctrl.hold({medium:true}),ctrl2:AI.make(tier,7)});closeIn(f);
+    for(let i=0;i<400;i++){f.cinematic=0;f.step()}
+    const g=golden[tier];
+    eq(f.p1.hp,g.hp1,tier+': p1 hp must match the pinned golden run');
+    eq(f.p2.hp,g.hp2,tier+': p2 hp must match the pinned golden run');
+    eq(f.frame,g.frame,tier+': the fight must end on the exact same frame as the pinned golden run');
+    eq(f.log.filter(e=>e.who===-1&&e.type==='hit').map(e=>e.move+':'+e.val).join(','),g.hits.join(','),
+      tier+': p2\'s own hit sequence (move+damage, in order) must match the pinned golden run exactly')}});
 // --- Task 9.4: busy()-gate fix (9.1b review Important finding) -- a scripted bot now keeps holding
 // block through BLOCKSTUN, absorbing every sub-hit of a real multi-hit special, not just the first ---
 Test.add('busy()-gate fix (AI.make, t3): a bot that react-blocked sub-hit 1 of carl\'s real S2 Boot Party keeps blocking sub-hits 2-5, never leaking a sub-hit through as an unblocked hit',()=>{
