@@ -318,21 +318,30 @@ const Render={ctx:canvas.getContext('2d'),
   // as streakGeom/barFillRect -- so portraitFrame's own test can sample the exact pixel the gem fills
   // without re-deriving the layout math.
   gemCenter(x,y,size){return{x:x+size/2,y:y+size+6}},
+  // Fix round 1: the ring used to stroke in the same flat gold (#f4c542) as CLS_GEM.brawler, so
+  // Carl's own gem visually disappeared into his own frame (flagged in the task 8.4 report's
+  // Concerns). Recolored to a darker bronze base with a brighter highlight edge -- neither of which
+  // collides with any CLS_GEM color (see that table's own test, 90_tests.js) -- so every gem,
+  // including brawler's gold, now reads as a distinct badge against the frame instead of the frame's
+  // own metal.
+  PORTRAIT_RING_BASE:'#8a6a2a',PORTRAIT_RING_HILITE:'#d9b45a',
   // Task 8.4 ruling: an ornate class-gem portrait frame, replacing the plain gold strokeRect that used
-  // to ring each 56px portrait bust (Rig.portrait) -- a two-ring beveled frame (dark outer bevel + gold
-  // inner ring, four short corner ticks for the "ornate" read) plus a small diamond gem tinted per the
-  // fighter's own class via CLS_GEM (40_movedata.js), centered at gemCenter(x,y,size) above. Purely
-  // decorative: draws AROUND the existing 56x56 portrait image already drawn at (x,y) by hud(), never
-  // changes the portrait's own pixel size or any of hud()'s p1x/p2x/barX layout numbers the HUD-
-  // clearance and phone-layout tests already pin. Bottom extent (y+size+11, see gemCenter's +6 plus
-  // this gem's own 5px radius) stays comfortably clear of HUD_LINE (104) -- see 10_util.js's own
-  // HUD_LINE comment, updated alongside this.
+  // to ring each 56px portrait bust (Rig.portrait) -- a two-ring beveled frame (dark outer bevel,
+  // then a thin bright highlight edge, then the bronze base ring just outside the portrait itself,
+  // four short corner ticks for the "ornate" read) plus a small diamond gem tinted per the fighter's
+  // own class via CLS_GEM (40_movedata.js), centered at gemCenter(x,y,size) above. Purely decorative:
+  // draws AROUND the existing 56x56 portrait image already drawn at (x,y) by hud(), never changes the
+  // portrait's own pixel size or any of hud()'s p1x/p2x/barX layout numbers the HUD-clearance and
+  // phone-layout tests already pin. Bottom extent (y+size+11, see gemCenter's +6 plus this gem's own
+  // 5px radius) stays comfortably clear of HUD_LINE (104) -- see 10_util.js's own HUD_LINE comment,
+  // updated alongside this.
   portraitFrame(c,x,y,size,cls){
     const gem=CLS_GEM[cls]||CLS_GEM.default;
     c.save();
     c.strokeStyle='#000';c.lineWidth=3;c.strokeRect(x-1.5,y-1.5,size+3,size+3);
-    c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(x+1,y+1,size-2,size-2);
-    c.strokeStyle='#f4c542';c.lineWidth=1.5;
+    c.strokeStyle=this.PORTRAIT_RING_HILITE;c.lineWidth=1;c.strokeRect(x-.5,y-.5,size+1,size+1);
+    c.strokeStyle=this.PORTRAIT_RING_BASE;c.lineWidth=2;c.strokeRect(x+1,y+1,size-2,size-2);
+    c.strokeStyle=this.PORTRAIT_RING_HILITE;c.lineWidth=1.5;
     const tick=6;
     [[x-1.5,y-1.5,1,1],[x+size+1.5,y-1.5,-1,1],[x-1.5,y+size+1.5,1,-1],[x+size+1.5,y+size+1.5,-1,-1]]
       .forEach(([cx,cy,dx,dy])=>{c.beginPath();c.moveTo(cx,cy+dy*tick);c.lineTo(cx,cy);c.lineTo(cx+dx*tick,cy);c.stroke()});

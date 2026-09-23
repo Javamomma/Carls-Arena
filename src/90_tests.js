@@ -5552,13 +5552,14 @@ Test.add('Render.barFillRect (chevron bar geometry): the filled region is exactl
   const full1=Render.barFillRect(x,y,w,h,1,'right'),full2=Render.barFillRect(x,y,w,h,1,'left');
   eq(full1.x,full2.x,'a full bar must start at the same x on both sides');
   eq(full1.w,full2.w,'a full bar must have the same width on both sides')});
-Test.add('HUD.portraitFrame draws a class-gem badge colored by CLS_GEM[cls], with a defined fallback for a def.cls the ruling\'s table doesn\'t cover',()=>{
+Test.add('HUD.portraitFrame draws a class-gem badge colored by CLS_GEM[cls], with a defined fallback for a class the table doesn\'t cover',()=>{
   const cnv=document.createElement('canvas');cnv.width=80;cnv.height=90;
   const c=cnv.getContext('2d');
   const hex=h=>{const n=parseInt(h.slice(1),16);return[(n>>16)&255,(n>>8)&255,n&255]};
-  // brawler/beast/caster are in the ruling's own CLS_GEM table verbatim; 'tank' is a real def.cls
-  // (mongo/hobgoblin/grull) the ruling's table never names -- exercises CLS_GEM.default.
-  for(const cls of['brawler','beast','caster','tank']){
+  // Fix round 1: all six real def.cls values now have their own CLS_GEM entry (see that table's own
+  // comment, 40_movedata.js) -- 'totally-unmapped-class' stands in for a future class not yet added,
+  // exercising CLS_GEM.default without relying on any current def falling back to it.
+  for(const cls of['brawler','caster','trickster','tank','rogue','beast','totally-unmapped-class']){
     c.clearRect(0,0,80,90);
     Render.portraitFrame(c,8,8,56,cls);
     const p=Render.gemCenter(8,8,56);
@@ -5566,6 +5567,22 @@ Test.add('HUD.portraitFrame draws a class-gem badge colored by CLS_GEM[cls], wit
     const want=hex(CLS_GEM[cls]||CLS_GEM.default);
     eq(d[0],want[0],cls+' gem red channel');eq(d[1],want[1],cls+' gem green channel');eq(d[2],want[2],cls+' gem blue channel')}
   ok(CLS_GEM.brawler!==CLS_GEM.default,'sanity: a mapped class and the fallback must actually be different colors')});
+Test.add('CLS_GEM: every CHAMPS/MOBS/BOSSES def\'s cls maps to a defined, non-default gem color -- no class silently falls back to grey',()=>{
+  const defs=Object.assign({},CHAMPS,MOBS,BOSSES);
+  for(const id in defs){
+    const cls=defs[id].cls;
+    ok(CLS_GEM.hasOwnProperty(cls),id+'\'s cls ('+cls+') has no CLS_GEM entry at all');
+    ok(CLS_GEM[cls]!==CLS_GEM.default,id+'\'s cls ('+cls+') falls back to CLS_GEM.default -- give it a real entry')}});
+Test.add('HUD.portraitFrame\'s ring color never collides with any CLS_GEM color, so every gem (including brawler\'s gold) reads as a distinct badge against the frame',()=>{
+  ok(/^#[0-9a-f]{6}$/i.test(Render.PORTRAIT_RING_BASE||''),
+    'Render.PORTRAIT_RING_BASE must be a real hex color, got '+JSON.stringify(Render.PORTRAIT_RING_BASE));
+  ok(/^#[0-9a-f]{6}$/i.test(Render.PORTRAIT_RING_HILITE||''),
+    'Render.PORTRAIT_RING_HILITE must be a real hex color, got '+JSON.stringify(Render.PORTRAIT_RING_HILITE));
+  const ringColors=[Render.PORTRAIT_RING_BASE,Render.PORTRAIT_RING_HILITE];
+  for(const gemCls in CLS_GEM){
+    const gem=CLS_GEM[gemCls];
+    ok(!ringColors.includes(gem),
+      'CLS_GEM.'+gemCls+' ('+gem+') exactly matches a portrait-frame ring color -- that gem would blend into its own frame')}});
 Test.add('Render.comboDisplay tweens the shown combo count up to the real count over at most 8 frames, never exceeding it',()=>{
   Render._comboTween={};
   eq(Render.comboDisplay('p1',0,0),0,'a fresh, never-started combo must show 0');

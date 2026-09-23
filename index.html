@@ -1653,14 +1653,16 @@ const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',
 // gem / enemy combo-counter color the HUD draws (70_render.js's portraitFrame/hud) -- presentation
 // reads this table, the sim never does, same boundary CLASS_BEATS above already draws for the
 // pre-fight matchup arrow (that one the sim DOES read; this one only ever reaches a canvas draw).
-// The controller's ruling gives five entries verbatim -- brawler/beast/caster/undead/brute -- kept
-// exactly as given rather than renamed. The roster's actual def.cls vocabulary (see CHAMPS/MOBS/
-// BOSSES above) is brawler/rogue/caster/tank/beast/trickster: 'undead' and 'brute' don't label any
-// current def, and 'rogue'/'tank'/'trickster' aren't in the ruling's table -- `default` covers those
-// so every real roster member still gets a defined gem color instead of an `undefined` fillStyle.
-// See the task report's Concerns for the follow-up this asymmetry flags.
-const CLS_GEM={brawler:'#f4c542',beast:'#5fbf6a',caster:'#9b6bd6',undead:'#d8d0c0',brute:'#c0623a',
-  default:'#9aa0a6'};
+// Fix round 1: the first cut of this table (brawler/beast/caster/undead/brute) used class names the
+// task 8.4 brief invented rather than the six def.cls values CHAMPS/MOBS/BOSSES above actually use
+// (brawler/rogue/caster/tank/beast/trickster) -- flagged in the task 8.4 report's Deviations/Concerns
+// and fixed here with the controller's own corrected ruling: all six real classes now have their own
+// entry (no more `undead`/`brute`, which labeled nothing), so no current def falls back to
+// `default` -- see the "every def's cls has a non-default CLS_GEM entry" test (90_tests.js) that
+// pins this. `default` stays, as a defined fallback for any future class this table hasn't caught up
+// to yet, but nothing in CHAMPS/MOBS/BOSSES should ever actually hit it.
+const CLS_GEM={brawler:'#f4c542',caster:'#9b6bd6',trickster:'#3fbfb0',tank:'#c0623a',rogue:'#5fbf6a',
+  beast:'#e07a3f',default:'#9aa0a6'};
 // Fix-wave item 5 (final review, Important): the minimum CHARGE frames a released heavy still swings
 // at, instead of cancelling outright -- see Fighter.act's own CHARGE branch comment (50_fighter.js).
 // A flat frame count, independent of any per-champion moves.heavy.charge override (goblin 14, hobgoblin
@@ -7034,21 +7036,30 @@ const Render={ctx:canvas.getContext('2d'),
   // as streakGeom/barFillRect -- so portraitFrame's own test can sample the exact pixel the gem fills
   // without re-deriving the layout math.
   gemCenter(x,y,size){return{x:x+size/2,y:y+size+6}},
+  // Fix round 1: the ring used to stroke in the same flat gold (#f4c542) as CLS_GEM.brawler, so
+  // Carl's own gem visually disappeared into his own frame (flagged in the task 8.4 report's
+  // Concerns). Recolored to a darker bronze base with a brighter highlight edge -- neither of which
+  // collides with any CLS_GEM color (see that table's own test, 90_tests.js) -- so every gem,
+  // including brawler's gold, now reads as a distinct badge against the frame instead of the frame's
+  // own metal.
+  PORTRAIT_RING_BASE:'#8a6a2a',PORTRAIT_RING_HILITE:'#d9b45a',
   // Task 8.4 ruling: an ornate class-gem portrait frame, replacing the plain gold strokeRect that used
-  // to ring each 56px portrait bust (Rig.portrait) -- a two-ring beveled frame (dark outer bevel + gold
-  // inner ring, four short corner ticks for the "ornate" read) plus a small diamond gem tinted per the
-  // fighter's own class via CLS_GEM (40_movedata.js), centered at gemCenter(x,y,size) above. Purely
-  // decorative: draws AROUND the existing 56x56 portrait image already drawn at (x,y) by hud(), never
-  // changes the portrait's own pixel size or any of hud()'s p1x/p2x/barX layout numbers the HUD-
-  // clearance and phone-layout tests already pin. Bottom extent (y+size+11, see gemCenter's +6 plus
-  // this gem's own 5px radius) stays comfortably clear of HUD_LINE (104) -- see 10_util.js's own
-  // HUD_LINE comment, updated alongside this.
+  // to ring each 56px portrait bust (Rig.portrait) -- a two-ring beveled frame (dark outer bevel,
+  // then a thin bright highlight edge, then the bronze base ring just outside the portrait itself,
+  // four short corner ticks for the "ornate" read) plus a small diamond gem tinted per the fighter's
+  // own class via CLS_GEM (40_movedata.js), centered at gemCenter(x,y,size) above. Purely decorative:
+  // draws AROUND the existing 56x56 portrait image already drawn at (x,y) by hud(), never changes the
+  // portrait's own pixel size or any of hud()'s p1x/p2x/barX layout numbers the HUD-clearance and
+  // phone-layout tests already pin. Bottom extent (y+size+11, see gemCenter's +6 plus this gem's own
+  // 5px radius) stays comfortably clear of HUD_LINE (104) -- see 10_util.js's own HUD_LINE comment,
+  // updated alongside this.
   portraitFrame(c,x,y,size,cls){
     const gem=CLS_GEM[cls]||CLS_GEM.default;
     c.save();
     c.strokeStyle='#000';c.lineWidth=3;c.strokeRect(x-1.5,y-1.5,size+3,size+3);
-    c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(x+1,y+1,size-2,size-2);
-    c.strokeStyle='#f4c542';c.lineWidth=1.5;
+    c.strokeStyle=this.PORTRAIT_RING_HILITE;c.lineWidth=1;c.strokeRect(x-.5,y-.5,size+1,size+1);
+    c.strokeStyle=this.PORTRAIT_RING_BASE;c.lineWidth=2;c.strokeRect(x+1,y+1,size-2,size-2);
+    c.strokeStyle=this.PORTRAIT_RING_HILITE;c.lineWidth=1.5;
     const tick=6;
     [[x-1.5,y-1.5,1,1],[x+size+1.5,y-1.5,-1,1],[x-1.5,y+size+1.5,1,-1],[x+size+1.5,y+size+1.5,-1,-1]]
       .forEach(([cx,cy,dx,dy])=>{c.beginPath();c.moveTo(cx,cy+dy*tick);c.lineTo(cx,cy);c.lineTo(cx+dx*tick,cy);c.stroke()});
@@ -14638,13 +14649,14 @@ Test.add('Render.barFillRect (chevron bar geometry): the filled region is exactl
   const full1=Render.barFillRect(x,y,w,h,1,'right'),full2=Render.barFillRect(x,y,w,h,1,'left');
   eq(full1.x,full2.x,'a full bar must start at the same x on both sides');
   eq(full1.w,full2.w,'a full bar must have the same width on both sides')});
-Test.add('HUD.portraitFrame draws a class-gem badge colored by CLS_GEM[cls], with a defined fallback for a def.cls the ruling\'s table doesn\'t cover',()=>{
+Test.add('HUD.portraitFrame draws a class-gem badge colored by CLS_GEM[cls], with a defined fallback for a class the table doesn\'t cover',()=>{
   const cnv=document.createElement('canvas');cnv.width=80;cnv.height=90;
   const c=cnv.getContext('2d');
   const hex=h=>{const n=parseInt(h.slice(1),16);return[(n>>16)&255,(n>>8)&255,n&255]};
-  // brawler/beast/caster are in the ruling's own CLS_GEM table verbatim; 'tank' is a real def.cls
-  // (mongo/hobgoblin/grull) the ruling's table never names -- exercises CLS_GEM.default.
-  for(const cls of['brawler','beast','caster','tank']){
+  // Fix round 1: all six real def.cls values now have their own CLS_GEM entry (see that table's own
+  // comment, 40_movedata.js) -- 'totally-unmapped-class' stands in for a future class not yet added,
+  // exercising CLS_GEM.default without relying on any current def falling back to it.
+  for(const cls of['brawler','caster','trickster','tank','rogue','beast','totally-unmapped-class']){
     c.clearRect(0,0,80,90);
     Render.portraitFrame(c,8,8,56,cls);
     const p=Render.gemCenter(8,8,56);
@@ -14652,6 +14664,22 @@ Test.add('HUD.portraitFrame draws a class-gem badge colored by CLS_GEM[cls], wit
     const want=hex(CLS_GEM[cls]||CLS_GEM.default);
     eq(d[0],want[0],cls+' gem red channel');eq(d[1],want[1],cls+' gem green channel');eq(d[2],want[2],cls+' gem blue channel')}
   ok(CLS_GEM.brawler!==CLS_GEM.default,'sanity: a mapped class and the fallback must actually be different colors')});
+Test.add('CLS_GEM: every CHAMPS/MOBS/BOSSES def\'s cls maps to a defined, non-default gem color -- no class silently falls back to grey',()=>{
+  const defs=Object.assign({},CHAMPS,MOBS,BOSSES);
+  for(const id in defs){
+    const cls=defs[id].cls;
+    ok(CLS_GEM.hasOwnProperty(cls),id+'\'s cls ('+cls+') has no CLS_GEM entry at all');
+    ok(CLS_GEM[cls]!==CLS_GEM.default,id+'\'s cls ('+cls+') falls back to CLS_GEM.default -- give it a real entry')}});
+Test.add('HUD.portraitFrame\'s ring color never collides with any CLS_GEM color, so every gem (including brawler\'s gold) reads as a distinct badge against the frame',()=>{
+  ok(/^#[0-9a-f]{6}$/i.test(Render.PORTRAIT_RING_BASE||''),
+    'Render.PORTRAIT_RING_BASE must be a real hex color, got '+JSON.stringify(Render.PORTRAIT_RING_BASE));
+  ok(/^#[0-9a-f]{6}$/i.test(Render.PORTRAIT_RING_HILITE||''),
+    'Render.PORTRAIT_RING_HILITE must be a real hex color, got '+JSON.stringify(Render.PORTRAIT_RING_HILITE));
+  const ringColors=[Render.PORTRAIT_RING_BASE,Render.PORTRAIT_RING_HILITE];
+  for(const gemCls in CLS_GEM){
+    const gem=CLS_GEM[gemCls];
+    ok(!ringColors.includes(gem),
+      'CLS_GEM.'+gemCls+' ('+gem+') exactly matches a portrait-frame ring color -- that gem would blend into its own frame')}});
 Test.add('Render.comboDisplay tweens the shown combo count up to the real count over at most 8 frames, never exceeding it',()=>{
   Render._comboTween={};
   eq(Render.comboDisplay('p1',0,0),0,'a fresh, never-started combo must show 0');

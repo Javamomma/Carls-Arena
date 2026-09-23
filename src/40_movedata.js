@@ -178,14 +178,16 @@ const CLASS_BEATS={brawler:'rogue',rogue:'caster',caster:'brawler',tank:'beast',
 // gem / enemy combo-counter color the HUD draws (70_render.js's portraitFrame/hud) -- presentation
 // reads this table, the sim never does, same boundary CLASS_BEATS above already draws for the
 // pre-fight matchup arrow (that one the sim DOES read; this one only ever reaches a canvas draw).
-// The controller's ruling gives five entries verbatim -- brawler/beast/caster/undead/brute -- kept
-// exactly as given rather than renamed. The roster's actual def.cls vocabulary (see CHAMPS/MOBS/
-// BOSSES above) is brawler/rogue/caster/tank/beast/trickster: 'undead' and 'brute' don't label any
-// current def, and 'rogue'/'tank'/'trickster' aren't in the ruling's table -- `default` covers those
-// so every real roster member still gets a defined gem color instead of an `undefined` fillStyle.
-// See the task report's Concerns for the follow-up this asymmetry flags.
-const CLS_GEM={brawler:'#f4c542',beast:'#5fbf6a',caster:'#9b6bd6',undead:'#d8d0c0',brute:'#c0623a',
-  default:'#9aa0a6'};
+// Fix round 1: the first cut of this table (brawler/beast/caster/undead/brute) used class names the
+// task 8.4 brief invented rather than the six def.cls values CHAMPS/MOBS/BOSSES above actually use
+// (brawler/rogue/caster/tank/beast/trickster) -- flagged in the task 8.4 report's Deviations/Concerns
+// and fixed here with the controller's own corrected ruling: all six real classes now have their own
+// entry (no more `undead`/`brute`, which labeled nothing), so no current def falls back to
+// `default` -- see the "every def's cls has a non-default CLS_GEM entry" test (90_tests.js) that
+// pins this. `default` stays, as a defined fallback for any future class this table hasn't caught up
+// to yet, but nothing in CHAMPS/MOBS/BOSSES should ever actually hit it.
+const CLS_GEM={brawler:'#f4c542',caster:'#9b6bd6',trickster:'#3fbfb0',tank:'#c0623a',rogue:'#5fbf6a',
+  beast:'#e07a3f',default:'#9aa0a6'};
 // Fix-wave item 5 (final review, Important): the minimum CHARGE frames a released heavy still swings
 // at, instead of cancelling outright -- see Fighter.act's own CHARGE branch comment (50_fighter.js).
 // A flat frame count, independent of any per-champion moves.heavy.charge override (goblin 14, hobgoblin
