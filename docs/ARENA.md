@@ -1542,8 +1542,8 @@ No node collapsed to a near-0/near-100 wall; nothing here needed a retune.
 
 ## Phase 8 exit (2026-09-22)
 
-Tasks 8.0-8.5 plus the final-review fix wave, commits `5bc5397..52bae9a` on `main` (Task 8.0's first
-commit through the fix wave's last code commit, immediately before this section's own update commit).
+Tasks 8.0-8.5 plus the final-review fix wave, commits `5bc5397..1a867e7` on `main` (Task 8.0's first
+commit through the fix wave's last commit, which is the one that wrote this section).
 SDD ledger: `.superpowers/sdd/2026-09-22-phase8-art-upgrade/progress.md`.
 
 ### Exit table
@@ -1556,7 +1556,7 @@ SDD ledger: `.superpowers/sdd/2026-09-22-phase8-art-upgrade/progress.md`.
 | 8.3 Stage lighting | `387158f`, `52d933d`, `7661eb0`, `e04ffac`, `b1dd123` | 481→496 (+15) | `Stage.build` far/torches/floor-falloff layers, `Stage.lightAt` (per-8px-column cached torch tint/rim), fighter torch-tint overlay + rim highlight — landed after a fix round (tint bled outside the fighter's own silhouette as a pale box; fixed with per-fighter tinted bitmaps) and a re-review fix (falloff step corrected to the ruled 32px) |
 | 8.4 HUD | `9c7a833`, `a6a6629`, `36cbf31` | 496→504 (+8) | Chevron-capped HUD bars (`HUD.bar`/`barFillRect`), the `CLS_GEM` class-color table (`40_movedata.js`), `HUD.portraitFrame`'s ornate ring + class-gem badge, gold italic tilted combo counter with a count-up tween — landed after a fix round correcting `CLS_GEM`'s class names to the six real `def.cls` values and recoloring the frame ring off brawler gold so the gold gem itself still reads |
 | 8.5 Screens + close-out | see below | 504→511 (+7) | Map door cards (`Screens.doorCard`, cached per node id + state) replacing the old plain-text doorstack: a fixed **72×72** square carrying a stone arch, a torch and the encounter enemy's own portrait — **no floor banner**, and the locked/cleared indicator is **DOM text** (`.doormark`) in the row's text column, not a canvas overlay. `flex-shrink:0` on `.node`/`.card` is the fix for the row-compression bug that let a door card bleed into its neighbours. Roster cards framed with the 112px portrait + `Render.portraitFrame`/`CLS_GEM` (`Screens.portraitCard`); `tools/shots.sh` regenerated end-to-end (see its own "Task 8.5" comment block); this section |
-| Fix wave (final review) | `517869c`, `4647a25`, `b11a55a`, `c1a12eb`, `4a9c435`, `6fae676`, `952ded5`, `c25679c`, `52bae9a` | 511→520 (+9) | The whole-branch review's 1 Critical, 5 Important and 9 Minor, plus the parked Donut art note. See the fix-wave subsection below |
+| Fix wave (final review) | `517869c`, `4647a25`, `b11a55a`, `c1a12eb`, `4a9c435`, `6fae676`, `952ded5`, `c25679c`, `52bae9a`, `1a867e7` | 511→520 (+9) | The whole-branch review's 1 Critical, 5 Important and 9 Minor, plus the parked Donut art note. See the fix-wave subsection below |
 
 **Phase 8 exit criteria:** all eleven looks have layered bodies and faces (8.1/8.2), with a standing
 shot for each one — grub and the shaman got theirs in the fix wave, which is what took the reviewable
@@ -1692,7 +1692,7 @@ same fresh-save floor 1 as `p4-map.png` by design — one map screen, one fixtur
   becomes bronze so the gold gem reads; combo shot via a scripted fixture — cost if wrong: colors
   only."
 
-### Full gate (the fix wave's last code commit, `52bae9a`)
+### Full gate (re-run at the fix wave's last commit, `1a867e7`)
 
 | Command | Result |
 |---|---|
