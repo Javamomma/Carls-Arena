@@ -5446,9 +5446,13 @@ Test.add('Rig.draw/drawBig/drawQuad tolerate a missing lit argument (existing ca
 
 // Pinned counts for the session sweep below. Named constants rather than literals so the two places
 // that have to agree -- the assertion and the memory estimate in the task report -- read the same
-// number, and so a deliberate change (fix-wave item 4 routing seven more part kinds through the tint
-// path) lands as one edit with a reason next to it.
-const SESSION_BASE_BITMAPS=340,SESSION_TINTED_BITMAPS=600;
+// number, and so a deliberate change lands as one edit with a reason next to it. That has already
+// happened once: fix-wave item 4 routed hips/hand/joint/seam/blob/paw/foot through the same tint
+// path limb/torso/head already used, which took the tinted copies from 600 to 1360 for this sweep
+// (the base bitmap count is unchanged -- no new bitmaps, only tinted copies of existing ones). That
+// is the cost the review named as item 3's prerequisite, and it is why item 3 came first: the whole
+// set is now dropped at every G.startFight rather than kept for the life of the page.
+const SESSION_BASE_BITMAPS=340,SESSION_TINTED_BITMAPS=1360;
 // ---- Fix-wave item 3 (final review, Important #1): every BodyStyle cache is counted and bounded --
 // cacheCount() used to report _cache alone, which is the one cache that is provably bounded (it is
 // keyed on look|part|face|zoomBucket, all of which are finite). _tintedCache -- one full copy of a
@@ -5497,6 +5501,52 @@ Test.add('every BodyStyle cache is counted, bounded across an all-looks session,
     eq(BodyStyle.tintedCount(),0,'G.startFight must drop the tinted-copy cache -- this is the one that grew');
     eq(BodyStyle.specCount(),0,'G.startFight must drop the tint-spec cache');
   }finally{G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+
+// ---- Fix-wave item 4 (final review, Important #4): the torch tint must reach EVERY part ----------
+// `lit` reached limb/torso/head and nothing else, so a fighter standing away from a torch had their
+// arms, legs, torso and head darkened by up to 25% while their fists, feet, hip cloth (Carl's red
+// boxers), knee and elbow caps, a quad's haunch/shoulder masses and paws, and any held weapon stayed
+// at the full base palette -- visible in docs/shots/p8-stage-doorway.png as feet and boxers reading
+// brighter than the shins right above them. Every one of those parts already routes through
+// this.cache(), so each needed exactly what limb already did: keep the cache key, hand it and `lit`
+// to _tintedBitmap. This spies on _tintedBitmap itself rather than sampling pixels, because the
+// property under test is "this part took the tint path", which a pixel probe can only infer.
+Test.add('the torch tint reaches every cached part kind, not just limb/torso/head',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state,orig=BodyStyle._tintedBitmap;
+  const seen=new Set();
+  try{
+    BodyStyle.clearCache();
+    BodyStyle._tintedBitmap=function(base,key,lit){
+      if(lit)seen.add(String(key).split('|')[1].split(':')[0]);
+      return orig.call(this,base,key,lit)};
+    const cam={x:0,zoom:1};
+    // k=0 is the darkest end of the ruling's range, so every part that takes the path gets a real
+    // (non-zero-alpha) tint rather than the neutral k=0.5 pivot's no-op.
+    const lit={tint:Stage._mix(Stage.AMBIENT_TINT,Stage.TORCH_TINT,0),k:0,rimSide:1};
+    const drawOne=id=>{const F=mkFight({p1:DEFS[id]}).p1;
+      c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,0,lit);c.restore()};
+    drawOne('carl');                      // human rig: hips (Carl's boxers), hand, joint, seam, foot
+    drawOne('mother_rat');                // quad rig: blob (haunch/shoulder/tail tip) and paw
+    for(const part of['limb','torso','head','hips','hand','joint','seam','foot','blob','paw'])
+      ok(seen.has(part),'BodyStyle.'+part+' must route its cached bitmap through the torch tint; '+
+        'tinted part kinds seen: '+[...seen].sort().join(','));
+  }finally{BodyStyle._tintedBitmap=orig;G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+// The held-weapon half of the same finding: a dagger, a club and a spiked club are drawn straight
+// onto the main canvas with flat colours, not from a cached bitmap, so there is no bitmap to tint.
+// BodyStyle.litCol applies the SAME spec analytically -- an alpha blend of the tint colour over the
+// base colour is exactly what the source-atop overlay does to an opaque pixel -- so a held weapon
+// darkens with the fighter holding it instead of staying at full brightness.
+Test.add('BodyStyle.litCol tints a flat prop colour by the same spec the cached bitmaps use',()=>{
+  const white='#ffffff';
+  const dark=BodyStyle.litCol(white,{tint:'#ffb060',k:0,rimSide:1});
+  ok(dark!==white,'k=0 must darken a flat prop colour');
+  ok(parseInt(dark.slice(1,3),16)<255,'the darkened colour must actually be darker, got '+dark);
+  eq(BodyStyle.litCol(white,{tint:'#ffb060',k:.5,rimSide:1}),white,'k=0.5 is the neutral pivot: unchanged');
+  eq(BodyStyle.litCol(white,null),white,'no lit at all (portraits, the atlas path) must pass the colour through');
+  eq(BodyStyle.litCol('rgba(255,255,255,.8)',{tint:'#ffb060',k:0,rimSide:1}),'rgba(255,255,255,.8)',
+    'a non-hex colour has no defined mix and must pass through untouched rather than throw')});
 
 // ---- Task 8.3 fix round 1: torch tint must never paint outside the fighter's own silhouette -----
 // Controller-found Critical: the first version stamped one source-atop fillRect per BODY PART onto

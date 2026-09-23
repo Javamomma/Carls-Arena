@@ -973,6 +973,19 @@ const BodyStyle={
     tx.globalCompositeOperation='source-atop';tx.globalAlpha=spec.alpha;tx.fillStyle=spec.fill;
     tx.fillRect(0,0,tc.width,tc.height);
     return this._tintedCache[tKey]=tc},
+  // Fix-wave item 4 (final review, Important #4), the held-weapon half. A dagger, a club or a spiked
+  // club is drawn straight onto the main canvas with flat colours and gradient stops -- there is no
+  // cached, transparent bitmap to hand _tintedBitmap, and a source-atop stamp on the main canvas is
+  // the v1 pale-box Critical all over again. So the same spec is applied ANALYTICALLY instead: an
+  // alpha blend of the tint colour over the base colour is exactly what a source-atop overlay does
+  // to an opaque pixel, so `litCol(col,lit)` and `_tintedBitmap` agree by construction. Anything that
+  // is not a plain #rrggbb (an rgba() hair stroke, a CanvasGradient) has no defined mix here and is
+  // returned untouched rather than thrown on.
+  litCol(col,lit){
+    if(!lit||typeof col!=='string'||!/^#[0-9a-fA-F]{6}$/.test(col))return col;
+    const spec=this._litSpec(lit);
+    if(!spec||spec.alpha<=0)return col;
+    return Stage._mix(col,spec.fill,spec.alpha)},
   // The rim ruling's whole ask: "a single additional stroke on the torch-facing edge of the torso/
   // head only" -- drawn live (not cached; it is one stroke, not a gradient rebuild) directly onto the
   // main canvas, on whichever side lit.rimSide names, in a lightened version of the current torch tint.
@@ -1361,7 +1374,8 @@ const BodyStyle={
   // ko shot. A garment hanging off the hips does not foreshorten with the ribcage, so it does not
   // belong in the ribcage's bitmap. Drawn after both legs so the trunks cover the top of each thigh,
   // the same z-order the pre-8.1 'boxers'/'gear' props had at the end of the prop loop.
-  hips(c,x,y,look,face){
+  hips(c,x,y,look,face,opts){
+    opts=opts||{};
     const b=look&&look.body;
     if(!b)return;
     const cl=b.cloth;
@@ -1369,9 +1383,11 @@ const BodyStyle={
     const zb=this.zoomBucket(c),px=this.SS*zb,limb=look.limb,hw=look.hipW;
     const halfW=hw*.5+limb*.8+3,up=limb*.8,down=cl.legs==='shorts'?limb*2.0:limb*1.0;
     const bw=Math.ceil(halfW*2*px),bh=Math.ceil((up+down)*px);
-    const cv=this.cache(this.key(look,'hips:'+cl.legs,face,zb),bw,bh,g=>{
+    const cacheKey=this.key(look,'hips:'+cl.legs,face,zb);
+    const cv0=this.cache(cacheKey,bw,bh,g=>{
       g.scale(px,px);g.translate(halfW,up);
       this._paintHipCloth(g,look,face<0?-1:1)});
+    const cv=this._tintedBitmap(cv0,cacheKey,opts.lit);
     c.drawImage(cv,x-halfW,y-up,cv.width/px,cv.height/px)},
   _paintHipCloth(g,look,fw){
     const b=look.body,cl=b.cloth,prim=cl.primary,sec=cl.secondary,limb=look.limb,hw=look.hipW;
@@ -2151,15 +2167,18 @@ const BodyStyle={
   // ---- hands and feet ---------------------------------------------------------------------------
   // The old rig drew no hand at all -- a forearm's round line cap was the fist. A real fist is what
   // sells a punch at this size.
-  hand(c,x,y,r,look,face,ang,wrap){
+  hand(c,x,y,r,look,face,ang,wrap,opts){
+    opts=opts||{};
     const b=look&&look.body;
     if(!b)return;
     const zb=this.zoomBucket(c),px=this.SS*zb;
     const half=r*1.75+3;
     const bw=Math.ceil(half*2*px);
-    const cv=this.cache(this.key(look,'hand:'+this._r(r,4)+':'+(wrap?'w':'b'),face,zb),bw,bw,g=>{
+    const cacheKey=this.key(look,'hand:'+this._r(r,4)+':'+(wrap?'w':'b'),face,zb);
+    const cv0=this.cache(cacheKey,bw,bw,g=>{
       g.scale(px,px);g.translate(half,half);
       this._paintHand(g,r,look,wrap)});
+    const cv=this._tintedBitmap(cv0,cacheKey,opts.lit);
     c.save();c.translate(x,y);c.rotate(ang||0);
     c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
     c.restore()},
@@ -2189,13 +2208,15 @@ const BodyStyle={
       g.beginPath();g.moveTo(-r*.92,-r*.05);g.lineTo(r*.46,-r*.16);g.stroke()}},
   // A ball at a limb's attach point. Without it the tube's flat proximal cap leaves a visible notch
   // against the torso silhouette, which is what made the first pass read as parts bolted together.
-  joint(c,x,y,r,look,face,col){
+  joint(c,x,y,r,look,face,col,opts){
+    opts=opts||{};
     const b=look&&look.body;
     if(!b)return;
     const base=col||look.skin;
     const zb=this.zoomBucket(c),px=this.SS*zb,half=r*1.3+3;
     const bw=Math.ceil(half*2*px);
-    const cv=this.cache(this.key(look,'joint:'+this._r(r,4)+':'+base,face,zb),bw,bw,g=>{
+    const cacheKey=this.key(look,'joint:'+this._r(r,4)+':'+base,face,zb);
+    const cv0=this.cache(cacheKey,bw,bw,g=>{
       g.scale(px,px);g.translate(half,half);
       const lo=b.skinShade[0],hi=b.skinShade[1];
       const bone=b.cloth.torso==='bone';
@@ -2206,6 +2227,7 @@ const BodyStyle={
       g.fillStyle=gr;g.beginPath();g.arc(0,0,r,0,Math.PI*2);g.fill();
       if(bone){g.strokeStyle=shade(base,lo*1.3);g.lineWidth=Math.max(.7,r*.16);
         g.beginPath();g.moveTo(-r*.5,0);g.lineTo(r*.5,0);g.stroke()}});
+    const cv=this._tintedBitmap(cv0,cacheKey,opts.lit);
     c.drawImage(cv,x-half,y-half,cv.width/px,cv.height/px)},
   // ---- seam cap (Task 8.2) ----------------------------------------------------------------------
   // The controller's visual read of 8.1 was that every rig looked like "a jointed wooden mannequin".
@@ -2223,13 +2245,15 @@ const BodyStyle={
   //
   // Not used for 'bone' limbs: a skeleton's lobed joint knobs ARE the art (see _paintBoneLimb), so
   // there is no seam to hide there.
-  seam(c,x,y,r,look,face,col,ang){
+  seam(c,x,y,r,look,face,col,ang,opts){
+    opts=opts||{};
     const b=look&&look.body;
     if(!b||!(r>.4))return;
     const base=col||look.skin;
     const zb=this.zoomBucket(c),px=this.SS*zb,half=r+2;
     const bw=Math.ceil(half*2*px);
-    const cv=this.cache(this.key(look,'seam:'+this._r(r,4)+':'+base,face,zb),bw,bw,g=>{
+    const cacheKey=this.key(look,'seam:'+this._r(r,4)+':'+base,face,zb);
+    const cv0=this.cache(cacheKey,bw,bw,g=>{
       g.scale(px,px);g.translate(half,half);
       const lo=b.skinShade[0],hi=b.skinShade[1];
       // Exactly _tube's own stops, at exactly the tube's own width. Anything else -- the first pass
@@ -2239,6 +2263,7 @@ const BodyStyle={
       // onto the bone's own axis, which is the frame _tube's gradient is baked in.
       g.fillStyle=this._tube(g,base,lo,hi,r*2);
       g.beginPath();g.arc(0,0,r,0,Math.PI*2);g.fill()});
+    const cv=this._tintedBitmap(cv0,cacheKey,opts.lit);
     c.save();c.translate(x,y);if(ang)c.rotate(ang);
     c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
     c.restore()},
@@ -2247,14 +2272,16 @@ const BodyStyle={
   // chain of tubes -- it is a haunch, a barrel and a shoulder -- and those three masses are what
   // separate a cat from a noodle. Cached like everything else; `name` is the only thing that varies
   // per call site, so one bitmap per mass per look per zoom bucket.
-  blob(c,x,y,rx,ry,ang,look,face,name,col,hiCol){
+  blob(c,x,y,rx,ry,ang,look,face,name,col,hiCol,opts){
+    opts=opts||{};
     const b=look&&look.body;
     if(!b||!(rx>.3)||!(ry>.3))return;
     const base=col||look.skin,lo=b.skinShade[0],hi=b.skinShade[1];
     const zb=this.zoomBucket(c),px=this.SS*zb;
     const half=Math.max(rx,ry)+3;
     const bw=Math.ceil(half*2*px);
-    const cv=this.cache(this.key(look,'blob:'+name+':'+this._r(rx,2)+':'+this._r(ry,2)+':'+base,face,zb),bw,bw,g=>{
+    const cacheKey=this.key(look,'blob:'+name+':'+this._r(rx,2)+':'+this._r(ry,2)+':'+base,face,zb);
+    const cv0=this.cache(cacheKey,bw,bw,g=>{
       g.scale(px,px);g.translate(half,half);
       g.fillStyle=b.outline;
       g.beginPath();g.ellipse(0,0,rx+1.3,ry+1.3,0,0,Math.PI*2);g.fill();
@@ -2265,6 +2292,7 @@ const BodyStyle={
       g.globalAlpha=.34;g.fillStyle=hiCol||shade(base,Math.min(.95,hi*1.7));
       g.beginPath();g.ellipse(-rx*.16,-ry*.42,rx*.62,ry*.34,0,0,Math.PI*2);g.fill();
       g.globalAlpha=1});
+    const cv=this._tintedBitmap(cv0,cacheKey,opts.lit);
     c.save();c.translate(x,y);if(ang)c.rotate(ang);
     c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
     c.restore()},
@@ -2279,9 +2307,11 @@ const BodyStyle={
     const bw=Math.ceil(half*2*px);
     const kind=(look.species||'beast')+(opts.slam?':slam':'');
     const base=opts.col||look.skin;
-    const cv=this.cache(this.key(look,'paw:'+kind+':'+this._r(w,4)+':'+base,face,zb),bw,bw,g=>{
+    const cacheKey=this.key(look,'paw:'+kind+':'+this._r(w,4)+':'+base,face,zb);
+    const cv0=this.cache(cacheKey,bw,bw,g=>{
       g.scale(px,px);g.translate(half,half);
       this._paintPaw(g,w,look,base,!!opts.slam)});
+    const cv=this._tintedBitmap(cv0,cacheKey,opts.lit);
     c.save();c.translate(x,y);c.rotate(ang||0);
     c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
     c.restore()},
@@ -2326,16 +2356,19 @@ const BodyStyle={
       g.beginPath();g.ellipse(L*.10,H*.34,L*.50,H*.22,0,0,Math.PI*2);g.fill();
       g.globalAlpha=1}
     g.restore()},
-  foot(c,x,y,look,face,ang){
+  foot(c,x,y,look,face,ang,opts){
+    opts=opts||{};
     const b=look&&look.body;
     if(!b)return;
     const zb=this.zoomBucket(c),px=this.SS*zb;
     const w=look.limb*1.35,h=look.limb*.82,half=Math.max(w,h)*1.15+3;
     const bw=Math.ceil(half*2*px);
     const bare=!!look.bareFeet,kind=b.cloth.legs==='bone'?'bone':bare?'bare':'boot';
-    const cv=this.cache(this.key(look,'foot:'+kind+':'+this._r(w,2),face,zb),bw,bw,g=>{
+    const cacheKey=this.key(look,'foot:'+kind+':'+this._r(w,2),face,zb);
+    const cv0=this.cache(cacheKey,bw,bw,g=>{
       g.scale(px,px);g.translate(half,half);
       this._paintFoot(g,w,h,look,kind)});
+    const cv=this._tintedBitmap(cv0,cacheKey,opts.lit);
     c.save();c.translate(x,y);c.rotate(ang||0);
     c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
     c.restore()},
@@ -2810,6 +2843,11 @@ const Rig={
     const cf=part=>this.clothFor(look,part);
     const wrapped=(look.props||[]).includes('bandages');
     const armW=limb*.88,foreW=limb*.70,thighW=limb*1.08,shinW=limb*.86;
+    // Fix-wave item 4: the trailing options bag every cached part module now takes. One object per
+    // fighter draw, built once here, so threading the torch tint to the seven modules that used to
+    // drop it costs no per-part allocation. L() is the same tint applied to a flat prop colour,
+    // for the held weapons below (no cached bitmap of their own to hand _tintedBitmap).
+    const LO={lit},LC=col=>BodyStyle.litCol(col,lit);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
     // Task 8.2 joint-seam polish, applied to all three rigs (see BodyStyle.seam). Three changes per
     // chain: the balls shrank from proud-of-the-limb (.62/.58/.56 of a width, i.e. 12-24% WIDER than
@@ -2818,22 +2856,22 @@ const Rig={
     const boney=cf('upperArm')==='bone';
     const arm=(sh,el,hand)=>{
       const jc=this.jointCol(look,'foreArm');
-      BodyStyle.joint(c,sh.x,sh.y,armW*.48,look,face,this.jointCol(look,'upperArm'));
-      BodyStyle.joint(c,el.x,el.y,Math.min(armW*.86,foreW)*.48,look,face,jc);
+      BodyStyle.joint(c,sh.x,sh.y,armW*.48,look,face,this.jointCol(look,'upperArm'),LO);
+      BodyStyle.joint(c,el.x,el.y,Math.min(armW*.86,foreW)*.48,look,face,jc,LO);
       BodyStyle.limb(c,sh.x,sh.y,el.x,el.y,armW,look,{bone:'upperArm',cloth:cf('upperArm'),face,lit,w2:armW*.86});
       BodyStyle.limb(c,el.x,el.y,hand.x,hand.y,foreW,look,{bone:'foreArm',cloth:cf('foreArm'),face,lit,w2:foreW*.90});
       if(!boney){
-        BodyStyle.seam(c,sh.x,sh.y,armW*.50,look,face,this.jointCol(look,'upperArm'),Math.atan2(el.y-sh.y,el.x-sh.x));
-        BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5+1.1,look,face,jc,Math.atan2(hand.y-el.y,hand.x-el.x))}
-      BodyStyle.hand(c,hand.x,hand.y,limb*.40,look,face,Math.atan2(hand.y-el.y,hand.x-el.x),wrapped)};
+        BodyStyle.seam(c,sh.x,sh.y,armW*.50,look,face,this.jointCol(look,'upperArm'),Math.atan2(el.y-sh.y,el.x-sh.x),LO);
+        BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5+1.1,look,face,jc,Math.atan2(hand.y-el.y,hand.x-el.x),LO)}
+      BodyStyle.hand(c,hand.x,hand.y,limb*.40,look,face,Math.atan2(hand.y-el.y,hand.x-el.x),wrapped,LO)};
     const leg=(hp,kn,ft)=>{
       const jc=this.jointCol(look,'shin');
-      BodyStyle.joint(c,kn.x,kn.y,Math.min(thighW*.78,shinW)*.48,look,face,jc);
+      BodyStyle.joint(c,kn.x,kn.y,Math.min(thighW*.78,shinW)*.48,look,face,jc,LO);
       BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,thighW,look,{bone:'thigh',cloth:cf('thigh'),face,lit,w2:thighW*.78});
       BodyStyle.limb(c,kn.x,kn.y,ft.x,ft.y,shinW,look,{bone:'shin',cloth:cf('shin'),face,lit,w2:shinW*.72});
       if(cf('shin')!=='bone')
-        BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.78,shinW)*.5+1.1,look,face,jc,Math.atan2(ft.y-kn.y,ft.x-kn.x));
-      BodyStyle.foot(c,ft.x+face*limb*.28,ft.y+limb*.14,look,face,0)};
+        BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.78,shinW)*.5+1.1,look,face,jc,Math.atan2(ft.y-kn.y,ft.x-kn.x),LO);
+      BodyStyle.foot(c,ft.x+face*limb*.28,ft.y+limb*.14,look,face,0,LO)};
     leg(j.lHip,j.lKnee,j.lFoot);
     arm(j.lShoulder,j.lElbow,j.lHand);
     BodyStyle.torso(c,j.neck,j.hip,look,face,lit);
@@ -2845,29 +2883,29 @@ const Rig={
     BodyStyle.head(c,0,0,look.headR,look,face,fs,lit);
     c.restore();
     leg(j.rHip,j.rKnee,j.rFoot);
-    BodyStyle.hips(c,j.hip.x,j.hip.y,look,face);
+    BodyStyle.hips(c,j.hip.x,j.hip.y,look,face,LO);
     arm(j.rShoulder,j.rElbow,j.rHand);
     for(const p of look.props||[]){
       if(this.BODY_CLOTH_PROPS[p])continue;
       if(p==='dagger'){
         const h=j.rHand,len=look.armLen*.46,ux=face,uy=-.32,n=Math.hypot(ux,uy),dx=ux/n,dy=uy/n,px=-dy,py=dx;
         const tipX=h.x+dx*len,tipY=h.y+dy*len,baseX=h.x+dx*3,baseY=h.y+dy*3,w=4.2;
-        c.fillStyle='#e4e4e4';
+        c.fillStyle=LC('#e4e4e4');
         c.beginPath();c.moveTo(baseX+px*w,baseY+py*w);c.lineTo(tipX,tipY);c.lineTo(baseX-px*w,baseY-py*w);c.closePath();c.fill();
-        c.strokeStyle='#5a5a5a';c.lineWidth=1.3;c.stroke();
-        c.strokeStyle='#fbfbfb';c.lineWidth=1.2;
+        c.strokeStyle=LC('#5a5a5a');c.lineWidth=1.3;c.stroke();
+        c.strokeStyle=LC('#fbfbfb');c.lineWidth=1.2;
         c.beginPath();c.moveTo(baseX+dx*2,baseY+dy*2);c.lineTo(tipX-dx*2,tipY-dy*2);c.stroke();
-        c.strokeStyle=look.secondary;c.lineWidth=3.6;
+        c.strokeStyle=LC(look.secondary);c.lineWidth=3.6;
         c.beginPath();c.moveTo(baseX+px*6,baseY+py*6);c.lineTo(baseX-px*6,baseY-py*6);c.stroke();
-        c.strokeStyle='#3a2f22';c.lineWidth=4;c.lineCap='round';
+        c.strokeStyle=LC('#3a2f22');c.lineWidth=4;c.lineCap='round';
         c.beginPath();c.moveTo(h.x,h.y);c.lineTo(baseX,baseY);c.stroke()}
       if(p==='club'){ // shaft geometry kept in sync with propExtra's own 'club' entry
         const h=j.rHand;
-        c.strokeStyle=look.secondary;c.lineWidth=10;c.lineCap='round';
+        c.strokeStyle=LC(look.secondary);c.lineWidth=10;c.lineCap='round';
         c.beginPath();c.moveTo(h.x,h.y);c.lineTo(h.x+face*12,h.y-30);c.stroke();
-        c.strokeStyle=shade(look.secondary,-.4);c.lineWidth=2;
+        c.strokeStyle=LC(shade(look.secondary,-.4));c.lineWidth=2;
         c.beginPath();c.moveTo(h.x+face*2,h.y-6);c.lineTo(h.x+face*10,h.y-26);c.stroke();
-        c.fillStyle='#3a2f22';for(let i=0;i<3;i++){c.beginPath();
+        c.fillStyle=LC('#3a2f22');for(let i=0;i<3;i++){c.beginPath();
           c.arc(h.x+face*(4+i*4),h.y-10-i*10,3,0,Math.PI*2);c.fill()}}}
     c.restore()},
   // The layered brute body (Task 8.2). Same z-order and the same module set as _drawHuman -- back
@@ -2882,23 +2920,25 @@ const Rig={
     const limb=look.limb,fs=BodyStyle.faceState(poseKey);
     const cf=part=>this.clothFor(look,part);
     const armW=limb*1.06,foreW=limb*.86,thighW=limb*1.34,shinW=limb*1.04;
+    // Fix-wave item 4, same options bag / flat-colour helper as _drawHuman.
+    const LO={lit},LC=col=>BodyStyle.litCol(col,lit);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
     const arm=(sh,el,hand)=>{
       const jc=this.jointCol(look,'foreArm');
-      BodyStyle.joint(c,sh.x,sh.y,armW*.48,look,face,this.jointCol(look,'upperArm'));
-      BodyStyle.joint(c,el.x,el.y,Math.min(armW*.86,foreW)*.48,look,face,jc);
+      BodyStyle.joint(c,sh.x,sh.y,armW*.48,look,face,this.jointCol(look,'upperArm'),LO);
+      BodyStyle.joint(c,el.x,el.y,Math.min(armW*.86,foreW)*.48,look,face,jc,LO);
       BodyStyle.limb(c,sh.x,sh.y,el.x,el.y,armW,look,{bone:'upperArm',cloth:cf('upperArm'),face,lit,w2:armW*.86});
       BodyStyle.limb(c,el.x,el.y,hand.x,hand.y,foreW,look,{bone:'foreArm',cloth:cf('foreArm'),face,lit,w2:foreW*.92});
-      BodyStyle.seam(c,sh.x,sh.y,armW*.50,look,face,this.jointCol(look,'upperArm'),Math.atan2(el.y-sh.y,el.x-sh.x));
-      BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5+1.1,look,face,jc,Math.atan2(hand.y-el.y,hand.x-el.x));
-      BodyStyle.hand(c,hand.x,hand.y,limb*.62,look,face,Math.atan2(hand.y-el.y,hand.x-el.x),false)};
+      BodyStyle.seam(c,sh.x,sh.y,armW*.50,look,face,this.jointCol(look,'upperArm'),Math.atan2(el.y-sh.y,el.x-sh.x),LO);
+      BodyStyle.seam(c,el.x,el.y,Math.min(armW*.86,foreW)*.5+1.1,look,face,jc,Math.atan2(hand.y-el.y,hand.x-el.x),LO);
+      BodyStyle.hand(c,hand.x,hand.y,limb*.62,look,face,Math.atan2(hand.y-el.y,hand.x-el.x),false,LO)};
     const leg=(hp,kn,ft)=>{
       const jc=this.jointCol(look,'shin');
-      BodyStyle.joint(c,kn.x,kn.y,Math.min(thighW*.76,shinW)*.48,look,face,jc);
+      BodyStyle.joint(c,kn.x,kn.y,Math.min(thighW*.76,shinW)*.48,look,face,jc,LO);
       BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,thighW,look,{bone:'thigh',cloth:cf('thigh'),face,lit,w2:thighW*.76});
       BodyStyle.limb(c,kn.x,kn.y,ft.x,ft.y,shinW,look,{bone:'shin',cloth:cf('shin'),face,lit,w2:shinW*.78});
-      BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.76,shinW)*.5+1.1,look,face,jc,Math.atan2(ft.y-kn.y,ft.x-kn.x));
-      BodyStyle.foot(c,ft.x+face*limb*.30,ft.y+limb*.16,look,face,0)};
+      BodyStyle.seam(c,kn.x,kn.y,Math.min(thighW*.76,shinW)*.5+1.1,look,face,jc,Math.atan2(ft.y-kn.y,ft.x-kn.x),LO);
+      BodyStyle.foot(c,ft.x+face*limb*.30,ft.y+limb*.16,look,face,0,LO)};
     leg(j.lHip,j.lKnee,j.lFoot);
     arm(j.lShoulder,j.lElbow,j.lHand);
     BodyStyle.torso(c,j.neck,j.hip,look,face,lit);
@@ -2908,7 +2948,7 @@ const Rig={
     BodyStyle.head(c,0,0,look.headR,look,face,fs,lit);
     c.restore();
     leg(j.rHip,j.rKnee,j.rFoot);
-    BodyStyle.hips(c,j.hip.x,j.hip.y,look,face);
+    BodyStyle.hips(c,j.hip.x,j.hip.y,look,face,LO);
     arm(j.rShoulder,j.rElbow,j.rHand);
     for(const p of look.props||[]){
       // 'trousers' is now real cloth (cloth.legs:'pants' -> BodyStyle.limb's pant overlay plus
@@ -2922,9 +2962,9 @@ const Rig={
         c.lineCap='round';
         for(const sc of[[-13,-16,9,1],[6,-9,20,-1]]){
           const x0=cx+sc[0],y0=cy+sc[1],x1=x0+sc[3]*9,y1=y0+sc[2];
-          c.strokeStyle=shade(look.skin,-.30);c.lineWidth=2.6;c.globalAlpha=.6;
+          c.strokeStyle=LC(shade(look.skin,-.30));c.lineWidth=2.6;c.globalAlpha=.6;
           c.beginPath();c.moveTo(x0,y0);c.quadraticCurveTo((x0+x1)/2+sc[3]*3,(y0+y1)/2,x1,y1);c.stroke();
-          c.strokeStyle=shade(look.skin,.26);c.lineWidth=1.3;c.globalAlpha=.85;
+          c.strokeStyle=LC(shade(look.skin,.26));c.lineWidth=1.3;c.globalAlpha=.85;
           c.beginPath();c.moveTo(x0,y0);c.quadraticCurveTo((x0+x1)/2+sc[3]*3,(y0+y1)/2,x1,y1);c.stroke()}
         c.globalAlpha=1}
       if(p==='horns'){ // two curved horns sweeping up and back from the temples (geometry kept in
@@ -2934,8 +2974,8 @@ const Rig={
           c.beginPath();c.moveTo(j.head.x+s*hr*.5,j.head.y-hr*.7);
           c.quadraticCurveTo(j.head.x+s*hr*1.3,j.head.y-hr*1.5,j.head.x+s*hr*1.05,j.head.y-hr*2.1);
           c.stroke()};
-        for(const s of[-1,1]){horn(s,7.5,look.body.outline);horn(s,5,'#e8ded0');
-          horn(s,1.8,shade('#e8ded0',-.24))}}
+        for(const s of[-1,1]){horn(s,7.5,LC(look.body.outline));horn(s,5,LC('#e8ded0'));
+          horn(s,1.8,LC(shade('#e8ded0',-.24)))}}
       if(p==='spikedclub'){
         // The tip stays exactly where propExtra puts it (h + (face*len*.3, -len)), but the club is
         // no longer a uniform round-capped stroke with four slits painted down the middle of it --
@@ -2955,22 +2995,22 @@ const Rig={
           for(let i=10;i>=0;i--){const t=i/10,q=at(t,-(wAt(t)+grow));c.lineTo(q.x,q.y)}
           c.closePath();
           if(pass){const sg=c.createLinearGradient(h.x-12,h.y,h.x+12,ty);
-            sg.addColorStop(0,shade(look.secondary,-.38));sg.addColorStop(.45,shade(look.secondary,.18));
-            sg.addColorStop(1,shade(look.secondary,-.30));c.fillStyle=sg}
-          else c.fillStyle=look.body.outline;
+            sg.addColorStop(0,LC(shade(look.secondary,-.38)));sg.addColorStop(.45,LC(shade(look.secondary,.18)));
+            sg.addColorStop(1,LC(shade(look.secondary,-.30)));c.fillStyle=sg}
+          else c.fillStyle=LC(look.body.outline);
           c.fill()}
         for(let i=0;i<4;i++){const t=.42+i*.16,w=wAt(t);
           for(const sgn of[1,-1]){
             const root=at(t,sgn*(w-1.4)),fore=at(t+.09,sgn*(w-1.4)),tip=at(t+.045,sgn*(w+8.5));
-            c.fillStyle=look.body.outline;
+            c.fillStyle=LC(look.body.outline);
             c.beginPath();c.moveTo(root.x-ux*2,root.y-uy*2);c.lineTo(tip.x+nx*sgn*1.6,tip.y+ny*sgn*1.6);
             c.lineTo(fore.x+ux*2,fore.y+uy*2);c.closePath();c.fill();
             const kg=c.createLinearGradient(root.x,root.y,tip.x,tip.y);
-            kg.addColorStop(0,'#8d8878');kg.addColorStop(.5,'#c9c2b0');kg.addColorStop(1,'#efe9da');
+            kg.addColorStop(0,LC('#8d8878'));kg.addColorStop(.5,LC('#c9c2b0'));kg.addColorStop(1,LC('#efe9da'));
             c.fillStyle=kg;
             c.beginPath();c.moveTo(root.x,root.y);c.lineTo(tip.x,tip.y);c.lineTo(fore.x,fore.y);
             c.closePath();c.fill()}}
-        c.strokeStyle='#2a1c10';c.lineWidth=3;c.lineCap='butt';   // the grip binding
+        c.strokeStyle=LC('#2a1c10');c.lineWidth=3;c.lineCap='butt';   // the grip binding
         for(const t of[.05,.13])
           {const a=at(t,4.4),b2=at(t,-4.4);c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b2.x,b2.y);c.stroke()}}}
     c.restore()},
@@ -3080,16 +3120,18 @@ const Rig={
     const slamming=poseKey==='medium';       // the rearing double-front-paw slam (POSES_QUAD.medium)
     const slamCol=slamming?shade(look.skin,-.18):undefined;
     const ang=(a,b)=>Math.atan2(b.y-a.y,b.x-a.x);
+    // Fix-wave item 4, same options bag / flat-colour helper as _drawHuman.
+    const LO={lit},LC=col=>BodyStyle.litCol(col,lit);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
     // A leg is the same joint/limb/seam/paw sandwich the human rig uses, so the joint-seam contract
     // (balls under both segments, inside the limb, a seam cap after) holds for all twelve of them.
     const leg=(hp,kn,pw,w,col,slam)=>{
       const uw=w,lw=w*.62;
-      BodyStyle.joint(c,kn.x,kn.y,Math.min(uw*.70,lw)*.48,look,face,col||look.skin);
+      BodyStyle.joint(c,kn.x,kn.y,Math.min(uw*.70,lw)*.48,look,face,col||look.skin,LO);
       BodyStyle.limb(c,hp.x,hp.y,kn.x,kn.y,uw,look,{bone:'legU',cloth:'bare',face,lit,w2:uw*.70});
       BodyStyle.limb(c,kn.x,kn.y,pw.x,pw.y,lw,look,{bone:'legL',cloth:'bare',face,lit,w2:lw*.84});
-      BodyStyle.seam(c,kn.x,kn.y,Math.min(uw*.70,lw)*.5+1.1,look,face,col||look.skin,ang(kn,pw));
-      BodyStyle.paw(c,pw.x,pw.y,lw*1.05,look,face,ang(kn,pw),{col,slam})};
+      BodyStyle.seam(c,kn.x,kn.y,Math.min(uw*.70,lw)*.5+1.1,look,face,col||look.skin,ang(kn,pw),LO);
+      BodyStyle.paw(c,pw.x,pw.y,lw*1.05,look,face,ang(kn,pw),{col,slam,lit})};
     // --- back legs and haunches, behind everything
     leg(j.blHip,j.bl1,j.bl2,legW);
     leg(j.brHip,j.br1,j.br2,legW);
@@ -3098,15 +3140,15 @@ const Rig={
     const tc=look.tailTint||look.skin;
     BodyStyle.limb(c,j.hip.x,j.hip.y,j.tail1.x,j.tail1.y,legW*.66,look,{bone:'tail1',cloth:'bare',face,lit,w2:legW*.48});
     BodyStyle.limb(c,j.tail1.x,j.tail1.y,j.tail2.x,j.tail2.y,legW*.48,look,{bone:'tail2',cloth:'bare',face,lit,w2:legW*.26});
-    BodyStyle.seam(c,j.tail1.x,j.tail1.y,legW*.24+1.1,look,face,tc,ang(j.tail1,j.tail2));
-    BodyStyle.blob(c,j.tail2.x,j.tail2.y,legW*.28,legW*.26,0,look,face,'tailtip',tc);
+    BodyStyle.seam(c,j.tail1.x,j.tail1.y,legW*.24+1.1,look,face,tc,ang(j.tail1,j.tail2),LO);
+    BodyStyle.blob(c,j.tail2.x,j.tail2.y,legW*.28,legW*.26,0,look,face,'tailtip',tc,null,LO);
     if(look.tailTint){ // re-tint the two tail segments: BodyStyle.limb paints in the coat colour
-      c.save();c.globalAlpha=.86;c.lineCap='round';c.strokeStyle=tc;
+      c.save();c.globalAlpha=.86;c.lineCap='round';c.strokeStyle=L(tc);
       c.lineWidth=legW*.52;c.beginPath();c.moveTo(j.hip.x,j.hip.y);c.lineTo(j.tail1.x,j.tail1.y);
       c.lineTo(j.tail2.x,j.tail2.y);c.stroke();
       // Scale BANDS across the tail, not rings around it: a full circle at each step read as a row
       // of beads threaded on a wire rather than as a scaly tail.
-      c.strokeStyle=shade(tc,-.32);c.lineWidth=Math.max(.9,legW*.08);
+      c.strokeStyle=LC(shade(tc,-.32));c.lineWidth=Math.max(.9,legW*.08);
       const seg=(a,b,n)=>{const dx=b.x-a.x,dy=b.y-a.y,L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L;
         for(let i=1;i<=n;i++){const t=i/(n+1),px=a.x+dx*t,py=a.y+dy*t,hw=legW*(.26-.10*t);
           c.beginPath();c.moveTo(px-nx*hw,py-ny*hw);c.lineTo(px+nx*hw,py+ny*hw);c.stroke()}};
@@ -3126,11 +3168,11 @@ const Rig={
     // a pixel proud of the barrel and their outlines read as two rings around an otherwise smooth body.
     if(!grub){
       BodyStyle.blob(c,j.hip.x-Math.cos(hipA)*bodyW*.10,j.hip.y-Math.sin(hipA)*bodyW*.10,
-        bodyW*.70,bodyW*.62,hipA,look,face,'haunch');}
+        bodyW*.70,bodyW*.62,hipA,look,face,'haunch',null,null,LO);}
     BodyStyle.limb(c,j.hip.x,j.hip.y,j.spine.x,j.spine.y,w0,look,{bone:'barrelA',cloth:'bare',face,lit,w2:w1});
     BodyStyle.limb(c,j.spine.x,j.spine.y,j.chest.x,j.chest.y,w1,look,{bone:'barrelB',cloth:'bare',face,lit,w2});
-    BodyStyle.seam(c,j.spine.x,j.spine.y,w1*.5+1.1,look,face,null,chA);
-    if(!grub)BodyStyle.blob(c,j.chest.x,j.chest.y,bodyW*.46,bodyW*.44,chA,look,face,'shoulder');
+    BodyStyle.seam(c,j.spine.x,j.spine.y,w1*.5+1.1,look,face,null,chA,LO);
+    if(!grub)BodyStyle.blob(c,j.chest.x,j.chest.y,bodyW*.46,bodyW*.44,chA,look,face,'shoulder',null,null,LO);
     if(look.body.cloth.torso==='chitin'){
       // The larva's banded plates, replacing the 'segments' prop's three flat rings: overlapping
       // shells along the body axis, each with a lit leading edge and a dark trailing seam.
@@ -3145,15 +3187,15 @@ const Rig={
         const px=j.hip.x+(j.chest.x-j.hip.x)*t,py=j.hip.y+(j.chest.y-j.hip.y)*t;
         const a=hipA+(chA-hipA)*t,w=hwB*(1-.10*t);
         c.save();c.translate(px,py);c.rotate(a);
-        c.globalAlpha=.42;c.strokeStyle=dark;c.lineWidth=Math.max(1.4,bodyW*.06);
+        c.globalAlpha=.42;c.strokeStyle=L(dark);c.lineWidth=Math.max(1.4,bodyW*.06);
         c.beginPath();c.ellipse(0,0,bodyW*.11,w,0,-Math.PI*.62,Math.PI*.62);c.stroke();
-        c.globalAlpha=.26;c.strokeStyle=shade(look.skin,.50);c.lineWidth=Math.max(.9,bodyW*.04);
+        c.globalAlpha=.26;c.strokeStyle=LC(shade(look.skin,.50));c.lineWidth=Math.max(.9,bodyW*.04);
         c.beginPath();c.ellipse(bodyW*.07,0,bodyW*.11,w*.90,0,-Math.PI*.56,Math.PI*.56);c.stroke();
         c.restore()}
       c.restore()}
     else{ // a furred belly: a lighter band along the underside of the barrel
       c.save();c.globalAlpha=.30;c.lineCap='round';
-      c.strokeStyle=shade(look.skin,Math.min(.95,look.body.skinShade[1]*1.6));
+      c.strokeStyle=LC(shade(look.skin,Math.min(.95,look.body.skinShade[1]*1.6)));
       c.lineWidth=bodyW*.36;
       c.beginPath();
       c.moveTo(j.hip.x,j.hip.y+bodyW*.30);c.lineTo(j.spine.x,j.spine.y+bodyW*.32);
@@ -3166,11 +3208,11 @@ const Rig={
     const nw=bodyW*(grub?.62:.50);
     BodyStyle.limb(c,j.chest.x,j.chest.y,j.neck.x,j.neck.y,nw,look,{bone:'neck',cloth:'bare',face,lit,w2:nw*.86});
     BodyStyle.limb(c,j.neck.x,j.neck.y,j.head.x,j.head.y,nw*.86,look,{bone:'nape',cloth:'bare',face,lit,w2:look.headR*.88});
-    BodyStyle.seam(c,j.neck.x,j.neck.y,nw*.43+1.1,look,face,null,ang(j.neck,j.head));
-    BodyStyle.seam(c,j.chest.x,j.chest.y,nw*.50+1.1,look,face,null,ang(j.chest,j.neck));
+    BodyStyle.seam(c,j.neck.x,j.neck.y,nw*.43+1.1,look,face,null,ang(j.neck,j.head),LO);
+    BodyStyle.seam(c,j.chest.x,j.chest.y,nw*.50+1.1,look,face,null,ang(j.chest,j.neck),LO);
     if(!grub){ // the chest ruff: a fur collar where the neck meets the shoulder
       c.save();c.globalAlpha=.34;c.lineCap='round';
-      c.strokeStyle=shade(look.skin,Math.min(.95,look.body.skinShade[1]*1.8));
+      c.strokeStyle=LC(shade(look.skin,Math.min(.95,look.body.skinShade[1]*1.8)));
       c.lineWidth=Math.max(1.4,bodyW*.07);
       const rx=(j.chest.x+j.neck.x)/2,ry=(j.chest.y+j.neck.y)/2;
       for(let i=-2;i<=2;i++){const a=chA+Math.PI/2+i*.30;
@@ -3195,11 +3237,11 @@ const Rig={
           c.moveTo(cx-w,cy+h);c.lineTo(cx-w,cy);c.lineTo(cx-w*.5,cy+h*.5);
           c.lineTo(cx,cy-h*.2);c.lineTo(cx+w*.5,cy+h*.5);c.lineTo(cx+w,cy);c.lineTo(cx+w,cy+h);
           c.closePath()};
-        c.strokeStyle='#4a3606';c.lineWidth=2.6;c.lineJoin='round';crown();c.stroke();
+        c.strokeStyle=LC('#4a3606');c.lineWidth=2.6;c.lineJoin='round';crown();c.stroke();
         const gg=c.createLinearGradient(cx-w,cy-h,cx+w,cy+h);
-        gg.addColorStop(0,'#fff0b0');gg.addColorStop(.45,look.accent||'#f4c542');gg.addColorStop(1,'#a87b12');
+        gg.addColorStop(0,LC('#fff0b0'));gg.addColorStop(.45,LC(look.accent||'#f4c542'));gg.addColorStop(1,LC('#a87b12'));
         c.fillStyle=gg;crown();c.fill();
-        c.fillStyle='#e0506a';                                  // the stone in the middle point
+        c.fillStyle=LC('#e0506a');                               // the stone in the middle point
         c.beginPath();c.arc(cx,cy+h*.18,Math.max(1.2,h*.22),0,Math.PI*2);c.fill();
         c.fillStyle='rgba(255,255,255,.75)';
         c.beginPath();c.arc(cx-w*.42,cy+h*.30,Math.max(.8,h*.13),0,Math.PI*2);c.fill()}
@@ -3215,11 +3257,11 @@ const Rig={
       if(p==='teeth'){ // the boss's incisors (geometry kept in sync with propExtra)
         const tx=j.head.x+face*look.headR*.85,ty=j.head.y+look.headR*.25;
         for(const o of[0,-3.4]){
-          c.fillStyle=look.body.outline;
+          c.fillStyle=LC(look.body.outline);
           c.beginPath();c.moveTo(tx+face*o,ty-1);c.lineTo(tx+face*(o+4.6),ty+6.6);c.lineTo(tx+face*o,ty+7.8);
           c.closePath();c.fill();
           const tg=c.createLinearGradient(tx,ty,tx+face*5,ty+7);
-          tg.addColorStop(0,'#fbf0a8');tg.addColorStop(1,look.teeth||'#e8d24a');
+          tg.addColorStop(0,LC('#fbf0a8'));tg.addColorStop(1,LC(look.teeth||'#e8d24a'));
           c.fillStyle=tg;
           c.beginPath();c.moveTo(tx+face*o,ty);c.lineTo(tx+face*(o+4),ty+6);c.lineTo(tx+face*o,ty+7);
           c.closePath();c.fill()}}}
