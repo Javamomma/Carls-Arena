@@ -5300,3 +5300,131 @@ Test.add('the quad rig\'s head props stay world-space and keep propExtra\'s own 
     const look=LOOKS[id];
     ok(look.rig==='quad',id+' must be a quad look');
     ok(look.body.face.eyes!=='human',id+' must not fall back to the human face')}});
+
+// ---- Task 8.3: stage depth and lighting ---------------------------------------------------------
+// Stage.lightAt(x) has no `frame` parameter of its own (frozen interface) -- it reads whatever
+// frame/theme Stage.draw() last ran for. Every test below drives it the same real way Render does:
+// Stage.draw(...) once, then Stage.lightAt(x).
+Test.add('Stage.lightAt is deterministic for a given frame (flicker is a pure function of seed+frame, not a consumed shared stream)',()=>{
+  const c=document.createElement('canvas').getContext('2d');
+  const st=Stage.build('doorway'),cam={x:STAGE_W/2,zoom:1};
+  const saved=Save.data;Save.data=Meta.defaults();
+  Stage.draw(c,cam,37,st);
+  const a=Stage.lightAt(300),a2=Stage.lightAt(300);
+  eq(JSON.stringify(a),JSON.stringify(a2),'two calls for the same x within the same frame must match exactly');
+  // Re-running draw() for the SAME frame number must reproduce the exact same light: lightAt carries
+  // no state across draw() calls beyond (theme,frame) themselves.
+  Stage.draw(c,cam,37,st);
+  const b=Stage.lightAt(300);
+  eq(JSON.stringify(a),JSON.stringify(b),'re-drawing the same frame number must reproduce the same light exactly');
+  ok(a.k>=0&&a.k<=1,'k must stay in [0,1]');
+  ok(a.rimSide===1||a.rimSide===-1,'rimSide must be exactly +1 or -1');
+  ok(/^#[0-9a-f]{6}$/.test(a.tint),'tint must be a #rrggbb hex string');
+  // a different frame number must (almost certainly) change the flicker component
+  Stage.draw(c,cam,38,st);
+  const d=Stage.lightAt(300);
+  ok(JSON.stringify(a)!==JSON.stringify(d),'a different frame should change the live flicker (reduceMotion is off here)');
+  Save.data=saved});
+Test.add('Stage.lightAt caches per 8px column within a frame',()=>{
+  const c=document.createElement('canvas').getContext('2d');
+  const st=Stage.build('doorway'),cam={x:STAGE_W/2,zoom:1};
+  const saved=Save.data;Save.data=Meta.defaults();
+  Stage.draw(c,cam,10,st);
+  const a=Stage.lightAt(400),b=Stage.lightAt(403); // both round to the same 8px column (400)
+  ok(a===b,'x values sharing an 8px column must return the identical cached object, not just an equal one');
+  const d=Stage.lightAt(408); // the next column over
+  ok(a!==d,'a different 8px column must not share the cached object');
+  Save.data=saved});
+Test.add('torch flicker is off under reduceMotion (k is a static baseline across every frame)',()=>{
+  const c=document.createElement('canvas').getContext('2d');
+  const st=Stage.build('doorway'),cam={x:STAGE_W/2,zoom:1};
+  const saved=Save.data;Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
+  const ks=[];
+  for(const fr of[0,1,2,3,50,51]){Stage.draw(c,cam,fr,st);ks.push(Stage.lightAt(300).k)}
+  for(let i=1;i<ks.length;i++)eq(ks[i],ks[0],'k must not vary across frames under reduceMotion');
+  Save.data.settings.reduceMotion=false;
+  const ks2=new Set();
+  for(const fr of[0,1,2,3,50,51]){Stage.draw(c,cam,fr,st);ks2.add(Stage.lightAt(300).k)}
+  ok(ks2.size>1,'k must vary across frames once reduceMotion is off (flicker is live again)');
+  Save.data=saved});
+Test.add('floor falloff (Stage.falloffAlpha) never brightens: bounded, monotonic-in-k, black-only',()=>{
+  let prev=Infinity;
+  for(let i=0;i<=20;i++){const k=i/20,a=Stage.falloffAlpha(k);
+    ok(a>=0&&a<=.35,'falloffAlpha('+k+') out of [0,.35]: '+a);
+    ok(a<=prev+1e-9,'falloffAlpha must be non-increasing in k (k='+k+' gave '+a+' after '+prev+')');
+    prev=a}
+  eq(Stage.falloffAlpha(1),0,'fully lit (k=1) must apply no darkening at all');
+  ok(Stage.falloffAlpha(0)>0,'fully dark (k=0) must darken the floor');
+  // out-of-range k must clamp, never invert into a negative (brightening) alpha
+  ok(Stage.falloffAlpha(-5)<=.35&&Stage.falloffAlpha(-5)>=0,'k below 0 must clamp, not go negative-alpha');
+  eq(Stage.falloffAlpha(5),0,'k above 1 must clamp to no darkening, not a negative (brightening) alpha')});
+Test.add('Stage.build adds a far/blurred-arch layer at parallax 0.4, alongside the existing .2/.45/.75/1 stack',()=>{
+  for(const id of['doorway','sewers']){
+    const s=Stage.build(id);
+    ok(s.layers.some(L=>Math.abs(L.parallax-.4)<1e-9),id+' must have a layer at parallax 0.4');
+    const factors=s.layers.map(L=>L.parallax);
+    for(const want of[.2,.45,.75,1])ok(factors.some(f=>Math.abs(f-want)<1e-9),id+' must keep its '+want+' layer too)')}});
+Test.add('doorway and sewers are visually distinct themes (different wall/floor base colors), same geometry contract',()=>{
+  const d=Stage.build('doorway'),s=Stage.build('sewers');
+  eq(d.layers.length,s.layers.length,'both themes must build the same layer stack shape');
+  eq(d.torches.length,s.torches.length);
+  // sample a pixel from each theme's wall layer (top strip, away from any arch/banner/chain
+  // geometry so it reads the plain base-color fill) and confirm the two themes actually differ.
+  const wallOf=st=>st.layers.find(L=>Math.abs(L.parallax-.45)<1e-9).canvas;
+  const dc=wallOf(d).getContext('2d').getImageData(4,4,1,1).data;
+  const sc=wallOf(s).getContext('2d').getImageData(4,4,1,1).data;
+  ok(dc[0]!==sc[0]||dc[1]!==sc[1]||dc[2]!==sc[2],'doorway and sewers wall base colors must differ')});
+Test.add('Render.streakGeom (the floor specular streak under a fighter\'s feet) follows fighter x',()=>{
+  const F=mkFighter();
+  const lit={tint:'#ffb060',k:.6,rimSide:1};
+  F.x=120;const a=Render.streakGeom(F,lit);
+  eq(a.x,120,'the streak must sit exactly at the fighter\'s own x');
+  F.x=640;const b=Render.streakGeom(F,lit);
+  eq(b.x,640,'moving the fighter must move the streak with it');
+  ok(a.w>0,'the streak must have a positive width');
+  ok(a.alpha>0&&a.alpha<=1,'alpha must be a usable canvas alpha');
+  const dim={tint:'#ffb060',k:0,rimSide:1},bright={tint:'#ffb060',k:1,rimSide:1};
+  ok(Render.streakGeom(F,bright).alpha>Render.streakGeom(F,dim).alpha,
+    'a fighter standing in brighter torchlight (higher k) must get a brighter streak')});
+Test.add('BodyStyle fighter-tint overlay cache is bounded to k-buckets (0.05 steps), never one entry per distinct lightAt() result',()=>{
+  BodyStyle._tintCache={};
+  for(let i=0;i<400;i++){
+    const k=(i%97)/97;
+    BodyStyle._litSpec({tint:Stage._mix(Stage.AMBIENT_TINT,Stage.TORCH_TINT,k),k,rimSide:i%2?1:-1})}
+  ok(Object.keys(BodyStyle._tintCache).length<=21,
+    'k in [0,1] bucketed to 0.05 steps is at most 21 distinct entries no matter how many lightAt() '+
+    'results (400 near-continuous k values here) feed it -- got '+Object.keys(BodyStyle._tintCache).length);
+  const spec=BodyStyle._litSpec({tint:'#ffb060',k:.5,rimSide:1});
+  eq(spec.alpha,0,'k=0.5 is the neutral pivot: no darkening, no brightening');
+  const dark=BodyStyle._litSpec({tint:'#ffb060',k:0,rimSide:1});
+  ok(dark.alpha>0&&dark.alpha<=.25,'k=0 must darken, bounded at the ruling\'s 25% ceiling');
+  const bright=BodyStyle._litSpec({tint:'#ffb060',k:1,rimSide:1});
+  ok(bright.alpha>0&&bright.alpha<=.18,'k=1 must brighten, bounded at the ruling\'s 18% ceiling')});
+Test.add('a flickering fighter tint never grows the bone-part cache -- only the tiny k-bucket overlay cache does',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  try{
+    BodyStyle.clearCache();
+    const fighters=HUMAN_LOOK_IDS.map(id=>{const f=mkFight({p1:DEFS[id]});return f.p1});
+    const cam={x:0,zoom:1};
+    const drawAll=frame=>{
+      for(const F of fighters){
+        F.f=frame%60;
+        const lit={tint:Stage._mix(Stage.AMBIENT_TINT,Stage.TORCH_TINT,(frame%23)/23),k:(frame%23)/23,rimSide:frame%2?1:-1};
+        c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,frame,lit);c.restore()}};
+    for(let i=0;i<60;i++)drawAll(i);
+    const warm=BodyStyle.cacheCount();
+    ok(warm>0,'the warm-up must actually have cached something, got '+warm);
+    for(let i=0;i<600;i++)drawAll(i);
+    eq(BodyStyle.cacheCount(),warm,'600 further frames of a flickering lit value must add no bone-part cache entries');
+  }finally{G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+Test.add('Rig.draw/drawBig/drawQuad tolerate a missing lit argument (existing callers, atlas fallback, portraits) with no throw',()=>{
+  const c=document.createElement('canvas').getContext('2d');
+  const cam={x:0,zoom:1};
+  const human=mkFighter();
+  ok(!threw(()=>Rig.draw(c,human,cam,0)),'human rig must not throw with lit omitted');
+  const big=new Fighter(DEFS.mongo,1,Ctrl.idle());
+  ok(!threw(()=>Rig.draw(c,big,cam,0)),'big rig must not throw with lit omitted');
+  const quad=new Fighter(DEFS.donut,1,Ctrl.idle());
+  ok(!threw(()=>Rig.draw(c,quad,cam,0)),'quad rig must not throw with lit omitted')});

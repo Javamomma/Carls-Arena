@@ -128,7 +128,7 @@ const Render={ctx:canvas.getContext('2d'),
     const sy=Camera.toScreen(cam,F.x,this.overlayY(F)).sy;
     return Math.max(sy,HUD_LINE+height+2)},
   reflection(c,F,cam,frame){c.save();c.beginPath();c.rect(0,FLOOR,STAGE_W,90);c.clip();
-    c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.12;Rig.draw(c,F,cam,frame);c.restore()},
+    c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.12;Rig.draw(c,F,cam,frame,Stage.lightAt(F.x));c.restore()},
   // A grounding contact shadow at the fighter's feet — the mirrored reflection alone reads as a
   // detached ghost. A flattened dark ellipse under the floor art, sized off shoulderW (a stand-in
   // for the character's overall footprint) so bigger/scaled-up looks (the hobgoblin) get a bigger
@@ -138,11 +138,25 @@ const Render={ctx:canvas.getContext('2d'),
   shadow(c,F){const look=lookFor(F.def),scale=F.def.scale||1,
       w=(look.rig==='quad'?look.bodyLen*1.15:look.shoulderW*1.6)*scale;
     c.save();c.globalAlpha=.35;c.fillStyle='#000';
-    c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore()},
+    c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore();
+    // Task 8.3: a wet-floor specular streak under the fighter's own feet, tinted/brightened by
+    // whichever torch is nearest THIS fighter's x (Stage.lightAt) so the floor reads as reflecting
+    // the same torchlight the fighter stands in. streakGeom is a pure function of (F,lit) -- no
+    // canvas access -- purely so "the streak follows fighter x" is assertable without a canvas mock.
+    const g=this.streakGeom(F,Stage.lightAt(F.x));
+    c.save();c.globalAlpha=g.alpha;c.fillStyle=g.tint;
+    c.beginPath();c.ellipse(g.x,FLOOR+3,g.w/2,g.w*.09,0,0,Math.PI*2);c.fill();c.restore()},
+  // Pure geometry for the specular streak above: {x, w, alpha, tint}. x always equals F.x (the
+  // ruling's "follows fighter x"); w scales off the same footprint shadow() sizes off; alpha rides
+  // the torch proximity k so a fighter standing right under a torch gets a brighter streak than one
+  // out at the fringe.
+  streakGeom(F,lit){const look=lookFor(F.def),scale=F.def.scale||1,
+      w=(look.rig==='quad'?look.bodyLen*1.15:look.shoulderW*1.6)*scale;
+    return{x:F.x,w:w*.7,alpha:.16+.26*lit.k,tint:lit.tint}},
   fighter(c,F,cam,frame){
-    const flash=F.state==='HITSTUN'&&F.f<3;
-    if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame);c.filter='none';c.restore()}
-    else{Rig.draw(c,F,cam,frame);
+    const flash=F.state==='HITSTUN'&&F.f<3,lit=Stage.lightAt(F.x);
+    if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame,lit);c.filter='none';c.restore()}
+    else{Rig.draw(c,F,cam,frame,lit);
       if(flash){c.save();c.globalAlpha=.45;c.fillStyle='#fff';
         c.fillRect(F.x-F.width,FLOOR-140*(F.def.scale||1),F.width*2,140*(F.def.scale||1));c.restore()}}
     // Fix-wave item 1: both above-the-head overlays now draw in SCREEN space (this function runs
@@ -373,7 +387,9 @@ const Render={ctx:canvas.getContext('2d'),
     // reproducible frame for frame.
     if(Math.abs(FX.shake.x)>0.05||Math.abs(FX.shake.y)>0.05)
       c.translate(FX.shake.x/cam.zoom,FX.shake.y/cam.zoom);
-    Stage.draw(c,cam,fr,Stage.build('depths'));
+    // Task 8.3: floor 2 ("THE SEWERS") gets its own palette; everything else (floor 1's "DOORWAY"
+    // and exhibition mode, which has no G.encounter at all) keeps the original dungeon theme.
+    Stage.draw(c,cam,fr,Stage.build(G.encounter&&G.encounter.floor===2?'sewers':'doorway'));
     if(f){
       this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
       this.shadow(c,f.p1);this.shadow(c,f.p2);

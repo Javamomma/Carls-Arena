@@ -2940,14 +2940,39 @@ class Fight{
     this.onEvent(type,holder,null,dir)}}
 
 // Parallax dungeon stage + follow camera. Pure presentation: reads Fight/Fighter state, never writes it.
+// Task 8.3: two stage themes (floor 1's DOORWAY, floor 2's THE SEWERS) share every shape this file
+// draws -- the arch, banners, chains, barrels, torches -- and differ only in a handful of base
+// colors pulled from PALETTES below. 'doorway' keeps the exact stops the Phase 8 art pass already
+// tuned; 'sewers' shifts the same stops toward a damp green-grey so floor 2 reads as a different
+// place without a second geometry pass.
+const PALETTES={
+  doorway:{wallTop:'#3a4258',wallBottom:'#181d2c',blockBase:[58,66,86],
+    floorTop:'#232838',floorBottom:'#0c0e16',haze:'rgba(70,80,110,.5)'},
+  sewers:{wallTop:'#2e3a30',wallBottom:'#12190f',blockBase:[46,64,48],
+    floorTop:'#1c2a20',floorBottom:'#08120a',haze:'rgba(60,90,70,.5)'}};
 const Stage={cache:{},
+  // Torch key light, warm; blended with this cool ambient the further a point sits from every torch
+  // (see lightAt/_mix below) -- matching the rendition's warm-key/cool-ambient torchlit read.
+  TORCH_TINT:'#ffb060',AMBIENT_TINT:'#232c42',
+  _mix(a,b,t){
+    t=clamp(t,0,1);
+    const pa=parseInt(a.slice(1),16),pb=parseInt(b.slice(1),16);
+    const ar=(pa>>16)&255,ag=(pa>>8)&255,ab=pa&255,br=(pb>>16)&255,bg=(pb>>8)&255,bb=pb&255;
+    const m=v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0');
+    return'#'+m(ar+(br-ar)*t)+m(ag+(bg-ag)*t)+m(ab+(bb-ab)*t)},
   build(themeId){
     if(this.cache[themeId])return this.cache[themeId];
+    const pal=PALETTES[themeId]||PALETTES.doorway;
     const r=RNG(0xd00d),H0=FLOOR+80,cx=STAGE_W/2;
     const mk=()=>{const cv=document.createElement('canvas');cv.width=STAGE_W;cv.height=H0;return cv};
     // torches kept close to center so they stay on screen across the camera's zoom range (1.0-1.28,
-    // fix round 2: gameplay caps at 1.12, the S3 cinematic punch-in at 1.28)
-    const torches=[{x:cx-150,y:225},{x:cx+150,y:225},{x:cx-255,y:235},{x:cx+255,y:235}];
+    // fix round 2: gameplay caps at 1.12, the S3 cinematic punch-in at 1.28). Each carries its own
+    // build-time flicker seed (Task 8.3) -- a fresh RNG(seed^frame) per torch per frame is a pure,
+    // side-effect-free function of (seed,frame), so lightAt can reproduce any frame's flicker
+    // exactly without consuming a shared mutable RNG stream (which would make the result depend on
+    // how many times/what order lightAt happened to be called that frame).
+    const torches=[{x:cx-150,y:225,flicker:r.int(0x7fffffff)},{x:cx+150,y:225,flicker:r.int(0x7fffffff)},
+      {x:cx-255,y:235,flicker:r.int(0x7fffffff)},{x:cx+255,y:235,flicker:r.int(0x7fffffff)}];
 
     // ---- layer 0: far fog + lit archway + distant stairs (parallax .2); shows through the wall's arch cutout ----
     const far=mk(),fc=far.getContext('2d');
@@ -2965,13 +2990,13 @@ const Stage={cache:{},
 
     // ---- layer 1: back wall, arches, chains, banners, torch sconces (parallax .45) ----
     const wall=mk(),wc=wall.getContext('2d');
-    g=wc.createLinearGradient(0,0,0,H0);g.addColorStop(0,'#3a4258');g.addColorStop(1,'#181d2c');
+    g=wc.createLinearGradient(0,0,0,H0);g.addColorStop(0,pal.wallTop);g.addColorStop(1,pal.wallBottom);
     wc.fillStyle=g;wc.fillRect(0,0,STAGE_W,H0);
     // stone block coursing with mortar lines and slight per-block jitter
-    const bw=58,bh=34;
+    const bw=58,bh=34,[bb0,bb1,bb2]=pal.blockBase;
     for(let y=0;y<H0;y+=bh){const rowOff=(Math.floor(y/bh)%2)*(bw/2);
       for(let x=-bw;x<STAGE_W+bw;x+=bw){const bx=x+rowOff;
-        const j=r.int(14)-7;wc.fillStyle=`rgb(${58+j},${66+j},${86+j})`;
+        const j=r.int(14)-7;wc.fillStyle=`rgb(${bb0+j},${bb1+j},${bb2+j})`;
         wc.fillRect(bx+1,y+1,bw-2,bh-2)}}
     wc.strokeStyle='rgba(10,12,20,.45)';wc.lineWidth=2;
     for(let y=0;y<=H0;y+=bh){wc.beginPath();wc.moveTo(0,y+.5);wc.lineTo(STAGE_W,y+.5);wc.stroke()}
@@ -3026,9 +3051,23 @@ const Stage={cache:{},
     barrel(cx+430,FLOOR,52,70);crate(cx+375,FLOOR,58,58);crate(cx+320,FLOOR-2,44,44);
     const skullX=cx-445;for(let i=0;i<5;i++)skull(skullX+r.int(60)-30,FLOOR-4-r.int(10),9+r.int(6));
 
+    // ---- layer 2.5: hazy far arches/pillars (Task 8.3, parallax .4) -- a soft extra depth cue that
+    // sits between the wall (.45) and the fog (.2), a step closer than the wall so it reads as
+    // "one more thing back there" rather than doubling the fog. Baked once at build time (a blur
+    // filter cost paid here, never per frame) into its own canvas rather than into `far`'s, so its
+    // parallax factor can differ from the fog's.
+    const haze=mk(),hz=haze.getContext('2d');
+    hz.save();if('filter'in hz)hz.filter='blur(7px)';
+    hz.fillStyle=pal.haze;
+    for(const dx of[-300,-110,110,300]){hz.beginPath();hz.ellipse(cx+dx,FLOOR-150,26,175,0,0,Math.PI*2);hz.fill()}
+    hz.beginPath();hz.moveTo(cx-190,FLOOR+10);hz.quadraticCurveTo(cx-190,FLOOR-260,cx,FLOOR-300);
+    hz.quadraticCurveTo(cx+190,FLOOR-260,cx+190,FLOOR+10);hz.lineTo(cx+170,FLOOR+10);
+    hz.quadraticCurveTo(cx+170,FLOOR-250,cx,FLOOR-278);hz.quadraticCurveTo(cx-170,FLOOR-250,cx-170,FLOOR+10);hz.closePath();hz.fill();
+    hz.restore();
+
     // ---- layer 3: floor tiles + wet reflective sheen (parallax 1) ----
     const floor=mk(),flc=floor.getContext('2d');
-    g=flc.createLinearGradient(0,FLOOR,0,H0);g.addColorStop(0,'#232838');g.addColorStop(1,'#0c0e16');
+    g=flc.createLinearGradient(0,FLOOR,0,H0);g.addColorStop(0,pal.floorTop);g.addColorStop(1,pal.floorBottom);
     flc.fillStyle=g;flc.fillRect(0,FLOOR,STAGE_W,H0-FLOOR);
     flc.strokeStyle='rgba(8,10,16,.6)';flc.lineWidth=2;
     for(let x=0;x<STAGE_W;x+=70){flc.beginPath();flc.moveTo(x,FLOOR);flc.lineTo(x,H0);flc.stroke()}
@@ -3038,10 +3077,56 @@ const Stage={cache:{},
     for(let i=0;i<40;i++){flc.fillStyle=`rgba(0,0,0,${.15+r.next()*.15})`;flc.beginPath();
       flc.arc(r.next()*STAGE_W,FLOOR+8+r.next()*(H0-FLOOR-8),2+r.next()*4,0,Math.PI*2);flc.fill()}
 
-    const st={layers:[{canvas:far,parallax:.2},{canvas:wall,parallax:.45},{canvas:props,parallax:.75},{canvas:floor,parallax:1}],
+    const st={layers:[{canvas:far,parallax:.2},{canvas:haze,parallax:.4},{canvas:wall,parallax:.45},
+        {canvas:props,parallax:.75},{canvas:floor,parallax:1}],
       torches,floorY:FLOOR};
     return this.cache[themeId]=st},
+  // ---- Task 8.3: per-frame torch flicker + Stage.lightAt --------------------------------------
+  // `_active` remembers the theme/frame this draw() call last ran for, so lightAt(x) (called once
+  // per fighter, right after draw(), by Render.fighter) reads the SAME frame's flicker without
+  // recomputing it -- "recomputed only when torch flicker changes the frame's k" from the ruling.
+  _active:null,_activeFrame:-1,_litCol:{},
+  // A fresh RNG(seed) per (torch,frame) rather than a consumed shared stream: RNG(seed).next() is a
+  // pure function of its seed, so this is trivially deterministic and reproducible for a given
+  // frame no matter how many times or in what order it's asked for that frame -- exactly what
+  // "Stage.lightAt is deterministic for a given frame" needs, without smuggling a stateful presRng
+  // cursor through Stage.draw's frozen (c,cam,frame,st) signature. reduceMotion collapses this to
+  // the static midpoint (no per-frame variation at all), same gate every other camera-motion fx in
+  // 72_fx.js already uses.
+  _torchFlicker(t){
+    if(Save.data&&Save.data.settings&&Save.data.settings.reduceMotion)return .5;
+    return RNG((t.flicker^Math.imul(this._activeFrame,2654435761))>>>0).next()},
+  lightAt(x){
+    const st=this._active;
+    if(!st)return{tint:this.TORCH_TINT,k:.5,rimSide:1};
+    // Keyed on column alone: _litCol is reset every draw() call (see below), so within one frame
+    // this is a pure memoization of the column->light lookup, and across frames it never accumulates
+    // stale entries (a frame-number-keyed cache here would grow without bound over a long session).
+    const col=Math.round(x/8)*8,key=col;
+    const hit=this._litCol[key];
+    if(hit)return hit;
+    let best=null,best2=null,bd=Infinity,bd2=Infinity;
+    for(const t of st.torches){const d=Math.abs(t.x-col);
+      if(d<bd){best2=best;bd2=bd;best=t;bd=d}
+      else if(d<bd2){best2=t;bd2=d}}
+    if(!best2){best2=best}
+    const prox=d=>Math.max(0,1-d/260);
+    const k0=prox(bd)*(.78+.30*this._torchFlicker(best)),k1=prox(bd2)*(.78+.30*this._torchFlicker(best2));
+    const k=clamp(Math.max(k0,k1),0,1);
+    const tint=this._mix(this.AMBIENT_TINT,this.TORCH_TINT,k);
+    const rimSide=best.x>=col?1:-1;
+    return this._litCol[key]={tint,k,rimSide}},
+  // Pure (no canvas access) so "floor falloff never brightens above the base" is directly
+  // assertable: for every k in [0,1] this returns an alpha in [0,.35], monotonically non-increasing
+  // in k, and is only ever used as a BLACK overlay (draw() above) -- there is no code path that
+  // paints a positive-brightness color onto the floor from this function.
+  falloffAlpha(k){return Math.max(0,(1-clamp(k,0,1))*.35)},
   draw(c,cam,frame,st){
+    // The column cache is only ever valid for the frame it was built for (torch flicker moves k
+    // every frame) -- cleared unconditionally here, once per draw() call, rather than left to
+    // accumulate a stale entry per (column,frame) pair across a whole session.
+    this._litCol={};
+    this._active=st;this._activeFrame=frame;
     for(const L of st.layers){const off=(cam.x-STAGE_W/2)*(1-L.parallax);c.drawImage(L.canvas,off,0)}
     // Release pass (art item 4): "one notch warmer" -- every stop pulled toward red/orange and away
     // from the paler yellow-white the fix-wave art pass originally tuned (each channel nudged down,
@@ -3051,7 +3136,14 @@ const Stage={cache:{},
       const g=c.createRadialGradient(t.x,t.y,0,t.x,t.y,rad);
       g.addColorStop(0,`rgba(255,185,105,${.66+.25*flick})`);g.addColorStop(.45,`rgba(255,120,45,${.4+.16*flick})`);g.addColorStop(1,'rgba(255,95,25,0)');
       c.fillStyle=g;c.beginPath();c.arc(t.x,t.y,rad,0,Math.PI*2);c.fill();
-      c.fillStyle=`rgba(255,${192+Math.floor(20*flick)},130,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}}};
+      c.fillStyle=`rgba(255,${192+Math.floor(20*flick)},130,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}
+    // Task 8.3: floor falloff -- the strip darkens with distance from the nearest torch (never
+    // brightens above the floor's own baked tiles), sampled in coarse 16px columns via the same
+    // lightAt this frame will hand the fighters, so the floor and whatever stands on it agree.
+    c.save();c.beginPath();c.rect(0,st.floorY,STAGE_W,80);c.clip();
+    for(let x=-40;x<STAGE_W+40;x+=16){const dark=this.falloffAlpha(this.lightAt(x).k);
+      if(dark>0){c.fillStyle=`rgba(0,0,0,${dark})`;c.fillRect(x-8,st.floorY,16,80)}}
+    c.restore()}};
 const Camera={
   // Anchor moved .62 -> .74 (round 1) -> .90 (fix round 2): at zoom 1.0 a character's SCREEN size
   // is anchor-independent (world px == screen px at zoom 1), so this doesn't cost any of round 1's
@@ -3992,6 +4084,48 @@ const BodyStyle={
     paint(cnv.getContext('2d'),cnv.width,cnv.height);
     return this._cache[key]=cnv},
 
+  // ---- Task 8.3: torch tint overlay -------------------------------------------------------------
+  // `lit` ({tint,k,rimSide}, from Stage.lightAt) is deliberately NOT folded into the bone-part cache
+  // key above: a fighter's tint changes every frame the torches flicker, and keying the actual bone
+  // bitmaps on it would mean repainting (and re-caching) every limb/torso/head every time k ticks
+  // over a bucket -- exactly the "per-frame recolor of every bone bitmap" the controller's ruling
+  // rules out. Instead the tint is a translucent flat-color overlay, composited with 'source-atop'
+  // (so it only recolors pixels the part itself just painted, never bleeding outside its own
+  // silhouette or touching the cached bitmap underneath it) directly over the live drawImage call.
+  // The only thing that IS cached here is the {fill,alpha} pair itself, per k-bucket (0.05 steps) --
+  // a handful of string lookups, not a canvas repaint -- so flicker costs one cache lookup and one
+  // fillRect per part per frame, not a rebuilt gradient. Bucketed on k ALONE (not on lit.tint, which
+  // is Stage.lightAt's own continuous ambient<->torch blend and would never repeat two frames in a
+  // row): a k-bucket count is bounded (21 steps) forever, where keying on a continuous string would
+  // grow this cache without limit over a long session.
+  _tintCache:{},
+  _litSpec(lit){
+    if(!lit)return null;
+    const kb=Math.round(lit.k/.05)*.05,key=kb;
+    const hit=this._tintCache[key];
+    if(hit)return hit;
+    // k=0.5 is the neutral pivot (no change); below it the overlay darkens toward the ruling's -25%
+    // floor, above it the overlay brightens toward the ruling's +18% ceiling, using the SAME fixed
+    // torch-warm hue every time (brightening only ever happens near a torch, i.e. high k, so a fixed
+    // warm fill reads correctly without pulling the continuous tint string into the cache key).
+    let spec;
+    if(kb<=.5)spec={fill:'#000000',alpha:(.5-kb)/.5*.25};
+    else spec={fill:Stage.TORCH_TINT,alpha:(kb-.5)/.5*.18};
+    return this._tintCache[key]=spec},
+  _applyTint(c,lit,dx,dy,dw,dh){
+    if(!lit)return;
+    const spec=this._litSpec(lit);
+    if(!spec||spec.alpha<=0)return;
+    c.save();c.globalCompositeOperation='source-atop';c.globalAlpha=spec.alpha;c.fillStyle=spec.fill;
+    c.fillRect(dx,dy,dw,dh);c.restore()},
+  // The rim ruling's whole ask: "a single additional stroke on the torch-facing edge of the torso/
+  // head only" -- drawn live (not cached; it is one stroke, not a gradient rebuild) on whichever
+  // side lit.rimSide names, in a lightened version of the current torch tint.
+  _rimStroke(c,lit,pathFn){
+    if(!lit)return;
+    c.save();c.strokeStyle=shade(lit.tint,.55);c.globalAlpha=.55;c.lineCap='round';
+    pathFn(c);c.restore()},
+
   // ---- pose key -> face state -------------------------------------------------------------------
   // The Phase 8 ruling's six expressions, reached with no new sim state at all: Rig.poseFor already
   // turns Fighter.state into a pose key every frame, so the face rides on that. 'dash' wears the
@@ -4055,6 +4189,7 @@ const BodyStyle={
     c.save();
     c.translate(x1,y1);c.rotate(Math.atan2(dy,dx));
     c.drawImage(cv,-half,-half,cv.width/px,cv.height/px);
+    this._applyTint(c,opts.lit,-half,-half,cv.width/px,cv.height/px);
     c.restore()},
   _paintLimb(g,len,w,w2,look,cloth){
     const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
@@ -4150,6 +4285,14 @@ const BodyStyle={
     c.save();
     c.transform(1,0,-sx/L,-sy/L,hip.x,hip.y);
     c.drawImage(cv,-MW/2,-(L+topPad),cv.width/px,cv.height/px);
+    this._applyTint(c,lit,-MW/2,-(L+topPad),cv.width/px,cv.height/px);
+    // The rim ruling: a single stroke along the torch-facing silhouette edge, waist to shoulder, in
+    // this same sheared torso frame (rimSide>0 is the local +x/right edge, matching lightAt's own
+    // "torch is to this world x's right" convention).
+    if(lit){const rx=lit.rimSide>=0?1:-1,sw=look.shoulderW,hw=Math.max(look.hipW,this.waistW(look));
+      this._rimStroke(c,lit,g=>{
+        g.lineWidth=Math.max(1.2,look.limb*.16);
+        g.beginPath();g.moveTo(rx*hw*.46,-L*.40);g.lineTo(rx*sw*.48,-L+look.limb*.5);g.stroke()})}
     c.restore()},
   _paintTorso(g,L,look,face){
     const b=look.body,lo=b.skinShade[0],hi=b.skinShade[1];
@@ -4469,7 +4612,15 @@ const BodyStyle={
     const cv=this.cache(this.key(look,'head:'+st+':'+this._r(r),fx,zb),bw,bh,g=>{
       g.scale(px,px);g.translate(halfW,up);
       this._paintHead(g,r,look,fx,st)});
-    c.drawImage(cv,x-halfW,y-up,cv.width/px,cv.height/px)},
+    c.drawImage(cv,x-halfW,y-up,cv.width/px,cv.height/px);
+    this._applyTint(c,lit,x-halfW,y-up,cv.width/px,cv.height/px);
+    // Rim ruling: a single stroke along the torch-facing side of the skull. Head art carries no
+    // rotation transform (mirroring is baked into the cached bitmap via fx, not a live c.rotate),
+    // so this is a plain screen-space arc centered on (x,y).
+    if(lit){const rx=lit.rimSide>=0?1:-1,ang=rx>0?0:Math.PI;
+      this._rimStroke(c,lit,g=>{
+        g.lineWidth=Math.max(1,r*.11);
+        g.beginPath();g.arc(x,y,r*.94,ang-.85,ang+.85);g.stroke()})}},
   // The look's ear length rescaled to whatever radius the head is being drawn at (look.headR in a
   // fight, S*.27 in a portrait), so one head module serves both.
   earLen(look,r){return (look.earLen||r*.7)*(r/(look.headR||r))},
@@ -5624,7 +5775,7 @@ const Rig={
     c.scale(scale*face,scale);
     c.drawImage(atlas.img,sx,sy,fr.w,fr.h,-fr.anchorX,-fr.anchorY,fr.w,fr.h);
     c.restore()},
-  draw(c,F,cam,frame){
+  draw(c,F,cam,frame,lit){
     // Task 5.5: the atlas short-circuit. F.def.id doubles as the atlas lookId (it's the same key
     // LOOKS/DEFS are both keyed on -- see the DEFS[id].look=LOOKS[id] wiring loop at the bottom of
     // this file). ATLAS[lookId] only ever holds a real {img,meta} once Atlas.load's promise has
@@ -5647,14 +5798,14 @@ const Rig={
       const{key,t01}=this.poseFor(F);
       if(atlas.meta.poses[key]){this._drawAtlasFrame(c,F,cam,frame,atlas,key,t01);return}}
     const look0=lookFor(F.def);
-    if(look0.rig==='quad')return this.drawQuad(c,F,cam,frame,look0);
-    if(look0.rig==='big')return this.drawBig(c,F,cam,frame,look0);
+    if(look0.rig==='quad')return this.drawQuad(c,F,cam,frame,look0,lit);
+    if(look0.rig==='big')return this.drawBig(c,F,cam,frame,look0,lit);
     const look=look0,scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solve(look,key,t01,face);
     // Task 8.1: every human look ships a `.body` block, so this is the live path; everything below
     // it is the pre-8.1 stroke rig, kept intact as the fallback for a look that has none (the
     // lookFor() fallback target, LOOKS.carl, does have one, so nothing reaches it today).
-    if(look.body)return this._drawHuman(c,F,look,j,face,scale,key);
+    if(look.body)return this._drawHuman(c,F,look,j,face,scale,key,lit);
     const skinDark=shade(look.skin,-.35);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
     const limb=(p,q,w)=>{c.lineCap='round';
@@ -5972,14 +6123,14 @@ const Rig={
   // (unconditional — both Mongo and Grull read as "hulking brute"), and dark boots instead of Carl's
   // optional bare feet (no look.bareFeet field on either big look). look is passed through from
   // draw()'s dispatch so it doesn't re-resolve lookFor(F.def) a second time.
-  drawBig(c,F,cam,frame,look){
+  drawBig(c,F,cam,frame,look,lit){
     look=look||lookFor(F.def);
     const scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solveBig(look,key,t01,face);
     // Task 8.2: both big looks now ship a `.body` block, so this is the live path; everything
     // below it is the pre-8.2 stroke rig, kept intact as the fallback for a big look that has none
     // (there is none today). Exactly the shape of draw()'s own 8.1 short-circuit.
-    if(look.body)return this._drawBrute(c,F,look,j,face,scale,key);
+    if(look.body)return this._drawBrute(c,F,look,j,face,scale,key,lit);
     const skinDark=shade(look.skin,-.35);
     c.save();c.translate(F.x,FLOOR);c.scale(scale,scale);
     const limb=(p,q,w)=>{c.lineCap='round';
@@ -6218,13 +6369,13 @@ const Rig={
   // horizontal body capsule (hip->spine->chest) instead of a torso hexagon. look is passed through
   // from draw()'s dispatch so it doesn't re-resolve lookFor(F.def) a second time; solveQuad's own
   // callers (tests, the dispatch below) can still call it directly without one.
-  drawQuad(c,F,cam,frame,look){
+  drawQuad(c,F,cam,frame,look,lit){
     look=look||lookFor(F.def);
     const scale=F.def.scale||1,face=F.face;
     const{key,t01}=this.poseFor(F),j=this.solveQuad(look,key,t01,face);
     // Task 8.2: all three quad looks now ship a `.body` block, so this is the live path; everything
     // below it is the pre-8.2 stroke rig, kept intact as the fallback for a quad look that has none.
-    if(look.body)return this._drawBeast(c,F,look,j,face,key);
+    if(look.body)return this._drawBeast(c,F,look,j,face,key,lit);
     const skinDark=shade(look.skin,-.35);
     // Fix round 2 (controller review, Task 6.5): the medium kick is now a rearing double-front-paw
     // slam (see POSES_QUAD.medium's own comment) — the striking limbs are the FRONT legs, which this
@@ -6647,7 +6798,7 @@ const Render={ctx:canvas.getContext('2d'),
     const sy=Camera.toScreen(cam,F.x,this.overlayY(F)).sy;
     return Math.max(sy,HUD_LINE+height+2)},
   reflection(c,F,cam,frame){c.save();c.beginPath();c.rect(0,FLOOR,STAGE_W,90);c.clip();
-    c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.12;Rig.draw(c,F,cam,frame);c.restore()},
+    c.translate(0,2*FLOOR);c.scale(1,-1);c.globalAlpha=.12;Rig.draw(c,F,cam,frame,Stage.lightAt(F.x));c.restore()},
   // A grounding contact shadow at the fighter's feet — the mirrored reflection alone reads as a
   // detached ghost. A flattened dark ellipse under the floor art, sized off shoulderW (a stand-in
   // for the character's overall footprint) so bigger/scaled-up looks (the hobgoblin) get a bigger
@@ -6657,11 +6808,25 @@ const Render={ctx:canvas.getContext('2d'),
   shadow(c,F){const look=lookFor(F.def),scale=F.def.scale||1,
       w=(look.rig==='quad'?look.bodyLen*1.15:look.shoulderW*1.6)*scale;
     c.save();c.globalAlpha=.35;c.fillStyle='#000';
-    c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore()},
+    c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore();
+    // Task 8.3: a wet-floor specular streak under the fighter's own feet, tinted/brightened by
+    // whichever torch is nearest THIS fighter's x (Stage.lightAt) so the floor reads as reflecting
+    // the same torchlight the fighter stands in. streakGeom is a pure function of (F,lit) -- no
+    // canvas access -- purely so "the streak follows fighter x" is assertable without a canvas mock.
+    const g=this.streakGeom(F,Stage.lightAt(F.x));
+    c.save();c.globalAlpha=g.alpha;c.fillStyle=g.tint;
+    c.beginPath();c.ellipse(g.x,FLOOR+3,g.w/2,g.w*.09,0,0,Math.PI*2);c.fill();c.restore()},
+  // Pure geometry for the specular streak above: {x, w, alpha, tint}. x always equals F.x (the
+  // ruling's "follows fighter x"); w scales off the same footprint shadow() sizes off; alpha rides
+  // the torch proximity k so a fighter standing right under a torch gets a brighter streak than one
+  // out at the fringe.
+  streakGeom(F,lit){const look=lookFor(F.def),scale=F.def.scale||1,
+      w=(look.rig==='quad'?look.bodyLen*1.15:look.shoulderW*1.6)*scale;
+    return{x:F.x,w:w*.7,alpha:.16+.26*lit.k,tint:lit.tint}},
   fighter(c,F,cam,frame){
-    const flash=F.state==='HITSTUN'&&F.f<3;
-    if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame);c.filter='none';c.restore()}
-    else{Rig.draw(c,F,cam,frame);
+    const flash=F.state==='HITSTUN'&&F.f<3,lit=Stage.lightAt(F.x);
+    if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame,lit);c.filter='none';c.restore()}
+    else{Rig.draw(c,F,cam,frame,lit);
       if(flash){c.save();c.globalAlpha=.45;c.fillStyle='#fff';
         c.fillRect(F.x-F.width,FLOOR-140*(F.def.scale||1),F.width*2,140*(F.def.scale||1));c.restore()}}
     // Fix-wave item 1: both above-the-head overlays now draw in SCREEN space (this function runs
@@ -6892,7 +7057,9 @@ const Render={ctx:canvas.getContext('2d'),
     // reproducible frame for frame.
     if(Math.abs(FX.shake.x)>0.05||Math.abs(FX.shake.y)>0.05)
       c.translate(FX.shake.x/cam.zoom,FX.shake.y/cam.zoom);
-    Stage.draw(c,cam,fr,Stage.build('depths'));
+    // Task 8.3: floor 2 ("THE SEWERS") gets its own palette; everything else (floor 1's "DOORWAY"
+    // and exhibition mode, which has no G.encounter at all) keeps the original dungeon theme.
+    Stage.draw(c,cam,fr,Stage.build(G.encounter&&G.encounter.floor===2?'sewers':'doorway'));
     if(f){
       this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
       this.shadow(c,f.p1);this.shadow(c,f.p2);
@@ -14088,5 +14255,133 @@ Test.add('the quad rig\'s head props stay world-space and keep propExtra\'s own 
     const look=LOOKS[id];
     ok(look.rig==='quad',id+' must be a quad look');
     ok(look.body.face.eyes!=='human',id+' must not fall back to the human face')}});
+
+// ---- Task 8.3: stage depth and lighting ---------------------------------------------------------
+// Stage.lightAt(x) has no `frame` parameter of its own (frozen interface) -- it reads whatever
+// frame/theme Stage.draw() last ran for. Every test below drives it the same real way Render does:
+// Stage.draw(...) once, then Stage.lightAt(x).
+Test.add('Stage.lightAt is deterministic for a given frame (flicker is a pure function of seed+frame, not a consumed shared stream)',()=>{
+  const c=document.createElement('canvas').getContext('2d');
+  const st=Stage.build('doorway'),cam={x:STAGE_W/2,zoom:1};
+  const saved=Save.data;Save.data=Meta.defaults();
+  Stage.draw(c,cam,37,st);
+  const a=Stage.lightAt(300),a2=Stage.lightAt(300);
+  eq(JSON.stringify(a),JSON.stringify(a2),'two calls for the same x within the same frame must match exactly');
+  // Re-running draw() for the SAME frame number must reproduce the exact same light: lightAt carries
+  // no state across draw() calls beyond (theme,frame) themselves.
+  Stage.draw(c,cam,37,st);
+  const b=Stage.lightAt(300);
+  eq(JSON.stringify(a),JSON.stringify(b),'re-drawing the same frame number must reproduce the same light exactly');
+  ok(a.k>=0&&a.k<=1,'k must stay in [0,1]');
+  ok(a.rimSide===1||a.rimSide===-1,'rimSide must be exactly +1 or -1');
+  ok(/^#[0-9a-f]{6}$/.test(a.tint),'tint must be a #rrggbb hex string');
+  // a different frame number must (almost certainly) change the flicker component
+  Stage.draw(c,cam,38,st);
+  const d=Stage.lightAt(300);
+  ok(JSON.stringify(a)!==JSON.stringify(d),'a different frame should change the live flicker (reduceMotion is off here)');
+  Save.data=saved});
+Test.add('Stage.lightAt caches per 8px column within a frame',()=>{
+  const c=document.createElement('canvas').getContext('2d');
+  const st=Stage.build('doorway'),cam={x:STAGE_W/2,zoom:1};
+  const saved=Save.data;Save.data=Meta.defaults();
+  Stage.draw(c,cam,10,st);
+  const a=Stage.lightAt(400),b=Stage.lightAt(403); // both round to the same 8px column (400)
+  ok(a===b,'x values sharing an 8px column must return the identical cached object, not just an equal one');
+  const d=Stage.lightAt(408); // the next column over
+  ok(a!==d,'a different 8px column must not share the cached object');
+  Save.data=saved});
+Test.add('torch flicker is off under reduceMotion (k is a static baseline across every frame)',()=>{
+  const c=document.createElement('canvas').getContext('2d');
+  const st=Stage.build('doorway'),cam={x:STAGE_W/2,zoom:1};
+  const saved=Save.data;Save.data=Meta.defaults();Save.data.settings.reduceMotion=true;
+  const ks=[];
+  for(const fr of[0,1,2,3,50,51]){Stage.draw(c,cam,fr,st);ks.push(Stage.lightAt(300).k)}
+  for(let i=1;i<ks.length;i++)eq(ks[i],ks[0],'k must not vary across frames under reduceMotion');
+  Save.data.settings.reduceMotion=false;
+  const ks2=new Set();
+  for(const fr of[0,1,2,3,50,51]){Stage.draw(c,cam,fr,st);ks2.add(Stage.lightAt(300).k)}
+  ok(ks2.size>1,'k must vary across frames once reduceMotion is off (flicker is live again)');
+  Save.data=saved});
+Test.add('floor falloff (Stage.falloffAlpha) never brightens: bounded, monotonic-in-k, black-only',()=>{
+  let prev=Infinity;
+  for(let i=0;i<=20;i++){const k=i/20,a=Stage.falloffAlpha(k);
+    ok(a>=0&&a<=.35,'falloffAlpha('+k+') out of [0,.35]: '+a);
+    ok(a<=prev+1e-9,'falloffAlpha must be non-increasing in k (k='+k+' gave '+a+' after '+prev+')');
+    prev=a}
+  eq(Stage.falloffAlpha(1),0,'fully lit (k=1) must apply no darkening at all');
+  ok(Stage.falloffAlpha(0)>0,'fully dark (k=0) must darken the floor');
+  // out-of-range k must clamp, never invert into a negative (brightening) alpha
+  ok(Stage.falloffAlpha(-5)<=.35&&Stage.falloffAlpha(-5)>=0,'k below 0 must clamp, not go negative-alpha');
+  eq(Stage.falloffAlpha(5),0,'k above 1 must clamp to no darkening, not a negative (brightening) alpha')});
+Test.add('Stage.build adds a far/blurred-arch layer at parallax 0.4, alongside the existing .2/.45/.75/1 stack',()=>{
+  for(const id of['doorway','sewers']){
+    const s=Stage.build(id);
+    ok(s.layers.some(L=>Math.abs(L.parallax-.4)<1e-9),id+' must have a layer at parallax 0.4');
+    const factors=s.layers.map(L=>L.parallax);
+    for(const want of[.2,.45,.75,1])ok(factors.some(f=>Math.abs(f-want)<1e-9),id+' must keep its '+want+' layer too)')}});
+Test.add('doorway and sewers are visually distinct themes (different wall/floor base colors), same geometry contract',()=>{
+  const d=Stage.build('doorway'),s=Stage.build('sewers');
+  eq(d.layers.length,s.layers.length,'both themes must build the same layer stack shape');
+  eq(d.torches.length,s.torches.length);
+  // sample a pixel from each theme's wall layer (top strip, away from any arch/banner/chain
+  // geometry so it reads the plain base-color fill) and confirm the two themes actually differ.
+  const wallOf=st=>st.layers.find(L=>Math.abs(L.parallax-.45)<1e-9).canvas;
+  const dc=wallOf(d).getContext('2d').getImageData(4,4,1,1).data;
+  const sc=wallOf(s).getContext('2d').getImageData(4,4,1,1).data;
+  ok(dc[0]!==sc[0]||dc[1]!==sc[1]||dc[2]!==sc[2],'doorway and sewers wall base colors must differ')});
+Test.add('Render.streakGeom (the floor specular streak under a fighter\'s feet) follows fighter x',()=>{
+  const F=mkFighter();
+  const lit={tint:'#ffb060',k:.6,rimSide:1};
+  F.x=120;const a=Render.streakGeom(F,lit);
+  eq(a.x,120,'the streak must sit exactly at the fighter\'s own x');
+  F.x=640;const b=Render.streakGeom(F,lit);
+  eq(b.x,640,'moving the fighter must move the streak with it');
+  ok(a.w>0,'the streak must have a positive width');
+  ok(a.alpha>0&&a.alpha<=1,'alpha must be a usable canvas alpha');
+  const dim={tint:'#ffb060',k:0,rimSide:1},bright={tint:'#ffb060',k:1,rimSide:1};
+  ok(Render.streakGeom(F,bright).alpha>Render.streakGeom(F,dim).alpha,
+    'a fighter standing in brighter torchlight (higher k) must get a brighter streak')});
+Test.add('BodyStyle fighter-tint overlay cache is bounded to k-buckets (0.05 steps), never one entry per distinct lightAt() result',()=>{
+  BodyStyle._tintCache={};
+  for(let i=0;i<400;i++){
+    const k=(i%97)/97;
+    BodyStyle._litSpec({tint:Stage._mix(Stage.AMBIENT_TINT,Stage.TORCH_TINT,k),k,rimSide:i%2?1:-1})}
+  ok(Object.keys(BodyStyle._tintCache).length<=21,
+    'k in [0,1] bucketed to 0.05 steps is at most 21 distinct entries no matter how many lightAt() '+
+    'results (400 near-continuous k values here) feed it -- got '+Object.keys(BodyStyle._tintCache).length);
+  const spec=BodyStyle._litSpec({tint:'#ffb060',k:.5,rimSide:1});
+  eq(spec.alpha,0,'k=0.5 is the neutral pivot: no darkening, no brightening');
+  const dark=BodyStyle._litSpec({tint:'#ffb060',k:0,rimSide:1});
+  ok(dark.alpha>0&&dark.alpha<=.25,'k=0 must darken, bounded at the ruling\'s 25% ceiling');
+  const bright=BodyStyle._litSpec({tint:'#ffb060',k:1,rimSide:1});
+  ok(bright.alpha>0&&bright.alpha<=.18,'k=1 must brighten, bounded at the ruling\'s 18% ceiling')});
+Test.add('a flickering fighter tint never grows the bone-part cache -- only the tiny k-bucket overlay cache does',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  try{
+    BodyStyle.clearCache();
+    const fighters=HUMAN_LOOK_IDS.map(id=>{const f=mkFight({p1:DEFS[id]});return f.p1});
+    const cam={x:0,zoom:1};
+    const drawAll=frame=>{
+      for(const F of fighters){
+        F.f=frame%60;
+        const lit={tint:Stage._mix(Stage.AMBIENT_TINT,Stage.TORCH_TINT,(frame%23)/23),k:(frame%23)/23,rimSide:frame%2?1:-1};
+        c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,cam,frame,lit);c.restore()}};
+    for(let i=0;i<60;i++)drawAll(i);
+    const warm=BodyStyle.cacheCount();
+    ok(warm>0,'the warm-up must actually have cached something, got '+warm);
+    for(let i=0;i<600;i++)drawAll(i);
+    eq(BodyStyle.cacheCount(),warm,'600 further frames of a flickering lit value must add no bone-part cache entries');
+  }finally{G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+Test.add('Rig.draw/drawBig/drawQuad tolerate a missing lit argument (existing callers, atlas fallback, portraits) with no throw',()=>{
+  const c=document.createElement('canvas').getContext('2d');
+  const cam={x:0,zoom:1};
+  const human=mkFighter();
+  ok(!threw(()=>Rig.draw(c,human,cam,0)),'human rig must not throw with lit omitted');
+  const big=new Fighter(DEFS.mongo,1,Ctrl.idle());
+  ok(!threw(()=>Rig.draw(c,big,cam,0)),'big rig must not throw with lit omitted');
+  const quad=new Fighter(DEFS.donut,1,Ctrl.idle());
+  ok(!threw(()=>Rig.draw(c,quad,cam,0)),'quad rig must not throw with lit omitted')});
 
 </script></body></html>
