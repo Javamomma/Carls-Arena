@@ -5196,6 +5196,79 @@ Test.add('big/quad extent snapshot (per pose and whole-set) is unchanged by the 
     for(const key of['idle','light1','medium','heavy','s3']){
       const[top,reach]=posesOf(look,key);
       near(top,snap[key][0],id+'/'+key+'.top');near(reach,snap[key][1],id+'/'+key+'.reach')}}});
+// ---- Fix-wave item 12 (controller's art note, parked since 8.2): Donut's barrel ----------------
+// The final review called Donut "the weakest look in the game" and named three causes, all in data:
+// a taper of 1.00 -> 0.94 -> 0.82 spread over the body's whole length is below the threshold where
+// the eye reads volume; the haunch and shoulder masses were sized at or under the barrel's own
+// half-width, so they were drawn INSIDE the tube and contributed nothing to the silhouette; and the
+// body ran dead straight, where a cat has a dipped back and a deeper chest. LOOKS.donut now carries
+// its own `barrel` table; every other quad keeps the default one, so this is a one-look change.
+//
+// Read off the actual draw calls rather than the table, because the property that matters is a
+// relationship between two different primitives -- a mass's cross-axis radius against the barrel's
+// half-width AT THAT END -- which is exactly what was wrong before and is invisible in either
+// number alone. Rig.extent is untouched: no joint moves, and the spine dip is applied at draw time
+// only, downward, so it cannot raise a silhouette into the HUD. The big/quad extent snapshot test
+// above is what actually pins that.
+Test.add('Donut\'s barrel reads as volume: masses proud of the tube, a real taper, a dipped spine',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;
+  const c=cnv.getContext('2d');
+  const savedFight=G.fight,savedState=G.state;
+  const realBlob=BodyStyle.blob,realLimb=BodyStyle.limb;
+  const blobs={},limbs={};
+  try{
+    BodyStyle.blob=function(cc,x,y,rx,ry,ang,look,face,name){blobs[name]={x,y,rx,ry};
+      return realBlob.apply(this,arguments)};
+    BodyStyle.limb=function(cc,x1,y1,x2,y2,w,look,opts){
+      if(opts&&/^barrel/.test(opts.bone))limbs[opts.bone]={x1,y1,x2,y2,w,w2:opts.w2};
+      return realLimb.apply(this,arguments)};
+    const f=mkFight({p1:DEFS.donut});G.fight=f;G.state='FIGHT';
+    const F=f.p1;F.state='IDLE';F.f=0;F.face=1;
+    c.save();c.setTransform(1,0,0,1,427,432);Rig.draw(c,F,{x:0,zoom:1},0);c.restore();
+    const A=limbs.barrelA,B=limbs.barrelB;
+    ok(A&&B,'both barrel segments must be drawn');
+    // (1) the two masses must stand OUTSIDE the barrel at the end they sit on, or they are invisible
+    // A margin, not a bare `>`: before this change the shoulder cleared the barrel by 0.03*bodyW,
+    // about 1.7px on Donut, which is a rounding error rather than a mass. 25%/35% of the half-width
+    // is roughly 7px and 12px at Donut's proportions, which is what the eye reads as a shape.
+    ok(blobs.haunch.ry>=A.w/2*1.25,'the haunch must stand proud of the barrel at the hip end by a '+
+      'real margin: ry '+blobs.haunch.ry.toFixed(2)+' vs half-width '+(A.w/2).toFixed(2));
+    ok(blobs.shoulder.ry>=B.w2/2*1.35,'the shoulder must stand proud of the barrel at the chest end '+
+      'by a real margin: ry '+blobs.shoulder.ry.toFixed(2)+' vs half-width '+(B.w2/2).toFixed(2));
+    // (2) a taper the eye can actually read across the body, not an 18% narrowing
+    ok(B.w2/A.w<=.75,'chest width must be at most 75% of hip width for the taper to read as volume, got '+
+      (B.w2/A.w).toFixed(3));
+    // (3) the spine curve: the two segments must meet BELOW the straight hip->chest line (a cat's
+    //     back dips), and the meeting point must not be the solved joint, which stays where it is.
+    const j=Rig.solveQuad(LOOKS.donut,'idle',0,1);
+    ok(A.y2>j.spine.y,'the drawn spine must sit below the solved joint (a dipped back), got '+
+      A.y2.toFixed(2)+' vs '+j.spine.y.toFixed(2));
+    ok(A.x2===B.x1&&A.y2===B.y1,'the two segments must meet at the same drawn point, or the body splits');
+    const straightY=j.hip.y+(j.chest.y-j.hip.y)*((A.x2-j.hip.x)/((j.chest.x-j.hip.x)||1));
+    ok(A.y2>straightY,'the drawn spine must sit below the straight hip->chest line');
+    // The offset runs along the body's own normal rather than world +y, which is what keeps both
+    // drawn segment lengths independent of the body's angle -- see _drawBeast's own note, and the
+    // "600 drawn frames of one pose add no entries" test, which is what catches a regression here.
+    const len=(p,q)=>Math.hypot(q.x-p.x,q.y-p.y);
+    const at=t01=>{const jj=Rig.solveQuad(LOOKS.donut,'idle',t01,1);
+      const ux=jj.chest.x-jj.hip.x,uy=jj.chest.y-jj.hip.y,uL=Math.hypot(ux,uy)||1;
+      let nx=-uy/uL,ny=ux/uL;if(ny<0){nx=-nx;ny=-ny}
+      const d=LOOKS.donut.bodyLen*.42*LOOKS.donut.barrel.dip;
+      const s={x:jj.spine.x+nx*d,y:jj.spine.y+ny*d};
+      return[len(jj.hip,s),len(s,jj.chest)]};
+    const a0=at(0),a1=at(.5);
+    ok(Math.abs(a0[0]-a1[0])<1e-6&&Math.abs(a0[1]-a1[1])<1e-6,
+      'the drawn barrel lengths must not vary across the idle cycle, or every rotation caches a new '+
+      'bitmap: got '+a0.map(v=>v.toFixed(4))+' vs '+a1.map(v=>v.toFixed(4)));
+  }finally{BodyStyle.blob=realBlob;BodyStyle.limb=realLimb;
+    G.fight=savedFight;G.state=savedState;BodyStyle.clearCache()}});
+Test.add('the barrel change is Donut\'s alone -- every other quad keeps the default proportions',()=>{
+  ok(LOOKS.donut.barrel,'donut must carry its own barrel table');
+  for(const id of['grub','mother_rat'])
+    ok(!LOOKS[id].barrel,id+' must keep the shared default barrel table, so its art is bit-identical');
+  for(const id of Object.keys(LOOKS))if(LOOKS[id].rig!=='quad')
+    ok(!LOOKS[id].barrel,id+' is not a quad: a barrel table there would be read by nothing')});
+
 // The HUD/roster bust must be the same character as the fight sprite for EVERY rig, not just the
 // human one: that is why the body layer exists at all. All eleven looks now have a .body block, so
 // all eleven go through BodyStyle.head, and each size caches separately (the head bitmap is
@@ -5458,8 +5531,10 @@ Test.add('Rig.draw/drawBig/drawQuad tolerate a missing lit argument (existing ca
 // path limb/torso/head already used, which took the tinted copies from 600 to 1360 for this sweep
 // (the base bitmap count is unchanged -- no new bitmaps, only tinted copies of existing ones). That
 // is the cost the review named as item 3's prerequisite, and it is why item 3 came first: the whole
-// set is now dropped at every G.startFight rather than kept for the life of the page.
-const SESSION_BASE_BITMAPS=340,SESSION_TINTED_BITMAPS=1360;
+// set is now dropped at every G.startFight rather than kept for the life of the page. Item 12 then
+// added Donut's two barrel-end seam discs: +4 base (two discs at two zoom buckets) and +16 tinted
+// (those four at four k-buckets), which is the whole cost of that look's fix.
+const SESSION_BASE_BITMAPS=344,SESSION_TINTED_BITMAPS=1376;
 // ---- Fix-wave item 3 (final review, Important #1): every BodyStyle cache is counted and bounded --
 // cacheCount() used to report _cache alone, which is the one cache that is provably bounded (it is
 // keyed on look|part|face|zoomBucket, all of which are finite). _tintedCache -- one full copy of a

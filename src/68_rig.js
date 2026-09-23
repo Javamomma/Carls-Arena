@@ -608,6 +608,23 @@ const LOOKS={
     hipH:65,legLen:65,bodyLen:134,neckLen:46,headR:26,tailLen:120,
     frontW:20,backW:24,legW:18,
     props:['tiara','whiskers'],
+    // Fix-wave item 12 (the controller's art note, parked since 8.2; the final review confirmed it
+    // and called this "the weakest look in the game"). Donut's body read as a white tube, for three
+    // reasons that are all proportions rather than code, so they live here as her own `barrel`
+    // table -- every other quad has none and keeps _drawBeast's shared default, which is what makes
+    // this a one-look change with Mother Rat and Grub bit-identical.
+    //   taper    1.00 -> 0.94 -> 0.82 of bodyW over ~170 units is an 18% narrowing spread over the
+    //            whole body: below the threshold where the eye reads it as volume. 1.08 -> 0.90 ->
+    //            0.66 is a third narrower at the chest than at the hips, which reads as a cat.
+    //   haunch/  both masses used to sit at or barely past the barrel's own half-width, so they were
+    //   shoulder drawn INSIDE the tube (the shoulder cleared it by 1.7px) and added nothing to the
+    //            silhouette. They are now clearly proud of it at the end each one sits on.
+    //   dip      a drawing-only downward offset of the point where the two barrel segments meet. A
+    //            cat has a dipped back and a deeper chest; a dead-straight spine is the other half
+    //            of why the barrel read as a tube. Drawing-only and DOWNWARD: no joint moves (the
+    //            big/quad extent snapshot pins that) and nothing can rise into the HUD zoom cap.
+    // Radii are multiples of bodyW (= bodyLen*0.42), the same unit _drawBeast already sizes in.
+    barrel:{taper:[1.08,.90,.66],haunch:[.92,.78],shoulder:[.80,.68],dip:.14},
     // Task 8.2: the quad rig's `.body` block. Same frozen schema and the same purely-additive rule
     // as every look above -- solveQuad and every extent/reach/zoom number tuned against it since
     // Phase 3 are bit-identical. cloth 'fur' is not an overlay for a quad: Rig.clothFor maps every
@@ -2993,23 +3010,63 @@ const Rig={
       c.restore()}
     // --- the three body masses. Drawn haunch -> barrel -> shoulder so each one overlaps the last
     //     from the rear forward, the way a real animal's silhouette stacks toward the viewer.
-    const hipA=ang(j.hip,j.spine),chA=ang(j.spine,j.chest);
+    // Fix-wave item 12: the barrel's proportions come from the look when it has its own table and
+    // from this default when it does not, so Mother Rat and Grub draw exactly what they always did.
+    const BAR=look.barrel||{taper:[1,.94,.82],haunch:[.70,.62],shoulder:[.46,.44],dip:0};
+    // The drawn spine: the solved joint, pushed off the hip->chest axis by the look's own dip, on
+    // whichever side is DOWN. j.spine itself is never touched -- Rig.extent folds joints, so moving
+    // one would move the zoom cap and the reach budget -- and offsetting downward means the dip can
+    // lower a silhouette but never raise it into the HUD line.
+    //
+    // The offset is along the body's own normal, NOT world +y, and that is load-bearing rather than
+    // tidy. A fixed world-space offset makes |hip->sp| a function of the body's ANGLE, so the idle
+    // cycle's gentle body rotation walked the drawn barrel length across a rounding boundary
+    // (measured: 67.51 -> 67.36 over the cycle, rounding 68 -> 67) and cached a second copy of the
+    // barrel -- caught by the existing "600 drawn frames of one pose add no entries" test, which is
+    // exactly the bug that test is for. hip, spine and chest are a rigid triangle, so an offset in
+    // the body's own frame keeps both drawn segment lengths constant under any rotation.
+    let sp=j.spine;
+    if(BAR.dip){
+      const ux=j.chest.x-j.hip.x,uy=j.chest.y-j.hip.y,uL=Math.hypot(ux,uy)||1;
+      let nx=-uy/uL,ny=ux/uL;
+      if(ny<0){nx=-nx;ny=-ny}                       // pick the downward normal
+      const d=bodyW*BAR.dip;
+      sp={x:j.spine.x+nx*d,y:j.spine.y+ny*d}}
+    const hipA=ang(j.hip,sp),chA=ang(sp,j.chest);
     // The barrel TAPERS from haunch to shoulder (1.00 -> 0.94 -> 0.82 of bodyW). The first pass ran
     // it at a constant width and it read as a log: an animal's body is widest over the hips and
     // narrows into the chest, and without that taper the three masses all vanish into one tube.
     // A grub is the exception -- a larva really is a uniform segmented tube -- so it keeps its own
     // near-constant profile.
-    const w0=bodyW,w1=bodyW*(grub?1.00:.94),w2=bodyW*(grub?.86:.82);
+    const w0=bodyW*(grub?1:BAR.taper[0]),w1=bodyW*(grub?1.00:BAR.taper[1]),w2=bodyW*(grub?.86:BAR.taper[2]);
     // A larva has neither a haunch nor a shoulder -- it is one uniform segmented tube -- so the two
     // masses are skipped entirely for the grub rather than sized down: at its proportions they sat
     // a pixel proud of the barrel and their outlines read as two rings around an otherwise smooth body.
     if(!grub){
       BodyStyle.blob(c,j.hip.x-Math.cos(hipA)*bodyW*.10,j.hip.y-Math.sin(hipA)*bodyW*.10,
-        bodyW*.70,bodyW*.62,hipA,look,face,'haunch',null,null,LO);}
-    BodyStyle.limb(c,j.hip.x,j.hip.y,j.spine.x,j.spine.y,w0,look,{bone:'barrelA',cloth:'bare',face,lit,zb:LO.zb,w2:w1});
-    BodyStyle.limb(c,j.spine.x,j.spine.y,j.chest.x,j.chest.y,w1,look,{bone:'barrelB',cloth:'bare',face,lit,zb:LO.zb,w2});
-    BodyStyle.seam(c,j.spine.x,j.spine.y,w1*.5+1.1,look,face,null,chA,LO);
-    if(!grub)BodyStyle.blob(c,j.chest.x,j.chest.y,bodyW*.46,bodyW*.44,chA,look,face,'shoulder',null,null,LO);
+        bodyW*BAR.haunch[0],bodyW*BAR.haunch[1],hipA,look,face,'haunch',null,null,LO);}
+    // Fix-wave item 12: for a look with its own barrel table the shoulder is drawn UNDER the barrel,
+    // next to the haunch, instead of being stamped on top of it. A mass big enough to matter is also
+    // big enough for its own outline ring to read as a separate ball when it is drawn last;
+    // underneath, only the crescent standing proud of the tube survives, which is the part that was
+    // doing the silhouette work anyway. Every other quad keeps the original haunch -> barrel ->
+    // shoulder order, so Mother Rat's art is bit-identical to before this item.
+    const shoulderMass=()=>BodyStyle.blob(c,j.chest.x,j.chest.y,
+      bodyW*BAR.shoulder[0],bodyW*BAR.shoulder[1],chA,look,face,'shoulder',null,null,LO);
+    if(!grub&&look.barrel)shoulderMass();
+    BodyStyle.limb(c,j.hip.x,j.hip.y,sp.x,sp.y,w0,look,{bone:'barrelA',cloth:'bare',face,lit,zb:LO.zb,w2:w1});
+    BodyStyle.limb(c,sp.x,sp.y,j.chest.x,j.chest.y,w1,look,{bone:'barrelB',cloth:'bare',face,lit,zb:LO.zb,w2});
+    BodyStyle.seam(c,sp.x,sp.y,w1*.5+1.1,look,face,null,chA,LO);
+    // Fix-wave item 12: the same seam cap BodyStyle.seam was written for, at the two ends where the
+    // barrel now meets a mass that stands proud of it. The barrel is a capsule, so each end carries
+    // a rounded OUTLINE cap -- harmless when it IS the silhouette, but with a haunch or a shoulder
+    // swelling past it that dark arc lands in the middle of the mass and reads as a seam between two
+    // separate balls. An un-outlined disc in the tube's own gradient, sized to sit past the cap's
+    // outline but strictly inside the mass, erases the arc and leaves both outer silhouettes alone.
+    if(!grub&&look.barrel){
+      BodyStyle.seam(c,j.hip.x,j.hip.y,Math.min(w0*.5+2,bodyW*BAR.haunch[1]*.86),look,face,null,hipA,LO);
+      BodyStyle.seam(c,j.chest.x,j.chest.y,Math.min(w2*.5+2,bodyW*BAR.shoulder[1]*.86),look,face,null,chA,LO)}
+    if(!grub&&!look.barrel)shoulderMass();
     if(look.body.cloth.torso==='chitin'){
       // The larva's banded plates, replacing the 'segments' prop's three flat rings: overlapping
       // shells along the body axis, each with a lit leading edge and a dark trailing seam.
@@ -3022,7 +3079,7 @@ const Rig={
       const hwB=bodyW*.42;
       for(let i=1;i<=7;i++){const t=i/8;
         const px=j.hip.x+(j.chest.x-j.hip.x)*t,py=j.hip.y+(j.chest.y-j.hip.y)*t;
-        const a=hipA+(chA-hipA)*t,w=hwB*(1-.10*t);
+        const a=hipA+(chA-hipA)*t,w=hwB*(1-.10*t);   // grub only, and grub's dip is 0
         c.save();c.translate(px,py);c.rotate(a);
         c.globalAlpha=.42;c.strokeStyle=L(dark);c.lineWidth=Math.max(1.4,bodyW*.06);
         c.beginPath();c.ellipse(0,0,bodyW*.11,w,0,-Math.PI*.62,Math.PI*.62);c.stroke();
@@ -3035,8 +3092,12 @@ const Rig={
       c.strokeStyle=LC(shade(look.skin,Math.min(.95,look.body.skinShade[1]*1.6)));
       c.lineWidth=bodyW*.36;
       c.beginPath();
-      c.moveTo(j.hip.x,j.hip.y+bodyW*.30);c.lineTo(j.spine.x,j.spine.y+bodyW*.32);
-      c.lineTo(j.chest.x,j.chest.y+bodyW*.26);c.stroke();
+      // The band follows the barrel's real widths for a look with its own table (Donut's chest is a
+      // third narrower than her hips now, so a flat bodyW band would hang off it) and the flat bodyW
+      // every quad used before item 12 for the rest, which keeps Mother Rat's band unchanged.
+      const bb=look.barrel?[w0,w1,w2]:[bodyW,bodyW,bodyW];
+      c.moveTo(j.hip.x,j.hip.y+bb[0]*.30);c.lineTo(sp.x,sp.y+bb[1]*.32);
+      c.lineTo(j.chest.x,j.chest.y+bb[2]*.26);c.stroke();
       c.restore()}
     // --- neck and head. TWO segments: chest->neck and then neck->head, because solveQuad puts the
     //     head a further headR*1.6 beyond the neck joint. Drawing only the first left a bare gap of
