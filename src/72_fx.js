@@ -53,6 +53,26 @@ const EFFECT_TINT={bleed:'#c62828',poison:'#4caf50',weakness:'#7e57c2'};
 // impact, not a blend) -- this comment exists only so a reader doesn't have to trace `appliedIds`
 // back to Fight.resolve to find out the ordering isn't arbitrary.
 function tintFor(ev){return(ev.tags&&ev.tags.map(t=>EFFECT_TINT[t]).find(Boolean))||null}
+// Task 12.4 ruling (frozen interface, exact ruling 8 / gameplay study S4.3 "Damage numbers"): one
+// style table for every FX.popup 'kind' -- white normal, gold crit (larger), grey chip, red bleed,
+// green heal, plus the punish/backdraft callouts' own already-shipped colors, all now driven from
+// here instead of a bespoke col/big literal at each push() call site. bleed reuses EFFECT_TINT.bleed
+// just above (the "one color table to extend, not duplicate" instruction) rather than a second red
+// literal; chip reuses the same grey EFFECT_STYLE.armorBreak already uses for its own effect badge,
+// for the same reason. heal is kept as its own literal (matching EFFECT_STYLE.regen's own col below)
+// rather than a forward reference, since this is a plain top-level const evaluated before the FX
+// object literal below it finishes building EFFECT_STYLE. Read only by push()'s 'popup' case below:
+// any push that omits `popupKind` (a raw FX.push({kind:'popup',...}) call -- every existing
+// 90_tests.js fixture, and thorns' own red popup in 47_buffs.js) keeps choosing its own col/big
+// exactly as before, unaffected.
+const POPUP_KIND={
+  normal:{col:'#fff',big:false},
+  crit:{col:'#f4c542',big:true},
+  chip:{col:'#9a9a9a',big:false},
+  bleed:{col:EFFECT_TINT.bleed,big:false},
+  heal:{col:'#4caf50',big:false},
+  punish:{col:'#ff5a4a',big:true},
+  backdraft:{col:'#ff5722',big:true}};
 const IMPACTS={
   blunt:{
     spawn(ev){return{kind:'impact',id:'blunt',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:16,tint:tintFor(ev)}},
@@ -185,12 +205,20 @@ const FX={list:[],
         const col=CLS_GEM[ev.cls]||CLS_GEM.default;
         this.list.push({kind:'passiveBanner',x:ev.x,y:ev.y,text:st.text,col,life:0,max:40});
         break}
-      case'popup':
+      case'popup':{
         // Task 6.4: `muted` (Fight.resolve, forwarding BUFFS.tutorialGuard's ref.capped) draws grey
         // instead of the pushed col -- see draw() below. Stored alongside col (never overwriting it)
         // so a test can still see what color a hit WOULD have been.
-        this.list.push({kind:'popup',x:ev.x,y:ev.y,text:ev.text,col:ev.col||'#fff',big:!!ev.big,muted:!!ev.muted,life:0,max:40});
-        break;
+        // Task 12.4 ruling: when the push names a `popupKind` (a plain fact the sim already knows --
+        // crit/chip/bleed/heal/normal/punish/backdraft), POPUP_KIND above is the only place col/big
+        // are chosen for it, overriding whatever col/big the push happened to also carry. A push with
+        // no popupKind (every pre-Phase-12 call site that never adds one) falls back to its own
+        // ev.col/ev.big exactly as before this task -- zero behavior change for those.
+        const pk=POPUP_KIND[ev.popupKind];
+        this.list.push({kind:'popup',x:ev.x,y:ev.y,text:ev.text,
+          col:pk?pk.col:(ev.col||'#fff'),big:pk?pk.big:!!ev.big,
+          muted:!!ev.muted,life:0,max:40,popupKind:ev.popupKind});
+        break}
       // Task 6.4: the tutorial dummy's own wind-up tell (Ctrl.tutorialDummy, 30_input.js) -- a brief
       // red glow at the dummy's own position, pushed exactly 30 frames before its scripted medium
       // fires (lesson 3's "release just before the hit lands to PARRY" cue). Never gated by

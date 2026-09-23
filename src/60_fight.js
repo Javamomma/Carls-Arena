@@ -247,6 +247,12 @@ class Fight{
       // generically for both branches, so both honor it identically).
       if(m.applies)for(let i=0;i<m.applies.length;i++){const ap=m.applies[i];
         if(ap.on==='block')Effects.apply(this,ap.target==='self'?att:def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
+      // Task 12.4 ruling (frozen interface, exact ruling 8): a blocked hit previously queued no
+      // damage number at all -- only the dust puff just below. `chip` is a fact this branch already
+      // computed just above; this queues the same 'popup' shape the hit branch uses, tagged
+      // popupKind:'chip' so FX (72_fx.js's POPUP_KIND) draws it in the ruled grey rather than this
+      // file choosing a color itself.
+      this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(chip),popupKind:'chip'});
       this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip,moveName)}
     const m=r.m,last=r.last;
     const cls=CLASS_BEATS[att.def.cls]===def.def.cls?CLASS_BONUS:1;
@@ -446,7 +452,14 @@ class Fight{
     // clamped this hit's dmg -- forwarded onto the popup fx as `muted`, which FX/Render draw grey
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
     // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
-    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
+    // Task 12.4 ruling: reports only the bare fact this hit crit (already known here, just above) as
+    // `popupKind` ('crit'/'normal') -- 72_fx.js's POPUP_KIND table is now the only place a color/size
+    // is chosen for it (white normal, gold crit larger), the same "sim reports facts, FX styles them"
+    // split the per-hit-class shake/punch table and IMPACTS/EFFECT_TINT already keep elsewhere in
+    // this file (see the 'hitfeel'/'impact' fx cases just below). col/big dropped: nothing
+    // else in this file ever reads this descriptor back, and POPUP_KIND's own fallback covers every
+    // OTHER popup push in this file that doesn't name a kind.
+    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),popupKind:crit?'crit':'normal',muted:!!ref.capped});
     // Task 9.1 (frozen interface, controller ruling): r.forcedThroughBlock (set by detect() above) --
     // def was actually holding block when this move's own unblockable flag bypassed the block branch
     // entirely. Presentation-only, queued on top of (never instead of) the plain damage popup just
@@ -483,14 +496,14 @@ class Fight{
     // dashed back out of a chain and then intercepted), the same {who,dir} emitTell shape intercept's
     // own event already uses.
     if(backdraft){
-      this.fx.push({kind:'popup',x:def.x,y:FLOOR-180,text:'BACKDRAFT!',col:'#ff5722',big:true});
+      this.fx.push({kind:'popup',x:def.x,y:FLOOR-180,text:'BACKDRAFT!',popupKind:'backdraft',col:'#ff5722',big:true});
       this.emitTell('backdraft',att,att.face)}
     // Task 12.1 (frozen interface, exact ruling): the punish's own PUNISH! callout and event, same
     // "on top of, never instead of, the plain damage popup" shape intercept's own callout just above
     // uses. emit (not emitTell) here -- val carries the actual (already x1.25'd) damage this punish
     // dealt, the same shape 'hit'/'block' already use, rather than intercept/dexterity's own {who,dir}
     // tell shape, since nothing downstream needs a facing for this one.
-    if(punish)this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'PUNISH!',col:'#ff5a4a',big:true});
+    if(punish)this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'PUNISH!',popupKind:'punish',col:'#ff5a4a',big:true});
     if(punish)this.emit('punish',att,def,dmg);
     this.emit('hit',att,def,dmg,moveName)}
   finish(){this.over=true;const a=this.p1,b=this.p2;

@@ -207,23 +207,64 @@ const Render={ctx:canvas.getContext('2d'),
   barFillRect(x,y,w,h,pct,bevel){
     const fw=w*clamp(pct,0,1);
     return bevel==='left'?{x:x+w-fw,y,w:fw,h}:{x,y,w:fw,h}},
-  hpBar(c,x,y,w,h,pct,col,bevel){
+  // Task 12.4 ruling (frozen interface, exact ruling 8 / gameplay study S4.3 "Health bar ghost
+  // trail"): both hp bars now take an optional `ghostPct` -- when given and it sits ABOVE the real
+  // `pct` (i.e. the bar just took damage and the trail hasn't caught up), a lighter translucent fill
+  // is drawn FIRST at ghostPct's own extent (via barFillRect, same pure geometry the real fill already
+  // uses), then the real, brighter fill is drawn on top at `pct` -- since ghostPct>=pct, the real fill
+  // always fully covers the ghost fill except for the sliver between them, which is exactly "the size
+  // of the hit you just took" reading the study calls for. Omitting ghostPct (every pre-Phase-12 call
+  // site, and every 90_tests.js fixture that calls these directly) draws neither the ghost layer nor
+  // any different pixel for the real fill -- zero behavior change for those.
+  hpBar(c,x,y,w,h,pct,col,bevel,ghostPct){
     this.barPath(c,x,y,w,h,bevel);c.save();c.clip();
     c.fillStyle='#1a1a1a';c.fillRect(x,y,w,h);
+    if(ghostPct!==undefined&&ghostPct>pct){
+      const gr=this.barFillRect(x,y,w,h,ghostPct,bevel);
+      c.fillStyle='rgba(255,255,255,.4)';c.fillRect(gr.x,gr.y,gr.w,gr.h)}
     const fr=this.barFillRect(x,y,w,h,pct,bevel);
     c.fillStyle=col;c.fillRect(fr.x,fr.y,fr.w,fr.h);
     c.restore();
     this.barPath(c,x,y,w,h,bevel);c.strokeStyle='#f4c542';c.lineWidth=1.75;c.stroke()},
   // p2's fill drains from the bar's right edge (matches "right" in the rendition) and is a
   // red(low)->orange(full) gradient across the filled span, not a flat color like p1's green.
-  hpBarGrad(c,x,y,w,h,pct,bevel){
+  hpBarGrad(c,x,y,w,h,pct,bevel,ghostPct){
     this.barPath(c,x,y,w,h,bevel);c.save();c.clip();
     c.fillStyle='#1a1a1a';c.fillRect(x,y,w,h);
+    if(ghostPct!==undefined&&ghostPct>pct){
+      const gr=this.barFillRect(x,y,w,h,ghostPct,bevel);
+      c.fillStyle='rgba(255,255,255,.4)';c.fillRect(gr.x,gr.y,gr.w,gr.h)}
     const fr=this.barFillRect(x,y,w,h,pct,bevel);
     if(fr.w>0){const g=c.createLinearGradient(fr.x,0,fr.x+fr.w,0);g.addColorStop(0,'#c62828');g.addColorStop(1,'#ffa726');
       c.fillStyle=g;c.fillRect(fr.x,fr.y,fr.w,fr.h)}
     c.restore();
     this.barPath(c,x,y,w,h,bevel);c.strokeStyle='#f4c542';c.lineWidth=1.75;c.stroke()},
+  // Task 12.4 ruling: the ghost trail's own lag state, one entry per side ('p1'/'p2'), keyed and
+  // tweened the exact same way comboDisplay's _comboTween just below already is -- state lives on
+  // Render itself (presentation-only), and the ramp is counted in DRAW CALLS (st.step), not sim
+  // frames, for the identical reason comboDisplay's own comment gives: a --sim fast-forward can run
+  // dozens of ticks between two consecutive paints, and a frame-counted ramp would either finish
+  // invisibly or freeze mid-drain the first time a real hud() draw catches up to it. HP_GHOST_FRAMES
+  // is the ruled "12-frame ghost trail".
+  //
+  // On a DROP (pct<st.to -- a fresh hit, possibly landing before the previous drain finished): the
+  // ghost restarts its drain from wherever it's CURRENTLY sitting (st.shown), never from the old
+  // pre-hit value, so two hits landing inside the same 12-frame window still read as one continuous
+  // drain toward the latest true value, not a jump back up. On a RISE (pct>st.to -- healing, or a new
+  // fight/fighter starting fuller than the last thing this side's state remembers) the ghost snaps up
+  // immediately and parks fully caught-up: a heal is never itself "ghost-trailed" backwards, and a
+  // brand-new fight's full health bar never opens with a stale drain animation left over from the
+  // fight that just ended (self-healing, the same reason comboTween is never explicitly reset either).
+  HP_GHOST_FRAMES:12,
+  hpGhost(side,pct){
+    this._hpGhost=this._hpGhost||{};
+    const st=this._hpGhost[side]||(this._hpGhost[side]={shown:pct,from:pct,to:pct,step:this.HP_GHOST_FRAMES});
+    if(pct<st.to){st.from=st.shown;st.to=pct;st.step=0}
+    else if(pct>st.to){st.shown=pct;st.from=pct;st.to=pct;st.step=this.HP_GHOST_FRAMES}
+    if(st.step<this.HP_GHOST_FRAMES){
+      st.step++;const t=st.step/this.HP_GHOST_FRAMES;
+      st.shown=st.from+(st.to-st.from)*t}
+    return st.shown},
   // 1-letter code per buff id, for the small gold badge squares under the enemy hp bar.
   BUFF_CODES:{regen:'R',armorUp:'A',powerGain:'P',unblockableSpecials:'U',degen:'D',thorns:'T'},
   // buffs is an array of resolved BUFFS objects (from G.encounter.buffs — presentation reads the
@@ -409,6 +450,42 @@ const Render={ctx:canvas.getContext('2d'),
   chevrons(c,power){
     const hc=this.hudCache(),filled=Math.min(3,Math.floor(power/100));
     c.drawImage(hc.chevrons[filled],W/2-hc.total/2,H-24)},
+  // Task 12.4 ruling (frozen interface, exact ruling 8 / gameplay study S4.2 "opponent power bar"):
+  // before this task the enemy's own power was invisible, which the study calls out as making baiting
+  // a special structurally impossible ("knowing the AI is about to have a special is what makes
+  // baiting possible"). This is the mirror of the player's own bottom-centre chevrons (Render.chevrons
+  // just above) but drawn under p2's OWN HUD column instead: three thin segments, one filled per 100
+  // power toward POWER_MAX (300), same fill rule chevrons() already uses. Placed at OPP_POWER_Y/H
+  // below (98/5, under p2's badge rows -- see hud()'s own comment on the call site for why there,
+  // not immediately under the bar itself) so no existing pinned layout number (buffBadges/
+  // effectBadges' own y, both still 48+barH(+16)) has to move.
+  //
+  // oppPowerGeom is a pure function of (x,y,w,h,power) -- same "geometry as a testable pure function"
+  // pattern as barFillRect/streakGeom -- returning the 3 segment rects plus whether the 3-bar pulse is
+  // active, so a test can assert the exact segments/pulse state without a canvas.
+  // effectBadges' own p2 row bottoms out at y=98 (barY 82 + internal +4 + size 12) -- OPP_POWER_Y=99
+  // leaves a 1px seam clear of it, and OPP_POWER_H=4 keeps this bar's own bottom (103) under HUD_LINE
+  // (104) with a further 1px to spare.
+  OPP_POWER_Y:99,OPP_POWER_H:4,
+  oppPowerGeom(x,y,w,h,power){
+    const filled=Math.min(3,Math.floor(power/100)),gap=4,segW=(w-gap*2)/3,segs=[];
+    for(let i=0;i<3;i++)segs.push({x:x+i*(segW+gap),y,w:segW,h,filled:i<filled});
+    return{segs,pulse:filled>=3}},
+  // Pure function of `frame` (the live SIM frame, f.frame -- never Math.random/performance.now, so
+  // the pulse is exactly reproducible for a given fight frame, same determinism every other
+  // frame-driven presentation value in this file already holds to): a sine-based glow multiplier in
+  // [.2,1], read by oppPowerBar below to alpha-modulate the gold outline drawn around a full 3-bar
+  // strip -- the ruled "gold 3-bar pulse".
+  oppPowerPulseAlpha(frame){return .6+.4*Math.sin(frame*0.15)},
+  oppPowerBar(c,x,y,w,h,power,frame){
+    const g=this.oppPowerGeom(x,y,w,h,power);
+    g.segs.forEach(s=>{
+      c.fillStyle=s.filled?'#f4c542':'#26262c';c.fillRect(s.x,s.y,s.w,s.h);
+      c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(s.x+.5,s.y+.5,s.w-1,s.h-1)});
+    if(g.pulse){
+      c.save();c.globalAlpha=this.oppPowerPulseAlpha(frame);
+      c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(x-1,y-1,w+2,h+2);
+      c.restore()}},
   hud(c,f){const a=f.p1,b=f.p2;
     // Portraits + numeric hp bars: p1 left (green), p2 right (red->orange, drains from the right).
     const p1x=18,p2x=W-74,barW=300,barH=18,p1barX=84,p2barX=W-74-10-barW;
@@ -432,12 +509,25 @@ const Render={ctx:canvas.getContext('2d'),
       c.fillStyle='#a0f0b0';c.fillText('TRAINING DUMMY — CANNOT BE KO\'D',p2barX+barW,39)}
     else{c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39)}
     if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW,b.def.name);
-    this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22','right');
+    // Task 12.4 ruling: hpGhost() is called exactly once per side per hud() draw (it mutates its own
+    // draw-call-counted tween state -- see its own comment) and fed straight into hpBar/hpBarGrad's
+    // new optional ghostPct param, so the trailing lighter fill and the real fill are always drawn
+    // from the same frame's read of hp/maxHp.
+    this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22','right',this.hpGhost('p1',a.hp/a.maxHp));
     // Task 6.4: the SPAR plate REPLACES p2's whole HP bar area (glyph+'SPAR', sparPlate above) while
     // guardActive -- the real numeric bar/text only return once the shield actually clears (lesson 4's
     // 'SHIELD DOWN'), so a first-time player is never shown a fake/frozen enemy hp reading mid-lesson.
     if(b.guardActive)this.sparPlate(c,p2barX,48,barW,barH);
-    else this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp,'left');
+    else this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp,'left',this.hpGhost('p2',b.hp/b.maxHp));
+    // Task 12.4 ruling (gameplay study S4.2 "opponent power bar"): drawn under p2's whole HUD column
+    // (health bar + its badge rows, OPP_POWER_Y=99) rather than immediately under the bar itself --
+    // the 4px gap between the bar's own bottom (66) and the first badge row (buffBadges, real pixel
+    // y=70) has no room for a segment, and buffBadges/effectBadges' own y values are load-bearing
+    // (pinned by nothing new here, but moving them for this bar would be its own regression risk for
+    // zero benefit) -- so this claims the last sliver of slack between effectBadges' own bottom (98)
+    // and HUD_LINE (104) instead. Skipped while guardActive, matching the real hp bar's own guard
+    // (the tutorial dummy has no real power to show either).
+    if(!b.guardActive)this.oppPowerBar(c,p2barX,this.OPP_POWER_Y,barW,this.OPP_POWER_H,b.power,f.frame);
     if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);
     // Task 7.1: per-fighter timed-effect badges. p1 gets its own row right under its bar (it never had
     // a buffBadges row -- that one's always been p2/encounter-only); p2's row sits one badge-height+gap
@@ -469,6 +559,27 @@ const Render={ctx:canvas.getContext('2d'),
     else this.comboDisplay('p2',0);
     this.chevrons(c,a.power);
     if(f.over){c.textAlign='center';c.fillStyle='#fff';c.font='bold 40px ui-monospace,monospace';c.fillText('K.O.',W/2,H/2)}},
+  // Task 12.4 ruling (frozen interface, exact ruling 8 / gameplay study S4.3 "S3 cinematic"): the S3
+  // sequence's own desaturated-background beat, a pure function of `cinematic` (fight.cinematic, the
+  // sim-owned 72->0 countdown Fight.checkCinematic already arms and G.tick already steps down --
+  // untouched by this task, so the sim stays bit-identical; this reads it, never writes it).
+  //
+  // G.tick() decrements fight.cinematic BEFORE Render ever sees it, so the value this reads has
+  // already taken its first step down from 72 to 71 on the very first cinematic tick -- the 72-tick
+  // sequence is the 72 values 71..0, split 18/48/6 exactly as G.tick's own S3 hit-beat/punchIn-snap
+  // math (80_game.js) splits it: cinematic>=54 (its first 18 values, 71..54) is the ruled "dolly 18 f"
+  // beat, ramping 0->1 and reaching 1 exactly at cinematic===54; cinematic in [6,53] (48 values) is
+  // "hits at 0.5x", held at 1 -- the same window G.tick's own hit-beat synthesis fires in; cinematic
+  // in [0,5] (its last 6 values) is "snap back 6 f", easing 1->0 so the background is back to full
+  // color by the time cinematic hits 0 and gameplay resumes, matching punchIn's own drop-out at
+  // cinematic<6. Deterministic and side-effect-free (no canvas access) so the whole timeline is
+  // directly assertable at any cinematic value without a canvas, same pattern as barFillRect/
+  // streakGeom.
+  s3Desat(cinematic){
+    if(!cinematic||cinematic<=0)return 0;
+    if(cinematic>=54)return Math.min(1,(72-cinematic)/18);
+    if(cinematic>=6)return 1;
+    return cinematic/5},
   frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
     this.hudCache(); // built once, before any HUD draw so it's ready whether or not f/hud runs this call
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
@@ -483,7 +594,10 @@ const Render={ctx:canvas.getContext('2d'),
       c.translate(FX.shake.x/cam.zoom,FX.shake.y/cam.zoom);
     // Task 8.3: floor 2 ("THE SEWERS") gets its own palette; everything else (floor 1's "DOORWAY"
     // and exhibition mode, which has no G.encounter at all) keeps the original dungeon theme.
-    Stage.draw(c,cam,fr,Stage.build(G.encounter&&G.encounter.floor===2?'sewers':'doorway'));
+    // Task 12.4: the S3 sequence's own desaturation (s3Desat above), a pure function of the live
+    // fight's cinematic countdown -- 0 (no-op, an ordinary saturate(100%) Stage.draw's own feature
+    // check skips entirely) whenever no fight is up or no S3 is playing.
+    Stage.draw(c,cam,fr,Stage.build(G.encounter&&G.encounter.floor===2?'sewers':'doorway'),f?this.s3Desat(f.cinematic):0);
     if(f){
       this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
       this.shadow(c,f.p1);this.shadow(c,f.p2);

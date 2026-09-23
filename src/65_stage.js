@@ -191,12 +191,22 @@ const Stage={cache:{},
   // in k, and is only ever used as a BLACK overlay (draw() above) -- there is no code path that
   // paints a positive-brightness color onto the floor from this function.
   falloffAlpha(k){return Math.max(0,(1-clamp(k,0,1))*.35)},
-  draw(c,cam,frame,st){
+  // Task 12.4 ruling (frozen interface, exact ruling 8): `desat` (Render.s3Desat, a pure function of
+  // the live fight's cinematic countdown) is an optional 0..1 amount, applied as a canvas `filter`
+  // saturate() wrapped around every layer this function draws -- the background only, per the ruling
+  // ("desaturated background"); the fighters/reflection/HUD drawn by other Render calls are untouched.
+  // Same `'filter'in c` feature-detection every other filter use in this codebase already gates on
+  // (Render.fighter's own HITSTUN flash); omitted or 0 (every call site before this task, and this
+  // task's own call site whenever no S3 is playing) costs nothing beyond one `if` -- no filter is
+  // ever set, so this is pixel-identical to before for any caller that doesn't pass one.
+  draw(c,cam,frame,st,desat){
     // The column cache is only ever valid for the frame it was built for (torch flicker moves k
     // every frame) -- cleared unconditionally here, once per draw() call, rather than left to
     // accumulate a stale entry per (column,frame) pair across a whole session.
     this._litCol={};
     this._active=st;this._activeFrame=frame;
+    const desaturated=desat>0&&'filter'in c;
+    if(desaturated){c.save();c.filter='saturate('+Math.round((1-desat)*100)+'%)'}
     for(const L of st.layers){const off=(cam.x-STAGE_W/2)*(1-L.parallax);c.drawImage(L.canvas,off,0)}
     // Release pass (art item 4): "one notch warmer" -- every stop pulled toward red/orange and away
     // from the paler yellow-white the fix-wave art pass originally tuned (each channel nudged down,
@@ -220,7 +230,8 @@ const Stage={cache:{},
     c.save();c.beginPath();c.rect(0,st.floorY,STAGE_W,80);c.clip();
     for(let x=-16;x<STAGE_W+16;x+=32){const dark=this.falloffAlpha(this.lightAt(x).k);
       if(dark>0){c.fillStyle=`rgba(0,0,0,${dark})`;c.fillRect(x-16,st.floorY,32,80)}}
-    c.restore()}};
+    c.restore();
+    if(desaturated)c.restore()}};
 const Camera={
   // Anchor moved .62 -> .74 (round 1) -> .90 (fix round 2): at zoom 1.0 a character's SCREEN size
   // is anchor-independent (world px == screen px at zoom 1), so this doesn't cost any of round 1's

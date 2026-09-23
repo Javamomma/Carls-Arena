@@ -4096,6 +4096,12 @@ class Fight{
       // generically for both branches, so both honor it identically).
       if(m.applies)for(let i=0;i<m.applies.length;i++){const ap=m.applies[i];
         if(ap.on==='block')Effects.apply(this,ap.target==='self'?att:def,ap.id,{stacks:ap.stacks,potency:ap.potency,source:att})}
+      // Task 12.4 ruling (frozen interface, exact ruling 8): a blocked hit previously queued no
+      // damage number at all -- only the dust puff just below. `chip` is a fact this branch already
+      // computed just above; this queues the same 'popup' shape the hit branch uses, tagged
+      // popupKind:'chip' so FX (72_fx.js's POPUP_KIND) draws it in the ruled grey rather than this
+      // file choosing a color itself.
+      this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(chip),popupKind:'chip'});
       this.fx.push({kind:'dust',x:def.x,y:FLOOR});return this.emit('block',att,def,chip,moveName)}
     const m=r.m,last=r.last;
     const cls=CLASS_BEATS[att.def.cls]===def.def.cls?CLASS_BONUS:1;
@@ -4295,7 +4301,14 @@ class Fight{
     // clamped this hit's dmg -- forwarded onto the popup fx as `muted`, which FX/Render draw grey
     // instead of the usual gold/red/crit color, per the frozen "capped popups drawn grey" interface.
     // false for every non-tutorial fight (ref.capped is only ever set by that one buff).
-    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),col:crit?'#ff4444':'#ffd86b',big:crit,muted:!!ref.capped});
+    // Task 12.4 ruling: reports only the bare fact this hit crit (already known here, just above) as
+    // `popupKind` ('crit'/'normal') -- 72_fx.js's POPUP_KIND table is now the only place a color/size
+    // is chosen for it (white normal, gold crit larger), the same "sim reports facts, FX styles them"
+    // split the per-hit-class shake/punch table and IMPACTS/EFFECT_TINT already keep elsewhere in
+    // this file (see the 'hitfeel'/'impact' fx cases just below). col/big dropped: nothing
+    // else in this file ever reads this descriptor back, and POPUP_KIND's own fallback covers every
+    // OTHER popup push in this file that doesn't name a kind.
+    this.fx.push({kind:'popup',x:def.x,y:FLOOR-120,text:String(dmg),popupKind:crit?'crit':'normal',muted:!!ref.capped});
     // Task 9.1 (frozen interface, controller ruling): r.forcedThroughBlock (set by detect() above) --
     // def was actually holding block when this move's own unblockable flag bypassed the block branch
     // entirely. Presentation-only, queued on top of (never instead of) the plain damage popup just
@@ -4332,14 +4345,14 @@ class Fight{
     // dashed back out of a chain and then intercepted), the same {who,dir} emitTell shape intercept's
     // own event already uses.
     if(backdraft){
-      this.fx.push({kind:'popup',x:def.x,y:FLOOR-180,text:'BACKDRAFT!',col:'#ff5722',big:true});
+      this.fx.push({kind:'popup',x:def.x,y:FLOOR-180,text:'BACKDRAFT!',popupKind:'backdraft',col:'#ff5722',big:true});
       this.emitTell('backdraft',att,att.face)}
     // Task 12.1 (frozen interface, exact ruling): the punish's own PUNISH! callout and event, same
     // "on top of, never instead of, the plain damage popup" shape intercept's own callout just above
     // uses. emit (not emitTell) here -- val carries the actual (already x1.25'd) damage this punish
     // dealt, the same shape 'hit'/'block' already use, rather than intercept/dexterity's own {who,dir}
     // tell shape, since nothing downstream needs a facing for this one.
-    if(punish)this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'PUNISH!',col:'#ff5a4a',big:true});
+    if(punish)this.fx.push({kind:'popup',x:def.x,y:FLOOR-150,text:'PUNISH!',popupKind:'punish',col:'#ff5a4a',big:true});
     if(punish)this.emit('punish',att,def,dmg);
     this.emit('hit',att,def,dmg,moveName)}
   finish(){this.over=true;const a=this.p1,b=this.p2;
@@ -4582,12 +4595,22 @@ const Stage={cache:{},
   // in k, and is only ever used as a BLACK overlay (draw() above) -- there is no code path that
   // paints a positive-brightness color onto the floor from this function.
   falloffAlpha(k){return Math.max(0,(1-clamp(k,0,1))*.35)},
-  draw(c,cam,frame,st){
+  // Task 12.4 ruling (frozen interface, exact ruling 8): `desat` (Render.s3Desat, a pure function of
+  // the live fight's cinematic countdown) is an optional 0..1 amount, applied as a canvas `filter`
+  // saturate() wrapped around every layer this function draws -- the background only, per the ruling
+  // ("desaturated background"); the fighters/reflection/HUD drawn by other Render calls are untouched.
+  // Same `'filter'in c` feature-detection every other filter use in this codebase already gates on
+  // (Render.fighter's own HITSTUN flash); omitted or 0 (every call site before this task, and this
+  // task's own call site whenever no S3 is playing) costs nothing beyond one `if` -- no filter is
+  // ever set, so this is pixel-identical to before for any caller that doesn't pass one.
+  draw(c,cam,frame,st,desat){
     // The column cache is only ever valid for the frame it was built for (torch flicker moves k
     // every frame) -- cleared unconditionally here, once per draw() call, rather than left to
     // accumulate a stale entry per (column,frame) pair across a whole session.
     this._litCol={};
     this._active=st;this._activeFrame=frame;
+    const desaturated=desat>0&&'filter'in c;
+    if(desaturated){c.save();c.filter='saturate('+Math.round((1-desat)*100)+'%)'}
     for(const L of st.layers){const off=(cam.x-STAGE_W/2)*(1-L.parallax);c.drawImage(L.canvas,off,0)}
     // Release pass (art item 4): "one notch warmer" -- every stop pulled toward red/orange and away
     // from the paler yellow-white the fix-wave art pass originally tuned (each channel nudged down,
@@ -4611,7 +4634,8 @@ const Stage={cache:{},
     c.save();c.beginPath();c.rect(0,st.floorY,STAGE_W,80);c.clip();
     for(let x=-16;x<STAGE_W+16;x+=32){const dark=this.falloffAlpha(this.lightAt(x).k);
       if(dark>0){c.fillStyle=`rgba(0,0,0,${dark})`;c.fillRect(x-16,st.floorY,32,80)}}
-    c.restore()}};
+    c.restore();
+    if(desaturated)c.restore()}};
 const Camera={
   // Anchor moved .62 -> .74 (round 1) -> .90 (fix round 2): at zoom 1.0 a character's SCREEN size
   // is anchor-independent (world px == screen px at zoom 1), so this doesn't cost any of round 1's
@@ -8261,23 +8285,64 @@ const Render={ctx:canvas.getContext('2d'),
   barFillRect(x,y,w,h,pct,bevel){
     const fw=w*clamp(pct,0,1);
     return bevel==='left'?{x:x+w-fw,y,w:fw,h}:{x,y,w:fw,h}},
-  hpBar(c,x,y,w,h,pct,col,bevel){
+  // Task 12.4 ruling (frozen interface, exact ruling 8 / gameplay study S4.3 "Health bar ghost
+  // trail"): both hp bars now take an optional `ghostPct` -- when given and it sits ABOVE the real
+  // `pct` (i.e. the bar just took damage and the trail hasn't caught up), a lighter translucent fill
+  // is drawn FIRST at ghostPct's own extent (via barFillRect, same pure geometry the real fill already
+  // uses), then the real, brighter fill is drawn on top at `pct` -- since ghostPct>=pct, the real fill
+  // always fully covers the ghost fill except for the sliver between them, which is exactly "the size
+  // of the hit you just took" reading the study calls for. Omitting ghostPct (every pre-Phase-12 call
+  // site, and every 90_tests.js fixture that calls these directly) draws neither the ghost layer nor
+  // any different pixel for the real fill -- zero behavior change for those.
+  hpBar(c,x,y,w,h,pct,col,bevel,ghostPct){
     this.barPath(c,x,y,w,h,bevel);c.save();c.clip();
     c.fillStyle='#1a1a1a';c.fillRect(x,y,w,h);
+    if(ghostPct!==undefined&&ghostPct>pct){
+      const gr=this.barFillRect(x,y,w,h,ghostPct,bevel);
+      c.fillStyle='rgba(255,255,255,.4)';c.fillRect(gr.x,gr.y,gr.w,gr.h)}
     const fr=this.barFillRect(x,y,w,h,pct,bevel);
     c.fillStyle=col;c.fillRect(fr.x,fr.y,fr.w,fr.h);
     c.restore();
     this.barPath(c,x,y,w,h,bevel);c.strokeStyle='#f4c542';c.lineWidth=1.75;c.stroke()},
   // p2's fill drains from the bar's right edge (matches "right" in the rendition) and is a
   // red(low)->orange(full) gradient across the filled span, not a flat color like p1's green.
-  hpBarGrad(c,x,y,w,h,pct,bevel){
+  hpBarGrad(c,x,y,w,h,pct,bevel,ghostPct){
     this.barPath(c,x,y,w,h,bevel);c.save();c.clip();
     c.fillStyle='#1a1a1a';c.fillRect(x,y,w,h);
+    if(ghostPct!==undefined&&ghostPct>pct){
+      const gr=this.barFillRect(x,y,w,h,ghostPct,bevel);
+      c.fillStyle='rgba(255,255,255,.4)';c.fillRect(gr.x,gr.y,gr.w,gr.h)}
     const fr=this.barFillRect(x,y,w,h,pct,bevel);
     if(fr.w>0){const g=c.createLinearGradient(fr.x,0,fr.x+fr.w,0);g.addColorStop(0,'#c62828');g.addColorStop(1,'#ffa726');
       c.fillStyle=g;c.fillRect(fr.x,fr.y,fr.w,fr.h)}
     c.restore();
     this.barPath(c,x,y,w,h,bevel);c.strokeStyle='#f4c542';c.lineWidth=1.75;c.stroke()},
+  // Task 12.4 ruling: the ghost trail's own lag state, one entry per side ('p1'/'p2'), keyed and
+  // tweened the exact same way comboDisplay's _comboTween just below already is -- state lives on
+  // Render itself (presentation-only), and the ramp is counted in DRAW CALLS (st.step), not sim
+  // frames, for the identical reason comboDisplay's own comment gives: a --sim fast-forward can run
+  // dozens of ticks between two consecutive paints, and a frame-counted ramp would either finish
+  // invisibly or freeze mid-drain the first time a real hud() draw catches up to it. HP_GHOST_FRAMES
+  // is the ruled "12-frame ghost trail".
+  //
+  // On a DROP (pct<st.to -- a fresh hit, possibly landing before the previous drain finished): the
+  // ghost restarts its drain from wherever it's CURRENTLY sitting (st.shown), never from the old
+  // pre-hit value, so two hits landing inside the same 12-frame window still read as one continuous
+  // drain toward the latest true value, not a jump back up. On a RISE (pct>st.to -- healing, or a new
+  // fight/fighter starting fuller than the last thing this side's state remembers) the ghost snaps up
+  // immediately and parks fully caught-up: a heal is never itself "ghost-trailed" backwards, and a
+  // brand-new fight's full health bar never opens with a stale drain animation left over from the
+  // fight that just ended (self-healing, the same reason comboTween is never explicitly reset either).
+  HP_GHOST_FRAMES:12,
+  hpGhost(side,pct){
+    this._hpGhost=this._hpGhost||{};
+    const st=this._hpGhost[side]||(this._hpGhost[side]={shown:pct,from:pct,to:pct,step:this.HP_GHOST_FRAMES});
+    if(pct<st.to){st.from=st.shown;st.to=pct;st.step=0}
+    else if(pct>st.to){st.shown=pct;st.from=pct;st.to=pct;st.step=this.HP_GHOST_FRAMES}
+    if(st.step<this.HP_GHOST_FRAMES){
+      st.step++;const t=st.step/this.HP_GHOST_FRAMES;
+      st.shown=st.from+(st.to-st.from)*t}
+    return st.shown},
   // 1-letter code per buff id, for the small gold badge squares under the enemy hp bar.
   BUFF_CODES:{regen:'R',armorUp:'A',powerGain:'P',unblockableSpecials:'U',degen:'D',thorns:'T'},
   // buffs is an array of resolved BUFFS objects (from G.encounter.buffs — presentation reads the
@@ -8463,6 +8528,42 @@ const Render={ctx:canvas.getContext('2d'),
   chevrons(c,power){
     const hc=this.hudCache(),filled=Math.min(3,Math.floor(power/100));
     c.drawImage(hc.chevrons[filled],W/2-hc.total/2,H-24)},
+  // Task 12.4 ruling (frozen interface, exact ruling 8 / gameplay study S4.2 "opponent power bar"):
+  // before this task the enemy's own power was invisible, which the study calls out as making baiting
+  // a special structurally impossible ("knowing the AI is about to have a special is what makes
+  // baiting possible"). This is the mirror of the player's own bottom-centre chevrons (Render.chevrons
+  // just above) but drawn under p2's OWN HUD column instead: three thin segments, one filled per 100
+  // power toward POWER_MAX (300), same fill rule chevrons() already uses. Placed at OPP_POWER_Y/H
+  // below (98/5, under p2's badge rows -- see hud()'s own comment on the call site for why there,
+  // not immediately under the bar itself) so no existing pinned layout number (buffBadges/
+  // effectBadges' own y, both still 48+barH(+16)) has to move.
+  //
+  // oppPowerGeom is a pure function of (x,y,w,h,power) -- same "geometry as a testable pure function"
+  // pattern as barFillRect/streakGeom -- returning the 3 segment rects plus whether the 3-bar pulse is
+  // active, so a test can assert the exact segments/pulse state without a canvas.
+  // effectBadges' own p2 row bottoms out at y=98 (barY 82 + internal +4 + size 12) -- OPP_POWER_Y=99
+  // leaves a 1px seam clear of it, and OPP_POWER_H=4 keeps this bar's own bottom (103) under HUD_LINE
+  // (104) with a further 1px to spare.
+  OPP_POWER_Y:99,OPP_POWER_H:4,
+  oppPowerGeom(x,y,w,h,power){
+    const filled=Math.min(3,Math.floor(power/100)),gap=4,segW=(w-gap*2)/3,segs=[];
+    for(let i=0;i<3;i++)segs.push({x:x+i*(segW+gap),y,w:segW,h,filled:i<filled});
+    return{segs,pulse:filled>=3}},
+  // Pure function of `frame` (the live SIM frame, f.frame -- never Math.random/performance.now, so
+  // the pulse is exactly reproducible for a given fight frame, same determinism every other
+  // frame-driven presentation value in this file already holds to): a sine-based glow multiplier in
+  // [.2,1], read by oppPowerBar below to alpha-modulate the gold outline drawn around a full 3-bar
+  // strip -- the ruled "gold 3-bar pulse".
+  oppPowerPulseAlpha(frame){return .6+.4*Math.sin(frame*0.15)},
+  oppPowerBar(c,x,y,w,h,power,frame){
+    const g=this.oppPowerGeom(x,y,w,h,power);
+    g.segs.forEach(s=>{
+      c.fillStyle=s.filled?'#f4c542':'#26262c';c.fillRect(s.x,s.y,s.w,s.h);
+      c.strokeStyle='#000';c.lineWidth=1;c.strokeRect(s.x+.5,s.y+.5,s.w-1,s.h-1)});
+    if(g.pulse){
+      c.save();c.globalAlpha=this.oppPowerPulseAlpha(frame);
+      c.strokeStyle='#f4c542';c.lineWidth=2;c.strokeRect(x-1,y-1,w+2,h+2);
+      c.restore()}},
   hud(c,f){const a=f.p1,b=f.p2;
     // Portraits + numeric hp bars: p1 left (green), p2 right (red->orange, drains from the right).
     const p1x=18,p2x=W-74,barW=300,barH=18,p1barX=84,p2barX=W-74-10-barW;
@@ -8486,12 +8587,25 @@ const Render={ctx:canvas.getContext('2d'),
       c.fillStyle='#a0f0b0';c.fillText('TRAINING DUMMY — CANNOT BE KO\'D',p2barX+barW,39)}
     else{c.font='10px ui-monospace,monospace';c.fillStyle='#bbb';c.fillText('LVL 1',p2barX+barW,39)}
     if(G.encounter&&G.encounter.boss)this.bossPlate(c,p2x,p2barX,barW,b.def.name);
-    this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22','right');
+    // Task 12.4 ruling: hpGhost() is called exactly once per side per hud() draw (it mutates its own
+    // draw-call-counted tween state -- see its own comment) and fed straight into hpBar/hpBarGrad's
+    // new optional ghostPct param, so the trailing lighter fill and the real fill are always drawn
+    // from the same frame's read of hp/maxHp.
+    this.hpBar(c,p1barX,48,barW,barH,a.hp/a.maxHp,'#4caf22','right',this.hpGhost('p1',a.hp/a.maxHp));
     // Task 6.4: the SPAR plate REPLACES p2's whole HP bar area (glyph+'SPAR', sparPlate above) while
     // guardActive -- the real numeric bar/text only return once the shield actually clears (lesson 4's
     // 'SHIELD DOWN'), so a first-time player is never shown a fake/frozen enemy hp reading mid-lesson.
     if(b.guardActive)this.sparPlate(c,p2barX,48,barW,barH);
-    else this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp,'left');
+    else this.hpBarGrad(c,p2barX,48,barW,barH,b.hp/b.maxHp,'left',this.hpGhost('p2',b.hp/b.maxHp));
+    // Task 12.4 ruling (gameplay study S4.2 "opponent power bar"): drawn under p2's whole HUD column
+    // (health bar + its badge rows, OPP_POWER_Y=99) rather than immediately under the bar itself --
+    // the 4px gap between the bar's own bottom (66) and the first badge row (buffBadges, real pixel
+    // y=70) has no room for a segment, and buffBadges/effectBadges' own y values are load-bearing
+    // (pinned by nothing new here, but moving them for this bar would be its own regression risk for
+    // zero benefit) -- so this claims the last sliver of slack between effectBadges' own bottom (98)
+    // and HUD_LINE (104) instead. Skipped while guardActive, matching the real hp bar's own guard
+    // (the tutorial dummy has no real power to show either).
+    if(!b.guardActive)this.oppPowerBar(c,p2barX,this.OPP_POWER_Y,barW,this.OPP_POWER_H,b.power,f.frame);
     if(G.encounter&&G.encounter.buffs&&G.encounter.buffs.length)this.buffBadges(c,p2barX,48+barH,barW,G.encounter.buffs);
     // Task 7.1: per-fighter timed-effect badges. p1 gets its own row right under its bar (it never had
     // a buffBadges row -- that one's always been p2/encounter-only); p2's row sits one badge-height+gap
@@ -8523,6 +8637,27 @@ const Render={ctx:canvas.getContext('2d'),
     else this.comboDisplay('p2',0);
     this.chevrons(c,a.power);
     if(f.over){c.textAlign='center';c.fillStyle='#fff';c.font='bold 40px ui-monospace,monospace';c.fillText('K.O.',W/2,H/2)}},
+  // Task 12.4 ruling (frozen interface, exact ruling 8 / gameplay study S4.3 "S3 cinematic"): the S3
+  // sequence's own desaturated-background beat, a pure function of `cinematic` (fight.cinematic, the
+  // sim-owned 72->0 countdown Fight.checkCinematic already arms and G.tick already steps down --
+  // untouched by this task, so the sim stays bit-identical; this reads it, never writes it).
+  //
+  // G.tick() decrements fight.cinematic BEFORE Render ever sees it, so the value this reads has
+  // already taken its first step down from 72 to 71 on the very first cinematic tick -- the 72-tick
+  // sequence is the 72 values 71..0, split 18/48/6 exactly as G.tick's own S3 hit-beat/punchIn-snap
+  // math (80_game.js) splits it: cinematic>=54 (its first 18 values, 71..54) is the ruled "dolly 18 f"
+  // beat, ramping 0->1 and reaching 1 exactly at cinematic===54; cinematic in [6,53] (48 values) is
+  // "hits at 0.5x", held at 1 -- the same window G.tick's own hit-beat synthesis fires in; cinematic
+  // in [0,5] (its last 6 values) is "snap back 6 f", easing 1->0 so the background is back to full
+  // color by the time cinematic hits 0 and gameplay resumes, matching punchIn's own drop-out at
+  // cinematic<6. Deterministic and side-effect-free (no canvas access) so the whole timeline is
+  // directly assertable at any cinematic value without a canvas, same pattern as barFillRect/
+  // streakGeom.
+  s3Desat(cinematic){
+    if(!cinematic||cinematic<=0)return 0;
+    if(cinematic>=54)return Math.min(1,(72-cinematic)/18);
+    if(cinematic>=6)return 1;
+    return cinematic/5},
   frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
     this.hudCache(); // built once, before any HUD draw so it's ready whether or not f/hud runs this call
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
@@ -8537,7 +8672,10 @@ const Render={ctx:canvas.getContext('2d'),
       c.translate(FX.shake.x/cam.zoom,FX.shake.y/cam.zoom);
     // Task 8.3: floor 2 ("THE SEWERS") gets its own palette; everything else (floor 1's "DOORWAY"
     // and exhibition mode, which has no G.encounter at all) keeps the original dungeon theme.
-    Stage.draw(c,cam,fr,Stage.build(G.encounter&&G.encounter.floor===2?'sewers':'doorway'));
+    // Task 12.4: the S3 sequence's own desaturation (s3Desat above), a pure function of the live
+    // fight's cinematic countdown -- 0 (no-op, an ordinary saturate(100%) Stage.draw's own feature
+    // check skips entirely) whenever no fight is up or no S3 is playing.
+    Stage.draw(c,cam,fr,Stage.build(G.encounter&&G.encounter.floor===2?'sewers':'doorway'),f?this.s3Desat(f.cinematic):0);
     if(f){
       this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
       this.shadow(c,f.p1);this.shadow(c,f.p2);
@@ -8609,6 +8747,26 @@ const EFFECT_TINT={bleed:'#c62828',poison:'#4caf50',weakness:'#7e57c2'};
 // impact, not a blend) -- this comment exists only so a reader doesn't have to trace `appliedIds`
 // back to Fight.resolve to find out the ordering isn't arbitrary.
 function tintFor(ev){return(ev.tags&&ev.tags.map(t=>EFFECT_TINT[t]).find(Boolean))||null}
+// Task 12.4 ruling (frozen interface, exact ruling 8 / gameplay study S4.3 "Damage numbers"): one
+// style table for every FX.popup 'kind' -- white normal, gold crit (larger), grey chip, red bleed,
+// green heal, plus the punish/backdraft callouts' own already-shipped colors, all now driven from
+// here instead of a bespoke col/big literal at each push() call site. bleed reuses EFFECT_TINT.bleed
+// just above (the "one color table to extend, not duplicate" instruction) rather than a second red
+// literal; chip reuses the same grey EFFECT_STYLE.armorBreak already uses for its own effect badge,
+// for the same reason. heal is kept as its own literal (matching EFFECT_STYLE.regen's own col below)
+// rather than a forward reference, since this is a plain top-level const evaluated before the FX
+// object literal below it finishes building EFFECT_STYLE. Read only by push()'s 'popup' case below:
+// any push that omits `popupKind` (a raw FX.push({kind:'popup',...}) call -- every existing
+// 90_tests.js fixture, and thorns' own red popup in 47_buffs.js) keeps choosing its own col/big
+// exactly as before, unaffected.
+const POPUP_KIND={
+  normal:{col:'#fff',big:false},
+  crit:{col:'#f4c542',big:true},
+  chip:{col:'#9a9a9a',big:false},
+  bleed:{col:EFFECT_TINT.bleed,big:false},
+  heal:{col:'#4caf50',big:false},
+  punish:{col:'#ff5a4a',big:true},
+  backdraft:{col:'#ff5722',big:true}};
 const IMPACTS={
   blunt:{
     spawn(ev){return{kind:'impact',id:'blunt',x:ev.x,y:ev.y,face:ev.face||1,life:0,max:16,tint:tintFor(ev)}},
@@ -8741,12 +8899,20 @@ const FX={list:[],
         const col=CLS_GEM[ev.cls]||CLS_GEM.default;
         this.list.push({kind:'passiveBanner',x:ev.x,y:ev.y,text:st.text,col,life:0,max:40});
         break}
-      case'popup':
+      case'popup':{
         // Task 6.4: `muted` (Fight.resolve, forwarding BUFFS.tutorialGuard's ref.capped) draws grey
         // instead of the pushed col -- see draw() below. Stored alongside col (never overwriting it)
         // so a test can still see what color a hit WOULD have been.
-        this.list.push({kind:'popup',x:ev.x,y:ev.y,text:ev.text,col:ev.col||'#fff',big:!!ev.big,muted:!!ev.muted,life:0,max:40});
-        break;
+        // Task 12.4 ruling: when the push names a `popupKind` (a plain fact the sim already knows --
+        // crit/chip/bleed/heal/normal/punish/backdraft), POPUP_KIND above is the only place col/big
+        // are chosen for it, overriding whatever col/big the push happened to also carry. A push with
+        // no popupKind (every pre-Phase-12 call site that never adds one) falls back to its own
+        // ev.col/ev.big exactly as before this task -- zero behavior change for those.
+        const pk=POPUP_KIND[ev.popupKind];
+        this.list.push({kind:'popup',x:ev.x,y:ev.y,text:ev.text,
+          col:pk?pk.col:(ev.col||'#fff'),big:pk?pk.big:!!ev.big,
+          muted:!!ev.muted,life:0,max:40,popupKind:ev.popupKind});
+        break}
       // Task 6.4: the tutorial dummy's own wind-up tell (Ctrl.tutorialDummy, 30_input.js) -- a brief
       // red glow at the dummy's own position, pushed exactly 30 frames before its scripted medium
       // fires (lesson 3's "release just before the hit lands to PARRY" cue). Never gated by
@@ -9089,6 +9255,17 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // to 6 by G.onEvent's own 'intercept' branch below, and only ever armed while !this.sim (frozen
   // ruling: a no-op under --sim/headless/batch, see that branch's own comment).
   dilate:0,_dilateN:0,
+  // Task 12.4 ruling (frozen interface, exact ruling 8 / "20 f at 0.4x"): koSlowmo is a PRESENTATION-
+  // only counter, entirely separate from fight.slowmo (the pre-existing sim-owned post-KO grace-period
+  // counter, Fight.finish()'s own `this.slowmo=90`, still armed and decremented exactly as it always
+  // was -- Fight.step() is already an unconditional no-op once fight.over (its own `if(this.over)
+  // return` guard, 60_fight.js, untouched by this task), so nothing sim-side reads or is affected by
+  // koSlowmo at all). Armed to 20 by onEvent's own 'ko' branch below, only ever while !this.sim --
+  // same never-under-headless/batch/--sim gate G.dilate already uses (Task 7.4), so a batch/matrix
+  // replay's own win-rate table is untouched regardless of how many KOs land. _koAcc is the same
+  // fractional-rate accumulator KO_SLOWMO_RATE (0.4, i.e. the sim's presentation clock advances 0.4
+  // ticks per real G.tick() call while armed) is spent against -- see tick()'s own koSlowmo branch.
+  koSlowmo:0,_koAcc:0,KO_SLOWMO_RATE:.4,
   // Fix-wave item 5 (final review, Minor): the page's own ?atlas=1 URL override, computed once here
   // (location.search doesn't change without a navigation) -- the exact same regex Atlas.load's own
   // `enabled` check already uses (68_rig.js) to decide whether to fetch at all. Rig.draw's atlas
@@ -9400,6 +9577,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // with an intercept still in its own dilation window left the NEXT fight starting at half speed
     // for up to 12 real ticks, non-deterministically (_dilateN's own parity carried over too).
     this.dilate=0;this._dilateN=0;
+    // Task 12.4: koSlowmo/_koAcc reset for the exact same reason dilate/_dilateN just above are --
+    // a fight that ended KO'd while its own slow-mo beat was still playing must not bleed into the
+    // next fight's opening frames.
+    this.koSlowmo=0;this._koAcc=0;
     // Fix-wave item 5 (final review M5): a thumb still down across a fight boundary could otherwise
     // resolve a stale gesture (P.pendingEnder/dashDir/heavyOn) into the new fight -- releasing pushes
     // a medium, or reaching a node-4 recovery in the new fight while that old pointer is still down
@@ -9561,7 +9742,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     else if(t==='block')this.playRecipe(Audio.recipes.block);
     else if(t==='parry'){this.playRecipe(Audio.recipes.parry);Audio.announce('parry',this.fight.presRng)}
     else if(t==='miss'){if(b&&b.state==='DASH')this.playRecipe(Audio.recipes.dash)}
-    else if(t==='ko'){this.playRecipe(Audio.recipes.ko);Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}
+    else if(t==='ko'){this.playRecipe(Audio.recipes.ko);Audio.announce(a.side===1?'win':'loss',this.fight.presRng);
+      // Task 12.4 ruling: arm the KO's own 20-tick/0.4x presentation slow-mo the instant the event
+      // fires -- never under G.sim, the same guard G.dilate's own 'intercept' branch just below uses,
+      // so a batch/matrix replay's own win-rate table is unaffected by how many KOs land.
+      if(!this.sim){this.koSlowmo=20;this._koAcc=0}}
     // Task 7.4 (frozen ruling): arm 6 sim ticks of time dilation the instant the intercept lands --
     // see G.tick's own dilate branch (above tick()) for how those 6 ticks actually get stretched
     // over double the real ticks. Never armed under G.sim (headless/batch/screenshot mode): a batch
@@ -9870,6 +10055,27 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // frames down, one per tick, so FX/Render keep animating around a frozen sim. Input is
       // drained and discarded so nothing queued during the card fires the instant it clears.
       f.cinematic--;this.frameNow=f.frame;Input.drain();
+      // Task 12.4 ruling (frozen interface, exact ruling 8 / gameplay study S4.3 "S3 cinematic"): the
+      // sequence's own "hits at 0.5x" beat, synthesized entirely in presentation -- the sim genuinely
+      // cannot advance while frozen (Fight.step's own `if(this.cinematic>0)return` guard, 60_fight.js,
+      // untouched by this task), so this reads the attacker's own already-resolved move data
+      // (cinemFocus.move, set the instant the special started -- a plain data read, not a sim
+      // behavior change) to space that many visual impact beats evenly across the 48-tick "hits"
+      // window (post-decrement cinematic 53..6, the middle third of the ruled "72 f = dolly 18 f ->
+      // hits at 0.5x -> snap back 6 f") at HALF the move's own native sub-hit cadence, and pushes the
+      // exact same spark+impact fx kinds a real landed hit already uses (72_fx.js's own IMPACTS[])
+      // at the DEFENDER's position, purely to sell "the hits are landing" during a beat the sim
+      // itself is holding frozen. No RNG at all (no Math.random, no fight.rng/presRng draw) --
+      // entirely a function of cinematic and the move's own static hit count/impact id, so the whole
+      // sequence replays identically for a given seed/frame count, same determinism every other
+      // frame-driven presentation value in this codebase already holds to.
+      if(this.cinemFocus&&f.cinematic>=6&&f.cinematic<=53){
+        const att=this.cinemFocus,def=att===f.p1?f.p2:f.p1;
+        const hitCount=Math.max(1,(att.move&&att.move.hits)||1),gap=Math.max(1,Math.floor(48/hitCount));
+        const beatT=53-f.cinematic;
+        if(beatT%gap===0&&beatT/gap<hitCount){
+          FX.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:'#ff5a4a'});
+          FX.push({kind:'impact',id:att.def.impact,x:def.x,y:FLOOR-80,face:att.face})}}
       if(f.cinematic===0){this.cinemFocus=null;this.showToast()}
     }else{
       const pm1=f.p1.moveName,pm2=f.p2.moveName;
@@ -9907,7 +10113,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // per-sim-frame cadence Broadcast.tick/Tutorial.tick above already run at.
       if(this.mode==='tutorial')this.syncTutorialPrompt()}
     FX.pushAll(f.fx);f.fx.length=0;
-    const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.28}:null; // fix round 2: 1.6->1.28
+    // Task 12.4 ruling: the ruled "6 f snap back on the last hit" -- punchIn (and with it, the
+    // punched-in 1.28 camera target Camera.update eases toward every tick at its own normal .12 lerp
+    // rate, unchanged) now drops out 6 ticks BEFORE cinematic hits 0 (cinematic<6, its last 6 values
+    // 5..0) instead of holding all the way to the last frame, so the camera has already started
+    // easing back toward the normal gameplay framing by the time cinematic reaches 0 and gameplay
+    // resumes -- reading as a "snap back" beat rather than an instant cut. Was `f.cinematic>0`.
+    const punchIn=f.cinematic>=6&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.28}:null; // fix round 2: 1.6->1.28
     // Fix-wave item 4: per-frame zoom cap sized off the pose(s) actually on screen this tick
     // (Rig.topAt), not the whole fight's worst case (this.zoomCap/this.cineZoomCap, kept above as
     // upper bounds a per-frame value can never exceed — the current pose's top is always <= the
@@ -9928,7 +10140,24 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       ?Math.min(1.28,(Camera.anchorY-HUD_LINE)/this.topNow(this.cinemFocus))
       :Math.min(gameplayCeil,(Camera.anchorY-HUD_LINE)/Math.max(this.topNow(f.p1),this.topNow(f.p2)));
     Camera.update(this.cam,f,punchIn,capNow);
-    FX.update();
+    // Task 12.4 ruling (frozen interface, exact ruling 8 / "20 f at 0.4x", "a no-op in headless/--sim
+    // like the dilation"): koSlowmo (armed by onEvent's own 'ko' branch, never under G.sim) throttles
+    // ONLY FX.update() -- the killing blow's own flash/spark particles (Fight.finish's existing
+    // fx.push({kind:'flash',...}), untouched) simply take longer real-world time to read out, purely
+    // a presentation pacing effect: nothing sim-side is touched (Fight.step() is already a permanent
+    // no-op once f.over, so fight.slowmo's own pre-existing 90-frame/4-tick throttle just below keeps
+    // gating the RESULT transition exactly as it always has -- entirely unrelated to and unaffected by
+    // this). _koAcc is a fractional accumulator (KO_SLOWMO_RATE=.4, so the presentation clock advances
+    // 0.4 "ticks" per real G.tick() call while armed, i.e. FX.update() actually fires on ~2 of every 5
+    // calls) rather than a fixed modulo, since 0.4 has no exact 1-in-N expression the way dilate's 0.5
+    // (every-other-tick) or the old slowmo's 0.25 (every-4th-tick) do. Once the 20-tick budget is
+    // spent, koSlowmo reaches 0 and this reverts to the plain unconditional `else FX.update()` below --
+    // identical to every tick before this task. Never armed under G.sim, so a batch/matrix replay
+    // always takes the `else` branch here, unaffected by how many KOs land.
+    if(this.koSlowmo>0){
+      this._koAcc+=this.KO_SLOWMO_RATE;
+      if(this._koAcc>=1){this._koAcc-=1;FX.update();this.koSlowmo--}
+    }else FX.update();
     // f.over flips true inside f.step() the instant a KO/timeout resolves, well before slow-mo has
     // played; f.slowmo (armed to 90 by Fight.finish) is what keeps this branch re-entering FIGHT and
     // counting down every 4th tick above (f.step() itself is a no-op once over, per Fight.step's own
@@ -12527,6 +12756,124 @@ Test.add('block chip scales by the attacker\'s own Effects.mods.atkMul (a fury s
   eq(chip,expect,'blocked chip must scale by the attacker\'s own atkMul, via the exact Fight.resolve chip formula')});
 Test.add('S3 freezes the sim for the cinematic then lands all hits',()=>{const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;run(f,21);ok(f.cinematic>0,'cinematic armed');const hpBefore=f.p2.hp;run(f,30);eq(f.p2.hp,hpBefore,'frozen');f.cinematic=0;run(f,120);eq(f.log.filter(e=>e.type==='hit').length,4)});
 Test.add('G.tick decrements cinematic without stepping the sim',()=>{const f=mkFight();f.cinematic=5;const fr=f.frame;G.fight=f;G.state='FIGHT';G.tick();eq(f.cinematic,4);eq(f.frame,fr);G.fight=null;G.state='TITLE'});
+// ---- Task 12.4: fight HUD and feedback (opponent power, ghost health, damage-number kinds, KO
+// slow-mo, S3 camera sequence) --------------------------------------------------------------------
+Test.add('Render.s3Desat: pure, deterministic timeline off fight.cinematic -- 0 when idle, ramps 0->1 across the dolly (cinematic 71..54), holds 1 across the hits window (53..6), eases 1->0 across the snap-back (5..0)',()=>{
+  eq(Render.s3Desat(0),0);eq(Render.s3Desat(undefined),0);eq(Render.s3Desat(null),0);
+  eq(Render.s3Desat(72),0,'the value the very first cinematic tick reads (post its own first decrement, 71) is what actually matters, but 72 itself must never explode');
+  ok(Render.s3Desat(71)>0&&Render.s3Desat(71)<1,'first dolly tick must be partway ramped, not 0 or already 1');
+  eq(Render.s3Desat(54),1,'dolly must finish exactly at its own last tick');
+  eq(Render.s3Desat(30),1,'the hits window must hold fully desaturated');
+  eq(Render.s3Desat(6),1,'the hits window\'s own last tick must still be fully desaturated');
+  eq(Render.s3Desat(5),1,'the snap-back\'s own first tick must still read fully desaturated (it only starts easing back from here)');
+  ok(Render.s3Desat(3)>0&&Render.s3Desat(3)<1,'mid snap-back must be partway eased');
+  eq(Render.s3Desat(0),0,'gameplay resumes at full color the instant cinematic hits 0')});
+Test.add('Stage.draw applies a saturate() filter scaled off desat, and always restores it (no bleed into the next draw)',()=>{
+  const cnv=document.createElement('canvas');cnv.width=STAGE_W;cnv.height=480;const c=cnv.getContext('2d');
+  const st=Stage.build('doorway');
+  Stage.draw(c,{x:STAGE_W/2,zoom:1},0,st,1); // fully desaturated
+  eq(c.filter,'none','the filter must be restored to none once draw() returns, not left applied');
+  // A mid-draw canvas can't be inspected without a second context spying on the calls Stage.draw
+  // makes -- covered instead by the pure s3Desat test above (the actual saturate% math) plus this
+  // one asserting the filter never leaks out of the function. desat:0 (the common case, every frame
+  // with no S3 playing) must cost nothing -- no filter set at all.
+  Stage.draw(c,{x:STAGE_W/2,zoom:1},0,st,0);
+  eq(c.filter,'none','desat:0 must never touch c.filter at all')});
+Test.add('S3 sequence hit-beat synthesis: exactly hitCount spark+impact beats fire during the 48-tick "hits" window (cinematic 53..6), none during dolly/snap',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;
+  G.fight=f;G.state='FIGHT';G.sim=false;G.cinemFocus=null;G.koSlowmo=0;G._koAcc=0;
+  for(let i=0;i<21;i++)G.tick();
+  ok(f.cinematic>0&&G.cinemFocus,'sanity: cinematic must be armed with a focus set by now');
+  const hitCount=G.cinemFocus.move.hits;
+  eq(hitCount,4,'sanity: carl\'s base (unoverridden) s3 is a 4-hit special');
+  const rawPush=FX.push.bind(FX),beats=[];
+  FX.push=(ev)=>{if(ev.kind==='impact')beats.push(f.cinematic);rawPush(ev)};
+  while(f.cinematic>0)G.tick();
+  FX.push=rawPush;
+  eq(beats.length,hitCount,'exactly one impact beat per hit, fired at cinematic='+beats.join(','));
+  ok(beats.every(cin=>cin>=6&&cin<=53),'every beat must land inside the ruled hits window (cinematic 6..53): '+beats.join(','));
+  G.fight=null;G.state='TITLE';G.cinemFocus=null});
+Test.add('S3 sequence camera "snap back": the punched-in 1.28 framing releases 6 ticks before cinematic hits 0, so cam.zoom is already easing back down by the time gameplay resumes',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;
+  G.fight=f;G.state='FIGHT';G.sim=false;G.cinemFocus=null;G.cam={x:STAGE_W/2,zoom:1};G.koSlowmo=0;G._koAcc=0;
+  for(let i=0;i<21;i++)G.tick();
+  while(f.cinematic>6)G.tick(); // run through the dolly+hits window (punchIn still active at cinematic===6)
+  ok(G.cam.zoom>1.15,'sanity: camera must already be well punched in before the snap-back window (zoom='+G.cam.zoom.toFixed(3)+')');
+  const zoomAtSnapStart=G.cam.zoom;
+  while(f.cinematic>0)G.tick(); // the final 6 (snap-back) ticks, punchIn null throughout
+  ok(G.cam.zoom<zoomAtSnapStart,'cam.zoom must start easing back down during the snap-back window: '+zoomAtSnapStart.toFixed(3)+' -> '+G.cam.zoom.toFixed(3));
+  G.fight=null;G.state='TITLE';G.cinemFocus=null});
+Test.add('Render.oppPowerGeom is a pure function: 3 evenly-gapped segments, filled one per 100 power toward POWER_MAX, pulse only at 3/3',()=>{
+  const g0=Render.oppPowerGeom(0,0,100,5,0);
+  eq(g0.segs.length,3);ok(g0.segs.every(s=>!s.filled));eq(g0.pulse,false);
+  const g1=Render.oppPowerGeom(0,0,100,5,150);
+  eq(g1.segs.filter(s=>s.filled).length,1,'150 power must fill exactly 1 of 3 segments');
+  const g3=Render.oppPowerGeom(0,0,100,5,300);
+  eq(g3.segs.filter(s=>s.filled).length,3);eq(g3.pulse,true,'a full 3-bar strip must pulse');
+  const over=Render.oppPowerGeom(0,0,100,5,999);
+  eq(over.segs.filter(s=>s.filled).length,3,'power must never fill more than 3 segments even past POWER_MAX');
+  // segments must not overlap and must stay inside [x,x+w]
+  for(let i=0;i<3;i++){ok(g0.segs[i].x>=0);ok(g0.segs[i].x+g0.segs[i].w<=100+1e-9)}
+  ok(g0.segs[1].x>=g0.segs[0].x+g0.segs[0].w,'segments must not overlap')});
+Test.add('Render.oppPowerPulseAlpha is a pure, deterministic function of frame alone (no Math.random/performance.now), staying inside [.2,1]',()=>{
+  for(const fr of[0,1,7,60,600,6000]){
+    const a=Render.oppPowerPulseAlpha(fr);
+    ok(a>=.2&&a<=1,'pulse alpha out of range at frame '+fr+': '+a);
+    eq(a,Render.oppPowerPulseAlpha(fr),'must be exactly reproducible for the same frame')}});
+Test.add('Render.oppPowerBar actually paints a filled gold segment at 300 power and an unfilled dark one at 0, at the geometry oppPowerGeom describes',()=>{
+  const cnv=document.createElement('canvas');cnv.width=200;cnv.height=20;const c=cnv.getContext('2d');
+  Render.oppPowerBar(c,0,0,120,6,300,0);
+  const seg=Render.oppPowerGeom(0,0,120,6,300).segs[0];
+  const px=c.getImageData(Math.round(seg.x+seg.w/2),3,1,1).data;
+  ok(px[0]>180&&px[1]>150&&px[2]<120,'a filled segment at 300 power must be the gold fill color: '+Array.from(px).join(','));
+  c.clearRect(0,0,200,20);
+  Render.oppPowerBar(c,0,0,120,6,0,0);
+  const px0=c.getImageData(Math.round(seg.x+seg.w/2),3,1,1).data;
+  ok(px0[0]<80&&px0[1]<80&&px0[2]<80,'an unfilled segment at 0 power must be the dark idle color: '+Array.from(px0).join(','))});
+Test.add('the opponent (p2) power bar is wired into hud(): drawing a real fight does not throw, and is skipped while guardActive (tutorial dummy)',()=>{
+  const cnv=document.createElement('canvas');cnv.width=854;cnv.height=480;const c=cnv.getContext('2d');
+  const f=mkFight();closeIn(f);f.p2.power=300;
+  Render.hud(c,f); // sanity: must not throw with a plain fight, at the pulse-triggering 3-bar power
+  f.p2.guardActive=true;
+  Render.hud(c,f); // must not throw with the tutorial's own SPAR-plate path either
+  f.p2.guardActive=false});
+Test.add('Render.hpGhost: a drop leaves the ghost trailing the real value, draining linearly over exactly HP_GHOST_FRAMES draw calls; a rise (heal, or a fresh fight) snaps immediately, never trailing backwards',()=>{
+  Render._hpGhost={};
+  eq(Render.hpGhost('ghostTestA',1),1,'a side\'s first-ever read must not itself start a drain');
+  const shown=Render.hpGhost('ghostTestA',.5); // a hit just landed: hp dropped from 1 to .5
+  ok(shown>.5&&shown<1,'immediately after a drop the ghost must sit strictly between the old and new value, not snapped: '+shown);
+  let last=shown;
+  for(let i=0;i<Render.HP_GHOST_FRAMES-1;i++){
+    const s=Render.hpGhost('ghostTestA',.5);
+    ok(s<=last+1e-9,'the ghost must monotonically drain toward the real value, never rise mid-drain: step '+i+' went '+last+' -> '+s);
+    last=s}
+  eq(Math.round(last*1000)/1000,.5,'after exactly HP_GHOST_FRAMES draw calls the ghost must have fully caught up to the real value');
+  // A heal (rise) must snap immediately, never itself trail
+  const healed=Render.hpGhost('ghostTestA',.8);
+  eq(healed,.8,'a rise must snap the ghost up immediately, never trailing behind on a heal');
+  delete Render._hpGhost.ghostTestA});
+Test.add('Render.hpGhost: a second drop mid-drain restarts the ease from wherever the ghost currently sits, never jumping back up to the pre-hit value',()=>{
+  Render._hpGhost={};
+  Render.hpGhost('ghostTestB',1);
+  Render.hpGhost('ghostTestB',.6); // first hit
+  const midDrain=Render.hpGhost('ghostTestB',.6); // one more draw call into the same drain
+  const secondHit=Render.hpGhost('ghostTestB',.3); // a second hit lands before the first drain finished
+  ok(secondHit<=midDrain+1e-9,'restarting the drain must never read HIGHER than where the ghost already was: '+midDrain+' -> '+secondHit);
+  ok(secondHit>=.3,'the restarted drain must still be trailing above the newest real value, not already caught up');
+  delete Render._hpGhost.ghostTestB});
+Test.add('hpBar/hpBarGrad draw an optional lighter ghost layer only when ghostPct is given and above pct; omitting it (every pre-Phase-12 call site) is pixel-unaffected',()=>{
+  const cnv=document.createElement('canvas');cnv.width=400;cnv.height=40;const c=cnv.getContext('2d');
+  c.clearRect(0,0,400,40);
+  Render.hpBar(c,10,10,200,18,.5,'#4caf22','right'); // no ghostPct: old call shape
+  const px1=c.getImageData(10+180,10+9,1,1).data; // far right of the bar, inside the 'lost' region if a ghost were drawn
+  c.clearRect(0,0,400,40);
+  Render.hpBar(c,10,10,200,18,.5,'#4caf22','right',.5); // ghostPct===pct: must draw identically (no ghost sliver)
+  const px2=c.getImageData(10+180,10+9,1,1).data;
+  eq(Array.from(px1).join(','),Array.from(px2).join(','),'ghostPct===pct must render pixel-identically to omitting it');
+  c.clearRect(0,0,400,40);
+  Render.hpBar(c,10,10,200,18,.5,'#4caf22','right',.9); // a real ghost sliver from .5 to .9
+  const px3=c.getImageData(10+170,10+9,1,1).data; // inside the .5..0.9 sliver, outside the real (0..0.5) fill
+  ok(px3[0]>100&&px3[1]>100&&px3[2]>100,'the ghost sliver must be a light translucent fill, not the dark background or the real green fill: '+Array.from(px3).join(','))});
 Test.add('brute profile exists and prefers heavies',()=>{ok(AI.profiles.brute);ok(AI.profiles.brute.heavy>=.5)});
 Test.add('brute AI lands a heavy on an idle target within 600 frames',()=>{
   let landed=false;
@@ -15156,6 +15503,47 @@ Test.add('a muted popup always renders grey, regardless of what color it was pus
   FX.draw(c2,{x:0,zoom:1},0);
   eq(c2.fillStyle,'#ffd86b','an un-muted popup must still render its own pushed col');
   FX.reset()});
+// ---- Task 12.4 ruling (frozen interface, exact ruling 8): FX.popup kinds -- normal | crit | chip |
+// bleed | heal | punish | backdraft, styled from the one POPUP_KIND table (white normal, gold crit
+// larger, grey chip, red bleed, green heal; punish/backdraft keep their pre-existing callout colors,
+// now sourced from the same table) --------------------------------------------------------------
+Test.add('FX.popup kinds are styled from POPUP_KIND: white normal, gold crit (larger), grey chip, red bleed (matching EFFECT_TINT.bleed), green heal, and punish/backdraft keep their own colors',()=>{
+  FX.reset();
+  const cases=[['normal','#fff',false],['crit','#f4c542',true],['chip','#9a9a9a',false],
+    ['bleed',EFFECT_TINT.bleed,false],['heal','#4caf50',false],
+    ['punish','#ff5a4a',true],['backdraft','#ff5722',true]];
+  for(const[kind,col,big]of cases){
+    FX.reset();
+    FX.push({kind:'popup',x:0,y:0,text:'x',popupKind:kind});
+    const p=FX.list[FX.list.length-1];
+    eq(p.col,col,kind+' must render '+col+', got '+p.col);
+    eq(p.big,big,kind+' big must be '+big+', got '+p.big)}
+  FX.reset()});
+Test.add('a popup push with no popupKind falls back to its own pushed col/big exactly as before Task 12.4 (POPUP_KIND is additive, never a behavior change for a push that doesn\'t opt in)',()=>{
+  FX.reset();
+  FX.push({kind:'popup',x:0,y:0,text:'x',col:'#123456',big:true});
+  const p=FX.list[FX.list.length-1];
+  eq(p.col,'#123456');eq(p.big,true);eq(p.popupKind,undefined);
+  FX.reset()});
+Test.add('a landed hit reports popupKind (\'crit\'/\'normal\') on its damage-number fx instead of choosing its own color; FX turns it into the ruled white/gold styling',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),noCrit:false});closeIn(f);
+  run(f,5);
+  const popup=f.fx.find(x=>x.kind==='popup'&&(x.popupKind==='crit'||x.popupKind==='normal'));
+  ok(popup,'a landed hit must queue a popup carrying popupKind, not a raw col: '+JSON.stringify(f.fx));
+  FX.reset();FX.pushAll(f.fx);
+  const p=FX.list.find(x=>x.kind==='popup'&&x.text===popup.text);
+  ok(p,'FX must turn the descriptor into a rendered popup');
+  eq(p.col,popup.popupKind==='crit'?'#f4c542':'#fff');
+  eq(p.big,popup.popupKind==='crit')});
+Test.add('a blocked hit now queues a grey chip damage number (previously queued no popup at all, only the dust puff)',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(10)]),ctrl2:Ctrl.hold({block:true})});closeIn(f);
+  run(f,15);
+  const chipPopup=f.fx.find(x=>x.kind==='popup'&&x.popupKind==='chip');
+  ok(chipPopup,'a blocked hit must queue a chip popup: '+JSON.stringify(f.fx.filter(x=>x.kind==='popup')));
+  eq(Number(chipPopup.text),1000-f.p2.hp,'the chip popup\'s text must equal the actual chip damage taken');
+  FX.reset();FX.pushAll(f.fx);
+  const p=FX.list.find(x=>x.kind==='popup'&&x.popupKind==='chip');
+  eq(p.col,'#9a9a9a','the rendered chip popup must be grey')});
 Test.add('Crystal.open(kind,{free:true}) skips the cost check/deduction entirely; a normal open still refuses without funds',()=>{
   Save.data=Meta.defaults();Save.data.gold=0;Save.data.units=0;
   const refused=Crystal.open('basic');
@@ -15717,7 +16105,11 @@ Test.add('katia\'s real S2 Misdirection (critChance 1.0) crits every sub-hit, co
   const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
   eq(hits.length,5,'Misdirection is a 5-hit special');
   eq(draws,5,'exactly one rng draw per landed sub-hit, even though critChance forces the result');
-  const critPopups=f.fx.filter(x=>x.kind==='popup'&&x.big===true&&x.text!=='UNBLOCKABLE');
+  // Task 12.4: the raw sim fx descriptor no longer carries its own `big` -- Fight.resolve reports
+  // only the bare fact popupKind:'crit'/'normal' now (72_fx.js's POPUP_KIND table is the only place
+  // big/col are chosen, at FX.push() time, not here), so this checks the fact the sim actually
+  // reports instead of a display flag the sim no longer sets.
+  const critPopups=f.fx.filter(x=>x.kind==='popup'&&x.popupKind==='crit'&&x.text!=='UNBLOCKABLE');
   eq(critPopups.length,5,'every sub-hit must crit')});
 Test.add('katia\'s real S3 Curtain Call applies bleed 3 + armorBreak 1 only once, after the LAST of its 4 hits',()=>{
   const f=mkFight({p1:CHAMPS.katia,ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;
@@ -16564,6 +16956,60 @@ Test.add('time dilation is a no-op under G.sim (headless/batch/--sim mode): an i
   const startFrame=f.frame;
   for(let i=0;i<12;i++)G.tick();
   eq(f.frame-startFrame,12,'every tick must step the sim under G.sim, even right after an intercept');
+  G.fight=null;G.state='TITLE';G.sim=false});
+// ---- Task 12.4: KO slow-mo (G.koSlowmo, entirely separate from fight.slowmo's own pre-existing
+// 90-frame/4-tick post-KO grace period, untouched by this task -- see G.koSlowmo's own top-of-file
+// comment) ------------------------------------------------------------------------------------------
+Test.add('G.onEvent(\'ko\',...) arms koSlowmo to exactly 20, resetting _koAcc, but never while G.sim is true',()=>{
+  const f=mkFight();G.fight=f;G.state='FIGHT';
+  G.sim=false;G.koSlowmo=0;G._koAcc=7;
+  G.onEvent('ko',f.p1,null,0);
+  eq(G.koSlowmo,20,'a real (non-sim) KO must arm exactly 20 ticks of slow-mo');
+  eq(G._koAcc,0,'_koAcc must reset alongside it');
+  G.sim=true;G.koSlowmo=0;
+  G.onEvent('ko',f.p1,null,0);
+  eq(G.koSlowmo,0,'a KO reported while G.sim is true must never arm koSlowmo -- the same never-under-headless gate G.dilate already uses');
+  G.fight=null;G.state='TITLE';G.sim=false});
+Test.add('G.startFight resets koSlowmo/_koAcc, mirroring the existing dilate/_dilateN reset',()=>{
+  Save.data=Meta.defaults();
+  G.koSlowmo=13;G._koAcc=.6;
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
+  eq(G.koSlowmo,0,'G.startFight must reset koSlowmo to 0');
+  eq(G._koAcc,0,'G.startFight must reset _koAcc to 0');
+  G.toTitle()});
+Test.add('koSlowmo throttles FX.update() at its own 0.4x rate (KO_SLOWMO_RATE) while armed, spending exactly 20 ticks worth of FX.update() calls, then reverting to the plain unconditional call',()=>{
+  const f=mkFight({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  G.fight=f;G.state='FIGHT';G.sim=false;G.koSlowmo=20;G._koAcc=0;
+  const rawUpdate=FX.update.bind(FX);let calls=0;
+  FX.update=()=>{calls++;rawUpdate()};
+  let ticks=0;
+  while(G.koSlowmo>0&&ticks<200){G.tick();ticks++}
+  FX.update=rawUpdate;
+  eq(calls,20,'exactly 20 FX.update() calls must have fired by the time the koSlowmo budget is spent');
+  // At a .4 accumulator rate, budget/rate real ticks are needed on average (20/.4=50); the exact
+  // count can drift by at most one tick either way depending on where in the fractional cycle the
+  // budget happened to land, so this checks a tight window rather than the literal 50.
+  ok(ticks>=49&&ticks<=51,'spending 20 ticks at a 0.4x rate must take ~50 real G.tick() calls, took '+ticks);
+  // Once the budget is spent, FX.update() must fire on every subsequent tick again (the plain
+  // unconditional `else FX.update()` branch), same as any tick before this task.
+  let after=0;const rawUpdate2=FX.update.bind(FX);FX.update=()=>{after++;rawUpdate2()};
+  for(let i=0;i<5;i++)G.tick();
+  FX.update=rawUpdate2;
+  eq(after,5,'FX.update() must fire on every tick once koSlowmo has fully drained');
+  G.fight=null;G.state='TITLE'});
+Test.add('koSlowmo is a no-op under G.sim: never armed by a KO\'d fight driven through G.tick with G.sim true, so FX.update() fires on every tick same as always',()=>{
+  // onEvent wired straight to G.onEvent (the same shape G.startFight itself uses) so the 'ko' event
+  // this fight really emits actually reaches G's own sim-gated arming logic, not a no-op -- otherwise
+  // this would vacuously pass just because nothing ever routed the event to G at all.
+  const f=mkFight({ctrl1:Ctrl.script([L(0)]),onEvent:(t,a,b,v)=>G.onEvent(t,a,b,v)});closeIn(f);f.p2.hp=1;
+  G.fight=f;G.state='FIGHT';G.sim=true;G.koSlowmo=0;G._koAcc=0;
+  const rawUpdate=FX.update.bind(FX);let calls=0;
+  FX.update=()=>{calls++;rawUpdate()};
+  let ticks=0;
+  while(G.state==='FIGHT'&&ticks<400){G.tick();ticks++}
+  FX.update=rawUpdate;
+  eq(G.koSlowmo,0,'koSlowmo must never have been armed under G.sim, even across a real KO');
+  eq(calls,ticks,'every one of the G.tick() calls it took to resolve the fight must have called FX.update() unthrottled');
   G.fight=null;G.state='TITLE';G.sim=false});
 Test.add('a real (non-sim) intercept lands still steps through G.tick end to end without throwing, dilate then drains to 0',()=>{
   const f=mkFight({ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.script([{f:0,intent:{medium:true}}]),

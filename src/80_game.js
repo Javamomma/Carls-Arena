@@ -151,6 +151,17 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // to 6 by G.onEvent's own 'intercept' branch below, and only ever armed while !this.sim (frozen
   // ruling: a no-op under --sim/headless/batch, see that branch's own comment).
   dilate:0,_dilateN:0,
+  // Task 12.4 ruling (frozen interface, exact ruling 8 / "20 f at 0.4x"): koSlowmo is a PRESENTATION-
+  // only counter, entirely separate from fight.slowmo (the pre-existing sim-owned post-KO grace-period
+  // counter, Fight.finish()'s own `this.slowmo=90`, still armed and decremented exactly as it always
+  // was -- Fight.step() is already an unconditional no-op once fight.over (its own `if(this.over)
+  // return` guard, 60_fight.js, untouched by this task), so nothing sim-side reads or is affected by
+  // koSlowmo at all). Armed to 20 by onEvent's own 'ko' branch below, only ever while !this.sim --
+  // same never-under-headless/batch/--sim gate G.dilate already uses (Task 7.4), so a batch/matrix
+  // replay's own win-rate table is untouched regardless of how many KOs land. _koAcc is the same
+  // fractional-rate accumulator KO_SLOWMO_RATE (0.4, i.e. the sim's presentation clock advances 0.4
+  // ticks per real G.tick() call while armed) is spent against -- see tick()'s own koSlowmo branch.
+  koSlowmo:0,_koAcc:0,KO_SLOWMO_RATE:.4,
   // Fix-wave item 5 (final review, Minor): the page's own ?atlas=1 URL override, computed once here
   // (location.search doesn't change without a navigation) -- the exact same regex Atlas.load's own
   // `enabled` check already uses (68_rig.js) to decide whether to fetch at all. Rig.draw's atlas
@@ -462,6 +473,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // with an intercept still in its own dilation window left the NEXT fight starting at half speed
     // for up to 12 real ticks, non-deterministically (_dilateN's own parity carried over too).
     this.dilate=0;this._dilateN=0;
+    // Task 12.4: koSlowmo/_koAcc reset for the exact same reason dilate/_dilateN just above are --
+    // a fight that ended KO'd while its own slow-mo beat was still playing must not bleed into the
+    // next fight's opening frames.
+    this.koSlowmo=0;this._koAcc=0;
     // Fix-wave item 5 (final review M5): a thumb still down across a fight boundary could otherwise
     // resolve a stale gesture (P.pendingEnder/dashDir/heavyOn) into the new fight -- releasing pushes
     // a medium, or reaching a node-4 recovery in the new fight while that old pointer is still down
@@ -623,7 +638,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     else if(t==='block')this.playRecipe(Audio.recipes.block);
     else if(t==='parry'){this.playRecipe(Audio.recipes.parry);Audio.announce('parry',this.fight.presRng)}
     else if(t==='miss'){if(b&&b.state==='DASH')this.playRecipe(Audio.recipes.dash)}
-    else if(t==='ko'){this.playRecipe(Audio.recipes.ko);Audio.announce(a.side===1?'win':'loss',this.fight.presRng)}
+    else if(t==='ko'){this.playRecipe(Audio.recipes.ko);Audio.announce(a.side===1?'win':'loss',this.fight.presRng);
+      // Task 12.4 ruling: arm the KO's own 20-tick/0.4x presentation slow-mo the instant the event
+      // fires -- never under G.sim, the same guard G.dilate's own 'intercept' branch just below uses,
+      // so a batch/matrix replay's own win-rate table is unaffected by how many KOs land.
+      if(!this.sim){this.koSlowmo=20;this._koAcc=0}}
     // Task 7.4 (frozen ruling): arm 6 sim ticks of time dilation the instant the intercept lands --
     // see G.tick's own dilate branch (above tick()) for how those 6 ticks actually get stretched
     // over double the real ticks. Never armed under G.sim (headless/batch/screenshot mode): a batch
@@ -932,6 +951,27 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // frames down, one per tick, so FX/Render keep animating around a frozen sim. Input is
       // drained and discarded so nothing queued during the card fires the instant it clears.
       f.cinematic--;this.frameNow=f.frame;Input.drain();
+      // Task 12.4 ruling (frozen interface, exact ruling 8 / gameplay study S4.3 "S3 cinematic"): the
+      // sequence's own "hits at 0.5x" beat, synthesized entirely in presentation -- the sim genuinely
+      // cannot advance while frozen (Fight.step's own `if(this.cinematic>0)return` guard, 60_fight.js,
+      // untouched by this task), so this reads the attacker's own already-resolved move data
+      // (cinemFocus.move, set the instant the special started -- a plain data read, not a sim
+      // behavior change) to space that many visual impact beats evenly across the 48-tick "hits"
+      // window (post-decrement cinematic 53..6, the middle third of the ruled "72 f = dolly 18 f ->
+      // hits at 0.5x -> snap back 6 f") at HALF the move's own native sub-hit cadence, and pushes the
+      // exact same spark+impact fx kinds a real landed hit already uses (72_fx.js's own IMPACTS[])
+      // at the DEFENDER's position, purely to sell "the hits are landing" during a beat the sim
+      // itself is holding frozen. No RNG at all (no Math.random, no fight.rng/presRng draw) --
+      // entirely a function of cinematic and the move's own static hit count/impact id, so the whole
+      // sequence replays identically for a given seed/frame count, same determinism every other
+      // frame-driven presentation value in this codebase already holds to.
+      if(this.cinemFocus&&f.cinematic>=6&&f.cinematic<=53){
+        const att=this.cinemFocus,def=att===f.p1?f.p2:f.p1;
+        const hitCount=Math.max(1,(att.move&&att.move.hits)||1),gap=Math.max(1,Math.floor(48/hitCount));
+        const beatT=53-f.cinematic;
+        if(beatT%gap===0&&beatT/gap<hitCount){
+          FX.push({kind:'spark',x:def.x,y:FLOOR-80,n:8,col:'#ff5a4a'});
+          FX.push({kind:'impact',id:att.def.impact,x:def.x,y:FLOOR-80,face:att.face})}}
       if(f.cinematic===0){this.cinemFocus=null;this.showToast()}
     }else{
       const pm1=f.p1.moveName,pm2=f.p2.moveName;
@@ -969,7 +1009,13 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       // per-sim-frame cadence Broadcast.tick/Tutorial.tick above already run at.
       if(this.mode==='tutorial')this.syncTutorialPrompt()}
     FX.pushAll(f.fx);f.fx.length=0;
-    const punchIn=f.cinematic>0&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.28}:null; // fix round 2: 1.6->1.28
+    // Task 12.4 ruling: the ruled "6 f snap back on the last hit" -- punchIn (and with it, the
+    // punched-in 1.28 camera target Camera.update eases toward every tick at its own normal .12 lerp
+    // rate, unchanged) now drops out 6 ticks BEFORE cinematic hits 0 (cinematic<6, its last 6 values
+    // 5..0) instead of holding all the way to the last frame, so the camera has already started
+    // easing back toward the normal gameplay framing by the time cinematic reaches 0 and gameplay
+    // resumes -- reading as a "snap back" beat rather than an instant cut. Was `f.cinematic>0`.
+    const punchIn=f.cinematic>=6&&this.cinemFocus?{x:this.cinemFocus.x,zoom:1.28}:null; // fix round 2: 1.6->1.28
     // Fix-wave item 4: per-frame zoom cap sized off the pose(s) actually on screen this tick
     // (Rig.topAt), not the whole fight's worst case (this.zoomCap/this.cineZoomCap, kept above as
     // upper bounds a per-frame value can never exceed — the current pose's top is always <= the
@@ -990,7 +1036,24 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       ?Math.min(1.28,(Camera.anchorY-HUD_LINE)/this.topNow(this.cinemFocus))
       :Math.min(gameplayCeil,(Camera.anchorY-HUD_LINE)/Math.max(this.topNow(f.p1),this.topNow(f.p2)));
     Camera.update(this.cam,f,punchIn,capNow);
-    FX.update();
+    // Task 12.4 ruling (frozen interface, exact ruling 8 / "20 f at 0.4x", "a no-op in headless/--sim
+    // like the dilation"): koSlowmo (armed by onEvent's own 'ko' branch, never under G.sim) throttles
+    // ONLY FX.update() -- the killing blow's own flash/spark particles (Fight.finish's existing
+    // fx.push({kind:'flash',...}), untouched) simply take longer real-world time to read out, purely
+    // a presentation pacing effect: nothing sim-side is touched (Fight.step() is already a permanent
+    // no-op once f.over, so fight.slowmo's own pre-existing 90-frame/4-tick throttle just below keeps
+    // gating the RESULT transition exactly as it always has -- entirely unrelated to and unaffected by
+    // this). _koAcc is a fractional accumulator (KO_SLOWMO_RATE=.4, so the presentation clock advances
+    // 0.4 "ticks" per real G.tick() call while armed, i.e. FX.update() actually fires on ~2 of every 5
+    // calls) rather than a fixed modulo, since 0.4 has no exact 1-in-N expression the way dilate's 0.5
+    // (every-other-tick) or the old slowmo's 0.25 (every-4th-tick) do. Once the 20-tick budget is
+    // spent, koSlowmo reaches 0 and this reverts to the plain unconditional `else FX.update()` below --
+    // identical to every tick before this task. Never armed under G.sim, so a batch/matrix replay
+    // always takes the `else` branch here, unaffected by how many KOs land.
+    if(this.koSlowmo>0){
+      this._koAcc+=this.KO_SLOWMO_RATE;
+      if(this._koAcc>=1){this._koAcc-=1;FX.update();this.koSlowmo--}
+    }else FX.update();
     // f.over flips true inside f.step() the instant a KO/timeout resolves, well before slow-mo has
     // played; f.slowmo (armed to 90 by Fight.finish) is what keeps this branch re-entering FIGHT and
     // counting down every 4th tick above (f.step() itself is a no-op once over, per Fight.step's own
