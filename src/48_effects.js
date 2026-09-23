@@ -73,7 +73,34 @@ const EFFECTS={
   // formula anyway for the same reason armorBreak/fury/weakness keep theirs -- a future potency-
   // scaled variant (a bigger single-dodge reward) needs no second EFFECTS entry.
   dexterity:{id:'dexterity',dur:180,maxStacks:1,
-    mod(e,m){m.critDelta+=0.2*e.stacks*e.potency}}};
+    mod(e,m){m.critDelta+=0.2*e.stacks*e.potency}},
+  // Task 9.1 (frozen interface, exact values): critDmg -- Katia's Understudy passive (Task 9.2) grants
+  // a stack on a successful parry; Fight.resolve (60_fight.js) reads m.critMul (below) additively on
+  // top of the attacker's own att.def.critMul (or CRIT_MUL_DEFAULT), only when this hit actually
+  // crit -- same "only matters on a crit" gating att.def.critMul itself already gets. maxStacks:1 (a
+  // flat +0.4, not a stackable bonus), same shape as dexterity's own critDelta comment above.
+  critDmg:{id:'critDmg',dur:180,maxStacks:1,
+    mod(e,m){m.critMul+=0.4*e.stacks*e.potency}},
+  // Task 9.1 (frozen interface, exact values): poison -- Donut's Hairball (Task 9.3) applies a stack
+  // per landed sub-hit. Same straight-hp-subtraction shape as bleed (ignores armor -- it never goes
+  // through the armor-reducing damage formula in Fight.resolve at all, same as bleed/regen), just a
+  // smaller per-stack rate (0.3%/s vs bleed's 0.4%/s) and a lower cap (3 vs bleed's 5), mirroring
+  // regen's own dur:300/maxStacks:3 shape rather than bleed's dur:180/maxStacks:5.
+  poison:{id:'poison',dur:300,maxStacks:3,
+    tick(fight,holder,e){holder.hp=Math.max(0,holder.hp-holder.maxHp*0.003*e.stacks*e.potency/60)}},
+  // Task 9.1 (frozen interface, exact values): armorUp -- Mongo's Doorway Denial s3 (Task 9.3) applies
+  // this to himself (target:'self' in the move's own `applies` entry). Same armorDelta accumulator
+  // armorBreak already reads in Fight.resolve, just the opposite sign (a positive buff instead of a
+  // debuff) -- +0.6 raw armor for 600 frames, maxStacks:1 (a flat bonus, not stackable).
+  armorUp:{id:'armorUp',dur:600,maxStacks:1,
+    mod(e,m){m.armorDelta+=0.6*e.stacks*e.potency}}};
+// Task 9.1 (controller ruling): the exact debuff set Effects.purify (below) removes -- Spite/Champion
+// of the Floor's own purify (Task 9.2's Grull passive) must strip every hostile timed effect a
+// champion/boss can be holding, but never a beneficial one (fury/regen/powerGain/dexterity/critDmg/
+// armorUp all stay). A fixed list rather than an "isDebuff" flag on each EFFECTS entry, since the
+// ruling names the exact six ids verbatim and nothing else in this file needs a general debuff/buff
+// classification.
+const PURIFIABLE=['bleed','stun','armorBreak','weakness','poison','powerBurn'];
 
 const Effects={
   // Refreshes duration to EFFECTS[id].dur and adds stacks up to maxStacks (the newest call's potency/
@@ -81,13 +108,18 @@ const Effects={
   // replace already uses). Emits a fight 'effect' event with applied:true and queues an HUD popup fx
   // descriptor (see fight.fx below) on every call, refresh or fresh alike -- the frozen interface only
   // distinguishes applied/expired, not new-vs-refreshed.
+  // Task 9.1 (frozen interface, exact ruling): o.uncapped bypasses the maxStacks clamp for THIS call
+  // only (Carl's Spite passive, Task 9.2, hands out uncapped fury past its normal cap of 5) -- the
+  // clamp is skipped on both the fresh-entry and the already-active branches below, same "latest call
+  // decides" shape every other Effects.apply option already has. A later, ordinary (non-uncapped) call
+  // on the same holder/id still clamps normally, down to maxStacks, exactly like any other apply would.
   apply(fight,holder,id,o){
     o=o||{};
     const def=EFFECTS[id];if(!def)throw new Error('unknown effect: '+id);
-    const stacks=o.stacks===undefined?1:o.stacks,potency=o.potency===undefined?1:o.potency;
+    const stacks=o.stacks===undefined?1:o.stacks,potency=o.potency===undefined?1:o.potency,uncapped=!!o.uncapped;
     let e=holder.effects.find(x=>x.id===id);
-    if(e){e.left=def.dur;e.stacks=Math.min(def.maxStacks,e.stacks+stacks);e.potency=potency;e.source=o.source}
-    else{e={id,left:def.dur,stacks:Math.min(def.maxStacks,stacks),potency,source:o.source};holder.effects.push(e)}
+    if(e){e.left=def.dur;e.stacks=uncapped?e.stacks+stacks:Math.min(def.maxStacks,e.stacks+stacks);e.potency=potency;e.source=o.source}
+    else{e={id,left:def.dur,stacks:uncapped?stacks:Math.min(def.maxStacks,stacks),potency,source:o.source};holder.effects.push(e)}
     if(def.onApply)def.onApply(fight,holder,e);
     fight.emitEffect(holder,id,e.stacks,'applied');
     fight.fx.push({kind:'effectPopup',x:holder.x,y:FLOOR-160,id,stacks:e.stacks});
@@ -120,9 +152,13 @@ const Effects={
   // always two DIFFERENT Fighter instances with their own separate _mods (Fight.resolve's own
   // attMods/defMods never collide), and because every caller reads the returned fields immediately
   // and never retains the object across frames -- the ruling this task's brief calls out explicitly.
+  // Task 9.1: critMul joins the pooled accumulator -- critDmg (above) is the first effect to set it,
+  // additive on top of whatever att.def.critMul (or CRIT_MUL_DEFAULT) Fight.resolve's own crit branch
+  // already reads, same "neutral when nothing is active" shape atkMul/armorDelta/critDelta already
+  // have (0, not 1, since it's ADDED to the base multiplier rather than multiplying it).
   mods(holder){
-    const m=holder._mods||(holder._mods={atkMul:1,armorDelta:0,critDelta:0});
-    m.atkMul=1;m.armorDelta=0;m.critDelta=0;
+    const m=holder._mods||(holder._mods={atkMul:1,armorDelta:0,critDelta:0,critMul:0});
+    m.atkMul=1;m.armorDelta=0;m.critDelta=0;m.critMul=0;
     for(const e of holder.effects){const def=EFFECTS[e.id];if(def.mod)def.mod(e,m)}
     return m},
   // No id: drops every effect. With an id: drops just that one (a no-op if the holder doesn't hold
@@ -131,4 +167,11 @@ const Effects={
   // (47_buffs.js) is silent the same way.
   clear(holder,id){
     if(id===undefined)holder.effects.length=0;
-    else{const i=holder.effects.findIndex(e=>e.id===id);if(i>=0)holder.effects.splice(i,1)}}};
+    else{const i=holder.effects.findIndex(e=>e.id===id);if(i>=0)holder.effects.splice(i,1)}},
+  // Task 9.1 (frozen interface, controller ruling): drops every currently-held debuff in PURIFIABLE
+  // (above) -- and only those; a beneficial effect (fury/regen/powerGain/dexterity/critDmg/armorUp)
+  // is left untouched even if active. Same silent, no-event shape as clear() above (Buffs.apply's own
+  // holder.buffs=[] replace is silent the same way) -- ships now, unused until Task 9.2's Grull
+  // passive (championOfTheFloor) calls it.
+  purify(holder){
+    for(let i=holder.effects.length-1;i>=0;i--)if(PURIFIABLE.includes(holder.effects[i].id))holder.effects.splice(i,1)}};

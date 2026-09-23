@@ -4203,12 +4203,13 @@ Test.add('powerBurn is instant: on apply it drains min(potency, holder.power) po
   const g=mkFight();g.p2.power=10;g.p2.hp=1000;
   Effects.apply(g,g.p2,'powerBurn',{potency:25});
   eq(g.p2.power,0);eq(g.p2.hp,990,'burn/damage must clamp to the 10 power actually banked, not the requested 25')});
-Test.add('Effects.mods always returns atkMul/armorDelta/critDelta, neutral when no effect is active (critDelta is plumbing for Task 7.3\'s dexterity)',()=>{
+Test.add('Effects.mods always returns atkMul/armorDelta/critDelta/critMul, neutral when no effect is active (critDelta is plumbing for Task 7.3\'s dexterity; critMul for Task 9.1\'s critDmg)',()=>{
   const f=mkFight();
-  eq(JSON.stringify(Effects.mods(f.p1)),JSON.stringify({atkMul:1,armorDelta:0,critDelta:0}));
+  eq(JSON.stringify(Effects.mods(f.p1)),JSON.stringify({atkMul:1,armorDelta:0,critDelta:0,critMul:0}));
   Effects.apply(f,f.p1,'fury',{stacks:2});
   const mods=Effects.mods(f.p1);
-  eq(mods.atkMul,1+0.12*2);eq(mods.armorDelta,0);eq(mods.critDelta,0,'no effect in this task sets critDelta yet')});
+  eq(mods.atkMul,1+0.12*2);eq(mods.armorDelta,0);eq(mods.critDelta,0,'no effect in this task sets critDelta yet');
+  eq(mods.critMul,0,'no effect here sets critMul yet')});
 // Task 8.0 (pre-art seam): Effects.mods pools one object per fighter (holder._mods) instead of
 // allocating fresh every call -- proves the pooling directly (same reference across two calls, values
 // correct and up to date on each), and that att/def never collide since they're different fighters.
