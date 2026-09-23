@@ -3123,8 +3123,12 @@ const Rig={
   // face 0 (the module's front-facing branch) over a shoulder wedge in the look's own cloth, so the
   // HUD portrait, the roster card and the fight sprite are demonstrably the same character. `size`
   // is 56 (HUD/map) or 112 (roster cards, Task 8.4); each size is cached separately on the look,
-  // since the head bitmap is resolution-dependent. Looks with no `.body` (the big and quad rigs)
-  // keep the pre-8.1 bust below, unchanged.
+  // since the head bitmap is resolution-dependent.
+  // Fix-wave item 9 (final review, Minor #2): the sentence that used to end this paragraph -- "looks
+  // with no `.body` (the big and quad rigs) keep the pre-8.1 bust below" -- described the tree one
+  // task earlier. Task 8.2 gave the big and quad rigs `.body` blocks too, so all eleven looks take
+  // the BodyStyle bust; the plain-palette bust further down is a fallback for a look with no `.body`
+  // block at all, of which there are none (see draw()'s own note on the same guard).
   portrait(look,size){
     if(look.rig==='quad')return this.portraitQuad(look,size);
     const S=size||56;

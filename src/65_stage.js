@@ -198,14 +198,15 @@ const Stage={cache:{},
       c.fillStyle=`rgba(255,${192+Math.floor(20*flick)},130,.95)`;c.beginPath();c.ellipse(t.x,t.y-8-flick*3,4,9+flick*3,0,0,Math.PI*2);c.fill()}
     // Task 8.3: floor falloff -- the strip darkens with distance from the nearest torch (never
     // brightens above the floor's own baked tiles), sampled in coarse columns via the same lightAt
-    // this frame will hand the fighters, so the floor and whatever stands on it agree. Fix round 1
-    // (reviewer Minor #3): step widened 16px -> 32px; each `lightAt` call here is a real (cached-per-
-    // column, but the cache is reset every draw()) nearest-torch search plus two RNG(seed) flicker
-    // draws, and at 16px this loop alone was worth ~0.1ms/frame of the perf budget.
+    // this frame will hand the fighters, so the floor and whatever stands on it agree.
+    // Fix-wave item 9 (final review, Minor #3): the step's whole history in one sentence, because
+    // the two comments that used to tell it separately read as two different widenings. It went
+    // 16 -> 32 (perf: each lightAt call is a real nearest-torch search plus two RNG(seed) flicker
+    // draws, and at 16px this loop alone was worth ~0.1ms/frame) -> 96 (further perf, overshot) ->
+    // 32 (the controller's 8.3 re-review ruling: a re-reviewer pixel-sampled a periodic brightness
+    // step every 96px on an unobstructed floor row; 32px sits under the floor art's own 26-70px
+    // tile granularity and costs ~0.03ms). 32 is the ruled value and the one in the loop below.
     c.save();c.beginPath();c.rect(0,st.floorY,STAGE_W,80);c.clip();
-    // Controller ruling (8.3 re-review): 32px, not 96 -- the re-reviewer pixel-sampled a periodic
-    // brightness step every 96px on an unobstructed floor row; 32px sits under the floor art's own
-    // 26-70px tile granularity and costs ~0.03ms.
     for(let x=-16;x<STAGE_W+16;x+=32){const dark=this.falloffAlpha(this.lightAt(x).k);
       if(dark>0){c.fillStyle=`rgba(0,0,0,${dark})`;c.fillRect(x-16,st.floorY,32,80)}}
     c.restore()}};
