@@ -6487,3 +6487,286 @@ Test.add('renderRoster builds each card\'s portrait at 112px (not the 56px HUD b
 // Task 8.5 close-out: the whole-branch gate this task's report cites (--unit/--matrix/--e2e/
 // --tutorial/--screens-smoke/--phone-check/--perf/batch) lives in tests/harness.py and tests/batch.py,
 // not here -- see docs/ARENA.md's "Phase 8 exit" section for the actual numbers.
+
+// ================================================================================================
+// Task 9.3: champion heavies, specials, kit text, commentary -- fills in every kit's heavy/S1/S2/S3
+// per the kit lines (40_movedata.js), roster kit text (85_screens.js), Broadcast commentary
+// (13_broadcast.js), and three carry-overs from the 9.2 review (Immovable's consecutive-frame reset,
+// Passives.onSpecial reusing _fire with a target param, per-effect impact tints).
+// ================================================================================================
+
+// --- Donut S1 Hairball / S3 Sponsor Meltdown: resized to the kit table's own hit counts ---------
+Test.add('Donut\'s real S1 Hairball (5 hits): every landed sub-hit applies 1 poison stack, capping at poison\'s own maxStacks (3) well before all 5 land',()=>{
+  const f=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{special:1}}])});closeIn(f);f.p1.power=100;
+  run(f,90);
+  // Task 9.3's own kit resize (CHAMPS.donut.moves.s1.hits) -- deliberately NOT MOVES.s1.hits, the
+  // untouched global base table, which is still 3.
+  eq(f.log.filter(e=>e.type==='hit'&&e.who===1).length,CHAMPS.donut.moves.s1.hits,'all 5 hits of Hairball must land');
+  eq(CHAMPS.donut.moves.s1.hits,5);
+  eq(Effects.stacks(f.p2,'poison'),3,'5 applies of 1 stack each cap at poison\'s own maxStacks(3)')});
+Test.add('Donut\'s real S3 Sponsor Meltdown (6 hits): every landed sub-hit applies 1 weakness stack, capping at weakness\'s own maxStacks (3)',()=>{
+  const f=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;
+  run(f,21);f.cinematic=0; // s3 arms a 72-frame cinematic freeze -- clear it by hand, same as every other raw-step s3 test
+  run(f,150);
+  eq(f.log.filter(e=>e.type==='hit'&&e.who===1).length,CHAMPS.donut.moves.s3.hits,'all 6 hits of Sponsor Meltdown must land');
+  eq(CHAMPS.donut.moves.s3.hits,6);
+  eq(Effects.stacks(f.p2,'weakness'),3,'6 applies of 1 stack each cap at weakness\'s own maxStacks(3)')});
+Test.add('Donut\'s real heavy burns 30 power off the foe (after the swing\'s own +9 powTaken lands first) and stacks that burn\'s own damage on top of the swing\'s normal damage',()=>{
+  const f=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.hold({heavy:true}),noCrit:true});closeIn(f);f.p2.power=100;
+  run(f,40);
+  const hit=f.log.find(e=>e.type==='hit'&&e.who===1);
+  ok(hit,'sanity: the heavy must have landed');
+  const cls=CLASS_BEATS[CHAMPS.donut.cls]===CHAMPS.carl.cls?CLASS_BONUS:1;
+  const swingDmg=Math.round(CHAMPS.donut.atk*1*MOVES.heavy.dmg*cls*1*(1-CHAMPS.carl.armor));
+  const powerAfterTaken=100+MOVES.heavy.powTaken,burn=Math.min(powerAfterTaken,30);
+  eq(f.p2.power,powerAfterTaken-burn,'30 power must have been burned off the foe');
+  eq(1000-f.p2.hp,swingDmg+burn,'total hp lost = the swing\'s own normal damage plus whatever power was actually burned')});
+Test.add('Donut\'s real heavy burns only what the foe actually has banked, never going negative',()=>{
+  const f=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.hold({heavy:true}),noCrit:true});closeIn(f);f.p2.power=10;
+  run(f,40);
+  const cls=CLASS_BEATS[CHAMPS.donut.cls]===CHAMPS.carl.cls?CLASS_BONUS:1;
+  const swingDmg=Math.round(CHAMPS.donut.atk*1*MOVES.heavy.dmg*cls*1*(1-CHAMPS.carl.armor));
+  const powerAfterTaken=10+MOVES.heavy.powTaken;
+  eq(f.p2.power,0,'power must floor at 0 -- the whole banked amount was burned, never negative');
+  eq(1000-f.p2.hp,swingDmg+powerAfterTaken,'damage must include only the power that was actually there to burn')});
+
+// --- Katia's real heavy: refreshes an already-bleeding foe's Bleed duration (Effects.refresh) ---
+Test.add('Katia\'s real heavy: refreshes an already-bleeding foe\'s Bleed duration back to its full 180 frames, without touching its stack count',()=>{
+  const f=mkFight({p1:CHAMPS.katia,ctrl1:Ctrl.hold({heavy:true})});closeIn(f);
+  Effects.apply(f,f.p2,'bleed',{stacks:2});
+  for(let i=0;i<100;i++)Effects.tick(f,f.p2); // burn the clock down to 80 frames left
+  eq(f.p2.effects.find(e=>e.id==='bleed').left,80);
+  // Stop stepping the instant the hit lands, not after some fixed frame count -- every step past
+  // landing runs another Effects.tick that ticks `left` back down from its freshly refreshed 180,
+  // so checking it too late would just be measuring how many EXTRA frames were run, not the refresh.
+  let landed=false;
+  for(let i=0;i<60&&!landed;i++){f.step();landed=f.log.some(e=>e.type==='hit'&&e.who===1)}
+  ok(landed,'sanity: the heavy landed');
+  eq(f.p2.effects.find(e=>e.id==='bleed').left,180,'the bleed\'s own clock must be reset to its full 180-frame dur');
+  eq(Effects.stacks(f.p2,'bleed'),2,'refresh must not touch the existing stack count')});
+Test.add('Katia\'s real heavy never creates a fresh Bleed out of nothing -- it only refreshes an ALREADY-bleeding foe',()=>{
+  const f=mkFight({p1:CHAMPS.katia,ctrl1:Ctrl.hold({heavy:true})});closeIn(f);
+  run(f,40);
+  eq(f.log.filter(e=>e.type==='hit'&&e.who===1).length,1,'sanity: the heavy landed');
+  ok(!Effects.has(f.p2,'bleed'),'a foe who was never bleeding must not start bleeding from the heavy alone')});
+Test.add('Effects.refresh is a silent no-op (no event, no fresh entry) when the holder doesn\'t hold the id',()=>{
+  const f=mkFight();
+  const before=f.log.length;
+  const r=Effects.refresh(f.p2,'bleed');
+  eq(r,undefined);
+  ok(!Effects.has(f.p2,'bleed'));
+  eq(f.log.length,before,'no log entry of any kind must be emitted')});
+Test.add('Effects.refresh resets only `left`; stacks/potency/source are all left exactly as they were',()=>{
+  const f=mkFight();
+  Effects.apply(f,f.p1,'bleed',{stacks:4,potency:2});
+  for(let i=0;i<50;i++)Effects.tick(f,f.p1);
+  Effects.refresh(f.p1,'bleed');
+  const e=f.p1.effects.find(x=>x.id==='bleed');
+  eq(e.left,180);eq(e.stacks,4);eq(e.potency,2)});
+
+// --- Grull's real heavy Pillar Swing: the kit's own "longer reach" (dash 40) ---------------------
+Test.add('Grull\'s real heavy (Pillar Swing): the kit\'s own longer reach -- a 40px dash-in lunge, consumed entirely over the swing\'s own 8-frame startup once the charge auto-fires',()=>{
+  const f=mkFight({p1:BOSSES.grull,ctrl1:Ctrl.hold({heavy:true})});
+  f.p1.x=200;f.p1.face=1;f.p2.x=400;
+  run(f,MOVES.heavy.charge);
+  eq(f.p1.state,'ATTACK','the full charge hold must have auto-fired the swing');
+  eq(f.p1.f,0,'freshly transitioned this same tick -- no dash consumed yet');
+  const xAtRelease=f.p1.x;
+  run(f,MOVES.heavy.startup+1);
+  eq(f.p1.x-xAtRelease,40,'the full 40px dash must be consumed over the swing\'s own startup')});
+
+// --- Mother Rat's real S3 Swarm: healPct .02 exercised through a real 6-hit fight ----------------
+Test.add('Mother Rat\'s real S3 Swarm (healPct .02) heals the attacker 2% of each landed sub-hit\'s own damage, rounded, capped at maxHp',()=>{
+  const f=mkFight({p1:BOSSES.mother_rat,ctrl1:Ctrl.script([{f:0,intent:{special:3}}])});closeIn(f);f.p1.power=300;f.p1.hp=1;
+  run(f,21);f.cinematic=0;
+  run(f,80);
+  const hits=f.log.filter(e=>e.type==='hit'&&e.who===1);
+  eq(hits.length,6,'Swarm is a 6-hit special');
+  let hp=1;for(const h of hits)hp=Math.min(f.p1.maxHp,hp+Math.round(h.val*0.02));
+  eq(f.p1.hp,hp)});
+
+// --- carry-over #3 (9.2 review): per-effect impact tints (bleed red, poison green, weakness violet)
+Test.add('a landed hit whose applies fired bleed/poison/weakness tags the impact fx with the matching tint color, via IMPACTS opts',()=>{
+  const P1=Object.assign({},CHAMPS.carl,{moves:{light:{applies:[{id:'bleed',stacks:1,on:'hit'}]}}});
+  const f=mkFight({p1:P1,ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5);
+  const ev=f.fx.find(e=>e.kind==='impact');
+  ok(ev,'sanity: an impact fx must have been pushed');
+  ok(ev.tags.includes('bleed'),'the impact fx must carry the fired effect id as a tag');
+  const particle=(IMPACTS[ev.id]||IMPACTS.blunt).spawn(ev);
+  eq(particle.tint,'#c62828','bleed must resolve to the red tint')});
+Test.add('an impact fx with no applies tags gets no tint override -- falls back to the usual per-class color',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([L(0)])});closeIn(f);run(f,5); // plain carl light, no applies at all
+  const ev=f.fx.find(e=>e.kind==='impact');
+  ok(ev,'sanity: an impact fx must have been pushed');
+  eq(ev.tags.length,0);
+  const particle=IMPACTS.blunt.spawn(ev);
+  eq(particle.tint,null)});
+Test.add('EFFECT_TINT/tintFor resolve poison green and weakness violet too; an untinted id (or no tags) resolves to no override',()=>{
+  eq(tintFor({tags:['poison']}),'#4caf50');
+  eq(tintFor({tags:['weakness']}),'#7e57c2');
+  eq(tintFor({tags:['fury']}),null,'a tag with no EFFECT_TINT entry resolves to no override');
+  eq(tintFor({}),null,'no tags at all resolves to no override')});
+Test.add('impact fx tags only include applies entries that actually fired THIS landed sub-hit -- on:"last" never tags an early sub-hit',()=>{
+  const f=mkFight({ctrl1:Ctrl.script([{f:0,intent:{special:1}}])});closeIn(f);f.p1.power=100; // carl S1: last hit only bleeds
+  run(f,10); // early sub-hits only, well before the 3rd (last) one lands
+  const early=f.fx.filter(e=>e.kind==='impact');
+  ok(early.length>0,'sanity: at least one early sub-hit must have landed by now');
+  ok(early.every(e=>!e.tags.includes('bleed')),'no early sub-hit\'s impact fx should carry the bleed tag -- it is on:"last" only');
+  run(f,60);
+  const all=f.fx.filter(e=>e.kind==='impact');
+  ok(all.some(e=>e.tags.includes('bleed')),'the final sub-hit\'s own impact fx must carry the bleed tag')});
+
+// --- carry-over #1 (9.2 review): Immovable's counter is CONSECUTIVE frames, resets on leaving BLOCK/BLOCKSTUN
+Test.add('Immovable\'s consecutive-block counter resets to 0 the instant the holder leaves BLOCK/BLOCKSTUN (carry-over from the 9.2 review)',()=>{
+  const f=mkFight({p1:CHAMPS.mongo});
+  f.p1.state='BLOCK';
+  for(let i=0;i<90;i++){f.frame++;Passives.tick(f,f.p1)} // 90 blocked frames, short of the 120 threshold
+  f.p1.state='HITSTUN'; // "a hit" -- leaves BLOCK/BLOCKSTUN
+  f.frame++;Passives.tick(f,f.p1);
+  f.p1.state='BLOCK';
+  for(let i=0;i<90;i++){f.frame++;Passives.tick(f,f.p1)} // 90 more -- would wrongly total 180 without the reset
+  eq(Effects.stacks(f.p1,'fury'),0,'the counter must have reset on the hit -- 90+90 must NOT sum to a stack');
+  for(let i=0;i<30;i++){f.frame++;Passives.tick(f,f.p1)} // complete a genuine 120 CONSECUTIVE frames
+  eq(Effects.stacks(f.p1,'fury'),1,'120 straight (unbroken) frames must still grant exactly 1 stack')});
+
+// --- carry-over #2 (9.2 review): Passives.onSpecial reuses _fire with a target parameter ---------
+Test.add('Passives._fire (carry-over from the 9.2 review): an explicit 7th `target` arg redirects the Effects.apply, while emitPassive still always credits the passive\'s OWNER',()=>{
+  const f=mkFight({p1:CHAMPS.donut});
+  Passives._fire(f,f.p1,'royalDisdain','weakness',2,false,f.p2);
+  eq(Effects.stacks(f.p1,'weakness'),0,'must NOT land on the owner when a target is given');
+  eq(Effects.stacks(f.p2,'weakness'),2,'must land on the explicit target instead');
+  eq(f.log[f.log.length-1].who,1,'emitPassive must still credit the OWNER (side 1), not the target')});
+Test.add('Passives._fire with no target arg still defaults to the holder itself (every pre-9.3 call site unchanged)',()=>{
+  const f=mkFight({p1:CHAMPS.carl});
+  Passives._fire(f,f.p1,'spite','fury',3,false);
+  eq(Effects.stacks(f.p1,'fury'),3)});
+Test.add('Royal Disdain (real fight, post-refactor): still applies weakness on the FOE while crediting the OWNER\'s own passive event -- regression lock for the onSpecial->_fire refactor',()=>{
+  const f=mkFight({p1:CHAMPS.donut,ctrl1:Ctrl.script([{f:0,intent:{special:1}}])});
+  f.p1.power=100;run(f,1);
+  eq(Effects.stacks(f.p2,'weakness'),1);
+  eq(f.log.filter(e=>e.type==='passive'&&e.id==='royalDisdain'&&e.who===1).length,1)});
+
+// --- Task 9.3: roster kit text (SIG/HEAVY/S1/S2/S3), from def.kitText -----------------------------
+Test.add('every CHAMPS/BOSSES def carries a full def.kitText (sig/heavy/s1/s2/s3), all non-empty strings',()=>{
+  for(const[id,def]of Object.entries(DEFS)){
+    if(!def.kitText)continue; // mobs (goblin/hobgoblin/skeleton/shaman/grub) carry no kit -- not part of this task's table
+    for(const k of['sig','heavy','s1','s2','s3'])
+      ok(typeof def.kitText[k]==='string'&&def.kitText[k].length>0,id+'.kitText.'+k+' must be a non-empty string')}
+  for(const id of['carl','donut','katia','mongo','grull','mother_rat'])
+    ok(CHAMPS[id]&&CHAMPS[id].kitText||BOSSES[id]&&BOSSES[id].kitText,id+' must carry def.kitText')});
+Test.add('renderRoster shows all five kit lines (SIG/HEAVY/S1/S2/S3) per champion, from def.kitText',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster={carl:{stars:1,rank:1,level:1,xp:0,shards:0},donut:{stars:1,rank:1,level:1,xp:0,shards:0},
+    katia:{stars:1,rank:1,level:1,xp:0,shards:0},mongo:{stars:1,rank:1,level:1,xp:0,shards:0}};
+  Screens.roster();
+  const cards=[...document.querySelectorAll('#rosterCards .card')];
+  eq(cards.length,4);
+  for(const card of cards){
+    const lines=[...card.querySelectorAll('.kitline')];
+    eq(lines.length,5,'each roster card must render exactly 5 kit lines')}
+  Screens.title()});
+
+// --- Task 9.3 (frozen ruling): Broadcast gets one commentary line per signature trigger -----------
+Test.add('Broadcast: a passive event picks one commentary line (deterministic via fight.presRng) into state.lastLine',()=>{
+  Broadcast.reset();
+  const f={p1:{},p2:{},presRng:RNG(1)};
+  Broadcast.onEvent('passive',{},null,'spite',f);
+  ok(COMMENTARY.spite.includes(Broadcast.state.lastLine),'lastLine must be one of spite\'s own commentary lines')});
+Test.add('Broadcast: every PASSIVES id has at least one commentary line',()=>{
+  for(const id of Object.keys(PASSIVES))ok(COMMENTARY[id]&&COMMENTARY[id].length>0,id+' must have at least one commentary line')});
+Test.add('Broadcast: an unrelated event type never sets lastLine',()=>{
+  Broadcast.reset();
+  const f={p1:{combo:1,moveName:'light1',hits:new Set([0])},p2:{},presRng:RNG(1)};
+  Broadcast.onEvent('hit',f.p1,f.p2,10,f);
+  eq(Broadcast.state.lastLine,null)});
+Test.add('Broadcast: a commentary pick never consumes fight.rng, only presRng (same sim/presentation separation the announcer toast already keeps)',()=>{
+  const f=mkFight({p1:CHAMPS.carl});
+  let n=0;const raw=f.rng.next.bind(f.rng);f.rng.next=()=>{n++;return raw()};
+  Broadcast.reset();Broadcast.onEvent('passive',f.p1,null,'spite',f);
+  eq(n,0,'fight.rng must never be drawn for a commentary pick')});
+Test.add('Broadcast.reset() clears state.lastLine too, same one-shot shape as lastPop',()=>{
+  Broadcast.state.lastLine='leftover from a previous fight';
+  Broadcast.reset();
+  eq(Broadcast.state.lastLine,null)});
+Test.add('G.onEvent drains Broadcast.state.lastLine into the toast via G.say, the same one-shot pattern lastPop already uses',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
+  G._sayAt=-999;G.frameNow=0;
+  // G.onEvent forwards to Broadcast.onEvent FIRST (unconditionally, every event) before draining
+  // state.lastLine into the toast a few lines later in the same call -- so a real {type:'passive',
+  // id:'spite'} event exercises the whole pipeline in one shot: Broadcast picks a real COMMENTARY
+  // line via fight.presRng, and G.onEvent drains it straight through to the toast.
+  G.onEvent('passive',G.fight.p1,null,'spite');
+  ok(COMMENTARY.spite.includes(document.getElementById('toast').textContent),
+    'the toast must show one of spite\'s own commentary lines, routed Broadcast -> G.say');
+  eq(Broadcast.state.lastLine,null,'must be a one-shot, drained and cleared');
+  G.toTitle();G.sim=false});
+
+// --- Task 9.3 ruling 5: matrix kit-usage check (in-page seeded soak, the ruling's own explicit
+// alternative to extending tests/harness.py's playwright-driven --matrix mode) -- confirms every
+// champion's real S1/S2/S3 kit effect actually lands at least once across real AI-vs-AI play (tier
+// t3+, which is when AI_TIERS' own tier.kit first holds power for a special), not just the scripted
+// single-move proofs above (which force the exact move to fire on demand).
+function kitUsageSeen(champDef,champId,mobDef,tier,seedBase,maxSteps){
+  const seen={s1:false,s2:false,s3:false};
+  const scan=f=>{for(const e of f.log){
+    if(e.type==='effect'&&e.applied){
+      if(champId==='carl'&&e.id==='bleed')seen.s1=true;
+      if(champId==='carl'&&e.id==='stun')seen.s3=true;
+      if(champId==='donut'&&e.id==='poison')seen.s1=true;
+      if(champId==='donut'&&e.id==='weakness')seen.s3=true;
+      if(champId==='katia'&&e.id==='bleed')seen.s1=true;
+      if(champId==='katia'&&e.id==='armorBreak')seen.s3=true;
+      if(champId==='mongo'&&e.id==='stun')seen.s1=true;
+      if(champId==='mongo'&&e.id==='armorUp')seen.s3=true}
+    // S2's own listed kit effect is unconditional whenever S2 connects for every champion EXCEPT
+    // carl, whose S2 (Boot Party) is refundOnBlock -- that one only ever fires when S2 is actually
+    // BLOCKED, a 'block' log entry, not a 'hit'. Every other champion's own S2 effect (donut's
+    // unblockable-last, katia's guaranteed crit, mongo's healPct) fires on a landed hit instead.
+    if(champId==='carl'){if(e.type==='block'&&e.who===1&&e.move==='s2')seen.s2=true}
+    else if(e.type==='hit'&&e.who===1&&e.move==='s2')seen.s2=true}};
+  // 55_ai.js's own special-pick rule (outside this task's file scope, unmodified here) is
+  // `it.special=me.power>=300?3:me.power>=200?2:1` -- with no tier.kit "hold for a bigger special"
+  // logic implemented yet (grepped: no `.kit` field anywhere in AI_TIERS), an AI that only ever
+  // fires the INSTANT power first crosses 100 lands in the s1 bucket almost every time; s2/s3 are
+  // real but rare accidents of timing. Rather than reach into 55_ai.js (out of this task's file
+  // list) to add the hold logic, each restart in this soak primes p1's OWN power into the s1/s2/s3
+  // decision band in turn -- the AI's real, unmodified decision rule and the real Fight.resolve
+  // pipeline still do everything else; this only guarantees each tier gets a fair, seeded shot
+  // instead of leaving s2/s3 to chance. The prime is deliberately delayed a few frames (not applied
+  // at frame 0) and staggered per restart: priming at frame 0 was measured to synchronize BOTH
+  // AI.make instances' opening move so tightly that the defender was always mid-its-own-swing (and
+  // so `me.busy()` skips decideBlock outright, 55_ai.js) on the single foe.f===1 frame
+  // decideBlock's own reactive check reads -- 0 real blocks in 79 real s2 throws. A short staggered
+  // delay lets the two independent AI streams desync first, the same way they would in ordinary
+  // (unprimed) play, which measurably restores real reactive blocks (carl's own S2 case).
+  const bands=[130,250,300];
+  let s=seedBase,band=0;
+  const mk=()=>{
+    const nf=new Fight({seed:s,p1:champDef,p2:mobDef,ctrl1:AI.make(tier,s),ctrl2:AI.make(tier,s+1),clock:60,noCrit:false});
+    nf._primeAt=15+((band*23)%37);nf._primeBand=bands[band%bands.length];nf._primed=false;
+    band++;return nf};
+  let f=mk();
+  for(let i=0;i<maxSteps;i++){
+    if(!f._primed&&f.frame>=f._primeAt){f.p1.power=f._primeBand;f._primed=true}
+    // An s3 (either side) arms a 72-frame cinematic freeze that only G.tick() ever decrements
+    // (Fight.step itself just no-ops solid while cinematic>0, see Fight.checkCinematic's own
+    // comment) -- cleared by hand every step, same pattern every other raw f.step() test that can
+    // hit an s3 uses, or this soak would permanently stall the instant any S3 fires.
+    f.cinematic=0;
+    f.step();
+    if(f.over){scan(f);s+=2;f=mk()}}
+  scan(f);
+  return seen}
+Test.add('Phase 9 ruling 5: each champion\'s real S1/S2/S3 applies its own listed kit effect at least once across a seeded AI-vs-AI soak (not just the scripted single-move proofs above)',()=>{
+  const mobs=[MOBS.hobgoblin,MOBS.grub,MOBS.skeleton];
+  for(const[id,def]of Object.entries(CHAMPS)){
+    const seen={s1:false,s2:false,s3:false};
+    outer:
+    for(const tier of['t3','t4','t5'])for(const seed of[1,2,3,4])for(const mob of mobs){
+      const r=kitUsageSeen(def,id,mob,tier,seed,4000);
+      seen.s1=seen.s1||r.s1;seen.s2=seen.s2||r.s2;seen.s3=seen.s3||r.s3;
+      if(seen.s1&&seen.s2&&seen.s3)break outer}
+    ok(seen.s1,id+'\'s S1 must apply its listed effect in at least one soaked cell');
+    ok(seen.s2,id+'\'s S2 must land/apply its own listed effect in at least one soaked cell');
+    ok(seen.s3,id+'\'s S3 must apply its listed effect in at least one soaked cell')}});
