@@ -342,6 +342,21 @@ const Ctrl={
     if(me.state==='ATTACK'&&me.phase()==='recovery'&&me.landed&&me.chainNode>=1&&me.chainNode<CHAIN.nodes){
       if(openedMedium&&me.chainNode===CHAIN.nodes-1){it.medium=true;return it}
       it.light=true;return it}
+    // Task 9.4 (busy()-gate fix, 9.1b review Important finding): keep holding block through
+    // BLOCKSTUN, ahead of the busy() gate just below (mirrors AI.make's own decideBlock('hold')
+    // fix, 55_ai.js). Fighter.busy() (50_fighter.js) excludes only IDLE/BLOCK, so BLOCKSTUN counts
+    // as busy -- without this, this controller's own busy() gate returned EMPTY (block:false) on
+    // every frame spent in BLOCKSTUN, which zeroed Fighter.blockAge each of those frames (act()
+    // resets it to 0 whenever intent.block reads false), so by the time BLOCKSTUN's own timer
+    // expired, blockAge was provably always 0 and Task 9.1b's same-frame BLOCKSTUN->BLOCK re-entry
+    // could never actually fire for this bot either -- a real block that had already landed leaked
+    // the next sub-hit of a multi-hit special through as an unblocked hit regardless. me.blockAge is
+    // read directly off the live Fighter (a plain field, already the exact "was I holding block as
+    // of the last act() call" signal 50_fighter.js/60_fight.js's own state machine relies on) rather
+    // than duplicating a parallel "was I blocking" flag in this controller's own closure state --
+    // Ctrl.* already only ever reads fighter fields, never mutates them, same boundary every other
+    // read here (me.hp/me.power/me.chainNode/...) keeps. No rng touched.
+    if(me.state==='BLOCKSTUN'&&me.blockAge>0){it.block=true;return it}
     if(me.busy())return it;
     // Task 7.5 (dash-back read): see this controller's own numbered comment above for the full
     // reasoning -- foe.effStartup is always set once foe.state==='ATTACK' (setupDash runs inside the
