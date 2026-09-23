@@ -367,21 +367,31 @@ const Render={ctx:canvas.getContext('2d'),
   // Task 8.4 ruling: the combo counter's shown digit count-up-tweens to the real combo over at most
   // CB_TWEEN_FRAMES, never overshooting it. State lives on Render itself (presentation-only, never
   // touches Fighter/Fight), keyed by side ('p1'/'p2') so each HUD half tweens independently.
-  // On a rising target it ramps `shown` from wherever it currently sits toward the new target,
-  // measured from the frame the rise was first seen (so a later, still-climbing call keeps the same
-  // ramp instead of restarting one every frame); on a falling target -- a combo reset, a shorter new
-  // combo, or hud() itself parking the tween at 0 while combo<=1 -- it snaps immediately, since
-  // "never overshoot" also means never lingering on a stale HIGHER count once the real one has
-  // dropped. A never-before-seen side starts its state at 0 (not the target), so even a combo
-  // counter's first-ever appearance ramps up rather than snapping in fully formed.
+  // On a rising target it ramps `shown` from wherever it currently sits toward the new target, one
+  // step per hud() DRAW call (st.step, capped at CB_TWEEN_FRAMES) rather than per simulated fight
+  // tick (F.frame): an early version measured the ramp off F.frame and it read back correctly in
+  // every real-time playthrough, but --sim's fast-forward runs dozens of ticks inside one synchronous
+  // JS loop with no paint in between (tests/harness.py's build_soak_js) -- the very first real hud()
+  // draw after such a jump would see F.frame already far past when the combo actually rose, collapse
+  // `span` to 1 frame's worth of progress, and freeze the shown digit there (caught by the very
+  // docs/shots/p8-hud.png this task's brief requires: a --sim shot landed on "1 HITS" for an actual
+  // 4-hit combo). Counting draw calls instead ties the ramp to how many times this HUD has actually
+  // been painted, which is what "≤8 frames" of visible motion means for an on-screen tween, and is
+  // immune to how many (or how few) simulated ticks separated two consecutive paints.
+  // On a falling target -- a combo reset, a shorter new combo, or hud() itself parking the tween at 0
+  // while combo<=1 -- it snaps immediately, since "never overshoot" also means never lingering on a
+  // stale HIGHER count once the real one has dropped. A never-before-seen side starts its state at 0
+  // (not the target), so even a combo counter's first-ever appearance ramps up rather than snapping
+  // in fully formed.
   CB_TWEEN_FRAMES:8,
-  comboDisplay(side,target,frame){
+  comboDisplay(side,target){
     this._comboTween=this._comboTween||{};
-    const st=this._comboTween[side]||(this._comboTween[side]={shown:0,from:0,to:0,startFrame:frame});
-    if(target<st.shown){st.shown=target;st.from=target;st.to=target;st.startFrame=frame;return st.shown}
-    if(target>st.to){st.from=st.shown;st.to=target;st.startFrame=frame}
+    const st=this._comboTween[side]||(this._comboTween[side]={shown:0,from:0,to:0,step:0});
+    if(target<st.shown){st.shown=target;st.from=target;st.to=target;st.step=this.CB_TWEEN_FRAMES;return st.shown}
+    if(target>st.to){st.from=st.shown;st.to=target;st.step=0}
     if(st.shown<st.to){
-      const span=Math.max(1,frame-st.startFrame),t=Math.min(1,span/this.CB_TWEEN_FRAMES);
+      st.step=Math.min(this.CB_TWEEN_FRAMES,st.step+1);
+      const t=st.step/this.CB_TWEEN_FRAMES;
       st.shown=Math.min(st.to,Math.round(st.from+(st.to-st.from)*t))}
     return st.shown},
   // Three chevron cells, filled from p1's power (the rendition shows one power bar for the player,
@@ -442,12 +452,12 @@ const Render={ctx:canvas.getContext('2d'),
     // combo actually starts even if the tweened digit briefly reads lower while it ramps up. The
     // `else` branches park the tween at 0 while no combo is showing, so the next one always ramps up
     // from zero instead of resuming from a stale earlier count.
-    if(a.combo>1){const shown=this.comboDisplay('p1',a.combo,f.frame);
+    if(a.combo>1){const shown=this.comboDisplay('p1',a.combo);
       this.combo(c,56,190,shown+' HITS',-6,'#f4c542','left')}
-    else this.comboDisplay('p1',0,f.frame);
-    if(b.combo>1){const shown=this.comboDisplay('p2',b.combo,f.frame),col=CLS_GEM[b.def.cls]||CLS_GEM.default;
+    else this.comboDisplay('p1',0);
+    if(b.combo>1){const shown=this.comboDisplay('p2',b.combo),col=CLS_GEM[b.def.cls]||CLS_GEM.default;
       this.combo(c,W-56,190,shown+' HITS',6,col,'right')}
-    else this.comboDisplay('p2',0,f.frame);
+    else this.comboDisplay('p2',0);
     this.chevrons(c,a.power);
     if(f.over){c.textAlign='center';c.fillStyle='#fff';c.font='bold 40px ui-monospace,monospace';c.fillText('K.O.',W/2,H/2)}},
   frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
