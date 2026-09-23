@@ -4834,18 +4834,18 @@ Test.add('Immovable (Mongo): +1 fury stack every 120 frames spent in BLOCK or BL
   f.p1.state='BLOCK';
   for(let i=0;i<120*4;i++){f.frame++;Passives.tick(f,f.p1)}
   eq(Effects.stacks(f.p1,'fury'),5,'capped at 5, never exceeded however long the blocking continues')});
-Test.add('Champion of the Floor (Grull): purifies every currently-held debuff and grants +3 fury every 1200 frames (fight.frame % 1200)',()=>{
+Test.add('Champion of the Floor (Grull): purifies every currently-held debuff and grants +3 fury every 600 frames (fight.frame % 600) -- Task 9.4 halved the cadence from 1200f (real boss fights average 300-620f, so the old cadence rarely landed even once)',()=>{
   const f=mkFight({p1:BOSSES.grull});
-  for(let i=0;i<1199;i++){f.frame++;Passives.tick(f,f.p1)}
-  eq(Effects.stacks(f.p1,'fury'),0,'must not fire before frame 1200');
+  for(let i=0;i<599;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),0,'must not fire before frame 600');
   Effects.apply(f,f.p1,'weakness',{stacks:2});
   f.frame++;Passives.tick(f,f.p1);
-  eq(Effects.stacks(f.p1,'fury'),3,'exactly +3 fury on the 1200th frame');
+  eq(Effects.stacks(f.p1,'fury'),3,'exactly +3 fury on the 600th frame');
   ok(!Effects.has(f.p1,'weakness'),'every debuff held at that instant must be purified on the same beat');
-  for(let i=0;i<1199;i++){f.frame++;Passives.tick(f,f.p1)}
-  eq(Effects.stacks(f.p1,'fury'),3,'must not fire again before the next 1200-frame beat');
+  for(let i=0;i<599;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),3,'must not fire again before the next 600-frame beat');
   f.frame++;Passives.tick(f,f.p1);
-  eq(Effects.stacks(f.p1,'fury'),5,'a second +3 grant on the 2400th frame, clamped by fury\'s own maxStacks(5)')});
+  eq(Effects.stacks(f.p1,'fury'),5,'a second +3 grant on the 1200th frame, clamped by fury\'s own maxStacks(5)')});
 Test.add('Brood (Mother Rat): grants one powerGain stack the instant hp first crosses below 50% (edge-triggered, re-arms once healed back above)',()=>{
   const f=mkFight({p1:BOSSES.mother_rat});
   f.p1.hp=f.p1.maxHp*0.6;
@@ -4936,8 +4936,8 @@ Test.add('Passives module and every hook stay presentation-free and RNG-free (si
   for(const fn of[Passives.tick,Passives.onParry,Passives.onSpecial,Passives.potency,Passives._fire])
     ok(!P_PURITY.test(fn.toString()),'Passives.'+(fn.name||'?')+' must stay presentation- and RNG-free')});
 Test.add('active passives do not change the fight\'s rng draw count (Passives consumes no RNG)',()=>{
-  // p2's hp is padded well past anything grull's own attacks could KO within 1300 frames -- a real KO
-  // would stop Fight.step (and with it Passives.tick) before Champion of the Floor's own 1200-frame
+  // p2's hp is padded well past anything grull's own attacks could KO within 2500 frames -- a real KO
+  // would stop Fight.step (and with it Passives.tick) before Champion of the Floor's own 600-frame
   // beat ever landed, which is exactly what this test needs to actually exercise.
   const f1=mkFight({noCrit:false,p1:BOSSES.grull,ctrl1:Ctrl.script([L(0,2500)])});closeIn(f1);f1.p2.hp=f1.p2.maxHp=1e6;
   let n1=0;const raw1=f1.rng.next.bind(f1.rng);f1.rng.next=()=>{n1++;return raw1()};

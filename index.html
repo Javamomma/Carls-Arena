@@ -1866,7 +1866,7 @@ const BOSSES={
       s3:{dmg:3.6,hits:3,gap:10,applies:[{id:'weakness',stacks:1,on:'last'}]}},
     // Task 9.2: Champion of the Floor -- see PASSIVES.championOfTheFloor (49_passives.js).
     passive:{id:'championOfTheFloor'},
-    kitText:{sig:'CHAMPION OF THE FLOOR — purifies every debuff and gains +3 Fury every 20s',
+    kitText:{sig:'CHAMPION OF THE FLOOR — purifies every debuff and gains +3 Fury every 10s',
       heavy:'PILLAR SWING — long reach, Armor Breaks',
       s1:'3-hit flurry',
       s2:'5-hit flurry',
@@ -2415,7 +2415,14 @@ const PASSIVES={
   royalDisdain:{onSpecial:{id:'weakness',stacks:1,doubleIfDebuffed:true}},
   understudy:{onParry:{id:'critDmg',stacks:1}},
   immovable:{whileBlocking:{every:120,apply:{id:'fury',stacks:1},max:5}},
-  championOfTheFloor:{every:1200,purify:true,apply:{id:'fury',stacks:3}},
+  // Task 9.4 (9.2/9.3 review carry-over, controller ruling): every 1200 -> 600 frames -- measured
+  // real boss fights (tests/batch.py's f1_grull/f2_mother rows) average roughly 300-620 frames long,
+  // so the frozen interface's own 1200f cadence meant Grull's own signature ability -- a full
+  // purify plus +3 fury -- almost never actually fired within a real fight's length (it needed to
+  // survive past frame 1200 first). Halving it to 600 lets a fight that runs the boss's own typical
+  // length actually see the mechanic at least once. kitText's own "every 20s" line (40_movedata.js)
+  // is updated alongside this to "every 10s" (600f/60fps).
+  championOfTheFloor:{every:600,purify:true,apply:{id:'fury',stacks:3}},
   brood:{hpBelow:.50,apply:{id:'powerGain',stacks:1}}};
 
 const Passives={
@@ -2490,10 +2497,12 @@ const Passives={
         // have wrongly summed to 180 (a stack at the wrong time) instead of resetting to 0 on the hit.
         else t.immovable=0;
         break}
-      // Grull's Champion of the Floor: every 1200 frames (fight.frame%1200===0, controller ruling --
-      // a stateless clock, no per-fighter timer needed), purify every debuff he's currently holding
-      // then grant +3 fury. Purify runs unconditionally on the beat (not gated by whether he actually
-      // holds any debuff) -- Effects.purify is already a silent no-op when there's nothing to strip.
+      // Grull's Champion of the Floor: every cfg.every frames (fight.frame%cfg.every===0, controller
+      // ruling -- a stateless clock, no per-fighter timer needed; Task 9.4 halved this from 1200 to
+      // 600 -- see PASSIVES.championOfTheFloor's own comment), purify every debuff he's currently
+      // holding then grant +3 fury. Purify runs unconditionally on the beat (not gated by whether he
+      // actually holds any debuff) -- Effects.purify is already a silent no-op when there's nothing
+      // to strip.
       case'championOfTheFloor':{
         const cfg=PASSIVES.championOfTheFloor;
         if(fight.frame>0&&fight.frame%cfg.every===0){
@@ -14717,18 +14726,18 @@ Test.add('Immovable (Mongo): +1 fury stack every 120 frames spent in BLOCK or BL
   f.p1.state='BLOCK';
   for(let i=0;i<120*4;i++){f.frame++;Passives.tick(f,f.p1)}
   eq(Effects.stacks(f.p1,'fury'),5,'capped at 5, never exceeded however long the blocking continues')});
-Test.add('Champion of the Floor (Grull): purifies every currently-held debuff and grants +3 fury every 1200 frames (fight.frame % 1200)',()=>{
+Test.add('Champion of the Floor (Grull): purifies every currently-held debuff and grants +3 fury every 600 frames (fight.frame % 600) -- Task 9.4 halved the cadence from 1200f (real boss fights average 300-620f, so the old cadence rarely landed even once)',()=>{
   const f=mkFight({p1:BOSSES.grull});
-  for(let i=0;i<1199;i++){f.frame++;Passives.tick(f,f.p1)}
-  eq(Effects.stacks(f.p1,'fury'),0,'must not fire before frame 1200');
+  for(let i=0;i<599;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),0,'must not fire before frame 600');
   Effects.apply(f,f.p1,'weakness',{stacks:2});
   f.frame++;Passives.tick(f,f.p1);
-  eq(Effects.stacks(f.p1,'fury'),3,'exactly +3 fury on the 1200th frame');
+  eq(Effects.stacks(f.p1,'fury'),3,'exactly +3 fury on the 600th frame');
   ok(!Effects.has(f.p1,'weakness'),'every debuff held at that instant must be purified on the same beat');
-  for(let i=0;i<1199;i++){f.frame++;Passives.tick(f,f.p1)}
-  eq(Effects.stacks(f.p1,'fury'),3,'must not fire again before the next 1200-frame beat');
+  for(let i=0;i<599;i++){f.frame++;Passives.tick(f,f.p1)}
+  eq(Effects.stacks(f.p1,'fury'),3,'must not fire again before the next 600-frame beat');
   f.frame++;Passives.tick(f,f.p1);
-  eq(Effects.stacks(f.p1,'fury'),5,'a second +3 grant on the 2400th frame, clamped by fury\'s own maxStacks(5)')});
+  eq(Effects.stacks(f.p1,'fury'),5,'a second +3 grant on the 1200th frame, clamped by fury\'s own maxStacks(5)')});
 Test.add('Brood (Mother Rat): grants one powerGain stack the instant hp first crosses below 50% (edge-triggered, re-arms once healed back above)',()=>{
   const f=mkFight({p1:BOSSES.mother_rat});
   f.p1.hp=f.p1.maxHp*0.6;
@@ -14819,8 +14828,8 @@ Test.add('Passives module and every hook stay presentation-free and RNG-free (si
   for(const fn of[Passives.tick,Passives.onParry,Passives.onSpecial,Passives.potency,Passives._fire])
     ok(!P_PURITY.test(fn.toString()),'Passives.'+(fn.name||'?')+' must stay presentation- and RNG-free')});
 Test.add('active passives do not change the fight\'s rng draw count (Passives consumes no RNG)',()=>{
-  // p2's hp is padded well past anything grull's own attacks could KO within 1300 frames -- a real KO
-  // would stop Fight.step (and with it Passives.tick) before Champion of the Floor's own 1200-frame
+  // p2's hp is padded well past anything grull's own attacks could KO within 2500 frames -- a real KO
+  // would stop Fight.step (and with it Passives.tick) before Champion of the Floor's own 600-frame
   // beat ever landed, which is exactly what this test needs to actually exercise.
   const f1=mkFight({noCrit:false,p1:BOSSES.grull,ctrl1:Ctrl.script([L(0,2500)])});closeIn(f1);f1.p2.hp=f1.p2.maxHp=1e6;
   let n1=0;const raw1=f1.rng.next.bind(f1.rng);f1.rng.next=()=>{n1++;return raw1()};

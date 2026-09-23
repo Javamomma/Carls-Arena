@@ -18,7 +18,14 @@ const PASSIVES={
   royalDisdain:{onSpecial:{id:'weakness',stacks:1,doubleIfDebuffed:true}},
   understudy:{onParry:{id:'critDmg',stacks:1}},
   immovable:{whileBlocking:{every:120,apply:{id:'fury',stacks:1},max:5}},
-  championOfTheFloor:{every:1200,purify:true,apply:{id:'fury',stacks:3}},
+  // Task 9.4 (9.2/9.3 review carry-over, controller ruling): every 1200 -> 600 frames -- measured
+  // real boss fights (tests/batch.py's f1_grull/f2_mother rows) average roughly 300-620 frames long,
+  // so the frozen interface's own 1200f cadence meant Grull's own signature ability -- a full
+  // purify plus +3 fury -- almost never actually fired within a real fight's length (it needed to
+  // survive past frame 1200 first). Halving it to 600 lets a fight that runs the boss's own typical
+  // length actually see the mechanic at least once. kitText's own "every 20s" line (40_movedata.js)
+  // is updated alongside this to "every 10s" (600f/60fps).
+  championOfTheFloor:{every:600,purify:true,apply:{id:'fury',stacks:3}},
   brood:{hpBelow:.50,apply:{id:'powerGain',stacks:1}}};
 
 const Passives={
@@ -93,10 +100,12 @@ const Passives={
         // have wrongly summed to 180 (a stack at the wrong time) instead of resetting to 0 on the hit.
         else t.immovable=0;
         break}
-      // Grull's Champion of the Floor: every 1200 frames (fight.frame%1200===0, controller ruling --
-      // a stateless clock, no per-fighter timer needed), purify every debuff he's currently holding
-      // then grant +3 fury. Purify runs unconditionally on the beat (not gated by whether he actually
-      // holds any debuff) -- Effects.purify is already a silent no-op when there's nothing to strip.
+      // Grull's Champion of the Floor: every cfg.every frames (fight.frame%cfg.every===0, controller
+      // ruling -- a stateless clock, no per-fighter timer needed; Task 9.4 halved this from 1200 to
+      // 600 -- see PASSIVES.championOfTheFloor's own comment), purify every debuff he's currently
+      // holding then grant +3 fury. Purify runs unconditionally on the beat (not gated by whether he
+      // actually holds any debuff) -- Effects.purify is already a silent no-op when there's nothing
+      // to strip.
       case'championOfTheFloor':{
         const cfg=PASSIVES.championOfTheFloor;
         if(fight.frame>0&&fight.frame%cfg.every===0){
