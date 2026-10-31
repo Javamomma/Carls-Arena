@@ -8277,3 +8277,24 @@ Test.add('final boss win, TITLE, then an exhibition fight: pause QUIT returns to
   document.getElementById('quit').click();
   eq(Screens._current,'title');
   G.toTitle();G.sim=false});
+
+Test.add('arena leaderboard shows saved text literally and builds no elements from markup',()=>{
+  const saved=Save.data.leaderboard,origin=Screens._origin;
+  try{
+    Save.data.leaderboard=[
+      {champ:'<img src=x>',viewers:1200,streak:3,date:'<b>x</b>'},
+      {champ:'carl',viewers:900,floor:2,date:'2026-01-02'}];
+    Screens.arena();
+    const rows=document.querySelectorAll('#arenaLeaderboard .lbrow');
+    eq(rows.length,2);
+    eq(rows[0].querySelectorAll('img,b').length,0);
+    eq(rows[0].children.length,5);
+    eq(rows[0].children[2].textContent,'<img src=x>');
+    eq(rows[0].children[4].textContent,'<b>x</b>');
+    eq(rows[1].children.length,5);
+    eq(rows[1].children[0].textContent,'2');
+    eq(rows[1].children[2].textContent,CHAMPS.carl.name);
+    eq(rows[1].children[3].textContent,'FLOOR 2');
+    eq(rows[1].children[4].textContent,'2026-01-02');
+    for(const c of rows[1].children)eq(c.tagName,'SPAN')
+  }finally{Save.data.leaderboard=saved;Screens._origin=origin;Screens.title()}});

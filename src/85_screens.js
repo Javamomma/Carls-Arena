@@ -518,8 +518,9 @@ const Screens={
         const row=document.createElement('div');row.className='lbrow';
         const champName=(CHAMPS[e.champ]&&CHAMPS[e.champ].name)||e.champ;
         const prog=e.floor!=null?('FLOOR '+e.floor):('STREAK '+e.streak);
-        row.innerHTML=[String(i+1),Render.fmtViewers(e.viewers)+' VIEWERS',champName,prog,e.date]
-          .map(s=>'<span>'+s+'</span>').join('');
+        // textContent because champ and date come from the save and must never be parsed as markup.
+        [String(i+1),Render.fmtViewers(e.viewers)+' VIEWERS',champName,prog,e.date].forEach(s=>{
+          const cell=document.createElement('span');cell.textContent=s;row.appendChild(cell)});
         lb.appendChild(row)})}
     document.getElementById('arenaBack').onclick=()=>Screens.title()},
   // ---- result ----------------------------------------------------------------------------------

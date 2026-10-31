@@ -1121,7 +1121,7 @@ def main():
             out['unit'] = r
             print(json.dumps(out, indent=1))
             b.close()
-            sys.exit(0 if r['fail'] == 0 and not errors else 1)
+            sys.exit(0 if r['fail'] == 0 and not errors and not console else 1)
         if a.cinematic:
             pg.evaluate('G.debugCinematic()')
             out['state'] = pg.evaluate('G.state')
