@@ -36,7 +36,7 @@ import argparse, json, os, sys, time
 from playwright.sync_api import sync_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-INDEX = 'file://' + os.path.join(ROOT, 'index.html')
+INDEX = 'file://' + os.path.join(ROOT, 'test.html')
 
 # A generous per-fight tick cap: Fight's own clock (120s default -> 7200 ticks) always forces a
 # timeout decision, and the post-KO slow-mo grace period (90 frames, stepped one per 4 ticks) adds

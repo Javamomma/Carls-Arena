@@ -188,7 +188,7 @@ $H --reset-save --pre "Save.data.roster.carl={stars:3,rank:2,level:14,xp:22,shar
 # resolves) or the generic --cinematic S3 name-card (p2-card.png/p7-s3.png). None of those show a
 # kit's own listed EFFECT actually landing. These four use `--eval` (which runs after the harness's
 # own startFight but before --shot's screenshot) to drive a real, deterministic connect: closeIn(f)
-# (the same test-file helper every scripted unit test uses, concatenated into index.html along with
+# (the same test-file helper every scripted unit test uses, concatenated into test.html along with
 # everything else in src/90_tests.js, so it's callable here too) puts the two fighters adjacent,
 # the attacker's own power is set directly to the special's exact cost (100/200/300 -- not "primed"
 # gameplay, just the harness's own debug-state convention every other fixture in this file already

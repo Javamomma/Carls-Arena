@@ -35,6 +35,9 @@
       # arena/settings is also a real >=44px target fully inside the viewport (one legitimately scrolled
       # out of a .path/.setrows/#shopBody internal scroll region is skipped, not failed)
 
+  python3 tests/harness.py --player-smoke                           # player page (index.html) only:
+      # no test code, title screen, one full fight to RESULT, no page/console errors
+
   python3 tests/harness.py --saves                                  # damaged-save cases: a prepared
       # localStorage save is seeded before any game script runs (fresh browser context per case);
       # checks the game still starts, only the broken record is repaired, an unreadable save is
@@ -48,6 +51,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INDEX = 'file://' + os.path.join(ROOT, 'index.html')
+TEST_PAGE = 'file://' + os.path.join(ROOT, 'test.html')
 # The four-champion roster fixture, kept in one place because two things have to agree on it: the
 # docs/shots/p8-roster.png line in tools/shots.sh (which passes it as --pre) and --phone-check's own
 # roster seeding (Phase 8 final review, Important #5 -- a fresh one-champion save made every roster
@@ -312,7 +316,7 @@ def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
     cell_errors = []
     pg.on('pageerror', lambda e: cell_errors.append(str(e)))
     pg.on('console', lambda m: cell_errors.append(m.text) if m.type == 'error' else None)
-    pg.goto(INDEX)
+    pg.goto(TEST_PAGE)
     pg.wait_for_function('typeof G!=="undefined"')
     js = build_soak_js(seed, p1n, p2n, ain, 'Ctrl.random(seed)', int(sim_seconds * 60))
     r = pg.evaluate(js)
@@ -477,7 +481,7 @@ def run_saves():
             errs = []
             pg.on('pageerror', lambda e: errs.append(str(e)))
             pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             started = True
             try:
                 pg.wait_for_function('typeof G!=="undefined"', timeout=3000)
@@ -512,6 +516,33 @@ def run_saves():
         b.close()
     print(json.dumps({'saves': results}, indent=1))
     return 1 if any_err or any(not r['ok'] for r in results) else 0
+
+def run_player_smoke():
+    """Loads the shipped player page and plays one fight through the game's own loop, with no test
+    helpers, so a build that leaks test code or breaks without it fails here."""
+    errors = []
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page(viewport={'width': 854, 'height': 480})
+        pg.on('pageerror', lambda e: errors.append(str(e)))
+        pg.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
+        pg.goto(INDEX)
+        pg.wait_for_function('typeof G!=="undefined"')
+        html = open(os.path.join(ROOT, 'index.html'), encoding='utf-8').read()
+        r = pg.evaluate("""(()=>{
+          const o={test_undefined:typeof Test==='undefined',
+                   title_shown:document.getElementById('title').classList.contains('show')&&G.state==='TITLE'};
+          G.sim=true;
+          G.startFight({seed:1,p1:'carl',p2:'donut',ai:'brawl',ctrl1:Ctrl.random(1)});
+          let frames=0;
+          while(G.state!=='RESULT'&&frames<20000){G.tick();frames++}
+          o.frames=frames;o.final_state=G.state;return o})()""")
+        b.close()
+    out = dict(r, no_test_add=('Test.add(' not in html), errors=errors)
+    print(json.dumps(out, indent=1))
+    ok = (r['test_undefined'] and out['no_test_add'] and r['title_shown']
+          and r['final_state'] == 'RESULT' and not errors)
+    return 0 if ok else 1
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -615,6 +646,9 @@ def main():
                           "closeIn to skip the walk-up) so Screens.result renders too; each screen's "
                           "own pageerror/console-error delta is recorded separately; prints a JSON "
                           "{screens:[{screen,errors}]} and exits 1 if any screen recorded errors")
+    ap.add_argument('--player-smoke', action='store_true',
+                     help="load the player page (index.html): no test code in it, the game starts on "
+                          "the title screen, one real fight plays to RESULT, no page/console errors")
     ap.add_argument('--saves', action='store_true',
                      help="seed damaged saves into localStorage before any game script runs and check "
                           "the game starts, only the broken record is repaired, unreadable saves are "
@@ -652,6 +686,8 @@ def main():
         sys.exit(run_matrix())
     if a.saves:
         sys.exit(run_saves())
+    if a.player_smoke:
+        sys.exit(run_player_smoke())
     if a.perf is not None:
         with sync_playwright() as p:
             b = p.chromium.launch()
@@ -659,7 +695,7 @@ def main():
             perf_errors = []
             pg.on('pageerror', lambda e: perf_errors.append(str(e)))
             pg.on('console', lambda m: perf_errors.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             # Restart-on-KO, same as build_soak_js: a plain N-tick loop with no restart leaves
             # G.stepFrame() a no-op for the remainder of the run once the fight ends (Fight.step
@@ -692,7 +728,7 @@ def main():
             e2e_errors = []
             pg.on('pageerror', lambda e: e2e_errors.append(str(e)))
             pg.on('console', lambda m: e2e_errors.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             # Same reset as --reset-save: re-migrate from empty localStorage onto Meta.defaults()
             # so the run starts from full energy / floor 1 node 0 open / only carl owned, regardless
@@ -711,7 +747,7 @@ def main():
             share_errors = []
             pg.on('pageerror', lambda e: share_errors.append(str(e)))
             pg.on('console', lambda m: share_errors.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             # Same "end a fight via a scripted low-hp hit, then step ticks until RESULT" technique
             # every other e2e-style test in this file already uses (no dedicated debug-KO hook exists,
@@ -752,7 +788,7 @@ def main():
             tut_errors = []
             pg.on('pageerror', lambda e: tut_errors.append(str(e)))
             pg.on('console', lambda m: tut_errors.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             # Same reset as --e2e/--reset-save: re-migrate from empty localStorage onto Meta.defaults()
             # so the run starts from a genuinely fresh (!tutorialDone) save.
@@ -780,7 +816,7 @@ def main():
             shot_errors = []
             pg.on('pageerror', lambda e: shot_errors.append(str(e)))
             pg.on('console', lambda m: shot_errors.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             pg.evaluate('localStorage.clear();Save.load()')
             js = build_tutorial_shot_js(a.tutorial_shot, a.seed)
@@ -798,7 +834,7 @@ def main():
             errs = []
             pg.on('pageerror', lambda e: errs.append(str(e)))
             pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             pg.evaluate('localStorage.clear();Save.load()')
             results = []
@@ -845,7 +881,7 @@ def main():
             errs = []
             pg.on('pageerror', lambda e: errs.append(str(e)))
             pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             pg.evaluate('localStorage.clear();Save.load()')
             pg.evaluate("G.startFight({seed:1,p1:'carl',p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()})")
@@ -925,7 +961,7 @@ def main():
             screen_errs = []
             pg2.on('pageerror', lambda e: screen_errs.append(str(e)))
             pg2.on('console', lambda m: screen_errs.append(m.text) if m.type == 'error' else None)
-            pg2.goto(INDEX)
+            pg2.goto(TEST_PAGE)
             pg2.wait_for_function('typeof G!=="undefined"')
             pg2.evaluate('localStorage.clear();Save.load()')
             # Phase 8 final review, Important #5: a FRESH save has exactly one champion, so the
@@ -1107,7 +1143,7 @@ def main():
         pg = b.new_page(viewport={'width': 854, 'height': 480})
         pg.on('pageerror', lambda e: errors.append(str(e)))
         pg.on('console', lambda m: console.append(m.text) if m.type == 'error' else None)
-        pg.goto(INDEX)
+        pg.goto(TEST_PAGE)
         pg.wait_for_function('typeof G!=="undefined"')
         if a.reset_save:
             # Save.load() re-migrates from (now-empty) localStorage, landing on Meta.defaults() --

@@ -246,12 +246,15 @@ python -m pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-- Edit files in `src/`, then `python3 tools/build.py` writes `index.html`. Never hand-edit
-  `index.html` — it's a generated, concatenated build of every `src/*.js`/`*.html` file.
-  `python3 tools/build.py --check` builds without writing, exiting non-zero if the build would
-  differ from the committed `index.html`.
+- Edit files in `src/`, then `python3 tools/build.py` writes `index.html` (the player page, without
+  the test suite). Never hand-edit it or `test.html` — both are generated, concatenated builds of
+  the `src/*.js`/`*.html` files. `python3 tools/build.py --check` builds without writing, exiting
+  non-zero and naming each committed file that would differ.
+- `test.html` is the same page plus `src/90_tests.js`; the harness and `tests/batch.py` load it.
+- `python3 tests/harness.py --player-smoke` loads `index.html` and checks it has no test code and
+  plays one fight to the end.
 - `python3 tests/harness.py --unit` runs the in-page unit tests headless (Python Playwright driving
-  a real headless Chromium against `index.html`, no npm/node toolchain).
+  a real headless Chromium against `test.html`, no npm/node toolchain).
 - `python3 tests/harness.py --sim --seconds 60 --bot random --ai basic` soaks the fight loop for a
   fixed number of simulated frames, restarting on every KO.
 - `python3 tests/harness.py --matrix` runs the full AI/content soak matrix (every rig × mob × AI

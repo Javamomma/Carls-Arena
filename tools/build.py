@@ -1,17 +1,31 @@
 #!/usr/bin/env python3
-"""Concatenate src/* (sorted by filename) into index.html.
+"""Build the two pages from src/* (sorted by filename).
 
-  python3 tools/build.py          # write index.html
-  python3 tools/build.py --check  # exit 1 if index.html differs from a fresh build
+  index.html  the player page: every src file except 90_tests.js (what GitHub Pages serves)
+  test.html   the test page: every src file, loaded by tests/harness.py and tests/batch.py
+
+  python3 tools/build.py          # write both
+  python3 tools/build.py --check  # exit 1 and name each file that differs from a fresh build
 """
 import glob, os, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-parts = [open(p, encoding='utf-8').read() for p in sorted(glob.glob(os.path.join(ROOT, 'src', '*')))]
-out = '\n'.join(parts)
-idx = os.path.join(ROOT, 'index.html')
-if '--check' in sys.argv:
-    cur = open(idx, encoding='utf-8').read() if os.path.exists(idx) else ''
-    sys.exit(0 if cur == out else 1)
-open(idx, 'w', encoding='utf-8').write(out)
-print(f'wrote index.html ({len(out)} bytes, {len(parts)} parts)')
+TEST_SRC = '90_tests.js'
+files = sorted(glob.glob(os.path.join(ROOT, 'src', '*')))
+outputs = {
+    'index.html': '\n'.join(open(p, encoding='utf-8').read() for p in files if os.path.basename(p) != TEST_SRC),
+    'test.html': '\n'.join(open(p, encoding='utf-8').read() for p in files),
+}
+stale = []
+for name, text in outputs.items():
+    path = os.path.join(ROOT, name)
+    if '--check' in sys.argv:
+        cur = open(path, encoding='utf-8').read() if os.path.exists(path) else None
+        if cur != text:
+            stale.append(name)
+    else:
+        open(path, 'w', encoding='utf-8').write(text)
+        print(f'wrote {name} ({len(text.encode("utf-8"))} bytes)')
+if stale:
+    print('stale: ' + ', '.join(stale), file=sys.stderr)
+    sys.exit(1)

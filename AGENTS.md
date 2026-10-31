@@ -20,16 +20,17 @@ Base branch: main
   `python3.14 -m playwright install chromium`.
 
 ## Build
-- Edit files in `src/`, then run `python3 tools/build.py`. Commit the rebuilt `index.html` together
-  with the `src/` change.
-- Never hand-edit `index.html`.
-- `python3 tools/build.py --check` exits 1 if `index.html` is stale.
+- Edit files in `src/`, then run `python3 tools/build.py`. It writes two files: `index.html` (the
+  player page, everything except `src/90_tests.js`) and `test.html` (everything, which the harness
+  loads). Commit both rebuilt files together with the `src/` change.
+- Never hand-edit `index.html` or `test.html`.
+- `python3 tools/build.py --check` exits 1 and names each stale file.
 
 ## Verify
 Run this before you stop. It must print `ALL GREEN`:
 
 ```sh
-python3 tools/build.py --check && python3.14 tests/harness.py --unit >/dev/null && python3.14 tests/harness.py --tutorial --seed 1 >/dev/null && python3.14 tests/harness.py --e2e --seed 1 >/dev/null && python3.14 tests/harness.py --screens-smoke >/dev/null && python3.14 tests/harness.py --phone-check >/dev/null && python3.14 tests/harness.py --saves >/dev/null && echo ALL GREEN
+python3 tools/build.py --check && python3.14 tests/harness.py --unit >/dev/null && python3.14 tests/harness.py --tutorial --seed 1 >/dev/null && python3.14 tests/harness.py --e2e --seed 1 >/dev/null && python3.14 tests/harness.py --screens-smoke >/dev/null && python3.14 tests/harness.py --phone-check >/dev/null && python3.14 tests/harness.py --saves >/dev/null && python3.14 tests/harness.py --player-smoke >/dev/null && echo ALL GREEN
 ```
 
 To see why a mode failed, run it again without `>/dev/null` and read the JSON it prints. `--unit`
