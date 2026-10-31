@@ -86,7 +86,7 @@ Acceptance: `--unit` fails on console errors, like the other modes; the arena le
 built with `textContent`.
 Files: `tests/harness.py`, `src/85_screens.js`, `src/90_tests.js`, `index.html`.
 
-## 7. Reproducible checks and CI — `ci` — status: in progress
+## 7. Reproducible checks and CI — `ci` — status: done (first real run happens on the PR)
 Acceptance: pinned `requirements.txt` (Playwright); README developer setup including
 `python -m playwright install chromium`; AGENTS.md (done at setup) kept current; one GitHub
 Actions workflow running `build.py --check`, `--unit`, `--tutorial --seed 1`, `--e2e --seed 1`,
