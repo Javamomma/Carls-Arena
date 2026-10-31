@@ -50,7 +50,7 @@ Files: `src/12_meta.js`, `src/85_screens.js` (`lastFloor`, floor tabs), `src/90_
 `tests/harness.py` (the e2e helper that walks `Save.data.floors`), `tests/fixtures/*.json`,
 `index.html`.
 
-## 3. A rank-up catalyst in the shop — `shop-catalyst` — status: in progress at 600 gold; merge waits for Arshia to confirm the price
+## 3. A rank-up catalyst in the shop — `shop-catalyst` — status: built and approved at 600 gold (branch task/shop-catalyst); merge waits for Arshia to confirm the price
 Goal: every champion can earn its next rank through normal play.
 Acceptance:
 - One new `Meta.SHOP_ITEMS` entry, a "choose a class" catalyst bought with gold, and a class picker
@@ -71,7 +71,7 @@ reward code until each of the four champions completes its first rank-up. Existi
 stay.
 Files: `src/90_tests.js` and/or `tests/harness.py`.
 
-## 5. Energy refresh and a campaign-complete screen — `energy-campaign` — status: todo
+## 5. Energy refresh and a campaign-complete screen — `energy-campaign` — status: in progress
 Goal: waiting on the map refills energy, and finishing both bosses tells the player what's next.
 Acceptance:
 - `Energy.tick()` runs inside `Quest.canStart()`/`Quest.start()` and when the window regains focus.
