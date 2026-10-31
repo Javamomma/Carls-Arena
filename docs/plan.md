@@ -31,7 +31,7 @@ Acceptance:
 Files: `src/12_meta.js`, `src/15_save.js`, `src/85_screens.js` and/or `src/00_head.html` (the
 note), `src/90_tests.js`, `tests/harness.py`, `index.html`, `AGENTS.md` (add `--saves` to Verify).
 
-## 2. Stable fight IDs — `fight-ids` — status: in progress
+## 2. Stable fight IDs — `fight-ids` — status: done (e9fe0d1)
 Goal: campaign progress is stored per fight, not per list position, so reordering doors can never
 move a player's progress onto a different fight.
 Acceptance:
@@ -50,7 +50,7 @@ Files: `src/12_meta.js`, `src/85_screens.js` (`lastFloor`, floor tabs), `src/90_
 `tests/harness.py` (the e2e helper that walks `Save.data.floors`), `tests/fixtures/*.json`,
 `index.html`.
 
-## 3. A rank-up catalyst in the shop — `shop-catalyst` — status: waiting on Arshia's price
+## 3. A rank-up catalyst in the shop — `shop-catalyst` — status: in progress at 600 gold; merge waits for Arshia to confirm the price
 Goal: every champion can earn its next rank through normal play.
 Acceptance:
 - One new `Meta.SHOP_ITEMS` entry, a "choose a class" catalyst bought with gold, and a class picker
