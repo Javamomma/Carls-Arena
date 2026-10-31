@@ -81,7 +81,7 @@ Acceptance:
 Files: `src/12_meta.js`, `src/80_game.js`, `src/85_screens.js`, `src/00_head.html`,
 `src/90_tests.js`, `index.html`.
 
-## 6. Small fixes — `small-fixes` — status: todo
+## 6. Small fixes — `small-fixes` — status: in progress
 Acceptance: `--unit` fails on console errors, like the other modes; the arena leaderboard row is
 built with `textContent`.
 Files: `tests/harness.py`, `src/85_screens.js`, `src/90_tests.js`, `index.html`.
