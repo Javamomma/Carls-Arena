@@ -81,12 +81,12 @@ Acceptance:
 Files: `src/12_meta.js`, `src/80_game.js`, `src/85_screens.js`, `src/00_head.html`,
 `src/90_tests.js`, `index.html`.
 
-## 6. Small fixes — `small-fixes` — status: built, awaiting review
+## 6. Small fixes — `small-fixes` — status: done (7477103)
 Acceptance: `--unit` fails on console errors, like the other modes; the arena leaderboard row is
 built with `textContent`.
 Files: `tests/harness.py`, `src/85_screens.js`, `src/90_tests.js`, `index.html`.
 
-## 7. Reproducible checks and CI — `ci` — status: todo
+## 7. Reproducible checks and CI — `ci` — status: in progress
 Acceptance: pinned `requirements.txt` (Playwright); README developer setup including
 `python -m playwright install chromium`; AGENTS.md (done at setup) kept current; one GitHub
 Actions workflow running `build.py --check`, `--unit`, `--tutorial --seed 1`, `--e2e --seed 1`,
