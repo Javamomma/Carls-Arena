@@ -63,7 +63,7 @@ Acceptance:
 Files: `src/12_meta.js`, `src/85_screens.js`, `src/00_head.html` (picker styles), `src/90_tests.js`,
 `index.html`.
 
-## 4. Journey tests — `journey-tests` — status: todo
+## 4. Journey tests — `journey-tests` — status: in progress (branched from task/shop-catalyst)
 Goal: tests that earn resources the way a player does.
 Acceptance: from a fresh save, with no injected gold, catalysts or energy, the test plays or
 simulates the path (tutorial, campaign doors, arena runs, crystals, shop) through the game's own
