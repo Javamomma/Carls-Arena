@@ -16,7 +16,7 @@ Base branch: main
 
 ## Setup
 - On this Mac, `python3.14` has Playwright and the default `python3` does not. Use `python3.14` for
-  the harness. On a new machine: `python3.14 -m pip install playwright` and
+  the harness. On a new machine: `python3.14 -m pip install -r requirements.txt` and
   `python3.14 -m playwright install chromium`.
 
 ## Build

@@ -1,0 +1,37 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Build is up to date
+        run: python tools/build.py --check
+      - name: Unit tests
+        run: python tests/harness.py --unit
+      - name: Tutorial
+        run: python tests/harness.py --tutorial --seed 1
+      - name: End-to-end
+        run: python tests/harness.py --e2e --seed 1
+      - name: Screens smoke
+        run: python tests/harness.py --screens-smoke
+      - name: Phone check
+        run: python tests/harness.py --phone-check
+      - name: Saves
+        run: python tests/harness.py --saves

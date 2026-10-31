@@ -239,6 +239,13 @@ same reason (a blocked sub-hit never reaches the code path that applies it).
 
 ## Development
 
+Setup needs Python 3.9 or newer. CI uses 3.14, and AGENTS.md uses `python3.14` on Arshia's Mac.
+
+```sh
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+```
+
 - Edit files in `src/`, then `python3 tools/build.py` writes `index.html`. Never hand-edit
   `index.html` — it's a generated, concatenated build of every `src/*.js`/`*.html` file.
   `python3 tools/build.py --check` builds without writing, exiting non-zero if the build would
