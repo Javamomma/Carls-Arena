@@ -10,9 +10,11 @@ const Save={key:'carlsArena.v1',bakKey:'carlsArena.v1.bak',data:null,
     if(str!==null){
       let raw;
       try{raw=JSON.parse(str)}catch(e){raw=undefined}
-      const known=!!raw&&typeof raw==='object'&&(raw.v===1||raw.v===2);
+      const known=!!raw&&typeof raw==='object'&&(raw.v===1||raw.v===2||raw.v===3);
+      const upgrading=known&&raw.v<3;
       if(known){try{data=Meta.migrate(raw)}catch(e){data=null}}
-      if(!data)this.backup(str)}
+      // An upgrade rewrites the save in a new shape, so keep the original string first.
+      if(!data||upgrading)this.backup(str)}
     this.data=data||Meta.defaults();
     this.put()},
   // Keeps the raw string of a save we can't read before it is replaced; if the copy fails, stop writing.

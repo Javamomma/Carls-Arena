@@ -65,7 +65,7 @@ const Screens={
     if(o.name==='map')this.map(o.args&&o.args[0]);
     else if(typeof this[o.name]==='function')this[o.name]();
     else this.title()},
-  lastFloor(){const ks=Object.keys(Save.data.floors).map(Number);return ks.length?Math.max.apply(null,ks):1},
+  lastFloor(){return FLOORS.reduce((m,fd)=>Quest.unlocked(fd.floor)?Math.max(m,fd.floor):m,1)},
   // ---- title -------------------------------------------------------------------------------
   renderTitle(){
     Save.syncNote();
@@ -143,7 +143,7 @@ const Screens={
     heading.textContent=f?f.name:'CAMPAIGN';
     const tabs=document.getElementById('mapTabs');tabs.innerHTML='';
     for(const fd of FLOORS){
-      const unlocked=!!Save.data.floors[fd.floor];
+      const unlocked=Quest.unlocked(fd.floor);
       const b=document.createElement('button');
       b.className='ftab'+(fd.floor===n?' active':'');
       b.textContent='FLOOR '+fd.floor;

@@ -2333,7 +2333,7 @@ Test.add('G.startFight({floor,node:"boss"}) resolves the boss encounter and sets
   // Task 4.4: {floor,node} now spends energy through Quest.start, which requires the node to be
   // 'open' -- floor 2's boss doesn't exist in Meta.defaults() (only floor 1 is created), so it's
   // opened by hand here rather than relying on default save state.
-  Save.data=Meta.defaults();Save.data.floors[2]={nodes:['done','done','done','done','done'],boss:'open'};
+  Save.data=Meta.defaults();clearIds('f1_grull',...FLOORS[1].nodes);
   G.startFight({floor:2,node:'boss'});
   ok(G.encounter&&G.encounter.boss,'G.encounter.boss must be true');
   eq(G.fight.p2.def.id,'mother_rat');
@@ -2514,13 +2514,13 @@ Test.add('a batch of seeded Ctrl.competent vs AI t3 fights produces at least one
 // Task 4.1: Meta data layer (save v2, migrate, stats, energy) ------------------------------------
 Test.add('Meta.defaults has every top-level key and carl at 1-star/1-rank/1-level',()=>{
   const d=Meta.defaults();
-  for(const k of ['v','seed','gold','units','iso','cats','roster','active','floors','energy','arena','mute','settings','stats'])
+  for(const k of ['v','seed','gold','units','iso','cats','roster','active','cleared','energy','arena','mute','settings','stats'])
     ok(k in d,k+' missing');
-  eq(d.v,2);eq(d.active,'carl');
+  eq(d.v,3);eq(d.active,'carl');
   eq(d.roster.carl.stars,1);eq(d.roster.carl.rank,1);eq(d.roster.carl.level,1)});
 Test.add('Meta.migrate upgrades a v1 save, keeping gold/units/mute/settings and adding roster',()=>{
   const v2=Meta.migrate({v:1,gold:5,units:2,roster:{},mute:true,settings:{}});
-  eq(v2.v,2);eq(v2.gold,5);eq(v2.units,2);eq(v2.mute,true);
+  eq(v2.v,3);eq(v2.gold,5);eq(v2.units,2);eq(v2.mute,true);
   eq(v2.roster.carl.stars,1);eq(v2.roster.carl.rank,1);eq(v2.roster.carl.level,1)});
 Test.add('Meta.migrate fills missing keys on a v2 save without discarding what is there',()=>{
   const d=Meta.migrate({v:2,gold:9});
@@ -2594,7 +2594,7 @@ Test.add('Save.load migrates an existing v1 localStorage value without throwing'
   try{
     localStorage.setItem(Save.key,JSON.stringify({v:1,gold:5,units:2,roster:{},mute:true,settings:{x:1}}));
     Save.load();
-    eq(Save.data.v,2);eq(Save.data.gold,5);eq(Save.data.units,2);eq(Save.data.mute,true);
+    eq(Save.data.v,3);eq(Save.data.gold,5);eq(Save.data.units,2);eq(Save.data.mute,true);
     eq(Save.data.roster.carl.stars,1)
   }finally{
     if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
@@ -2607,7 +2607,7 @@ Test.add('Save.load persists the migrated v2 shape back to localStorage',()=>{
   try{
     localStorage.setItem(Save.key,JSON.stringify({v:1,gold:5,units:2,roster:{},mute:true,settings:{}}));
     Save.load();
-    eq(JSON.parse(localStorage.getItem(Save.key)).v,2,'localStorage must hold the migrated v2 save, not the original v1 one')
+    eq(JSON.parse(localStorage.getItem(Save.key)).v,3,'localStorage must hold the migrated v3 save, not the original v1 one')
   }finally{
     if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
     Save.load()}});
@@ -2616,7 +2616,7 @@ Test.add('Save.put/load round-trips a v2 save',()=>{
   try{
     Save.data=Meta.defaults();Save.data.gold=42;Save.data.roster.carl.stars=3;
     Save.put();Save.load();
-    eq(Save.data.gold,42);eq(Save.data.roster.carl.stars,3);eq(Save.data.v,2)
+    eq(Save.data.gold,42);eq(Save.data.roster.carl.stars,3);eq(Save.data.v,3)
   }finally{
     if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
     Save.load()}});
@@ -2780,6 +2780,8 @@ Test.add('Crystal.open advances Save.data.seed by one per open, so consecutive o
 // would all need renumbering together the day a tutorial floor 0 is inserted at FLOORS[0].
 // Quest.floorDef(n) looks a floor up by its own .floor field instead, so a future floor:0 just plugs
 // in without touching any of the three call sites' indexing math.
+// Marks fights as beaten in the live save.
+const clearIds=(...ids)=>{for(const id of ids)Save.data.cleared[id]=true};
 Test.add('Quest.floorDef(n) looks floors up by their own .floor field, not array index (fix-wave item 9, Phase 5 seam)',()=>{
   eq(Quest.floorDef(1).id,'f1');
   eq(Quest.floorDef(2).id,'f2');
@@ -2830,11 +2832,10 @@ Test.add('Quest.complete on a loss changes nothing',()=>{
   eq(JSON.stringify(Save.data),before)});
 Test.add('Quest.complete on the last node opens the boss',()=>{
   Save.data=Meta.defaults();
-  for(let i=0;i<5;i++){Save.data.floors[1].nodes[i]='open';Quest.complete(1,i,true)}
+  for(let i=0;i<5;i++)Quest.complete(1,i,true)
   eq(Quest.floor(1).boss.state,'open')});
 Test.add('Quest.complete(1,"boss",true) creates floor 2 with node 0 open',()=>{
   Save.data=Meta.defaults();
-  Save.data.floors[1].boss='open';
   ok(Quest.complete(1,'boss',true));
   eq(Quest.floor(1).boss.state,'done');
   const f2=Quest.floor(2);
@@ -2844,10 +2845,10 @@ Test.add('Quest.complete(1,"boss",true) creates floor 2 with node 0 open',()=>{
   eq(f2.boss.state,'locked')});
 Test.add('Quest.complete on floor 2\'s boss does not create a floor 3 (FLOORS only has 2 floors)',()=>{
   Save.data=Meta.defaults();
-  Save.data.floors[2]={nodes:['done','done','done','done','done'],boss:'open'};
+  clearIds('f1_grull',...FLOORS[1].nodes);
   ok(Quest.complete(2,'boss',true));
   eq(Quest.floor(2).boss.state,'done');
-  eq(Save.data.floors[3],undefined)});
+  eq(Quest.floor(3),null)});
 // Fix-wave item 8 (ruled): node gold raised from 100*n+40*k to 160*n+60*k -- floor 1 only yielded
 // ~1200 gold total under the old numbers, while one roster star costs ~5 dupes worth of crystals
 // (~10000 gold at 500g/basic), gating floor-2 progression almost entirely behind a wall unrelated to
@@ -3563,8 +3564,6 @@ Test.add('map doors show REC. LVL n under the label, with .under when the active
 // floor, and must actually be scrollable when it doesn't fit.
 Test.add('the map path never clips a full floor -- door cards that don\'t fit scroll into view rather than being cut off (fix-wave item 3, updated for Task 8.5 door-card art)',()=>{
   Save.data=Meta.defaults();
-  for(let i=0;i<5;i++)Save.data.floors[1].nodes[i]='open'; // worst case: every row rendered, none locked-thin
-  Save.data.floors[1].boss='open';
   Screens.map(1);
   const path=document.getElementById('mapPath');
   const cs=getComputedStyle(path);
@@ -8056,7 +8055,7 @@ Test.add('migrate: a broken top-level record becomes its default and every other
     const s=playedV2();s[k]=bad;
     const out=Meta.migrate(s),want=playedV2();
     eq(JSON.stringify(out[k]),JSON.stringify(Meta.defaults()[k]),k+' repaired from '+JSON.stringify(bad));
-    for(const j in want)if(j!==k)eq(JSON.stringify(out[j]),JSON.stringify(want[j]),j+' kept while '+k+' broke')}});
+    for(const j in want)if(j!==k&&j!=='v'&&j!=='floors')eq(JSON.stringify(out[j]),JSON.stringify(want[j]),j+' kept while '+k+' broke')}});
 Test.add('migrate: missing keys inside cats/energy/arena/stats/settings are filled, present ones kept',()=>{
   const s=playedV2();s.cats={brawler:3};s.energy={n:4};s.arena={};s.stats={wins:5};s.settings={haptics:false};
   const out=Meta.migrate(s),d=Meta.defaults();
@@ -8075,17 +8074,64 @@ Test.add('migrate: a non-object roster or floors falls back to defaults; active 
   const s=playedV2();s.roster=[];s.floors=null;
   const out=Meta.migrate(s);
   eq(JSON.stringify(out.roster),JSON.stringify(Meta.defaults().roster));eq(out.active,'carl');
-  eq(JSON.stringify(out.floors),JSON.stringify(Meta.defaults().floors))});
-Test.add('migrate: floors:{} gets the default floor 1, and existing floors keep their progress',()=>{
+  eq(JSON.stringify(out.cleared),'{}')});
+Test.add('migrate: floors:{} clears nothing, and existing floors keep their progress',()=>{
   const s=playedV2();s.floors={};
-  eq(JSON.stringify(Meta.migrate(s).floors),JSON.stringify(Meta.defaults().floors));
+  eq(JSON.stringify(Meta.migrate(s).cleared),'{}');
   const t=playedV2();delete t.floors[1];t.floors[2]={nodes:['done','open','locked','locked','locked'],boss:'locked'};
-  const out=Meta.migrate(t);eq(out.floors[2].nodes[0],'done');eq(out.floors[1].nodes[0],'open')});
+  const saved=Save.data;
+  try{
+    const out=Meta.migrate(t);
+    eq(Object.keys(out.cleared).sort().join(),'f1_goblin,f1_grull,f1_hob,f1_goblin2,f1_shaman,f1_skel,f2_grub'.split(',').sort().join());
+    Save.data=out;
+    ok(Quest.unlocked(2),'floor 2 must stay playable');
+    const f=Quest.floor(2);
+    eq(f.nodes.map(x=>x.state).join(),'done,open,locked,locked,locked');
+    Save.data.energy.n=Save.data.energy.max;
+    ok(Quest.canStart(2,1),'the earned open door must be startable');
+  }finally{Save.data=saved}});
 Test.add('migrate: a broken floor entry is reset, a good one and its progress are kept',()=>{
   const s=playedV2();s.floors[2]=null;s.floors[3]={nodes:'x',boss:5};
-  const out=Meta.migrate(s),fresh=Meta.defaults().floors[1];
-  eq(JSON.stringify(out.floors[1]),JSON.stringify(playedV2().floors[1]));
-  eq(JSON.stringify(out.floors[2]),JSON.stringify(fresh));eq(JSON.stringify(out.floors[3]),JSON.stringify(fresh))});
+  const out=Meta.migrate(s);
+  eq(Object.keys(out.cleared).sort().join(),'f1_goblin,f1_skel');ok(!('floors' in out))});
+// ---- stable fight ids ----------------------------------------------------------------------------
+const swapDoors=(a,b)=>{const n=FLOORS[0].nodes;[n[a],n[b]]=[n[b],n[a]]};
+const stateOf=(floor,id)=>{const f=Quest.floor(floor);return [].concat(f.nodes,[f.boss]).find(x=>x.id===id).state};
+Test.add('reordering doors in FLOORS moves no progress: each fight keeps its own done state',()=>{
+  const realData=Save.data;
+  try{
+    Save.data=Meta.defaults();
+    ok(Quest.complete(1,0,true));ok(Quest.complete(1,1,true));
+    eq(stateOf(1,'f1_goblin'),'done');eq(stateOf(1,'f1_skel'),'done');eq(stateOf(1,'f1_goblin2'),'open');
+    try{
+      swapDoors(1,2);
+      eq(stateOf(1,'f1_skel'),'done','f1_skel was cleared before the swap');
+      eq(stateOf(1,'f1_goblin'),'done');
+      ok(stateOf(1,'f1_goblin2')!=='done','f1_goblin2 was never cleared');
+    }finally{swapDoors(1,2)}
+    eq(stateOf(1,'f1_goblin2'),'open');
+  }finally{Save.data=realData}});
+Test.add('migrate v2->v3 reads the frozen door order, not the live FLOORS',()=>{
+  try{
+    swapDoors(0,1);swapDoors(2,3);
+    const out=Meta.migrate(playedV2());
+    ok(out.cleared&&typeof out.cleared==='object','a v3 save needs a cleared record');
+    eq(Object.keys(out.cleared).sort().join(),'f1_goblin,f1_skel');
+  }finally{swapDoors(2,3);swapDoors(0,1)}
+  eq(FLOORS[0].nodes.join(),'f1_goblin,f1_skel,f1_goblin2,f1_shaman,f1_hob')});
+Test.add('migrate: a v3 save keeps its cleared record; one that is not a plain object becomes {}',()=>{
+  const s=playedV2();delete s.floors;s.v=3;s.cleared={f1_goblin:true};
+  eq(JSON.stringify(Meta.migrate(s).cleared),'{"f1_goblin":true}');
+  for(const bad of [null,[],5,'x']){const t=playedV2();delete t.floors;t.v=3;t.cleared=bad;eq(JSON.stringify(Meta.migrate(t).cleared),'{}')}});
+Test.add('migrate: a v1 save comes out as v3 with nothing cleared',()=>{
+  const out=Meta.migrate({v:1,gold:5});eq(out.v,3);eq(JSON.stringify(out.cleared),'{}');ok(!('floors' in out))});
+Test.add('Quest.unlocked: floor 1 always, floor 2 once floor 1\'s boss is cleared, nothing past FLOORS',()=>{
+  const realData=Save.data;
+  try{
+    Save.data=Meta.defaults();
+    ok(Quest.unlocked(1));ok(!Quest.unlocked(2));ok(!Quest.unlocked(3));eq(Quest.floor(2),null);
+    clearIds('f1_grull');ok(Quest.unlocked(2));eq(Quest.floor(2).nodes[0].state,'open');
+  }finally{Save.data=realData}});
 Test.add('migrate: a non-array leaderboard becomes [] and non-object entries are dropped',()=>{
   const s=playedV2();s.leaderboard='x';eq(Meta.migrate(s).leaderboard.length,0);
   const t=playedV2();t.leaderboard=[null,{viewers:1},5];eq(Meta.migrate(t).leaderboard.length,1)});
@@ -8111,7 +8157,7 @@ Test.add('Save.load backs up an unreadable save and never throws; a failed backu
   const el=document.getElementById('saveNote'),hadDisplay=el.style.display;
   try{
     localStorage.setItem(Save.key,'garbage{');Save.load();
-    eq(localStorage.getItem(Save.bakKey),'garbage{');eq(Save.data.v,2);
+    eq(localStorage.getItem(Save.bakKey),'garbage{');eq(Save.data.v,3);
     const odd=JSON.stringify({v:99,gold:5});localStorage.setItem(Save.key,odd);Save.load();
     eq(localStorage.getItem(Save.bakKey),odd);
     localStorage.setItem(Save.key,'garbage2{');

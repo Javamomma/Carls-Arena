@@ -123,8 +123,8 @@ const push=m=>summary.errors.push(m);
 const cumXp=e=>{let s=e.xp;for(let l=2;l<=e.level;l++)s+=Stats.xpToLevel(l);return s};
 const runTo=cap=>{let t=0;while(G.state==='FIGHT'&&t<cap){G.tick();t++}return t};
 const nextOpen=()=>{
-  for(const fn in Save.data.floors){
-    const n=+fn,f=Quest.floor(n);if(!f)continue;
+  for(const fd of FLOORS){
+    const n=fd.floor,f=Quest.floor(n);if(!f)continue;
     for(let i=0;i<f.nodes.length;i++)if(f.nodes[i].state==='open')return{floor:n,node:i};
     if(f.boss.state==='open')return{floor:n,node:'boss'}}
   return null};
@@ -417,6 +417,34 @@ def played_save():
 SAVE_KEY = 'carlsArena.v1'
 BAK_KEY = 'carlsArena.v1.bak'
 
+# A real v2 save (written by the old build) must load as v3: same values everywhere, same door states.
+def check_v2_fixture(pg, raw):
+    fails = []
+    old = json.loads(raw)
+    got = pg.evaluate('JSON.parse(JSON.stringify(Save.data))')
+    stored = json.loads(pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(SAVE_KEY)))
+    if got.get('v') != 3 or stored.get('v') != 3:
+        fails.append('v is %r in memory and %r stored, expected 3' % (got.get('v'), stored.get('v')))
+    if 'floors' in got or 'floors' in stored:
+        fails.append('a v3 save must not keep the floors key')
+    for k, v in old.items():
+        if k in ('v', 'floors'):
+            continue
+        if got.get(k) != v:
+            fails.append('field %s changed: %r' % (k, got.get(k)))
+    for n, fl in old['floors'].items():
+        state = pg.evaluate('(()=>{const f=Quest.floor(%s);return f&&{nodes:f.nodes.map(x=>x.state),boss:f.boss.state}})()' % n)
+        if state != fl:
+            fails.append('floor %s doors are %r, v2 had %r' % (n, state, fl))
+    for n in (1, 2):
+        want = str(n) in old['floors']
+        if pg.evaluate('typeof Quest.unlocked==="function"&&Quest.unlocked(%d)' % n) != want:
+            fails.append('Quest.unlocked(%d) should be %r' % (n, want))
+    bak = pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(BAK_KEY))
+    if bak != raw:
+        fails.append('.bak does not hold the original v2 string')
+    return fails
+
 def run_saves():
     cases = []
     for k in ('cats', 'energy', 'arena', 'stats'):
@@ -428,6 +456,9 @@ def run_saves():
     cases.append({'name': 'unknown-version', 'kind': 'bak', 'raw': json.dumps(dict(played_save(), v=99))})
     cases.append({'name': 'read-fails', 'kind': 'readfail', 'raw': json.dumps(played_save())})
     cases.append({'name': 'bak-write-fails', 'kind': 'bakfail', 'raw': 'not json {{{'})
+    for name in ('v2_default', 'v2_played'):
+        raw = open(os.path.join(ROOT, 'tests', 'fixtures', name + '.json')).read()
+        cases.append({'name': 'fixture-' + name, 'kind': 'fixture', 'raw': raw})
     results, any_err = [], False
     with sync_playwright() as p:
         b = p.chromium.launch()
@@ -462,8 +493,10 @@ def run_saves():
                     if got.get(c['broken']) != dflt[c['broken']]:
                         fails.append('%s not repaired to defaults: %r' % (c['broken'], got.get(c['broken'])))
                     for k, v in c['orig'].items():
-                        if k != c['broken'] and got.get(k) != v:
+                        if k not in (c['broken'], 'v', 'floors') and got.get(k) != v:
                             fails.append('field %s changed: %r' % (k, got.get(k)))
+                elif c['kind'] == 'fixture':
+                    fails.extend(check_v2_fixture(pg, c['raw']))
                 else:
                     bak = pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(BAK_KEY))
                     cur = pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(SAVE_KEY))
