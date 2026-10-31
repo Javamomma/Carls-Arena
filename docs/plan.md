@@ -71,7 +71,7 @@ reward code until each of the four champions completes its first rank-up. Existi
 stay.
 Files: `src/90_tests.js` and/or `tests/harness.py`.
 
-## 5. Energy refresh and a campaign-complete screen — `energy-campaign` — status: in progress
+## 5. Energy refresh and a campaign-complete screen — `energy-campaign` — status: done (e1061ea)
 Goal: waiting on the map refills energy, and finishing both bosses tells the player what's next.
 Acceptance:
 - `Energy.tick()` runs inside `Quest.canStart()`/`Quest.start()` and when the window regains focus.
