@@ -68,6 +68,7 @@ const Screens={
   lastFloor(){const ks=Object.keys(Save.data.floors).map(Number);return ks.length?Math.max.apply(null,ks):1},
   // ---- title -------------------------------------------------------------------------------
   renderTitle(){
+    Save.syncNote();
     // Task 5.4: the title screen's old bare SOUND toggle became a SETTINGS button -- SOUND itself
     // (#titleMute, still the one place Audio.muted/Save.data.mute actually flip -- see G.init())
     // moved into the new #settings overlay as one more toggle row; renderSettings() below is what

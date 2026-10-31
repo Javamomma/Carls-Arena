@@ -62,21 +62,26 @@ const Meta={
       return d}
     if(data.v===2){
       const d=Meta.defaults();
+      const plain=x=>!!x&&typeof x==='object'&&!Array.isArray(x);
+      // A nested record that isn't a plain object is replaced by its default; a plain one only gets
+      // its missing keys filled, so a damaged save can't make the `in` checks below throw.
+      const fill=(k,def)=>{if(!plain(data[k]))data[k]=def;else for(const j in def)if(!(j in data[k]))data[k][j]=def[j]};
       for(const k in d)if(!(k in data))data[k]=d[k];
-      for(const k in d.cats)if(!(k in data.cats))data.cats[k]=d.cats[k];
-      for(const k in d.energy)if(!(k in data.energy))data.energy[k]=d.energy[k];
-      for(const k in d.arena)if(!(k in data.arena))data.arena[k]=d.arena[k];
-      for(const k in d.stats)if(!(k in data.stats))data.stats[k]=d.stats[k];
-      // Task 5.4: `settings` already existed (as `{}`) before this task, so the generic top-level
-      // loop above never repopulates it for an old save -- explicit per-key backfill, same pattern as
-      // cats/energy/arena/stats just above.
-      if(!data.settings||typeof data.settings!=='object')data.settings=d.settings;
-      else for(const k in d.settings)if(!(k in data.settings))data.settings[k]=d.settings[k];
-      if(!data.roster||typeof data.roster!=='object'||!Object.keys(data.roster).length)data.roster=d.roster;
-      // Fix-wave item 10 (minor): migrate could reset `roster` (right above) without repointing a
-      // stale `active` that named a champion the reset just dropped -- Rewards.grant's xp path reads
-      // Save.data.roster[Save.data.active], so an unowned active silently ate every xp grant with no
-      // error. Repoints to the roster's own first key whenever active isn't (or no longer is) owned.
+      fill('cats',d.cats);fill('energy',d.energy);fill('arena',d.arena);fill('stats',d.stats);
+      fill('settings',d.settings);fill('pity',d.pity);
+      if(!plain(data.roster)||!Object.keys(data.roster).length)data.roster=d.roster;
+      for(const id in data.roster){
+        const fresh={stars:1,rank:1,level:1,xp:0,shards:0};
+        if(!plain(data.roster[id]))data.roster[id]=fresh;
+        else for(const j in fresh)if(!(j in data.roster[id]))data.roster[id][j]=fresh[j]}
+      if(!plain(data.floors))data.floors=d.floors;
+      else for(const n in d.floors)if(!(n in data.floors))data.floors[n]=d.floors[n];
+      for(const n in data.floors){
+        const f=data.floors[n],fresh=d.floors[1];
+        if(!plain(f))data.floors[n]=JSON.parse(JSON.stringify(fresh));
+        else{if(!Array.isArray(f.nodes))f.nodes=fresh.nodes.slice();if(typeof f.boss!=='string')f.boss=fresh.boss}}
+      if(!Array.isArray(data.leaderboard))data.leaderboard=[];
+      else data.leaderboard=data.leaderboard.filter(plain);
       if(!data.roster[data.active])data.active=Object.keys(data.roster)[0];
       return data}
     return Meta.defaults()},

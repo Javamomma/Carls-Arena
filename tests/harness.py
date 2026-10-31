@@ -35,6 +35,12 @@
       # arena/settings is also a real >=44px target fully inside the viewport (one legitimately scrolled
       # out of a .path/.setrows/#shopBody internal scroll region is skipped, not failed)
 
+  python3 tests/harness.py --saves                                  # damaged-save cases: a prepared
+      # localStorage save is seeded before any game script runs (fresh browser context per case);
+      # checks the game still starts, only the broken record is repaired, an unreadable save is
+      # backed up to carlsArena.v1.bak, and a failed backup never overwrites the original; exit 1
+      # on any failed case or page/console error
+
 Exit 1 on any page error, console error, or if the game never left TITLE.
 """
 import argparse, base64, json, os, struct, sys, time
@@ -389,6 +395,91 @@ def run_matrix():
             worst_cell['frames_total'], worst_cell['ko_ticks'], worst_cell['req_frames']))
     return 1 if bad else 0
 
+# A played v2 save in the exact shape Meta.defaults() writes, so --saves can break one record at a time
+# and assert every other field survives.
+def played_save():
+    return {
+        'v': 2, 'seed': 7, 'fightSeed': 42, 'gold': 1234, 'units': 55, 'iso': 80,
+        'cats': {'brawler': 3, 'rogue': 1, 'caster': 0, 'tank': 2, 'beast': 0, 'trickster': 0},
+        'roster': {'carl': {'stars': 1, 'rank': 2, 'level': 5, 'xp': 30, 'shards': 2},
+                   'donut': {'stars': 2, 'rank': 1, 'level': 3, 'xp': 10, 'shards': 0}},
+        'active': 'donut',
+        'floors': {'1': {'nodes': ['done', 'done', 'open', 'locked', 'locked'], 'boss': 'locked'}},
+        'energy': {'n': 4, 'max': 10, 'ts': 1700000000000},
+        'arena': {'best': 6, 'streak': 2},
+        'leaderboard': [{'viewers': 900, 'champ': 'carl', 'floor': 1, 'date': '2026-10-01'}],
+        'pity': {'basic': 3},
+        'settings': {'reduceMotion': True, 'haptics': False, 'leftHanded': True, 'useAtlas': False,
+                     'sfx': False, 'announcer': True, 'showButtons': True},
+        'tutorialDone': True, 'mute': True, 'stats': {'fights': 9, 'wins': 5},
+    }
+
+SAVE_KEY = 'carlsArena.v1'
+BAK_KEY = 'carlsArena.v1.bak'
+
+def run_saves():
+    cases = []
+    for k in ('cats', 'energy', 'arena', 'stats'):
+        d = played_save()
+        d[k] = None
+        cases.append({'name': 'null-' + k, 'kind': 'null', 'broken': k, 'raw': json.dumps(d),
+                      'orig': played_save()})
+    cases.append({'name': 'garbage-string', 'kind': 'bak', 'raw': 'not json {{{'})
+    cases.append({'name': 'unknown-version', 'kind': 'bak', 'raw': json.dumps(dict(played_save(), v=99))})
+    cases.append({'name': 'read-fails', 'kind': 'readfail', 'raw': json.dumps(played_save())})
+    cases.append({'name': 'bak-write-fails', 'kind': 'bakfail', 'raw': 'not json {{{'})
+    results, any_err = [], False
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        for c in cases:
+            ctx = b.new_context(viewport={'width': 854, 'height': 480})
+            seed = ("(()=>{try{if(sessionStorage.getItem('__seeded'))return;sessionStorage.setItem('__seeded','1')}catch(e){}"
+                    "const set=Storage.prototype.setItem;set.call(localStorage,%s,%s);"
+                    "if(%s)Storage.prototype.setItem=function(k,v){if(k===%s)throw new Error('quota');return set.call(this,k,v)};"
+                    "const get=Storage.prototype.getItem;window.__origGet=get;"
+                    "if(%s)Storage.prototype.getItem=function(k){if(k===%s)throw new Error('denied');return get.call(this,k)}})()"
+                    % (json.dumps(SAVE_KEY), json.dumps(c['raw']),
+                       'true' if c['kind'] == 'bakfail' else 'false', json.dumps(BAK_KEY),
+                       'true' if c['kind'] == 'readfail' else 'false', json.dumps(SAVE_KEY)))
+            ctx.add_init_script(seed)
+            pg = ctx.new_page()
+            errs = []
+            pg.on('pageerror', lambda e: errs.append(str(e)))
+            pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
+            pg.goto(INDEX)
+            started = True
+            try:
+                pg.wait_for_function('typeof G!=="undefined"', timeout=3000)
+            except Exception:
+                started = False
+            fails = []
+            if not started:
+                fails.append('game did not start (G missing)')
+            else:
+                if c['kind'] == 'null':
+                    got = pg.evaluate('JSON.parse(JSON.stringify(Save.data))')
+                    dflt = pg.evaluate('JSON.parse(JSON.stringify(Meta.defaults()))')
+                    if got.get(c['broken']) != dflt[c['broken']]:
+                        fails.append('%s not repaired to defaults: %r' % (c['broken'], got.get(c['broken'])))
+                    for k, v in c['orig'].items():
+                        if k != c['broken'] and got.get(k) != v:
+                            fails.append('field %s changed: %r' % (k, got.get(k)))
+                else:
+                    bak = pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(BAK_KEY))
+                    cur = pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(SAVE_KEY))
+                    if c['kind'] == 'bak' and bak != c['raw']:
+                        fails.append('.bak is %r, expected the original string' % bak)
+                    if c['kind'] in ('bakfail', 'readfail') and cur != c['raw']:
+                        fails.append('original save was overwritten: %r' % cur)
+            if errs:
+                fails.append('page/console errors: %s' % errs)
+                any_err = True
+            results.append({'case': c['name'], 'ok': not fails, 'fails': fails})
+            ctx.close()
+        b.close()
+    print(json.dumps({'saves': results}, indent=1))
+    return 1 if any_err or any(not r['ok'] for r in results) else 0
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--unit', action='store_true', help='run Test.run() and exit')
@@ -491,6 +582,11 @@ def main():
                           "closeIn to skip the walk-up) so Screens.result renders too; each screen's "
                           "own pageerror/console-error delta is recorded separately; prints a JSON "
                           "{screens:[{screen,errors}]} and exits 1 if any screen recorded errors")
+    ap.add_argument('--saves', action='store_true',
+                     help="seed damaged saves into localStorage before any game script runs and check "
+                          "the game starts, only the broken record is repaired, unreadable saves are "
+                          "backed up, and a failed backup leaves the original untouched; prints JSON "
+                          "and exits 1 on any failed case or page/console error")
     ap.add_argument('--phone-check', action='store_true',
                      help="Task 5.6: sets an 844x390 CSS-px landscape viewport (iPhone SE/8-class "
                           "phone rotated), starts a real fight, and asserts: the canvas is letterboxed "
@@ -521,6 +617,8 @@ def main():
         ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2
     if a.matrix:
         sys.exit(run_matrix())
+    if a.saves:
+        sys.exit(run_saves())
     if a.perf is not None:
         with sync_playwright() as p:
             b = p.chromium.launch()

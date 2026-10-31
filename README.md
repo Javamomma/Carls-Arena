@@ -258,6 +258,8 @@ same reason (a blocked sub-hit never reaches the code path that applies it).
   page/console errors on each; `python3 tests/harness.py --phone-check` asserts the canvas stays
   letterboxed, on-screen buttons are real ≥44px touch targets, and the page never scrolls
   horizontally at an 844×390 CSS-px landscape-phone viewport.
+- `python3 tests/harness.py --saves` seeds damaged saves (a null record, garbage, an unknown version, a
+  failing backup) before the game loads and checks it still starts without losing the original.
 - `python3 tests/harness.py --screen <name> --shot out.png` screenshots any menu screen
   (`title|map|roster|crystal|shop|arena|settings`) without starting a fight; `--pose <key> --shot
   out.png` freezes a fighter in a named rig pose for a clean reference shot; `--tutorial-shot

@@ -8041,3 +8041,89 @@ Test.add('Fix-wave I4: Champion of the Floor fires in >=50% of 40 seeded AI-Grul
       if(f.log.some(e=>e.type==='passive'&&e.id==='championOfTheFloor'&&e.who===1))fired=true}
     if(fired)seen++}
   ok(seen/40>=0.5,'Champion of the Floor must fire in at least 50% of 40 seeded fights, got '+Math.round(seen/40*1000)/10+'%')});
+
+// ---- save hardening ------------------------------------------------------------------------------
+const playedV2=()=>({v:2,seed:7,fightSeed:42,gold:1234,units:55,iso:80,
+  cats:{brawler:3,rogue:1,caster:0,tank:2,beast:0,trickster:0},
+  roster:{carl:{stars:1,rank:2,level:5,xp:30,shards:2},donut:{stars:2,rank:1,level:3,xp:10,shards:0}},
+  active:'donut',floors:{1:{nodes:['done','done','open','locked','locked'],boss:'locked'}},
+  energy:{n:4,max:10,ts:1700000000000},arena:{best:6,streak:2},
+  leaderboard:[{viewers:900,champ:'carl',floor:1,date:'2026-10-01'}],pity:{basic:3},
+  settings:{reduceMotion:true,haptics:false,leftHanded:true,useAtlas:false,sfx:false,announcer:true,showButtons:true},
+  tutorialDone:true,mute:true,stats:{fights:9,wins:5}});
+Test.add('migrate: a broken top-level record becomes its default and every other field is untouched',()=>{
+  for(const bad of [null,[],7,'x'])for(const k of ['cats','energy','arena','stats','settings','pity']){
+    const s=playedV2();s[k]=bad;
+    const out=Meta.migrate(s),want=playedV2();
+    eq(JSON.stringify(out[k]),JSON.stringify(Meta.defaults()[k]),k+' repaired from '+JSON.stringify(bad));
+    for(const j in want)if(j!==k)eq(JSON.stringify(out[j]),JSON.stringify(want[j]),j+' kept while '+k+' broke')}});
+Test.add('migrate: missing keys inside cats/energy/arena/stats/settings are filled, present ones kept',()=>{
+  const s=playedV2();s.cats={brawler:3};s.energy={n:4};s.arena={};s.stats={wins:5};s.settings={haptics:false};
+  const out=Meta.migrate(s),d=Meta.defaults();
+  eq(out.cats.brawler,3);eq(out.cats.rogue,0);eq(out.energy.n,4);eq(out.energy.max,d.energy.max);
+  eq(out.arena.best,0);eq(out.stats.wins,5);eq(out.stats.fights,0);
+  eq(out.settings.haptics,false);eq(out.settings.sfx,true)});
+Test.add('migrate: a broken roster entry becomes a fresh entry, so the champion stays owned',()=>{
+  for(const bad of [null,[],5,'x']){
+    const s=playedV2();s.roster.donut=bad;
+    const out=Meta.migrate(s);
+    eq(JSON.stringify(out.roster.donut),JSON.stringify({stars:1,rank:1,level:1,xp:0,shards:0}));
+    eq(out.roster.carl.level,5);eq(out.active,'donut')}
+  const s=playedV2();s.roster.carl={level:5};
+  const e=Meta.migrate(s).roster.carl;eq(e.level,5);eq(e.stars,1);eq(e.shards,0)});
+Test.add('migrate: a non-object roster or floors falls back to defaults; active is repointed',()=>{
+  const s=playedV2();s.roster=[];s.floors=null;
+  const out=Meta.migrate(s);
+  eq(JSON.stringify(out.roster),JSON.stringify(Meta.defaults().roster));eq(out.active,'carl');
+  eq(JSON.stringify(out.floors),JSON.stringify(Meta.defaults().floors))});
+Test.add('migrate: floors:{} gets the default floor 1, and existing floors keep their progress',()=>{
+  const s=playedV2();s.floors={};
+  eq(JSON.stringify(Meta.migrate(s).floors),JSON.stringify(Meta.defaults().floors));
+  const t=playedV2();delete t.floors[1];t.floors[2]={nodes:['done','open','locked','locked','locked'],boss:'locked'};
+  const out=Meta.migrate(t);eq(out.floors[2].nodes[0],'done');eq(out.floors[1].nodes[0],'open')});
+Test.add('migrate: a broken floor entry is reset, a good one and its progress are kept',()=>{
+  const s=playedV2();s.floors[2]=null;s.floors[3]={nodes:'x',boss:5};
+  const out=Meta.migrate(s),fresh=Meta.defaults().floors[1];
+  eq(JSON.stringify(out.floors[1]),JSON.stringify(playedV2().floors[1]));
+  eq(JSON.stringify(out.floors[2]),JSON.stringify(fresh));eq(JSON.stringify(out.floors[3]),JSON.stringify(fresh))});
+Test.add('migrate: a non-array leaderboard becomes [] and non-object entries are dropped',()=>{
+  const s=playedV2();s.leaderboard='x';eq(Meta.migrate(s).leaderboard.length,0);
+  const t=playedV2();t.leaderboard=[null,{viewers:1},5];eq(Meta.migrate(t).leaderboard.length,1)});
+Test.add('Save.put returns false and shows its note once per session when a write fails',()=>{
+  const realSet=Storage.prototype.setItem,realShown=Save.noteShown,realWritable=Save.writable,el=document.getElementById('saveNote');
+  const hadText=el.textContent,hadDisplay=el.style.display;
+  Save.noteShown=0;el.style.display='none';Save.writable=true;
+  try{
+    Storage.prototype.setItem=function(){throw new Error('quota')};
+    eq(Save.put(),false);
+    eq(el.style.display,'block');eq(el.textContent,"Progress isn't saving on this device.");
+    eq(Save.noteShown,1);
+    el.style.display='none';
+    eq(Save.put(),false);
+    eq(el.style.display,'none','the second failure must not show the note again');eq(Save.noteShown,1);
+    let wrote=null;
+    Storage.prototype.setItem=function(k,v){wrote=k};
+    eq(Save.put(),true);eq(wrote,Save.key);
+  }finally{Storage.prototype.setItem=realSet;Save.writable=realWritable;Save.noteShown=realShown;el.textContent=hadText;el.style.display=hadDisplay}});
+Test.add('Save.load backs up an unreadable save and never throws; a failed backup keeps the original',()=>{
+  const realData=Save.data,realSet=Storage.prototype.setItem,realShown=Save.noteShown,realWritable=Save.writable;
+  const keep={main:localStorage.getItem(Save.key),bak:localStorage.getItem(Save.bakKey)};
+  const el=document.getElementById('saveNote'),hadDisplay=el.style.display;
+  try{
+    localStorage.setItem(Save.key,'garbage{');Save.load();
+    eq(localStorage.getItem(Save.bakKey),'garbage{');eq(Save.data.v,2);
+    const odd=JSON.stringify({v:99,gold:5});localStorage.setItem(Save.key,odd);Save.load();
+    eq(localStorage.getItem(Save.bakKey),odd);
+    localStorage.setItem(Save.key,'garbage2{');
+    Storage.prototype.setItem=function(k,v){if(k===Save.bakKey)throw new Error('quota');return realSet.call(this,k,v)};
+    Save.load();
+    eq(localStorage.getItem(Save.key),'garbage2{');eq(Save.writable,false);eq(Save.put(),false);
+    Storage.prototype.setItem=realSet;
+    const realGet=Storage.prototype.getItem;localStorage.setItem(Save.key,'keepme');
+    Storage.prototype.getItem=function(k){if(k===Save.key)throw new Error('denied');return realGet.call(this,k)};
+    try{Save.load()}finally{Storage.prototype.getItem=realGet}
+    eq(Save.writable,false);eq(Save.put(),false);eq(localStorage.getItem(Save.key),'keepme');
+  }finally{
+    Storage.prototype.setItem=realSet;
+    for(const [k,v] of [[Save.key,keep.main],[Save.bakKey,keep.bak]])v===null?localStorage.removeItem(k):localStorage.setItem(k,v);
+    Save.writable=realWritable;Save.noteShown=realShown;el.style.display=hadDisplay;Save.data=realData}});
