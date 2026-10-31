@@ -59,11 +59,12 @@ Acceptance:
 - Unit tests: buying grants one catalyst of the chosen class and deducts the gold; refused when
   short; Carl can rank up with a bought brawler catalyst.
 - Optional, only if Arshia says yes: a boss drops a catalyst of the active champion's class
-  instead of the boss's own class.
+  instead of the boss's own class. Status: built and approved on branch task/boss-drop (stacked
+  on task/journey-tests); merges only on a yes.
 Files: `src/12_meta.js`, `src/85_screens.js`, `src/00_head.html` (picker styles), `src/90_tests.js`,
 `index.html`.
 
-## 4. Journey tests — `journey-tests` — status: in progress (branched from task/shop-catalyst)
+## 4. Journey tests — `journey-tests` — status: built and approved (branch task/journey-tests, stacked on task/shop-catalyst); merges right after step 3
 Goal: tests that earn resources the way a player does.
 Acceptance: from a fresh save, with no injected gold, catalysts or energy, the test plays or
 simulates the path (tutorial, campaign doors, arena runs, crystals, shop) through the game's own
