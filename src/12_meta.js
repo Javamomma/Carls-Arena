@@ -285,13 +285,17 @@ const Quest={
     const door=id=>{const state=cleared[id]?'done':prevDone?'open':'locked';prevDone=!!cleared[id];return{id,state,enc:id}};
     const nodes=def.nodes.map(door);
     return{floor:n,name:def.name,nodes,boss:door(def.boss)}},
+  // True once every floor's boss is beaten; the campaign has nothing further to offer after that.
+  campaignComplete(){return FLOORS.length>0&&FLOORS.every(fd=>!!Save.data.cleared[fd.boss])},
   canStart(n,k){
+    Energy.tick(); // regen that accrued while a screen sat idle must count before the gate reads it
     const f=Quest.floor(n);
     if(!f)return false;
     const node=k==='boss'?f.boss:f.nodes[k];
     if(!node||node.state!=='open')return false;
     return Save.data.energy.n>=1},
   start(n,k){
+    Energy.tick();
     if(!Quest.canStart(n,k))return null;
     const f=Quest.floor(n);
     const node=k==='boss'?f.boss:f.nodes[k];

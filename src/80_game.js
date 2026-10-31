@@ -351,6 +351,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // tests/batch.py always pass an explicit o.seed (every --sim/--e2e/--tutorial/batch-cell build_*_js
   // call), so this branch never fires for them -- they stay exactly as deterministic as before.
   startFight(o={}){
+    this.campaignJustCompleted=false; // the flag belongs to one result screen only
     let seed;
     if(o.seed!==undefined)seed=o.seed;
     else{seed=Save.data.fightSeed=(Save.data.fightSeed||1);Save.data.fightSeed++;Save.put()}
@@ -514,6 +515,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // through the exact same path fix-wave item 5 already wired for a node's own player-side buffs, so
   // the player can never actually be KO'd mid-lesson with no special case anywhere in Fight/Fighter.
   startTutorial(o={}){
+    this.campaignJustCompleted=false;
     Tutorial.reset();
     // Fix-wave item 1 (final review, Critical): the tutorial fight now runs with NO clock at all
     // (Fight.finish's time-up branch is unreachable -- Infinity minus STEP every frame never reaches
@@ -785,6 +787,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // for tests. Screens.result (arriving in Task 4.5) takes over rendering the overlay once it
   // exists; until then this fills the existing #result DOM directly.
   onFightEnd(won){
+    this.campaignJustCompleted=false;
     // Fix-wave item 2 (final review, Critical): hides the tutorial's own prompt pill/lesson banner
     // (z-index above .overlay) FIRST, before anything else below -- they used to only get hidden by
     // startFight/toTitle/backToOrigin, never on the RESULT transition itself, so a tutorial win's own
@@ -796,7 +799,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     let rewards=null;
     if(this.mode==='quest'&&this.questTarget){
       const{floor,node}=this.questTarget;
+      const wasComplete=Quest.campaignComplete();
       Quest.complete(floor,node,won);
+      this.campaignJustCompleted=won&&!wasComplete&&Quest.campaignComplete();
       if(won)rewards=Rewards.forNode(floor,node)
     }else if(this.mode==='arena')Arena.record(won);
     // Fix-wave item 1 (final review, Critical): completion additionally requires every Tutorial step
@@ -913,7 +918,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // always lands on the title screen specifically (tests call this directly and expect exactly
   // that); backToOrigin (below) is the "go back to wherever this fight was launched from" version,
   // used by the pause menu's QUIT and the result overlay's CONTINUE button.
-  toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+  toTitle(){this.campaignJustCompleted=false;this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
     // Task 6.4: an unconditional reset, so leaving the tutorial mid-lesson (before Tutorial.tick's own
     // step===2 transition ever turns it back off) can never leave BLOCK/PUNCH/KICK stuck forced-on
@@ -925,7 +930,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   backToOrigin(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
     this.forceButtons=false;this.applySettings(); // Task 6.4: see toTitle's own comment
-    if(typeof Screens!=='undefined')Screens.toOrigin();else this.toTitle()},
+    // The CONTINUE after the win that finished the campaign goes to the campaign-complete screen once.
+    if(typeof Screens!=='undefined'){
+      if(this.campaignJustCompleted){this.campaignJustCompleted=false;Screens.campaignComplete()}
+      else Screens.toOrigin()}
+    else this.toTitle()},
   // Fix round 1 (controller review, Critical): the title screen's own buttons only ever get their
   // onclick bound inside Screens.renderTitle(), which only runs when some Screens.* function
   // actually executes -- on a real page load nothing called one (the initial HTML markup already
@@ -1147,6 +1156,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     document.getElementById('again').onclick=()=>{
       const opts=Object.assign({},this.lastFightOpts,{seed:this.fight?this.fight.rng.int(1e9)+1:1});
       if(this.mode==='arena')this.startArena(opts);else this.startFight(opts)};
+    // Regen that accrued while the tab was away shows up the moment the player returns.
+    const wake=()=>{if(document.visibilityState==='hidden')return;Energy.tick();
+      if(typeof Screens!=='undefined'&&Screens._current==='map')Screens.refresh()};
+    window.addEventListener('focus',wake);
+    document.addEventListener('visibilitychange',wake);
     document.getElementById('resultTitleBtn').onclick=()=>this.backToOrigin();
     // Task 6.1 (owner playtest note: "No way to exit it seems after a defeat"): TITLE is a second,
     // unconditional exit off the result overlay, always visible (Screens.renderResult never hides

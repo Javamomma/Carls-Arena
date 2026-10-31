@@ -16,7 +16,8 @@ const Screens={
   // Fixed table of what each name shows/renders; kept as one object so show()/refresh() share it
   // instead of a chain of if/else per screen name.
   RENDER:{title:'renderTitle',map:'renderMap',roster:'renderRoster',crystal:'renderCrystal',
-    shop:'renderShop',arena:'renderArena',result:'renderResult',settings:'renderSettings'},
+    shop:'renderShop',arena:'renderArena',result:'renderResult',settings:'renderSettings',
+    campaignComplete:'renderCampaignComplete'},
   // Hides every Phase 4 overlay (plus pauseMenu, so the pause menu's QUIT and the result screen's
   // CONTINUE -- both of which land here through backToOrigin -- never leave it stuck on screen
   // over a browsing screen) and the touch buttons, shows exactly `name`, then renders it. The
@@ -24,7 +25,7 @@ const Screens={
   // visible) -- so show() both toggles AND renders, and Screens.map/roster/... below are thin
   // wrappers that stash their arg (if any) and call this.
   show(name){
-    for(const id of['title','map','roster','crystal','shop','arena','result','pauseMenu','settings'])G.show(id,id===name);
+    for(const id of['title','map','roster','crystal','shop','arena','result','pauseMenu','settings','campaignComplete'])G.show(id,id===name);
     G.show('btns',false);
     this._current=name;
     const fn=this.RENDER[name];
@@ -47,11 +48,12 @@ const Screens={
   // Task 5.4: not a fight-launching screen, so BACK just goes straight to the title (same pattern as
   // map/roster/crystal/shop/arena's own BACK -- none of them route through toOrigin()/_origin either).
   settings(){this.show('settings')},
+  campaignComplete(){this.show('campaignComplete')},
   // Called from G.startFight the instant a fight actually begins (title/result/pauseMenu are
   // already hidden there directly) -- a fight can be launched from any browsing screen (a map
   // node, arena's FIGHT, exhibition off the title screen), so whichever one is still up needs
   // hiding too, or it would linger visually over the fight underneath.
-  hideAll(){for(const id of['title','map','roster','crystal','shop','arena','settings'])G.show(id,false);this._current=null},
+  hideAll(){for(const id of['title','map','roster','crystal','shop','arena','settings','campaignComplete'])G.show(id,false);this._current=null},
   // Re-renders whatever screen is currently up (no visibility change) -- called after any Meta
   // mutation a button on that screen just made, so costs/affordability/counts reflect it
   // immediately without a full show() (which would also re-toggle overlay classes for no reason).
@@ -163,6 +165,12 @@ const Screens={
       t.textContent='TUTORIAL';
       t.onclick=()=>{Screens._origin={name:'map',args:[n]};G.startTutorial()};
       tabs.appendChild(t)}
+    // In the tabs row like TUTORIAL, so the arena shortcut adds no height at 854x480.
+    if(Quest.campaignComplete()){
+      const a=document.createElement('button');
+      a.id='mapArena';a.className='node arenago';a.textContent='ARENA';
+      a.onclick=()=>Screens.arena();
+      tabs.appendChild(a)}
     const path=document.getElementById('mapPath');path.innerHTML='';
     if(f){
       // Fix-wave item 6: a non-'open' node is disabled -- it used to be a live button that looked
@@ -198,6 +206,10 @@ const Screens={
     // writer, and only ever sets it, never clears it.
     document.getElementById('mapMsg').textContent='';
     document.getElementById('mapBack').onclick=()=>Screens.title()},
+  // ---- campaign complete ------------------------------------------------------------------------
+  renderCampaignComplete(){
+    document.getElementById('ccArena').onclick=()=>Screens.arena();
+    document.getElementById('ccMap').onclick=()=>Screens.map(Screens.lastFloor())},
   // Task 6.1, ruling 3 (owner playtest note: "recommended LVL 4" hint wanted on the hobgoblin): a
   // door/boss button's label plus a small "REC. LVL n" line under it, red (.under) when the active
   // roster champion's level is below ENCOUNTERS[encId].recLevel -- purely informational, never

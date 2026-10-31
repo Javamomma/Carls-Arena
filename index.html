@@ -161,6 +161,7 @@ canvas.doorcard{width:72px;height:72px;flex:none;border-radius:4px;background:#1
    44px instead of the path's 320px-wide/40px-tall shape. */
 .node.tutorial{border-color:#7fd18a;color:#7fd18a;background:#182018;
   width:auto;max-width:none;min-height:44px;padding:6px 16px;margin-left:6px}
+.node.arenago{background:#f4c542;color:#111;border-color:#f4c542;width:auto;max-width:none;min-height:44px;padding:6px 16px;margin-left:6px}
 /* Task 6.4: CONTINUE off a first-time tutorial win lands on the map with DOOR 1 highlighted -- a
    single one-shot pulse (never looping, unlike .cbtn.pulse's tutorial stall hint) so it reads as
    "start here" without nagging on every later map visit. Screens.renderMap adds/consumes this class
@@ -357,6 +358,7 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
      on Screens._origin resolving correctly, win or lose, in every mode (Screens.renderResult,
      85_screens.js). -->
 <div class="overlay" id="result"><div class="panel"><h1 id="resultTitle">VICTORY</h1><p id="resultLine"></p><button id="shareBtn">SHARE</button><button id="again">FIGHT AGAIN</button><button id="resultTitleBtn">CONTINUE</button><button id="titleBtn" class="secondary">TITLE</button></div></div>
+<div class="overlay" id="campaignComplete"><div class="panel"><h1>CAMPAIGN COMPLETE</h1><p>Both floors are cleared. The crowd wants blood, and the arena is next.</p><button id="ccArena" class="primary">ARENA</button><button id="ccMap" class="secondary">BACK TO MAP</button></div></div>
 <div class="overlay" id="map"><div class="scr">
 <h2>CAMPAIGN</h2>
 <div class="ftabs" id="mapTabs"></div>
@@ -739,13 +741,17 @@ const Quest={
     const door=id=>{const state=cleared[id]?'done':prevDone?'open':'locked';prevDone=!!cleared[id];return{id,state,enc:id}};
     const nodes=def.nodes.map(door);
     return{floor:n,name:def.name,nodes,boss:door(def.boss)}},
+  // True once every floor's boss is beaten; the campaign has nothing further to offer after that.
+  campaignComplete(){return FLOORS.length>0&&FLOORS.every(fd=>!!Save.data.cleared[fd.boss])},
   canStart(n,k){
+    Energy.tick(); // regen that accrued while a screen sat idle must count before the gate reads it
     const f=Quest.floor(n);
     if(!f)return false;
     const node=k==='boss'?f.boss:f.nodes[k];
     if(!node||node.state!=='open')return false;
     return Save.data.energy.n>=1},
   start(n,k){
+    Energy.tick();
     if(!Quest.canStart(n,k))return null;
     const f=Quest.floor(n);
     const node=k==='boss'?f.boss:f.nodes[k];
@@ -9520,6 +9526,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // tests/batch.py always pass an explicit o.seed (every --sim/--e2e/--tutorial/batch-cell build_*_js
   // call), so this branch never fires for them -- they stay exactly as deterministic as before.
   startFight(o={}){
+    this.campaignJustCompleted=false; // the flag belongs to one result screen only
     let seed;
     if(o.seed!==undefined)seed=o.seed;
     else{seed=Save.data.fightSeed=(Save.data.fightSeed||1);Save.data.fightSeed++;Save.put()}
@@ -9683,6 +9690,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // through the exact same path fix-wave item 5 already wired for a node's own player-side buffs, so
   // the player can never actually be KO'd mid-lesson with no special case anywhere in Fight/Fighter.
   startTutorial(o={}){
+    this.campaignJustCompleted=false;
     Tutorial.reset();
     // Fix-wave item 1 (final review, Critical): the tutorial fight now runs with NO clock at all
     // (Fight.finish's time-up branch is unreachable -- Infinity minus STEP every frame never reaches
@@ -9954,6 +9962,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // for tests. Screens.result (arriving in Task 4.5) takes over rendering the overlay once it
   // exists; until then this fills the existing #result DOM directly.
   onFightEnd(won){
+    this.campaignJustCompleted=false;
     // Fix-wave item 2 (final review, Critical): hides the tutorial's own prompt pill/lesson banner
     // (z-index above .overlay) FIRST, before anything else below -- they used to only get hidden by
     // startFight/toTitle/backToOrigin, never on the RESULT transition itself, so a tutorial win's own
@@ -9965,7 +9974,9 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     let rewards=null;
     if(this.mode==='quest'&&this.questTarget){
       const{floor,node}=this.questTarget;
+      const wasComplete=Quest.campaignComplete();
       Quest.complete(floor,node,won);
+      this.campaignJustCompleted=won&&!wasComplete&&Quest.campaignComplete();
       if(won)rewards=Rewards.forNode(floor,node)
     }else if(this.mode==='arena')Arena.record(won);
     // Fix-wave item 1 (final review, Critical): completion additionally requires every Tutorial step
@@ -10082,7 +10093,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // always lands on the title screen specifically (tests call this directly and expect exactly
   // that); backToOrigin (below) is the "go back to wherever this fight was launched from" version,
   // used by the pause menu's QUIT and the result overlay's CONTINUE button.
-  toTitle(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+  toTitle(){this.campaignJustCompleted=false;this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
     // Task 6.4: an unconditional reset, so leaving the tutorial mid-lesson (before Tutorial.tick's own
     // step===2 transition ever turns it back off) can never leave BLOCK/PUNCH/KICK stuck forced-on
@@ -10094,7 +10105,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   backToOrigin(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
     this.forceButtons=false;this.applySettings(); // Task 6.4: see toTitle's own comment
-    if(typeof Screens!=='undefined')Screens.toOrigin();else this.toTitle()},
+    // The CONTINUE after the win that finished the campaign goes to the campaign-complete screen once.
+    if(typeof Screens!=='undefined'){
+      if(this.campaignJustCompleted){this.campaignJustCompleted=false;Screens.campaignComplete()}
+      else Screens.toOrigin()}
+    else this.toTitle()},
   // Fix round 1 (controller review, Critical): the title screen's own buttons only ever get their
   // onclick bound inside Screens.renderTitle(), which only runs when some Screens.* function
   // actually executes -- on a real page load nothing called one (the initial HTML markup already
@@ -10316,6 +10331,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     document.getElementById('again').onclick=()=>{
       const opts=Object.assign({},this.lastFightOpts,{seed:this.fight?this.fight.rng.int(1e9)+1:1});
       if(this.mode==='arena')this.startArena(opts);else this.startFight(opts)};
+    // Regen that accrued while the tab was away shows up the moment the player returns.
+    const wake=()=>{if(document.visibilityState==='hidden')return;Energy.tick();
+      if(typeof Screens!=='undefined'&&Screens._current==='map')Screens.refresh()};
+    window.addEventListener('focus',wake);
+    document.addEventListener('visibilitychange',wake);
     document.getElementById('resultTitleBtn').onclick=()=>this.backToOrigin();
     // Task 6.1 (owner playtest note: "No way to exit it seems after a defeat"): TITLE is a second,
     // unconditional exit off the result overlay, always visible (Screens.renderResult never hides
@@ -10360,7 +10380,8 @@ const Screens={
   // Fixed table of what each name shows/renders; kept as one object so show()/refresh() share it
   // instead of a chain of if/else per screen name.
   RENDER:{title:'renderTitle',map:'renderMap',roster:'renderRoster',crystal:'renderCrystal',
-    shop:'renderShop',arena:'renderArena',result:'renderResult',settings:'renderSettings'},
+    shop:'renderShop',arena:'renderArena',result:'renderResult',settings:'renderSettings',
+    campaignComplete:'renderCampaignComplete'},
   // Hides every Phase 4 overlay (plus pauseMenu, so the pause menu's QUIT and the result screen's
   // CONTINUE -- both of which land here through backToOrigin -- never leave it stuck on screen
   // over a browsing screen) and the touch buttons, shows exactly `name`, then renders it. The
@@ -10368,7 +10389,7 @@ const Screens={
   // visible) -- so show() both toggles AND renders, and Screens.map/roster/... below are thin
   // wrappers that stash their arg (if any) and call this.
   show(name){
-    for(const id of['title','map','roster','crystal','shop','arena','result','pauseMenu','settings'])G.show(id,id===name);
+    for(const id of['title','map','roster','crystal','shop','arena','result','pauseMenu','settings','campaignComplete'])G.show(id,id===name);
     G.show('btns',false);
     this._current=name;
     const fn=this.RENDER[name];
@@ -10391,11 +10412,12 @@ const Screens={
   // Task 5.4: not a fight-launching screen, so BACK just goes straight to the title (same pattern as
   // map/roster/crystal/shop/arena's own BACK -- none of them route through toOrigin()/_origin either).
   settings(){this.show('settings')},
+  campaignComplete(){this.show('campaignComplete')},
   // Called from G.startFight the instant a fight actually begins (title/result/pauseMenu are
   // already hidden there directly) -- a fight can be launched from any browsing screen (a map
   // node, arena's FIGHT, exhibition off the title screen), so whichever one is still up needs
   // hiding too, or it would linger visually over the fight underneath.
-  hideAll(){for(const id of['title','map','roster','crystal','shop','arena','settings'])G.show(id,false);this._current=null},
+  hideAll(){for(const id of['title','map','roster','crystal','shop','arena','settings','campaignComplete'])G.show(id,false);this._current=null},
   // Re-renders whatever screen is currently up (no visibility change) -- called after any Meta
   // mutation a button on that screen just made, so costs/affordability/counts reflect it
   // immediately without a full show() (which would also re-toggle overlay classes for no reason).
@@ -10507,6 +10529,12 @@ const Screens={
       t.textContent='TUTORIAL';
       t.onclick=()=>{Screens._origin={name:'map',args:[n]};G.startTutorial()};
       tabs.appendChild(t)}
+    // In the tabs row like TUTORIAL, so the arena shortcut adds no height at 854x480.
+    if(Quest.campaignComplete()){
+      const a=document.createElement('button');
+      a.id='mapArena';a.className='node arenago';a.textContent='ARENA';
+      a.onclick=()=>Screens.arena();
+      tabs.appendChild(a)}
     const path=document.getElementById('mapPath');path.innerHTML='';
     if(f){
       // Fix-wave item 6: a non-'open' node is disabled -- it used to be a live button that looked
@@ -10542,6 +10570,10 @@ const Screens={
     // writer, and only ever sets it, never clears it.
     document.getElementById('mapMsg').textContent='';
     document.getElementById('mapBack').onclick=()=>Screens.title()},
+  // ---- campaign complete ------------------------------------------------------------------------
+  renderCampaignComplete(){
+    document.getElementById('ccArena').onclick=()=>Screens.arena();
+    document.getElementById('ccMap').onclick=()=>Screens.map(Screens.lastFloor())},
   // Task 6.1, ruling 3 (owner playtest note: "recommended LVL 4" hint wanted on the hobgoblin): a
   // door/boss button's label plus a small "REC. LVL n" line under it, red (.under) when the active
   // roster champion's level is below ENCOUNTERS[encId].recLevel -- purely informational, never
@@ -13732,7 +13764,7 @@ Test.add('Quest.start spends 1 energy and returns the node encounter id; refuses
   eq(Quest.start(1,1),null,'node 1 is locked');
   eq(JSON.stringify(Save.data),before,'a refusal must change nothing')});
 Test.add('Quest.start refuses (unchanged) when energy is empty',()=>{
-  Save.data=Meta.defaults();Save.data.energy.n=0;
+  Save.data=Meta.defaults();Save.data.energy.n=0;Save.data.energy.ts=Energy.now();
   const before=JSON.stringify(Save.data);
   eq(Quest.start(1,0),null);
   eq(JSON.stringify(Save.data),before)});
@@ -13920,7 +13952,7 @@ Test.add('a bare {encounter:ID} scripted KO win grants nothing: no rewards, no e
   eq(JSON.stringify(Save.data),before,'Save.data (gold/iso/xp/energy/floor node states) must be completely unchanged');
   G.toTitle();G.sim=false});
 Test.add('G.startFight({floor,node}) refuses without starting a fight when energy is empty, leaving G.state/G.fight unchanged',()=>{
-  Save.data=Meta.defaults();Save.data.energy.n=0;
+  Save.data=Meta.defaults();Save.data.energy.n=0;Save.data.energy.ts=Energy.now();
   G.toTitle();
   const stateBefore=G.state,fightBefore=G.fight;
   const r=G.startFight({floor:1,node:0});
@@ -19089,5 +19121,109 @@ Test.add('Save.load backs up an unreadable save and never throws; a failed backu
     Storage.prototype.setItem=realSet;
     for(const [k,v] of [[Save.key,keep.main],[Save.bakKey,keep.bak]])v===null?localStorage.removeItem(k):localStorage.setItem(k,v);
     Save.writable=realWritable;Save.noteShown=realShown;el.style.display=hadDisplay;Save.data=realData}});
+// ---- energy refresh on the map + campaign complete ---------------------------------------------
+const allBosses=()=>FLOORS.map(fd=>fd.boss);
+const allFightIds=()=>FLOORS.flatMap(fd=>[...fd.nodes,fd.boss]);
+Test.add('waiting on the map past one regen interval lets Quest.canStart and a door click go through without re-rendering',()=>{
+  const origNow=Energy.now;
+  try{
+    Save.data=Meta.defaults();
+    let t=7000000;Energy.now=()=>t;
+    Save.data.energy.n=0;Save.data.energy.ts=t;
+    Screens.map(1);
+    eq(Quest.canStart(1,0),false,'no energy yet');
+    t+=360000;
+    eq(Quest.canStart(1,0),true,'canStart must tick energy itself');
+    document.querySelectorAll('#mapPath .node:not(.boss)')[0].click();
+    eq(G.state,'FIGHT','door click must start the fight');
+  }finally{Energy.now=origNow;G.toTitle();G.sim=false}});
+Test.add('window focus and visibilitychange tick energy and re-render the map\'s pips',()=>{
+  const origNow=Energy.now;
+  const fullPips=()=>document.querySelectorAll('#mapEnergy .pip.full').length;
+  try{
+    Save.data=Meta.defaults();
+    let t=8000000;Energy.now=()=>t;
+    Save.data.energy.n=0;Save.data.energy.ts=t;
+    Screens.map(1);
+    eq(fullPips(),0);
+    t+=360000;
+    window.dispatchEvent(new Event('focus'));
+    eq(fullPips(),1,'focus must refill and redraw');
+    t+=360000;
+    document.dispatchEvent(new Event('visibilitychange'));
+    eq(fullPips(),2,'becoming visible must refill and redraw');
+  }finally{Energy.now=origNow;Screens.title()}});
+Test.add('Quest.campaignComplete is false on a fresh save and after floor 1 only, true once every boss is cleared',()=>{
+  Save.data=Meta.defaults();
+  eq(Quest.campaignComplete(),false);
+  clearIds(FLOORS[0].boss);
+  eq(Quest.campaignComplete(),false);
+  clearIds(...allBosses());
+  eq(Quest.campaignComplete(),true)});
+Test.add('winning the final boss and pressing CONTINUE shows the campaign-complete screen; ARENA opens the arena',()=>{
+  Save.data=Meta.defaults();
+  clearIds(...allFightIds());delete Save.data.cleared[FLOORS[1].boss];
+  Save.data.energy.n=Energy.max;Save.data.energy.ts=Energy.now();
+  Screens._origin={name:'map',args:[2]};
+  G.startFight({floor:2,node:'boss',champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  ok(Quest.campaignComplete(),'the win must complete the campaign');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'campaignComplete');
+  ok(document.getElementById('campaignComplete').classList.contains('show'));
+  eq(document.querySelector('#campaignComplete h1').textContent,'CAMPAIGN COMPLETE');
+  document.getElementById('ccArena').click();
+  eq(Screens._current,'arena');
+  G.toTitle();G.sim=false});
+Test.add('a win that does not complete the campaign still returns to the map on CONTINUE',()=>{
+  Save.data=Meta.defaults();
+  Screens._origin={name:'map',args:[1]};
+  G.startFight({floor:1,node:0,champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'map');
+  G.toTitle();G.sim=false});
+Test.add('after completion the campaign map shows an arena button and its doors stay disabled',()=>{
+  Save.data=Meta.defaults();
+  Screens.map(1);
+  ok(!document.getElementById('mapArena')||document.getElementById('mapArena').offsetParent===null,'hidden before completion');
+  clearIds(...allFightIds());
+  Screens.map(1);
+  const b=document.getElementById('mapArena');
+  ok(b&&b.offsetParent!==null,'arena button visible after completion');
+  ok([...document.querySelectorAll('#mapPath .node')].every(n=>n.disabled),'beaten doors stay disabled');
+  b.click();
+  eq(Screens._current,'arena');
+  Screens.title()});
+const winFinalBossThenTitle=()=>{
+  Save.data=Meta.defaults();
+  clearIds(...allFightIds());delete Save.data.cleared[FLOORS[1].boss];
+  Save.data.energy.n=Energy.max;Save.data.energy.ts=Energy.now();
+  Screens._origin={name:'map',args:[2]};
+  G.startFight({floor:2,node:'boss',champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  document.getElementById('titleBtn').click()};
+Test.add('final boss win, TITLE, then an arena fight: CONTINUE returns to the arena, not campaign complete',()=>{
+  winFinalBossThenTitle();
+  Screens._origin={name:'arena'};
+  G.startArena({champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'arena');
+  G.toTitle();G.sim=false});
+Test.add('final boss win, TITLE, then an exhibition fight: pause QUIT returns to title, not campaign complete',()=>{
+  winFinalBossThenTitle();
+  Screens._origin={name:'title'};
+  G.startFight({champ:'carl',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
+  document.getElementById('quit').click();
+  eq(Screens._current,'title');
+  G.toTitle();G.sim=false});
 
 </script></body></html>

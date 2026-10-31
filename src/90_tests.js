@@ -2816,7 +2816,7 @@ Test.add('Quest.start spends 1 energy and returns the node encounter id; refuses
   eq(Quest.start(1,1),null,'node 1 is locked');
   eq(JSON.stringify(Save.data),before,'a refusal must change nothing')});
 Test.add('Quest.start refuses (unchanged) when energy is empty',()=>{
-  Save.data=Meta.defaults();Save.data.energy.n=0;
+  Save.data=Meta.defaults();Save.data.energy.n=0;Save.data.energy.ts=Energy.now();
   const before=JSON.stringify(Save.data);
   eq(Quest.start(1,0),null);
   eq(JSON.stringify(Save.data),before)});
@@ -3004,7 +3004,7 @@ Test.add('a bare {encounter:ID} scripted KO win grants nothing: no rewards, no e
   eq(JSON.stringify(Save.data),before,'Save.data (gold/iso/xp/energy/floor node states) must be completely unchanged');
   G.toTitle();G.sim=false});
 Test.add('G.startFight({floor,node}) refuses without starting a fight when energy is empty, leaving G.state/G.fight unchanged',()=>{
-  Save.data=Meta.defaults();Save.data.energy.n=0;
+  Save.data=Meta.defaults();Save.data.energy.n=0;Save.data.energy.ts=Energy.now();
   G.toTitle();
   const stateBefore=G.state,fightBefore=G.fight;
   const r=G.startFight({floor:1,node:0});
@@ -8173,3 +8173,107 @@ Test.add('Save.load backs up an unreadable save and never throws; a failed backu
     Storage.prototype.setItem=realSet;
     for(const [k,v] of [[Save.key,keep.main],[Save.bakKey,keep.bak]])v===null?localStorage.removeItem(k):localStorage.setItem(k,v);
     Save.writable=realWritable;Save.noteShown=realShown;el.style.display=hadDisplay;Save.data=realData}});
+// ---- energy refresh on the map + campaign complete ---------------------------------------------
+const allBosses=()=>FLOORS.map(fd=>fd.boss);
+const allFightIds=()=>FLOORS.flatMap(fd=>[...fd.nodes,fd.boss]);
+Test.add('waiting on the map past one regen interval lets Quest.canStart and a door click go through without re-rendering',()=>{
+  const origNow=Energy.now;
+  try{
+    Save.data=Meta.defaults();
+    let t=7000000;Energy.now=()=>t;
+    Save.data.energy.n=0;Save.data.energy.ts=t;
+    Screens.map(1);
+    eq(Quest.canStart(1,0),false,'no energy yet');
+    t+=360000;
+    eq(Quest.canStart(1,0),true,'canStart must tick energy itself');
+    document.querySelectorAll('#mapPath .node:not(.boss)')[0].click();
+    eq(G.state,'FIGHT','door click must start the fight');
+  }finally{Energy.now=origNow;G.toTitle();G.sim=false}});
+Test.add('window focus and visibilitychange tick energy and re-render the map\'s pips',()=>{
+  const origNow=Energy.now;
+  const fullPips=()=>document.querySelectorAll('#mapEnergy .pip.full').length;
+  try{
+    Save.data=Meta.defaults();
+    let t=8000000;Energy.now=()=>t;
+    Save.data.energy.n=0;Save.data.energy.ts=t;
+    Screens.map(1);
+    eq(fullPips(),0);
+    t+=360000;
+    window.dispatchEvent(new Event('focus'));
+    eq(fullPips(),1,'focus must refill and redraw');
+    t+=360000;
+    document.dispatchEvent(new Event('visibilitychange'));
+    eq(fullPips(),2,'becoming visible must refill and redraw');
+  }finally{Energy.now=origNow;Screens.title()}});
+Test.add('Quest.campaignComplete is false on a fresh save and after floor 1 only, true once every boss is cleared',()=>{
+  Save.data=Meta.defaults();
+  eq(Quest.campaignComplete(),false);
+  clearIds(FLOORS[0].boss);
+  eq(Quest.campaignComplete(),false);
+  clearIds(...allBosses());
+  eq(Quest.campaignComplete(),true)});
+Test.add('winning the final boss and pressing CONTINUE shows the campaign-complete screen; ARENA opens the arena',()=>{
+  Save.data=Meta.defaults();
+  clearIds(...allFightIds());delete Save.data.cleared[FLOORS[1].boss];
+  Save.data.energy.n=Energy.max;Save.data.energy.ts=Energy.now();
+  Screens._origin={name:'map',args:[2]};
+  G.startFight({floor:2,node:'boss',champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  ok(Quest.campaignComplete(),'the win must complete the campaign');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'campaignComplete');
+  ok(document.getElementById('campaignComplete').classList.contains('show'));
+  eq(document.querySelector('#campaignComplete h1').textContent,'CAMPAIGN COMPLETE');
+  document.getElementById('ccArena').click();
+  eq(Screens._current,'arena');
+  G.toTitle();G.sim=false});
+Test.add('a win that does not complete the campaign still returns to the map on CONTINUE',()=>{
+  Save.data=Meta.defaults();
+  Screens._origin={name:'map',args:[1]};
+  G.startFight({floor:1,node:0,champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'map');
+  G.toTitle();G.sim=false});
+Test.add('after completion the campaign map shows an arena button and its doors stay disabled',()=>{
+  Save.data=Meta.defaults();
+  Screens.map(1);
+  ok(!document.getElementById('mapArena')||document.getElementById('mapArena').offsetParent===null,'hidden before completion');
+  clearIds(...allFightIds());
+  Screens.map(1);
+  const b=document.getElementById('mapArena');
+  ok(b&&b.offsetParent!==null,'arena button visible after completion');
+  ok([...document.querySelectorAll('#mapPath .node')].every(n=>n.disabled),'beaten doors stay disabled');
+  b.click();
+  eq(Screens._current,'arena');
+  Screens.title()});
+const winFinalBossThenTitle=()=>{
+  Save.data=Meta.defaults();
+  clearIds(...allFightIds());delete Save.data.cleared[FLOORS[1].boss];
+  Save.data.energy.n=Energy.max;Save.data.energy.ts=Energy.now();
+  Screens._origin={name:'map',args:[2]};
+  G.startFight({floor:2,node:'boss',champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  document.getElementById('titleBtn').click()};
+Test.add('final boss win, TITLE, then an arena fight: CONTINUE returns to the arena, not campaign complete',()=>{
+  winFinalBossThenTitle();
+  Screens._origin={name:'arena'};
+  G.startArena({champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'arena');
+  G.toTitle();G.sim=false});
+Test.add('final boss win, TITLE, then an exhibition fight: pause QUIT returns to title, not campaign complete',()=>{
+  winFinalBossThenTitle();
+  Screens._origin={name:'title'};
+  G.startFight({champ:'carl',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
+  document.getElementById('quit').click();
+  eq(Screens._current,'title');
+  G.toTitle();G.sim=false});

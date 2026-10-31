@@ -813,6 +813,7 @@ def main():
             visit('shop', "Screens.shop()")
             visit('arena', "Screens.arena()")
             visit('settings', "Screens.settings()")
+            visit('campaignComplete', "Screens.campaignComplete()")
             # A real quest fight (floor 1 node 0), same {floor,node} sugar --floor/--node use below,
             # topped up on energy the same way build_soak_js's own --floor/--node soak path does;
             # p1 chains lights until the mob (a goblin, low hp on node 0) drops, closeIn(f) skips the
@@ -961,7 +962,9 @@ def main():
 
             SCREENS = [('title', "Screens.title()"), ('map', "Screens.map(1)"), ('roster', "Screens.roster()"),
                        ('crystal', "Screens.crystal()"), ('shop', "Screens.shop()"), ('arena', "Screens.arena()"),
-                       ('settings', "Screens.settings()")]
+                       ('settings', "Screens.settings()"),
+                       ('campaignComplete', "Screens.campaignComplete()"),
+                       ('map-complete', "Object.keys(ENCOUNTERS).forEach(k=>Save.data.cleared[k]=true);Screens.map(2)")]
             screen_results = []
             for name, nav in SCREENS:
                 btns = capture_screen(nav)
