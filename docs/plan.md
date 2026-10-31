@@ -94,7 +94,7 @@ Actions workflow running `build.py --check`, `--unit`, `--tutorial --seed 1`, `-
 advisory until Arshia changes Pages or branch protection.
 Files: `requirements.txt`, `README.md`, `.github/workflows/checks.yml`, `AGENTS.md`.
 
-## 8. Player build vs test build — `build-split` — status: todo
+## 8. Player build vs test build — `build-split` — status: in progress (moved ahead of 3–4 while the price is pending)
 Goal: phones stop downloading the test suite (41.8% of the page today).
 Acceptance: `tools/build.py` writes a player `index.html` without `src/90_tests.js` and a test
 page the harness loads; `--check` verifies both; the player page starts and plays one fight in a
