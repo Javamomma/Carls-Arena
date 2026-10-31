@@ -9,7 +9,7 @@ the fix makes them pass, with all existing checks still green (see "Verify" in A
 Not Phase 10: no 6-star champions, ISO curves, catalyst tiers, signature levels, fragments or
 mastery tree. The single shop catalyst is the only piece taken from that plan.
 
-## 1. Save hardening — `save-hardening` — status: todo
+## 1. Save hardening — `save-hardening` — status: done (17c8e32)
 Goal: a damaged save can't stop the game from starting, an unreadable save is never wiped without a
 backup, and a failed write is no longer silent.
 Acceptance:
@@ -31,7 +31,7 @@ Acceptance:
 Files: `src/12_meta.js`, `src/15_save.js`, `src/85_screens.js` and/or `src/00_head.html` (the
 note), `src/90_tests.js`, `tests/harness.py`, `index.html`, `AGENTS.md` (add `--saves` to Verify).
 
-## 2. Stable fight IDs — `fight-ids` — status: todo
+## 2. Stable fight IDs — `fight-ids` — status: in progress
 Goal: campaign progress is stored per fight, not per list position, so reordering doors can never
 move a player's progress onto a different fight.
 Acceptance:
