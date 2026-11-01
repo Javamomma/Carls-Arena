@@ -102,7 +102,7 @@ smoke check; the harness passes on the test page.
 Files: `tools/build.py`, `tests/harness.py`, the new test page, `index.html`, README, AGENTS.md,
 the CI workflow.
 
-## 9. Null-field saves keep a backup — `null-save-bak` — status: in progress
+## 9. Null-field saves keep a backup — `null-save-bak` — status: done (5a76c56)
 Goal: the check for "a v2 save with any of the four null fields leaves a `.bak` copy" is in the
 tests, not only assumed.
 Acceptance: each `null-<field>` case in `--saves` also checks that `carlsArena.v1.bak` holds the
