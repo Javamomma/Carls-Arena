@@ -50,7 +50,7 @@ Files: `src/12_meta.js`, `src/85_screens.js` (`lastFloor`, floor tabs), `src/90_
 `tests/harness.py` (the e2e helper that walks `Save.data.floors`), `tests/fixtures/*.json`,
 `index.html`.
 
-## 3. A rank-up catalyst in the shop — `shop-catalyst` — status: built and approved at 600 gold (branch task/shop-catalyst); merge waits for Arshia to confirm the price
+## 3. A rank-up catalyst in the shop — `shop-catalyst` — status: done at 600 gold (424b84d)
 Goal: every champion can earn its next rank through normal play.
 Acceptance:
 - One new `Meta.SHOP_ITEMS` entry, a "choose a class" catalyst bought with gold, and a class picker
@@ -59,12 +59,11 @@ Acceptance:
 - Unit tests: buying grants one catalyst of the chosen class and deducts the gold; refused when
   short; Carl can rank up with a bought brawler catalyst.
 - Optional, only if Arshia says yes: a boss drops a catalyst of the active champion's class
-  instead of the boss's own class. Status: built and approved on branch task/boss-drop (stacked
-  on task/journey-tests); merges only on a yes.
+  instead of the boss's own class. Status: done on a yes (0d8e292).
 Files: `src/12_meta.js`, `src/85_screens.js`, `src/00_head.html` (picker styles), `src/90_tests.js`,
 `index.html`.
 
-## 4. Journey tests — `journey-tests` — status: built and approved (branch task/journey-tests, stacked on task/shop-catalyst); merges right after step 3
+## 4. Journey tests — `journey-tests` — status: done (035e571)
 Goal: tests that earn resources the way a player does.
 Acceptance: from a fresh save, with no injected gold, catalysts or energy, the test plays or
 simulates the path (tutorial, campaign doors, arena runs, crystals, shop) through the game's own
@@ -102,3 +101,10 @@ page the harness loads; `--check` verifies both; the player page starts and play
 smoke check; the harness passes on the test page.
 Files: `tools/build.py`, `tests/harness.py`, the new test page, `index.html`, README, AGENTS.md,
 the CI workflow.
+
+## 9. Null-field saves keep a backup — `null-save-bak` — status: in progress
+Goal: the check for "a v2 save with any of the four null fields leaves a `.bak` copy" is in the
+tests, not only assumed.
+Acceptance: each `null-<field>` case in `--saves` also checks that `carlsArena.v1.bak` holds the
+original v2 string, the same check the fixture cases make. Nothing in `src/` changes.
+Files: `tests/harness.py`.
