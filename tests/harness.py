@@ -655,6 +655,10 @@ def run_saves():
                     for k, v in c['orig'].items():
                         if k not in (c['broken'], 'v', 'floors') and got.get(k) != v:
                             fails.append('field %s changed: %r' % (k, got.get(k)))
+                    # A repaired null field must not cost the player the original save.
+                    bak = pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(BAK_KEY))
+                    if bak != c['raw']:
+                        fails.append('.bak does not hold the original v2 string')
                 elif c['kind'] == 'fixture':
                     fails.extend(check_v2_fixture(pg, c['raw']))
                 else:
