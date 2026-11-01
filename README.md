@@ -263,6 +263,9 @@ python -m playwright install chromium
   level-up → arena loop headless; add `--loops 20` for a longer menu+fight soak.
 - `python3 tests/harness.py --tutorial --seed 1` plays the Floor 0 tutorial headless via a scripted
   bot and asserts every prompt fires in order.
+- `python3 tests/harness.py --journey` starts from a fresh save with no debug grants and earns
+  everything through the game's own code (tutorial, campaign, arena streaks, crystals, shop
+  catalyst) until all four champions have ranked up once; it prints per-champion milestones.
 - `python3 tests/harness.py --share --shot /tmp/share.png` checks `G.shareCard()`'s PNG data URL.
 - `python3 tests/harness.py --screens-smoke` visits every screen plus one real fight and checks for
   page/console errors on each; `python3 tests/harness.py --phone-check` asserts the canvas stays

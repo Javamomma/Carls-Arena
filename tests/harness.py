@@ -14,6 +14,10 @@
       # quest->rewards->level-up->arena loop, headless; exit 1 on any assertion/page/console error
   python3 tests/harness.py --e2e --seed 1 --loops 20                 # --e2e plus a menu+fight soak:
       # N extra cycles of Screens renders + one quest-node fight + one arena fight
+  python3 tests/harness.py --journey --seed 1                        # fresh save to every champion's
+      # first rank-up with nothing granted: tutorial, campaign doors, arena runs, crystals and the shop
+      # catalyst, all through the game's own reward code; prints per-champion milestones and totals;
+      # exit 1 on any assertion, a champion that never ranks up, or any page/console error
   python3 tests/harness.py --screen settings --shot /tmp/settings.png  # Task 5.4: screenshot a Screens.<name>()
   python3 tests/harness.py --share --shot /tmp/share.png             # Task 5.4: G.shareCard() PNG data-URL
       # check (prefix + IHDR-decoded 854x480 dims); --shot writes the decoded PNG bytes to disk
@@ -306,6 +310,158 @@ try{
   summary.frame=G.fight?G.fight.frame:-1;
 }catch(e){push(String(e&&e.stack||e))}
 return summary})()""" % (which, seed, seed, seed, seed, body)
+
+def build_journey_js(seed):
+    """Earns every resource the way a player does, from a fresh save, until each champion has made
+    its first rank-up. One in-page evaluate, like build_e2e_js. The tutorial is the exact scripted run
+    build_tutorial_js plays; every other fight starts through G.startFight/G.startArena and ends in a
+    KO (the loser's hp set to 0, then G.tick until RESULT), so G.onFightEnd runs Quest.complete and
+    Rewards.grant/Arena.record unchanged. Energy only comes back by moving Energy.now forward. Gold is
+    spent only through Crystal.open('basic'), Meta.buy('classCatalyst') and Roster.rankUp. Returns
+    {seed, champs:{id:{obtained,stars2,rankedUp}}, totals, errors:[...]}, where each milestone is
+    {step, gold on hand, earned so far}."""
+    return r"""(()=>{
+G.sim=true;
+const S=__SEED__,CAP=400;
+const summary={seed:S,champs:{},totals:{arenaRuns:0,arenaWins:0,crystals:0,catalystsBought:0,
+  campaignFights:0,energyWaitsMin:0,goldEarned:{tutorial:0,campaign:0,arena:0}},errors:[]};
+const push=m=>summary.errors.push(m);
+const origNow=Energy.now;
+try{
+  const ids=Object.keys(CHAMPS),T=summary.totals;
+  const rec=summary.champs;ids.forEach(id=>{rec[id]={obtained:null,stars2:null,rankedUp:null}});
+  const ledger={};let step=0,fightN=0;
+  const fail=m=>{throw new Error(m)};
+  const gold=()=>Save.data.gold||0;
+  const earned=()=>T.goldEarned.tutorial+T.goldEarned.campaign+T.goldEarned.arena;
+  const mark=()=>{for(const id of ids){
+    const e=Save.data.roster[id],r=rec[id];
+    if(!e)continue;
+    if(!r.obtained)r.obtained={step,gold:gold(),earned:earned()};
+    if(e.stars>=2&&!r.stars2)r.stars2={step,gold:gold(),earned:earned()};
+    if(e.rank>=2&&!r.rankedUp)r.rankedUp={step,gold:gold(),earned:earned()}}};
+  const check=where=>{
+    for(const k of ['gold','units','iso'])if((Save.data[k]||0)<0)push(k+' went negative at '+where);
+    if(Save.data.energy.n<0)push('energy went negative at '+where);
+    for(const c in Save.data.cats){
+      if(Save.data.cats[c]<0)push('cats.'+c+' went negative at '+where);
+      if(Save.data.cats[c]!==(ledger[c]||0))push('cats.'+c+' is '+Save.data.cats[c]+' but only '+(ledger[c]||0)+' were earned/bought, at '+where)}};
+  const sumCats=c=>Object.values(c||{}).reduce((a,b)=>a+b,0);
+  const catsNow=()=>Object.assign({},Save.data.cats);
+  const snap=()=>({gold:gold(),iso:Save.data.iso||0,units:Save.data.units||0,cats:catsNow(),energy:Save.data.energy.n});
+  const absorbCats=(before)=>{for(const c in Save.data.cats){const d=Save.data.cats[c]-(before[c]||0);if(d)ledger[c]=(ledger[c]||0)+d}};
+
+  // Fresh-save preconditions: nothing was handed over before the tutorial.
+  if(gold()!==0||Object.keys(Save.data.roster).join()!=='carl'||sumCats(Save.data.cats)!==0)push('save was not fresh');
+  Save.data.seed=S;Save.put();
+
+  // Clock: from here on, time only moves when this test moves it.
+  let clock=origNow();Energy.now=()=>clock;
+
+  mark();
+  const tut=__TUTORIAL__;
+  (tut.errors||[]).forEach(e=>push('tutorial: '+e));
+  T.goldEarned.tutorial=gold();
+  step++;mark();check('tutorial');
+
+  // Starts a fight, forces one side's KO, ticks to RESULT, returns whether p1 won.
+  const koFight=(start,p1wins)=>{
+    const fseed=S*100000+(++fightN);
+    const o={seed:fseed,ctrl1:Ctrl.competent(fseed)};
+    const ok=start(o);
+    if(ok===false)fail('fight refused');
+    (p1wins?G.fight.p2:G.fight.p1).hp=0;
+    let n=0;while(G.state==='FIGHT'&&n<3000){G.tick();n++}
+    if(G.state!=='RESULT')fail('fight did not reach RESULT');
+    const won=!!(G.fight.winner&&G.fight.winner.side===1);
+    if(won!==p1wins)fail('KO went the wrong way');
+    step++;return won};
+
+  const nextDoor=()=>{
+    for(const fd of FLOORS){
+      const f=Quest.floor(fd.floor);if(!f)continue;
+      for(let i=0;i<f.nodes.length;i++)if(f.nodes[i].state==='open')return{floor:fd.floor,node:i};
+      if(f.boss.state==='open')return{floor:fd.floor,node:'boss'}}
+    return null};
+
+  const questWin=d=>{
+    let waits=0;
+    while(!Quest.canStart(d.floor,d.node)){
+      if(++waits>12)fail('door '+d.floor+'/'+d.node+' never became startable');
+      clock+=360000;T.energyWaitsMin+=6}
+    const b=snap(),exp=Rewards.forNode(d.floor,d.node);
+    koFight(o=>G.startFight(Object.assign(o,{floor:d.floor,node:d.node})),true);
+    const a=snap(),id=d.floor+'/'+d.node;
+    if(a.gold-b.gold!==exp.gold)push('gold delta '+(a.gold-b.gold)+' != '+exp.gold+' at '+id);
+    if(a.iso-b.iso!==exp.iso)push('iso delta '+(a.iso-b.iso)+' != '+exp.iso+' at '+id);
+    if(a.units-b.units!==(exp.units||0))push('units delta '+(a.units-b.units)+' != '+(exp.units||0)+' at '+id);
+    if(sumCats(a.cats)-sumCats(b.cats)!==sumCats(exp.cats))push('catalyst count delta wrong at '+id);
+    if(a.energy!==b.energy-1)push('energy delta '+(a.energy-b.energy)+' != -1 at '+id);
+    const f=Quest.floor(d.floor),st=d.node==='boss'?f.boss.state:f.nodes[d.node].state;
+    if(st!=='done')push('door not done after win: '+id);
+    absorbCats(b.cats);
+    T.goldEarned.campaign+=a.gold-b.gold;T.campaignFights++;
+    mark();check('quest '+id)};
+
+  const arenaFight=win=>{
+    const b=snap(),s0=Save.data.arena.streak;
+    koFight(o=>G.startArena(o),win);
+    const g=gold()-b.gold;
+    const exp=win?60*(s0+1):0;
+    if(g!==exp)push('arena gold delta '+g+' != '+exp+' at streak '+s0+(win?' win':' loss'));
+    if(Save.data.arena.streak!==(win?s0+1:0))push('arena streak wrong after '+(win?'win':'loss')+' at '+s0);
+    const a=snap();
+    for(const k of ['iso','units','energy'])if(a[k]!==b[k])push('arena fight changed '+k+' ('+b[k]+' -> '+a[k]+') at streak '+s0);
+    for(const c in a.cats)if(a.cats[c]!==b.cats[c])push('arena fight changed cats.'+c+' at streak '+s0);
+    T.goldEarned.arena+=g;if(win)T.arenaWins++;
+    check('arena');mark()};
+  const arenaRun=()=>{
+    if(++T.arenaRuns>CAP)fail('more than '+CAP+' arena runs');
+    for(let i=0;i<4;i++)arenaFight(true);
+    arenaFight(false)};
+
+  const earn=()=>{const d=nextDoor();if(d)questWin(d);else arenaRun()};
+
+  const basicCost=Crystal.KINDS.basic.cost.gold;
+  const shopCat=Meta.SHOP_ITEMS.classCatalyst;
+  const buyCrystal=()=>{
+    const g=gold(),r=Crystal.open('basic');
+    if(!r)fail('basic crystal refused with '+g+' gold');
+    if(gold()!==g-basicCost)push('crystal cost '+(g-gold())+' != '+basicCost);
+    T.crystals++;step++;mark();check('crystal')};
+  const buyCatalyst=cls=>{
+    const g=gold(),b=snap();
+    if(Meta.buy('classCatalyst',{cls})!==true)fail('catalyst refused with '+g+' gold');
+    if(gold()!==g-shopCat.cost.gold)push('catalyst cost '+(g-gold())+' != '+shopCat.cost.gold);
+    if(Save.data.cats[cls]!==b.cats[cls]+1)push('catalyst not added to '+cls);
+    absorbCats(b.cats);T.catalystsBought++;step++;check('catalyst')};
+  const rankUp=id=>{
+    const e=Save.data.roster[id],cls=CHAMPS[id].cls,have=Save.data.cats[cls]||0,cost=e.rank;
+    if(have<cost||(ledger[cls]||0)<cost)push('rank-up of '+id+' without an earned '+cls+' catalyst');
+    const b=snap();
+    if(!Roster.rankUp(id))fail('Roster.rankUp refused for '+id);
+    if(Save.data.roster[id].rank!==2)push(id+' rank is '+Save.data.roster[id].rank+' after rank-up');
+    for(const c in Save.data.cats){
+      const want=b.cats[c]-(c===cls?cost:0);
+      if(Save.data.cats[c]!==want)push('rank-up of '+id+' left cats.'+c+' at '+Save.data.cats[c]+', expected '+want)}
+    ledger[cls]-=cost;step++;mark();check('rankUp '+id)};
+
+  const blocked={};
+  for(let guard=0;guard<20000;guard++){
+    const pending=ids.filter(id=>!blocked[id]&&!(Save.data.roster[id]&&Save.data.roster[id].rank>=2));
+    if(!pending.length)break;
+    const cur=pending.find(id=>Save.data.roster[id]);
+    if(!cur){if(gold()>=basicCost)buyCrystal();else earn();continue}
+    const e=Save.data.roster[cur],cls=CHAMPS[cur].cls;
+    if(e.stars<2){if(gold()>=basicCost)buyCrystal();else earn();continue}
+    if((Save.data.cats[cls]||0)<1){
+      if(!shopCat){if(nextDoor())earn();else blocked[cur]=true;continue}
+      if(gold()>=shopCat.cost.gold)buyCatalyst(cls);else earn();continue}
+    rankUp(cur)}
+  for(const id of ids)if(!rec[id].rankedUp)push(id+' never ranked up');
+}catch(e){push(String(e&&e.message||e))}
+finally{Energy.now=origNow}
+return summary})()""".replace('__SEED__', str(seed)).replace('__TUTORIAL__', build_tutorial_js(seed))
 
 def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
     """One soak cell: a fresh page, p1 on Ctrl.random(seed), p2 on AI.make(ain). The whole
@@ -611,6 +767,10 @@ def main():
                           "capture page/console errors -- they do NOT re-run the main pass's "
                           "gold/iso/xp/energy delta assertions per fight; treat --loops as a soak, "
                           "not an itemized-assertion run")
+    ap.add_argument('--journey', action='store_true',
+                     help="reset the save and earn every resource the way a player does (tutorial, "
+                          "campaign, arena streaks, crystals, shop catalyst, no debug grants) until "
+                          "each champion has ranked up once; see build_journey_js")
     ap.add_argument('--share', action='store_true',
                      help="Task 5.4: start a fight, end it via the debug low-hp+scripted-hit pattern "
                           "(same technique every other e2e-style test in this file already uses, not "
@@ -740,6 +900,20 @@ def main():
         out = {'page_errors': e2e_errors, 'summary': r}
         print(json.dumps(out, indent=1))
         sys.exit(1 if e2e_errors or r.get('errors') else 0)
+    if a.journey:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page(viewport={'width': 854, 'height': 480})
+            journey_errors = []
+            pg.on('pageerror', lambda e: journey_errors.append(str(e)))
+            pg.on('console', lambda m: journey_errors.append(m.text) if m.type == 'error' else None)
+            pg.goto(TEST_PAGE)
+            pg.wait_for_function('typeof G!=="undefined"')
+            pg.evaluate('localStorage.clear();Save.load()')
+            r = pg.evaluate(build_journey_js(a.seed))
+            b.close()
+        print(json.dumps({'page_errors': journey_errors, 'summary': r}, indent=1))
+        sys.exit(1 if journey_errors or r.get('errors') else 0)
     if a.share:
         with sync_playwright() as p:
             b = p.chromium.launch()

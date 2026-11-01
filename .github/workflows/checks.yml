@@ -37,3 +37,5 @@ jobs:
         run: python tests/harness.py --saves
       - name: Player smoke
         run: python tests/harness.py --player-smoke
+      - name: Journey
+        run: python tests/harness.py --journey
