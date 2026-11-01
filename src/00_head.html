@@ -286,6 +286,11 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
    below (ID beats class) scopes that override to the kiosk specifically. */
 .shopBody{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
 #shopCards{flex:none}
+/* The class card spans the row so its four 44px+ buttons sit in one line and the kiosk scrolls less on a phone. */
+.kcard.kwide{width:100%;max-width:760px}
+.clsPick{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.kcard .clsPick button{min-height:44px;padding:4px 6px;font-size:10px;letter-spacing:.5px}
+.clsPick button span{display:block}
 .perksHeading{margin:6px 0 2px;font-size:11px;color:#f4c542;letter-spacing:1px;text-align:center}
 .perkrow{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;
   padding:6px 12px;background:#181c2b;border:1px solid #444;border-radius:6px;text-align:left}

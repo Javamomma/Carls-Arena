@@ -286,6 +286,11 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
    below (ID beats class) scopes that override to the kiosk specifically. */
 .shopBody{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
 #shopCards{flex:none}
+/* The class card spans the row so its four 44px+ buttons sit in one line and the kiosk scrolls less on a phone. */
+.kcard.kwide{width:100%;max-width:760px}
+.clsPick{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.kcard .clsPick button{min-height:44px;padding:4px 6px;font-size:10px;letter-spacing:.5px}
+.clsPick button span{display:block}
 .perksHeading{margin:6px 0 2px;font-size:11px;color:#f4c542;letter-spacing:1px;text-align:center}
 .perkrow{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;
   padding:6px 12px;background:#181c2b;border:1px solid #444;border-radius:6px;text-align:left}
@@ -563,14 +568,20 @@ const Meta={
   SHOP_ITEMS:{
     basicCrystal:{label:'BASIC CRYSTAL',cost:{gold:500},run:()=>Crystal.open('basic')},
     premiumCrystal:{label:'PREMIUM CRYSTAL',cost:{units:100},run:()=>Crystal.open('premium')},
-    isoPack:{label:'ISO PACK',cost:{gold:200},grant:{iso:60}}},
-  buy(itemId){
+    isoPack:{label:'ISO PACK',cost:{gold:200},grant:{iso:60}},
+    classCatalyst:{label:'CLASS CATALYST',cost:{gold:600},pickClass:true}},
+  // Derived from CHAMPS so a new champion class shows up in the shop picker without a second list.
+  playableClasses(){return[...new Set(Object.values(CHAMPS).map(c=>c.cls))]},
+  buy(itemId,opts){
     const item=Meta.SHOP_ITEMS[itemId];
     if(!item)throw new Error('unknown shop item: '+itemId);
     if(item.run)return item.run(); // crystal items: Crystal.open does its own cost check/deduction
+    const cls=opts&&opts.cls;
+    if(item.pickClass&&!Meta.playableClasses().includes(cls))return false;
     for(const c in item.cost)if((Save.data[c]||0)<item.cost[c])return false;
     for(const c in item.cost)Save.data[c]-=item.cost[c];
     if(item.grant)for(const c in item.grant)Save.data[c]=(Save.data[c]||0)+item.grant[c];
+    if(item.pickClass)Save.data.cats[cls]=(Save.data.cats[cls]||0)+1;
     Save.put();
     return true},
   buyIso(){return Meta.buy('isoPack')},
@@ -10835,7 +10846,22 @@ const Screens={
       btn.onclick=item.run
         ?(()=>Screens.openCrystal(itemId==='basicCrystal'?'basic':'premium'))
         :(()=>{Meta.buy(itemId);Screens.refresh()});
-      card.appendChild(h);card.appendChild(cost);card.appendChild(btn);
+      card.appendChild(h);card.appendChild(cost);
+      if(item.pickClass){
+        card.classList.add('kwide');
+        // One button per class: choosing the class is the purchase, so there is no separate BUY.
+        const pick=document.createElement('div');pick.className='clsPick';
+        for(const cls of Meta.playableClasses()){
+          const who=Object.values(CHAMPS).filter(c=>c.cls===cls).map(c=>c.name).join(', ');
+          const b=document.createElement('button');b.id='buy'+itemId[0].toUpperCase()+itemId.slice(1)+'_'+cls;
+          const name=document.createElement('span'),have=document.createElement('span');
+          name.textContent=cls.toUpperCase()+' · '+who;have.textContent='HAVE '+(Save.data.cats[cls]||0);
+          b.appendChild(name);b.appendChild(have);
+          b.disabled=!Screens.canAffordItem(itemId);
+          b.onclick=()=>{Meta.buy(itemId,{cls});Screens.refresh()};
+          pick.appendChild(b)}
+        card.appendChild(pick)}
+      else card.appendChild(btn);
       wrap.appendChild(card)}
     // Task 5.2: a PERKS section beneath the consumable-item cards above -- a permanent, one-time
     // buy per perk (never a `run`/`grant` item, so it doesn't belong in Meta.SHOP_ITEMS), rendered
@@ -19247,5 +19273,55 @@ Test.add('arena leaderboard shows saved text literally and builds no elements fr
     eq(rows[1].children[4].textContent,'2026-01-02');
     for(const c of rows[1].children)eq(c.tagName,'SPAN')
   }finally{Save.data.leaderboard=saved;Screens._origin=origin;Screens.title()}});
+
+
+
+// ---- class catalyst (shop) -----------------------------------------------------------------
+const CLASS_CAT_CLASSES={brawler:['CARL'],caster:['PRINCESS DONUT'],trickster:['KATIA'],tank:['MONGO']};
+const classCatPrice=()=>Meta.SHOP_ITEMS.classCatalyst.cost.gold;
+Test.add('Meta.buy(classCatalyst) grants one catalyst of each playable class and deducts exactly the price',()=>{
+  for(const cls in CLASS_CAT_CLASSES){
+    Save.data=Meta.defaults();Save.data.gold=classCatPrice()+7;
+    const others=JSON.stringify(Object.keys(Save.data.cats).filter(c=>c!==cls).map(c=>Save.data.cats[c]));
+    const had=Save.data.cats[cls]||0;
+    ok(Meta.buy('classCatalyst',{cls}),cls);
+    eq(Save.data.cats[cls],had+1,cls+' catalyst');
+    eq(Save.data.gold,7,cls+' gold left');
+    eq(JSON.stringify(Object.keys(Save.data.cats).filter(c=>c!==cls).map(c=>Save.data.cats[c])),others,'other classes untouched')}});
+Test.add('Meta.buy(classCatalyst) refuses and changes nothing when short, or for an unknown or unused class',()=>{
+  Save.data=Meta.defaults();Save.data.gold=classCatPrice()-1;
+  let before=JSON.stringify(Save.data);
+  eq(Meta.buy('classCatalyst',{cls:'brawler'}),false,'short on gold');
+  eq(JSON.stringify(Save.data),before);
+  Save.data.gold=classCatPrice()*10;before=JSON.stringify(Save.data);
+  for(const cls of['beast','rogue','nonsense',undefined,'__proto__']){
+    eq(Meta.buy('classCatalyst',cls===undefined?{}:{cls}),false,String(cls));
+    eq(JSON.stringify(Save.data),before,String(cls)+' must change nothing')}
+  eq(Meta.buy('classCatalyst'),false,'no options');
+  eq(JSON.stringify(Save.data),before)});
+Test.add('a 2-star Carl buys a brawler catalyst in the shop and then ranks up',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster.carl={stars:2,rank:1,level:1,xp:0,shards:0};
+  Save.data.cats.brawler=0;Save.data.gold=classCatPrice();
+  eq(Roster.rankUp('carl'),false,'no catalyst yet');
+  ok(Meta.buy('classCatalyst',{cls:'brawler'}));
+  ok(Roster.rankUp('carl'));
+  eq(Save.data.roster.carl.rank,2);eq(Save.data.gold,0)});
+Test.add('shop screen renders a labelled class picker and each choice buys its class',()=>{
+  Save.data=Meta.defaults();Save.data.gold=classCatPrice()*4;
+  Screens.shop();
+  const btns=[...document.querySelectorAll('#shopCards .clsPick button')];
+  eq(btns.length,Object.keys(CLASS_CAT_CLASSES).length,'one choice per playable class');
+  for(const cls in CLASS_CAT_CLASSES){
+    const b=document.getElementById('buyClassCatalyst_'+cls);
+    ok(b,'button for '+cls);
+    ok(b.textContent.includes(cls.toUpperCase()+' · '+CLASS_CAT_CLASSES[cls].join(', ')),b&&b.textContent);
+    eq(b.disabled,false)}
+  document.getElementById('buyClassCatalyst_caster').click();
+  eq(Save.data.cats.caster,1);eq(Save.data.gold,classCatPrice()*3);
+  ok(document.getElementById('buyClassCatalyst_caster').textContent.includes('1'),'shows holdings after refresh');
+  Save.data.gold=classCatPrice()-1;Screens.refresh();
+  eq(document.getElementById('buyClassCatalyst_tank').disabled,true,'disabled when short');
+  Screens.title()});
 
 </script></body></html>

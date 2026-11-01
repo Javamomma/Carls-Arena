@@ -8298,3 +8298,53 @@ Test.add('arena leaderboard shows saved text literally and builds no elements fr
     eq(rows[1].children[4].textContent,'2026-01-02');
     for(const c of rows[1].children)eq(c.tagName,'SPAN')
   }finally{Save.data.leaderboard=saved;Screens._origin=origin;Screens.title()}});
+
+
+
+// ---- class catalyst (shop) -----------------------------------------------------------------
+const CLASS_CAT_CLASSES={brawler:['CARL'],caster:['PRINCESS DONUT'],trickster:['KATIA'],tank:['MONGO']};
+const classCatPrice=()=>Meta.SHOP_ITEMS.classCatalyst.cost.gold;
+Test.add('Meta.buy(classCatalyst) grants one catalyst of each playable class and deducts exactly the price',()=>{
+  for(const cls in CLASS_CAT_CLASSES){
+    Save.data=Meta.defaults();Save.data.gold=classCatPrice()+7;
+    const others=JSON.stringify(Object.keys(Save.data.cats).filter(c=>c!==cls).map(c=>Save.data.cats[c]));
+    const had=Save.data.cats[cls]||0;
+    ok(Meta.buy('classCatalyst',{cls}),cls);
+    eq(Save.data.cats[cls],had+1,cls+' catalyst');
+    eq(Save.data.gold,7,cls+' gold left');
+    eq(JSON.stringify(Object.keys(Save.data.cats).filter(c=>c!==cls).map(c=>Save.data.cats[c])),others,'other classes untouched')}});
+Test.add('Meta.buy(classCatalyst) refuses and changes nothing when short, or for an unknown or unused class',()=>{
+  Save.data=Meta.defaults();Save.data.gold=classCatPrice()-1;
+  let before=JSON.stringify(Save.data);
+  eq(Meta.buy('classCatalyst',{cls:'brawler'}),false,'short on gold');
+  eq(JSON.stringify(Save.data),before);
+  Save.data.gold=classCatPrice()*10;before=JSON.stringify(Save.data);
+  for(const cls of['beast','rogue','nonsense',undefined,'__proto__']){
+    eq(Meta.buy('classCatalyst',cls===undefined?{}:{cls}),false,String(cls));
+    eq(JSON.stringify(Save.data),before,String(cls)+' must change nothing')}
+  eq(Meta.buy('classCatalyst'),false,'no options');
+  eq(JSON.stringify(Save.data),before)});
+Test.add('a 2-star Carl buys a brawler catalyst in the shop and then ranks up',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster.carl={stars:2,rank:1,level:1,xp:0,shards:0};
+  Save.data.cats.brawler=0;Save.data.gold=classCatPrice();
+  eq(Roster.rankUp('carl'),false,'no catalyst yet');
+  ok(Meta.buy('classCatalyst',{cls:'brawler'}));
+  ok(Roster.rankUp('carl'));
+  eq(Save.data.roster.carl.rank,2);eq(Save.data.gold,0)});
+Test.add('shop screen renders a labelled class picker and each choice buys its class',()=>{
+  Save.data=Meta.defaults();Save.data.gold=classCatPrice()*4;
+  Screens.shop();
+  const btns=[...document.querySelectorAll('#shopCards .clsPick button')];
+  eq(btns.length,Object.keys(CLASS_CAT_CLASSES).length,'one choice per playable class');
+  for(const cls in CLASS_CAT_CLASSES){
+    const b=document.getElementById('buyClassCatalyst_'+cls);
+    ok(b,'button for '+cls);
+    ok(b.textContent.includes(cls.toUpperCase()+' · '+CLASS_CAT_CLASSES[cls].join(', ')),b&&b.textContent);
+    eq(b.disabled,false)}
+  document.getElementById('buyClassCatalyst_caster').click();
+  eq(Save.data.cats.caster,1);eq(Save.data.gold,classCatPrice()*3);
+  ok(document.getElementById('buyClassCatalyst_caster').textContent.includes('1'),'shows holdings after refresh');
+  Save.data.gold=classCatPrice()-1;Screens.refresh();
+  eq(document.getElementById('buyClassCatalyst_tank').disabled,true,'disabled when short');
+  Screens.title()});

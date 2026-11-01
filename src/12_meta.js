@@ -107,14 +107,20 @@ const Meta={
   SHOP_ITEMS:{
     basicCrystal:{label:'BASIC CRYSTAL',cost:{gold:500},run:()=>Crystal.open('basic')},
     premiumCrystal:{label:'PREMIUM CRYSTAL',cost:{units:100},run:()=>Crystal.open('premium')},
-    isoPack:{label:'ISO PACK',cost:{gold:200},grant:{iso:60}}},
-  buy(itemId){
+    isoPack:{label:'ISO PACK',cost:{gold:200},grant:{iso:60}},
+    classCatalyst:{label:'CLASS CATALYST',cost:{gold:600},pickClass:true}},
+  // Derived from CHAMPS so a new champion class shows up in the shop picker without a second list.
+  playableClasses(){return[...new Set(Object.values(CHAMPS).map(c=>c.cls))]},
+  buy(itemId,opts){
     const item=Meta.SHOP_ITEMS[itemId];
     if(!item)throw new Error('unknown shop item: '+itemId);
     if(item.run)return item.run(); // crystal items: Crystal.open does its own cost check/deduction
+    const cls=opts&&opts.cls;
+    if(item.pickClass&&!Meta.playableClasses().includes(cls))return false;
     for(const c in item.cost)if((Save.data[c]||0)<item.cost[c])return false;
     for(const c in item.cost)Save.data[c]-=item.cost[c];
     if(item.grant)for(const c in item.grant)Save.data[c]=(Save.data[c]||0)+item.grant[c];
+    if(item.pickClass)Save.data.cats[cls]=(Save.data.cats[cls]||0)+1;
     Save.put();
     return true},
   buyIso(){return Meta.buy('isoPack')},

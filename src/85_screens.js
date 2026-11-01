@@ -471,7 +471,22 @@ const Screens={
       btn.onclick=item.run
         ?(()=>Screens.openCrystal(itemId==='basicCrystal'?'basic':'premium'))
         :(()=>{Meta.buy(itemId);Screens.refresh()});
-      card.appendChild(h);card.appendChild(cost);card.appendChild(btn);
+      card.appendChild(h);card.appendChild(cost);
+      if(item.pickClass){
+        card.classList.add('kwide');
+        // One button per class: choosing the class is the purchase, so there is no separate BUY.
+        const pick=document.createElement('div');pick.className='clsPick';
+        for(const cls of Meta.playableClasses()){
+          const who=Object.values(CHAMPS).filter(c=>c.cls===cls).map(c=>c.name).join(', ');
+          const b=document.createElement('button');b.id='buy'+itemId[0].toUpperCase()+itemId.slice(1)+'_'+cls;
+          const name=document.createElement('span'),have=document.createElement('span');
+          name.textContent=cls.toUpperCase()+' · '+who;have.textContent='HAVE '+(Save.data.cats[cls]||0);
+          b.appendChild(name);b.appendChild(have);
+          b.disabled=!Screens.canAffordItem(itemId);
+          b.onclick=()=>{Meta.buy(itemId,{cls});Screens.refresh()};
+          pick.appendChild(b)}
+        card.appendChild(pick)}
+      else card.appendChild(btn);
       wrap.appendChild(card)}
     // Task 5.2: a PERKS section beneath the consumable-item cards above -- a permanent, one-time
     // buy per perk (never a `run`/`grant` item, so it doesn't belong in Meta.SHOP_ITEMS), rendered
