@@ -53,7 +53,7 @@ After the tutorial, the title screen offers CAMPAIGN, ARENA, ROSTER, KIOSK, EXHI
   turning red once your active champion is below it) — you can still walk in under-leveled, it's
   just a fair warning, not a hard gate. Doors unlock left-to-right as you clear the one before them;
   each costs 1 energy (10 max, regenerating over time) and pays out gold, ISO, and XP for your
-  active champion on a win, plus units and a class catalyst for a boss win. Clearing a floor's boss
+  active champion on a win, plus units and a catalyst of your champion's class for a boss win. Clearing a floor's boss
   opens the next floor.
 - **ROSTER** shows every champion you own, star rating, rank, and level. LEVEL UP spends ISO,
   RANK UP spends that champion's class catalyst, and SELECT makes a champion the one who actually

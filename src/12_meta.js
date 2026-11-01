@@ -330,7 +330,9 @@ const Rewards={
   // uses the position just past the last regular node (def.nodes.length, 5 today) for that same
   // gold term, so its base gold continues the node ramp before the boss-only units/catalyst bonus
   // is layered on top.
-  forNode(n,k){
+  // A boss drops the fighting champion's class (the boss's own class can be one nobody plays, like
+  // beast), defaulting to the active champion; an unknown fighter falls back to the boss's class.
+  forNode(n,k,champId){
     const def=Quest.floorDef(n);
     if(!def)throw new Error('unknown floor: '+n);
     const isBoss=k==='boss';
@@ -344,9 +346,10 @@ const Rewards={
              xp:Math.round(30*n*Rewards.mult.xp)};
     if(isBoss){
       r.units=50*n; // not multiplied: Rewards.mult only covers gold/iso/xp, per the frozen shape
-      const enemyId=ENCOUNTERS[def.boss].enemy;
       r.cats={};
-      r.cats[DEFS[enemyId].cls]=1}
+      const own=id=>Object.prototype.hasOwnProperty.call(CHAMPS,id)?CHAMPS[id]:null; // plain lookups hit __proto__/constructor
+      const who=own(champId)||own(Save.data.active);
+      r.cats[who?who.cls:DEFS[ENCOUNTERS[def.boss].enemy].cls]=1}
     return r},
   // Currencies/catalysts apply unconditionally; xp applies to the active champion, levelling it up
   // (Stats.xpToLevel per level, consumed on each level-up) while level stays under its rank's cap —

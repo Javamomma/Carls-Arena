@@ -700,6 +700,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(r.iso)parts.push('+'+r.iso+' ISO');
     if(r.xp)parts.push('+'+r.xp+' XP');
     if(r.units)parts.push('+'+r.units+' UNITS');
+    if(r.cats)for(const c in r.cats)if(r.cats[c])parts.push('+'+r.cats[c]+' '+c.toUpperCase()+' CATALYST');
     return parts.join('  ')},
   // Fix-wave item 8 (final review, Minor): the play URL, in one place so the share card and any
   // future caller stay in sync with README.md's own "Play it now" link.
@@ -802,7 +803,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       const wasComplete=Quest.campaignComplete();
       Quest.complete(floor,node,won);
       this.campaignJustCompleted=won&&!wasComplete&&Quest.campaignComplete();
-      if(won)rewards=Rewards.forNode(floor,node)
+      if(won)rewards=Rewards.forNode(floor,node,this.champ)
     }else if(this.mode==='arena')Arena.record(won);
     // Fix-wave item 1 (final review, Critical): completion additionally requires every Tutorial step
     // to have actually been taught (state.step reached steps.length) -- won alone is no longer enough.

@@ -2860,11 +2860,57 @@ Test.add('Rewards.forNode gives gold/iso/xp scaled by floor and node position (f
   ok(!('units' in r0));ok(!('cats' in r0));
   const r3=Rewards.forNode(1,3);
   eq(r3.gold,160*1+60*3)});
-Test.add('Rewards.forNode boss adds units and one catalyst of the enemy class',()=>{
-  const r=Rewards.forNode(1,'boss');
+Test.add('Rewards.forNode boss adds units and one catalyst of the fighting champion\'s class',()=>{
+  const r=Rewards.forNode(1,'boss','carl');
   eq(r.iso,20);eq(r.xp,30);eq(r.units,50);
-  eq(DEFS.grull.cls,'tank');
-  eq(r.cats.tank,1)});
+  eq(JSON.stringify(r.cats),JSON.stringify({brawler:1}))});
+Test.add('Rewards.forNode boss drops the champion\'s class for every playable champion, other fields unchanged',()=>{
+  const base=Rewards.forNode(1,'boss','mongo');
+  for(const id in CHAMPS){
+    const r=Rewards.forNode(1,'boss',id);
+    eq(JSON.stringify(r.cats),JSON.stringify({[CHAMPS[id].cls]:1}),id);
+    eq(r.gold,base.gold);eq(r.iso,base.iso);eq(r.xp,base.xp);eq(r.units,base.units)}});
+Test.add('Rewards.forNode boss without champId uses Save.data.active',()=>{
+  Save.data=Meta.defaults();Save.data.active='donut';
+  eq(JSON.stringify(Rewards.forNode(1,'boss').cats),JSON.stringify({caster:1}))});
+Test.add('Rewards.forNode boss falls back to the boss class for an unknown champId, a non-champion id, or an invalid active id',()=>{
+  Save.data=Meta.defaults();
+  const bossCls=DEFS[ENCOUNTERS[FLOORS[0].boss].enemy].cls;
+  Save.data.active='goblin'; // non-champion active, no champId
+  eq(JSON.stringify(Rewards.forNode(1,'boss').cats),JSON.stringify({[bossCls]:1}));
+  eq(JSON.stringify(Rewards.forNode(1,'boss','nobody').cats),JSON.stringify({[bossCls]:1}));
+  eq(JSON.stringify(Rewards.forNode(1,'boss','goblin').cats),JSON.stringify({[bossCls]:1}));
+  for(const bad of ['__proto__','constructor']){
+    eq(JSON.stringify(Rewards.forNode(1,'boss',bad).cats),JSON.stringify({[bossCls]:1}),'champId '+bad);
+    Save.data.active=bad;
+    eq(JSON.stringify(Rewards.forNode(1,'boss').cats),JSON.stringify({[bossCls]:1}),'active '+bad)}
+  Save.data.active='donut'; // unknown champId still prefers the valid active champion
+  eq(JSON.stringify(Rewards.forNode(1,'boss','goblin').cats),JSON.stringify({caster:1}))});
+Test.add('a boss fought as a non-champion (p1:goblin) does not throw and still grants a catalyst',()=>{
+  Save.data=Meta.defaults();
+  clearIds(...allFightIds());delete Save.data.cleared[FLOORS[0].boss];
+  Save.data.energy.n=Energy.max;Save.data.energy.ts=Energy.now();
+  Screens._origin={name:'map',args:[1]};
+  G.startFight({floor:1,node:'boss',p1:'goblin',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Object.values(G.lastRewards.cats).reduce((a,b)=>a+b,0),1);
+  G.toTitle();G.sim=false});
+Test.add('winning a floor boss as Donut grants one caster catalyst and G.lastRewards shows it',()=>{
+  Save.data=Meta.defaults();
+  clearIds(...allFightIds());delete Save.data.cleared[FLOORS[0].boss];
+  Save.data.energy.n=Energy.max;Save.data.energy.ts=Energy.now();
+  Screens._origin={name:'map',args:[1]};
+  const before=Save.data.cats.caster||0;
+  G.startFight({floor:1,node:'boss',champ:'donut',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(JSON.stringify(G.lastRewards.cats),JSON.stringify({caster:1}));
+  eq(Save.data.cats.caster,before+1);
+  ok(document.getElementById('resultLine').textContent.includes('+1 CASTER CATALYST'),'result line must show the catalyst');
+  G.toTitle();G.sim=false});
 // Fix-wave item 9 (Phase 5 seam, ruled): Rewards had no multiplier hook, which is exactly where a
 // future ratings/viewers system needs to land -- without it, that multiplier would have to thread
 // through onFightEnd or every call site individually. Rewards.mult (default {gold:1,iso:1,xp:1}) is

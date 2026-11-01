@@ -791,7 +791,9 @@ const Rewards={
   // uses the position just past the last regular node (def.nodes.length, 5 today) for that same
   // gold term, so its base gold continues the node ramp before the boss-only units/catalyst bonus
   // is layered on top.
-  forNode(n,k){
+  // A boss drops the fighting champion's class (the boss's own class can be one nobody plays, like
+  // beast), defaulting to the active champion; an unknown fighter falls back to the boss's class.
+  forNode(n,k,champId){
     const def=Quest.floorDef(n);
     if(!def)throw new Error('unknown floor: '+n);
     const isBoss=k==='boss';
@@ -805,9 +807,10 @@ const Rewards={
              xp:Math.round(30*n*Rewards.mult.xp)};
     if(isBoss){
       r.units=50*n; // not multiplied: Rewards.mult only covers gold/iso/xp, per the frozen shape
-      const enemyId=ENCOUNTERS[def.boss].enemy;
       r.cats={};
-      r.cats[DEFS[enemyId].cls]=1}
+      const own=id=>Object.prototype.hasOwnProperty.call(CHAMPS,id)?CHAMPS[id]:null; // plain lookups hit __proto__/constructor
+      const who=own(champId)||own(Save.data.active);
+      r.cats[who?who.cls:DEFS[ENCOUNTERS[def.boss].enemy].cls]=1}
     return r},
   // Currencies/catalysts apply unconditionally; xp applies to the active champion, levelling it up
   // (Stats.xpToLevel per level, consumed on each level-up) while level stays under its rank's cap —
@@ -9886,6 +9889,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(r.iso)parts.push('+'+r.iso+' ISO');
     if(r.xp)parts.push('+'+r.xp+' XP');
     if(r.units)parts.push('+'+r.units+' UNITS');
+    if(r.cats)for(const c in r.cats)if(r.cats[c])parts.push('+'+r.cats[c]+' '+c.toUpperCase()+' CATALYST');
     return parts.join('  ')},
   // Fix-wave item 8 (final review, Minor): the play URL, in one place so the share card and any
   // future caller stay in sync with README.md's own "Play it now" link.
@@ -9988,7 +9992,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       const wasComplete=Quest.campaignComplete();
       Quest.complete(floor,node,won);
       this.campaignJustCompleted=won&&!wasComplete&&Quest.campaignComplete();
-      if(won)rewards=Rewards.forNode(floor,node)
+      if(won)rewards=Rewards.forNode(floor,node,this.champ)
     }else if(this.mode==='arena')Arena.record(won);
     // Fix-wave item 1 (final review, Critical): completion additionally requires every Tutorial step
     // to have actually been taught (state.step reached steps.length) -- won alone is no longer enough.
