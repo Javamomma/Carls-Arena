@@ -108,3 +108,30 @@ tests, not only assumed.
 Acceptance: each `null-<field>` case in `--saves` also checks that `carlsArena.v1.bak` holds the
 original v2 string, the same check the fixture cases make. Nothing in `src/` changes.
 Files: `tests/harness.py`.
+
+# Playtest round 1 (Arshia, 2026-11-02)
+
+## 10. Tutorial text fits the phone, and the way in is labelled — `tutorial-fit` — status: in progress
+Goal: every tutorial instruction is readable on a phone, and a new player can see where the
+tutorial starts.
+Acceptance:
+- Every lesson prompt and stall hint (`Tutorial.steps[].prompt`, `Tutorial.HINTS`, with the hint
+  appended the way the game appends it) sits fully inside the canvas on phone-sized landscape
+  screens (at least 844x390, 667x375 and 568x320 CSS px) and at 854x480. Long ones wrap onto a
+  second line instead of running off the edge. A harness check proves it and fails on today's code.
+- On a fresh save the title screen's first button says START TUTORIAL. Once the tutorial is done
+  it says CAMPAIGN again. Its behaviour doesn't change.
+- Prompt wording stays as it is (task 11 rewrites lesson 3).
+Files: `src/00_head.html`, `src/80_game.js` and/or `src/85_screens.js`, `src/90_tests.js`,
+`tests/harness.py`, `index.html`, `test.html`.
+
+## 11. Heavy attacks work by touch — `heavy-touch` — status: planned
+Goal: lesson 3 ("parry, then a heavy to punish") can be done with a finger, and its instruction
+describes the real gesture. Today a plain hold is a block, so "HOLD to charge a HEAVY" can't work;
+the heavy is swipe-right-and-keep-holding, which throws a kick first.
+Acceptance: a harness test drives real pointer events (no `intent.heavy`, no L key) through a
+parry and a heavy punish, and a heavy from standing; it shows what fails today. The fix is chosen
+with Arshia if it changes the controls.
+
+## 12. Character art — `art` — status: waiting on Arshia's choice of direction
+Goal: the fighters look like a modern mobile fighting game, not mannequins.
