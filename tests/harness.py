@@ -14,6 +14,10 @@
       # quest->rewards->level-up->arena loop, headless; exit 1 on any assertion/page/console error
   python3 tests/harness.py --e2e --seed 1 --loops 20                 # --e2e plus a menu+fight soak:
       # N extra cycles of Screens renders + one quest-node fight + one arena fight
+  python3 tests/harness.py --journey --seed 1                        # fresh save to every champion's
+      # first rank-up with nothing granted: tutorial, campaign doors, arena runs, crystals and the shop
+      # catalyst, all through the game's own reward code; prints per-champion milestones and totals;
+      # exit 1 on any assertion, a champion that never ranks up, or any page/console error
   python3 tests/harness.py --screen settings --shot /tmp/settings.png  # Task 5.4: screenshot a Screens.<name>()
   python3 tests/harness.py --share --shot /tmp/share.png             # Task 5.4: G.shareCard() PNG data-URL
       # check (prefix + IHDR-decoded 854x480 dims); --shot writes the decoded PNG bytes to disk
@@ -35,6 +39,15 @@
       # arena/settings is also a real >=44px target fully inside the viewport (one legitimately scrolled
       # out of a .path/.setrows/#shopBody internal scroll region is skipped, not failed)
 
+  python3 tests/harness.py --player-smoke                           # player page (index.html) only:
+      # no test code, title screen, one full fight to RESULT, no page/console errors
+
+  python3 tests/harness.py --saves                                  # damaged-save cases: a prepared
+      # localStorage save is seeded before any game script runs (fresh browser context per case);
+      # checks the game still starts, only the broken record is repaired, an unreadable save is
+      # backed up to carlsArena.v1.bak, and a failed backup never overwrites the original; exit 1
+      # on any failed case or page/console error
+
 Exit 1 on any page error, console error, or if the game never left TITLE.
 """
 import argparse, base64, json, os, struct, sys, time
@@ -42,6 +55,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INDEX = 'file://' + os.path.join(ROOT, 'index.html')
+TEST_PAGE = 'file://' + os.path.join(ROOT, 'test.html')
 # The four-champion roster fixture, kept in one place because two things have to agree on it: the
 # docs/shots/p8-roster.png line in tools/shots.sh (which passes it as --pre) and --phone-check's own
 # roster seeding (Phase 8 final review, Important #5 -- a fresh one-champion save made every roster
@@ -117,8 +131,8 @@ const push=m=>summary.errors.push(m);
 const cumXp=e=>{let s=e.xp;for(let l=2;l<=e.level;l++)s+=Stats.xpToLevel(l);return s};
 const runTo=cap=>{let t=0;while(G.state==='FIGHT'&&t<cap){G.tick();t++}return t};
 const nextOpen=()=>{
-  for(const fn in Save.data.floors){
-    const n=+fn,f=Quest.floor(n);if(!f)continue;
+  for(const fd of FLOORS){
+    const n=fd.floor,f=Quest.floor(n);if(!f)continue;
     for(let i=0;i<f.nodes.length;i++)if(f.nodes[i].state==='open')return{floor:n,node:i};
     if(f.boss.state==='open')return{floor:n,node:'boss'}}
   return null};
@@ -297,6 +311,158 @@ try{
 }catch(e){push(String(e&&e.stack||e))}
 return summary})()""" % (which, seed, seed, seed, seed, body)
 
+def build_journey_js(seed):
+    """Earns every resource the way a player does, from a fresh save, until each champion has made
+    its first rank-up. One in-page evaluate, like build_e2e_js. The tutorial is the exact scripted run
+    build_tutorial_js plays; every other fight starts through G.startFight/G.startArena and ends in a
+    KO (the loser's hp set to 0, then G.tick until RESULT), so G.onFightEnd runs Quest.complete and
+    Rewards.grant/Arena.record unchanged. Energy only comes back by moving Energy.now forward. Gold is
+    spent only through Crystal.open('basic'), Meta.buy('classCatalyst') and Roster.rankUp. Returns
+    {seed, champs:{id:{obtained,stars2,rankedUp}}, totals, errors:[...]}, where each milestone is
+    {step, gold on hand, earned so far}."""
+    return r"""(()=>{
+G.sim=true;
+const S=__SEED__,CAP=400;
+const summary={seed:S,champs:{},totals:{arenaRuns:0,arenaWins:0,crystals:0,catalystsBought:0,
+  campaignFights:0,energyWaitsMin:0,goldEarned:{tutorial:0,campaign:0,arena:0}},errors:[]};
+const push=m=>summary.errors.push(m);
+const origNow=Energy.now;
+try{
+  const ids=Object.keys(CHAMPS),T=summary.totals;
+  const rec=summary.champs;ids.forEach(id=>{rec[id]={obtained:null,stars2:null,rankedUp:null}});
+  const ledger={};let step=0,fightN=0;
+  const fail=m=>{throw new Error(m)};
+  const gold=()=>Save.data.gold||0;
+  const earned=()=>T.goldEarned.tutorial+T.goldEarned.campaign+T.goldEarned.arena;
+  const mark=()=>{for(const id of ids){
+    const e=Save.data.roster[id],r=rec[id];
+    if(!e)continue;
+    if(!r.obtained)r.obtained={step,gold:gold(),earned:earned()};
+    if(e.stars>=2&&!r.stars2)r.stars2={step,gold:gold(),earned:earned()};
+    if(e.rank>=2&&!r.rankedUp)r.rankedUp={step,gold:gold(),earned:earned()}}};
+  const check=where=>{
+    for(const k of ['gold','units','iso'])if((Save.data[k]||0)<0)push(k+' went negative at '+where);
+    if(Save.data.energy.n<0)push('energy went negative at '+where);
+    for(const c in Save.data.cats){
+      if(Save.data.cats[c]<0)push('cats.'+c+' went negative at '+where);
+      if(Save.data.cats[c]!==(ledger[c]||0))push('cats.'+c+' is '+Save.data.cats[c]+' but only '+(ledger[c]||0)+' were earned/bought, at '+where)}};
+  const sumCats=c=>Object.values(c||{}).reduce((a,b)=>a+b,0);
+  const catsNow=()=>Object.assign({},Save.data.cats);
+  const snap=()=>({gold:gold(),iso:Save.data.iso||0,units:Save.data.units||0,cats:catsNow(),energy:Save.data.energy.n});
+  const absorbCats=(before)=>{for(const c in Save.data.cats){const d=Save.data.cats[c]-(before[c]||0);if(d)ledger[c]=(ledger[c]||0)+d}};
+
+  // Fresh-save preconditions: nothing was handed over before the tutorial.
+  if(gold()!==0||Object.keys(Save.data.roster).join()!=='carl'||sumCats(Save.data.cats)!==0)push('save was not fresh');
+  Save.data.seed=S;Save.put();
+
+  // Clock: from here on, time only moves when this test moves it.
+  let clock=origNow();Energy.now=()=>clock;
+
+  mark();
+  const tut=__TUTORIAL__;
+  (tut.errors||[]).forEach(e=>push('tutorial: '+e));
+  T.goldEarned.tutorial=gold();
+  step++;mark();check('tutorial');
+
+  // Starts a fight, forces one side's KO, ticks to RESULT, returns whether p1 won.
+  const koFight=(start,p1wins)=>{
+    const fseed=S*100000+(++fightN);
+    const o={seed:fseed,ctrl1:Ctrl.competent(fseed)};
+    const ok=start(o);
+    if(ok===false)fail('fight refused');
+    (p1wins?G.fight.p2:G.fight.p1).hp=0;
+    let n=0;while(G.state==='FIGHT'&&n<3000){G.tick();n++}
+    if(G.state!=='RESULT')fail('fight did not reach RESULT');
+    const won=!!(G.fight.winner&&G.fight.winner.side===1);
+    if(won!==p1wins)fail('KO went the wrong way');
+    step++;return won};
+
+  const nextDoor=()=>{
+    for(const fd of FLOORS){
+      const f=Quest.floor(fd.floor);if(!f)continue;
+      for(let i=0;i<f.nodes.length;i++)if(f.nodes[i].state==='open')return{floor:fd.floor,node:i};
+      if(f.boss.state==='open')return{floor:fd.floor,node:'boss'}}
+    return null};
+
+  const questWin=d=>{
+    let waits=0;
+    while(!Quest.canStart(d.floor,d.node)){
+      if(++waits>12)fail('door '+d.floor+'/'+d.node+' never became startable');
+      clock+=360000;T.energyWaitsMin+=6}
+    const b=snap(),exp=Rewards.forNode(d.floor,d.node);
+    koFight(o=>G.startFight(Object.assign(o,{floor:d.floor,node:d.node})),true);
+    const a=snap(),id=d.floor+'/'+d.node;
+    if(a.gold-b.gold!==exp.gold)push('gold delta '+(a.gold-b.gold)+' != '+exp.gold+' at '+id);
+    if(a.iso-b.iso!==exp.iso)push('iso delta '+(a.iso-b.iso)+' != '+exp.iso+' at '+id);
+    if(a.units-b.units!==(exp.units||0))push('units delta '+(a.units-b.units)+' != '+(exp.units||0)+' at '+id);
+    if(sumCats(a.cats)-sumCats(b.cats)!==sumCats(exp.cats))push('catalyst count delta wrong at '+id);
+    if(a.energy!==b.energy-1)push('energy delta '+(a.energy-b.energy)+' != -1 at '+id);
+    const f=Quest.floor(d.floor),st=d.node==='boss'?f.boss.state:f.nodes[d.node].state;
+    if(st!=='done')push('door not done after win: '+id);
+    absorbCats(b.cats);
+    T.goldEarned.campaign+=a.gold-b.gold;T.campaignFights++;
+    mark();check('quest '+id)};
+
+  const arenaFight=win=>{
+    const b=snap(),s0=Save.data.arena.streak;
+    koFight(o=>G.startArena(o),win);
+    const g=gold()-b.gold;
+    const exp=win?60*(s0+1):0;
+    if(g!==exp)push('arena gold delta '+g+' != '+exp+' at streak '+s0+(win?' win':' loss'));
+    if(Save.data.arena.streak!==(win?s0+1:0))push('arena streak wrong after '+(win?'win':'loss')+' at '+s0);
+    const a=snap();
+    for(const k of ['iso','units','energy'])if(a[k]!==b[k])push('arena fight changed '+k+' ('+b[k]+' -> '+a[k]+') at streak '+s0);
+    for(const c in a.cats)if(a.cats[c]!==b.cats[c])push('arena fight changed cats.'+c+' at streak '+s0);
+    T.goldEarned.arena+=g;if(win)T.arenaWins++;
+    check('arena');mark()};
+  const arenaRun=()=>{
+    if(++T.arenaRuns>CAP)fail('more than '+CAP+' arena runs');
+    for(let i=0;i<4;i++)arenaFight(true);
+    arenaFight(false)};
+
+  const earn=()=>{const d=nextDoor();if(d)questWin(d);else arenaRun()};
+
+  const basicCost=Crystal.KINDS.basic.cost.gold;
+  const shopCat=Meta.SHOP_ITEMS.classCatalyst;
+  const buyCrystal=()=>{
+    const g=gold(),r=Crystal.open('basic');
+    if(!r)fail('basic crystal refused with '+g+' gold');
+    if(gold()!==g-basicCost)push('crystal cost '+(g-gold())+' != '+basicCost);
+    T.crystals++;step++;mark();check('crystal')};
+  const buyCatalyst=cls=>{
+    const g=gold(),b=snap();
+    if(Meta.buy('classCatalyst',{cls})!==true)fail('catalyst refused with '+g+' gold');
+    if(gold()!==g-shopCat.cost.gold)push('catalyst cost '+(g-gold())+' != '+shopCat.cost.gold);
+    if(Save.data.cats[cls]!==b.cats[cls]+1)push('catalyst not added to '+cls);
+    absorbCats(b.cats);T.catalystsBought++;step++;check('catalyst')};
+  const rankUp=id=>{
+    const e=Save.data.roster[id],cls=CHAMPS[id].cls,have=Save.data.cats[cls]||0,cost=e.rank;
+    if(have<cost||(ledger[cls]||0)<cost)push('rank-up of '+id+' without an earned '+cls+' catalyst');
+    const b=snap();
+    if(!Roster.rankUp(id))fail('Roster.rankUp refused for '+id);
+    if(Save.data.roster[id].rank!==2)push(id+' rank is '+Save.data.roster[id].rank+' after rank-up');
+    for(const c in Save.data.cats){
+      const want=b.cats[c]-(c===cls?cost:0);
+      if(Save.data.cats[c]!==want)push('rank-up of '+id+' left cats.'+c+' at '+Save.data.cats[c]+', expected '+want)}
+    ledger[cls]-=cost;step++;mark();check('rankUp '+id)};
+
+  const blocked={};
+  for(let guard=0;guard<20000;guard++){
+    const pending=ids.filter(id=>!blocked[id]&&!(Save.data.roster[id]&&Save.data.roster[id].rank>=2));
+    if(!pending.length)break;
+    const cur=pending.find(id=>Save.data.roster[id]);
+    if(!cur){if(gold()>=basicCost)buyCrystal();else earn();continue}
+    const e=Save.data.roster[cur],cls=CHAMPS[cur].cls;
+    if(e.stars<2){if(gold()>=basicCost)buyCrystal();else earn();continue}
+    if((Save.data.cats[cls]||0)<1){
+      if(!shopCat){if(nextDoor())earn();else blocked[cur]=true;continue}
+      if(gold()>=shopCat.cost.gold)buyCatalyst(cls);else earn();continue}
+    rankUp(cur)}
+  for(const id of ids)if(!rec[id].rankedUp)push(id+' never ranked up');
+}catch(e){push(String(e&&e.message||e))}
+finally{Energy.now=origNow}
+return summary})()""".replace('__SEED__', str(seed)).replace('__TUTORIAL__', build_tutorial_js(seed))
+
 def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
     """One soak cell: a fresh page, p1 on Ctrl.random(seed), p2 on AI.make(ain). The whole
     restart-on-KO loop runs as a single in-page evaluate() so a KO is caught the very next tick
@@ -306,7 +472,7 @@ def run_matrix_cell(b, p1n, p2n, ain, seed, sim_seconds):
     cell_errors = []
     pg.on('pageerror', lambda e: cell_errors.append(str(e)))
     pg.on('console', lambda m: cell_errors.append(m.text) if m.type == 'error' else None)
-    pg.goto(INDEX)
+    pg.goto(TEST_PAGE)
     pg.wait_for_function('typeof G!=="undefined"')
     js = build_soak_js(seed, p1n, p2n, ain, 'Ctrl.random(seed)', int(sim_seconds * 60))
     r = pg.evaluate(js)
@@ -389,6 +555,155 @@ def run_matrix():
             worst_cell['frames_total'], worst_cell['ko_ticks'], worst_cell['req_frames']))
     return 1 if bad else 0
 
+# A played v2 save in the exact shape Meta.defaults() writes, so --saves can break one record at a time
+# and assert every other field survives.
+def played_save():
+    return {
+        'v': 2, 'seed': 7, 'fightSeed': 42, 'gold': 1234, 'units': 55, 'iso': 80,
+        'cats': {'brawler': 3, 'rogue': 1, 'caster': 0, 'tank': 2, 'beast': 0, 'trickster': 0},
+        'roster': {'carl': {'stars': 1, 'rank': 2, 'level': 5, 'xp': 30, 'shards': 2},
+                   'donut': {'stars': 2, 'rank': 1, 'level': 3, 'xp': 10, 'shards': 0}},
+        'active': 'donut',
+        'floors': {'1': {'nodes': ['done', 'done', 'open', 'locked', 'locked'], 'boss': 'locked'}},
+        'energy': {'n': 4, 'max': 10, 'ts': 1700000000000},
+        'arena': {'best': 6, 'streak': 2},
+        'leaderboard': [{'viewers': 900, 'champ': 'carl', 'floor': 1, 'date': '2026-10-01'}],
+        'pity': {'basic': 3},
+        'settings': {'reduceMotion': True, 'haptics': False, 'leftHanded': True, 'useAtlas': False,
+                     'sfx': False, 'announcer': True, 'showButtons': True},
+        'tutorialDone': True, 'mute': True, 'stats': {'fights': 9, 'wins': 5},
+    }
+
+SAVE_KEY = 'carlsArena.v1'
+BAK_KEY = 'carlsArena.v1.bak'
+
+# A real v2 save (written by the old build) must load as v3: same values everywhere, same door states.
+def check_v2_fixture(pg, raw):
+    fails = []
+    old = json.loads(raw)
+    got = pg.evaluate('JSON.parse(JSON.stringify(Save.data))')
+    stored = json.loads(pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(SAVE_KEY)))
+    if got.get('v') != 3 or stored.get('v') != 3:
+        fails.append('v is %r in memory and %r stored, expected 3' % (got.get('v'), stored.get('v')))
+    if 'floors' in got or 'floors' in stored:
+        fails.append('a v3 save must not keep the floors key')
+    for k, v in old.items():
+        if k in ('v', 'floors'):
+            continue
+        if got.get(k) != v:
+            fails.append('field %s changed: %r' % (k, got.get(k)))
+    for n, fl in old['floors'].items():
+        state = pg.evaluate('(()=>{const f=Quest.floor(%s);return f&&{nodes:f.nodes.map(x=>x.state),boss:f.boss.state}})()' % n)
+        if state != fl:
+            fails.append('floor %s doors are %r, v2 had %r' % (n, state, fl))
+    for n in (1, 2):
+        want = str(n) in old['floors']
+        if pg.evaluate('typeof Quest.unlocked==="function"&&Quest.unlocked(%d)' % n) != want:
+            fails.append('Quest.unlocked(%d) should be %r' % (n, want))
+    bak = pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(BAK_KEY))
+    if bak != raw:
+        fails.append('.bak does not hold the original v2 string')
+    return fails
+
+def run_saves():
+    cases = []
+    for k in ('cats', 'energy', 'arena', 'stats'):
+        d = played_save()
+        d[k] = None
+        cases.append({'name': 'null-' + k, 'kind': 'null', 'broken': k, 'raw': json.dumps(d),
+                      'orig': played_save()})
+    cases.append({'name': 'garbage-string', 'kind': 'bak', 'raw': 'not json {{{'})
+    cases.append({'name': 'unknown-version', 'kind': 'bak', 'raw': json.dumps(dict(played_save(), v=99))})
+    cases.append({'name': 'read-fails', 'kind': 'readfail', 'raw': json.dumps(played_save())})
+    cases.append({'name': 'bak-write-fails', 'kind': 'bakfail', 'raw': 'not json {{{'})
+    for name in ('v2_default', 'v2_played'):
+        raw = open(os.path.join(ROOT, 'tests', 'fixtures', name + '.json')).read()
+        cases.append({'name': 'fixture-' + name, 'kind': 'fixture', 'raw': raw})
+    results, any_err = [], False
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        for c in cases:
+            ctx = b.new_context(viewport={'width': 854, 'height': 480})
+            seed = ("(()=>{try{if(sessionStorage.getItem('__seeded'))return;sessionStorage.setItem('__seeded','1')}catch(e){}"
+                    "const set=Storage.prototype.setItem;set.call(localStorage,%s,%s);"
+                    "if(%s)Storage.prototype.setItem=function(k,v){if(k===%s)throw new Error('quota');return set.call(this,k,v)};"
+                    "const get=Storage.prototype.getItem;window.__origGet=get;"
+                    "if(%s)Storage.prototype.getItem=function(k){if(k===%s)throw new Error('denied');return get.call(this,k)}})()"
+                    % (json.dumps(SAVE_KEY), json.dumps(c['raw']),
+                       'true' if c['kind'] == 'bakfail' else 'false', json.dumps(BAK_KEY),
+                       'true' if c['kind'] == 'readfail' else 'false', json.dumps(SAVE_KEY)))
+            ctx.add_init_script(seed)
+            pg = ctx.new_page()
+            errs = []
+            pg.on('pageerror', lambda e: errs.append(str(e)))
+            pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
+            pg.goto(TEST_PAGE)
+            started = True
+            try:
+                pg.wait_for_function('typeof G!=="undefined"', timeout=3000)
+            except Exception:
+                started = False
+            fails = []
+            if not started:
+                fails.append('game did not start (G missing)')
+            else:
+                if c['kind'] == 'null':
+                    got = pg.evaluate('JSON.parse(JSON.stringify(Save.data))')
+                    dflt = pg.evaluate('JSON.parse(JSON.stringify(Meta.defaults()))')
+                    if got.get(c['broken']) != dflt[c['broken']]:
+                        fails.append('%s not repaired to defaults: %r' % (c['broken'], got.get(c['broken'])))
+                    for k, v in c['orig'].items():
+                        if k not in (c['broken'], 'v', 'floors') and got.get(k) != v:
+                            fails.append('field %s changed: %r' % (k, got.get(k)))
+                    # A repaired null field must not cost the player the original save.
+                    bak = pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(BAK_KEY))
+                    if bak != c['raw']:
+                        fails.append('.bak does not hold the original v2 string')
+                elif c['kind'] == 'fixture':
+                    fails.extend(check_v2_fixture(pg, c['raw']))
+                else:
+                    bak = pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(BAK_KEY))
+                    cur = pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(SAVE_KEY))
+                    if c['kind'] == 'bak' and bak != c['raw']:
+                        fails.append('.bak is %r, expected the original string' % bak)
+                    if c['kind'] in ('bakfail', 'readfail') and cur != c['raw']:
+                        fails.append('original save was overwritten: %r' % cur)
+            if errs:
+                fails.append('page/console errors: %s' % errs)
+                any_err = True
+            results.append({'case': c['name'], 'ok': not fails, 'fails': fails})
+            ctx.close()
+        b.close()
+    print(json.dumps({'saves': results}, indent=1))
+    return 1 if any_err or any(not r['ok'] for r in results) else 0
+
+def run_player_smoke():
+    """Loads the shipped player page and plays one fight through the game's own loop, with no test
+    helpers, so a build that leaks test code or breaks without it fails here."""
+    errors = []
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page(viewport={'width': 854, 'height': 480})
+        pg.on('pageerror', lambda e: errors.append(str(e)))
+        pg.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
+        pg.goto(INDEX)
+        pg.wait_for_function('typeof G!=="undefined"')
+        html = open(os.path.join(ROOT, 'index.html'), encoding='utf-8').read()
+        r = pg.evaluate("""(()=>{
+          const o={test_undefined:typeof Test==='undefined',
+                   title_shown:document.getElementById('title').classList.contains('show')&&G.state==='TITLE'};
+          G.sim=true;
+          G.startFight({seed:1,p1:'carl',p2:'donut',ai:'brawl',ctrl1:Ctrl.random(1)});
+          let frames=0;
+          while(G.state!=='RESULT'&&frames<20000){G.tick();frames++}
+          o.frames=frames;o.final_state=G.state;return o})()""")
+        b.close()
+    out = dict(r, no_test_add=('Test.add(' not in html), errors=errors)
+    print(json.dumps(out, indent=1))
+    ok = (r['test_undefined'] and out['no_test_add'] and r['title_shown']
+          and r['final_state'] == 'RESULT' and not errors)
+    return 0 if ok else 1
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--unit', action='store_true', help='run Test.run() and exit')
@@ -456,6 +771,10 @@ def main():
                           "capture page/console errors -- they do NOT re-run the main pass's "
                           "gold/iso/xp/energy delta assertions per fight; treat --loops as a soak, "
                           "not an itemized-assertion run")
+    ap.add_argument('--journey', action='store_true',
+                     help="reset the save and earn every resource the way a player does (tutorial, "
+                          "campaign, arena streaks, crystals, shop catalyst, no debug grants) until "
+                          "each champion has ranked up once; see build_journey_js")
     ap.add_argument('--share', action='store_true',
                      help="Task 5.4: start a fight, end it via the debug low-hp+scripted-hit pattern "
                           "(same technique every other e2e-style test in this file already uses, not "
@@ -491,6 +810,14 @@ def main():
                           "closeIn to skip the walk-up) so Screens.result renders too; each screen's "
                           "own pageerror/console-error delta is recorded separately; prints a JSON "
                           "{screens:[{screen,errors}]} and exits 1 if any screen recorded errors")
+    ap.add_argument('--player-smoke', action='store_true',
+                     help="load the player page (index.html): no test code in it, the game starts on "
+                          "the title screen, one real fight plays to RESULT, no page/console errors")
+    ap.add_argument('--saves', action='store_true',
+                     help="seed damaged saves into localStorage before any game script runs and check "
+                          "the game starts, only the broken record is repaired, unreadable saves are "
+                          "backed up, and a failed backup leaves the original untouched; prints JSON "
+                          "and exits 1 on any failed case or page/console error")
     ap.add_argument('--phone-check', action='store_true',
                      help="Task 5.6: sets an 844x390 CSS-px landscape viewport (iPhone SE/8-class "
                           "phone rotated), starts a real fight, and asserts: the canvas is letterboxed "
@@ -521,6 +848,10 @@ def main():
         ap.error('--floor requires --node (an index or "boss")')  # prints usage + exits 2
     if a.matrix:
         sys.exit(run_matrix())
+    if a.saves:
+        sys.exit(run_saves())
+    if a.player_smoke:
+        sys.exit(run_player_smoke())
     if a.perf is not None:
         with sync_playwright() as p:
             b = p.chromium.launch()
@@ -528,7 +859,7 @@ def main():
             perf_errors = []
             pg.on('pageerror', lambda e: perf_errors.append(str(e)))
             pg.on('console', lambda m: perf_errors.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             # Restart-on-KO, same as build_soak_js: a plain N-tick loop with no restart leaves
             # G.stepFrame() a no-op for the remainder of the run once the fight ends (Fight.step
@@ -561,7 +892,7 @@ def main():
             e2e_errors = []
             pg.on('pageerror', lambda e: e2e_errors.append(str(e)))
             pg.on('console', lambda m: e2e_errors.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             # Same reset as --reset-save: re-migrate from empty localStorage onto Meta.defaults()
             # so the run starts from full energy / floor 1 node 0 open / only carl owned, regardless
@@ -573,6 +904,20 @@ def main():
         out = {'page_errors': e2e_errors, 'summary': r}
         print(json.dumps(out, indent=1))
         sys.exit(1 if e2e_errors or r.get('errors') else 0)
+    if a.journey:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page(viewport={'width': 854, 'height': 480})
+            journey_errors = []
+            pg.on('pageerror', lambda e: journey_errors.append(str(e)))
+            pg.on('console', lambda m: journey_errors.append(m.text) if m.type == 'error' else None)
+            pg.goto(TEST_PAGE)
+            pg.wait_for_function('typeof G!=="undefined"')
+            pg.evaluate('localStorage.clear();Save.load()')
+            r = pg.evaluate(build_journey_js(a.seed))
+            b.close()
+        print(json.dumps({'page_errors': journey_errors, 'summary': r}, indent=1))
+        sys.exit(1 if journey_errors or r.get('errors') else 0)
     if a.share:
         with sync_playwright() as p:
             b = p.chromium.launch()
@@ -580,7 +925,7 @@ def main():
             share_errors = []
             pg.on('pageerror', lambda e: share_errors.append(str(e)))
             pg.on('console', lambda m: share_errors.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             # Same "end a fight via a scripted low-hp hit, then step ticks until RESULT" technique
             # every other e2e-style test in this file already uses (no dedicated debug-KO hook exists,
@@ -621,7 +966,7 @@ def main():
             tut_errors = []
             pg.on('pageerror', lambda e: tut_errors.append(str(e)))
             pg.on('console', lambda m: tut_errors.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             # Same reset as --e2e/--reset-save: re-migrate from empty localStorage onto Meta.defaults()
             # so the run starts from a genuinely fresh (!tutorialDone) save.
@@ -649,7 +994,7 @@ def main():
             shot_errors = []
             pg.on('pageerror', lambda e: shot_errors.append(str(e)))
             pg.on('console', lambda m: shot_errors.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             pg.evaluate('localStorage.clear();Save.load()')
             js = build_tutorial_shot_js(a.tutorial_shot, a.seed)
@@ -667,7 +1012,7 @@ def main():
             errs = []
             pg.on('pageerror', lambda e: errs.append(str(e)))
             pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             pg.evaluate('localStorage.clear();Save.load()')
             results = []
@@ -682,6 +1027,7 @@ def main():
             visit('shop', "Screens.shop()")
             visit('arena', "Screens.arena()")
             visit('settings', "Screens.settings()")
+            visit('campaignComplete', "Screens.campaignComplete()")
             # A real quest fight (floor 1 node 0), same {floor,node} sugar --floor/--node use below,
             # topped up on energy the same way build_soak_js's own --floor/--node soak path does;
             # p1 chains lights until the mob (a goblin, low hp on node 0) drops, closeIn(f) skips the
@@ -713,7 +1059,7 @@ def main():
             errs = []
             pg.on('pageerror', lambda e: errs.append(str(e)))
             pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
-            pg.goto(INDEX)
+            pg.goto(TEST_PAGE)
             pg.wait_for_function('typeof G!=="undefined"')
             pg.evaluate('localStorage.clear();Save.load()')
             pg.evaluate("G.startFight({seed:1,p1:'carl',p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()})")
@@ -793,7 +1139,7 @@ def main():
             screen_errs = []
             pg2.on('pageerror', lambda e: screen_errs.append(str(e)))
             pg2.on('console', lambda m: screen_errs.append(m.text) if m.type == 'error' else None)
-            pg2.goto(INDEX)
+            pg2.goto(TEST_PAGE)
             pg2.wait_for_function('typeof G!=="undefined"')
             pg2.evaluate('localStorage.clear();Save.load()')
             # Phase 8 final review, Important #5: a FRESH save has exactly one champion, so the
@@ -830,7 +1176,9 @@ def main():
 
             SCREENS = [('title', "Screens.title()"), ('map', "Screens.map(1)"), ('roster', "Screens.roster()"),
                        ('crystal', "Screens.crystal()"), ('shop', "Screens.shop()"), ('arena', "Screens.arena()"),
-                       ('settings', "Screens.settings()")]
+                       ('settings', "Screens.settings()"),
+                       ('campaignComplete', "Screens.campaignComplete()"),
+                       ('map-complete', "Object.keys(ENCOUNTERS).forEach(k=>Save.data.cleared[k]=true);Screens.map(2)")]
             screen_results = []
             for name, nav in SCREENS:
                 btns = capture_screen(nav)
@@ -973,7 +1321,7 @@ def main():
         pg = b.new_page(viewport={'width': 854, 'height': 480})
         pg.on('pageerror', lambda e: errors.append(str(e)))
         pg.on('console', lambda m: console.append(m.text) if m.type == 'error' else None)
-        pg.goto(INDEX)
+        pg.goto(TEST_PAGE)
         pg.wait_for_function('typeof G!=="undefined"')
         if a.reset_save:
             # Save.load() re-migrates from (now-empty) localStorage, landing on Meta.defaults() --
@@ -987,7 +1335,7 @@ def main():
             out['unit'] = r
             print(json.dumps(out, indent=1))
             b.close()
-            sys.exit(0 if r['fail'] == 0 and not errors else 1)
+            sys.exit(0 if r['fail'] == 0 and not errors and not console else 1)
         if a.cinematic:
             pg.evaluate('G.debugCinematic()')
             out['state'] = pg.evaluate('G.state')

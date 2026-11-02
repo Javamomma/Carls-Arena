@@ -53,7 +53,7 @@ After the tutorial, the title screen offers CAMPAIGN, ARENA, ROSTER, KIOSK, EXHI
   turning red once your active champion is below it) — you can still walk in under-leveled, it's
   just a fair warning, not a hard gate. Doors unlock left-to-right as you clear the one before them;
   each costs 1 energy (10 max, regenerating over time) and pays out gold, ISO, and XP for your
-  active champion on a win, plus units and a class catalyst for a boss win. Clearing a floor's boss
+  active champion on a win, plus units and a catalyst of your champion's class for a boss win. Clearing a floor's boss
   opens the next floor.
 - **ROSTER** shows every champion you own, star rating, rank, and level. LEVEL UP spends ISO,
   RANK UP spends that champion's class catalyst, and SELECT makes a champion the one who actually
@@ -239,12 +239,22 @@ same reason (a blocked sub-hit never reaches the code path that applies it).
 
 ## Development
 
-- Edit files in `src/`, then `python3 tools/build.py` writes `index.html`. Never hand-edit
-  `index.html` — it's a generated, concatenated build of every `src/*.js`/`*.html` file.
-  `python3 tools/build.py --check` builds without writing, exiting non-zero if the build would
-  differ from the committed `index.html`.
+Setup needs Python 3.9 or newer. CI uses 3.14, and AGENTS.md uses `python3.14` on Arshia's Mac.
+
+```sh
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+- Edit files in `src/`, then `python3 tools/build.py` writes `index.html` (the player page, without
+  the test suite). Never hand-edit it or `test.html` — both are generated, concatenated builds of
+  the `src/*.js`/`*.html` files. `python3 tools/build.py --check` builds without writing, exiting
+  non-zero and naming each committed file that would differ.
+- `test.html` is the same page plus `src/90_tests.js`; the harness and `tests/batch.py` load it.
+- `python3 tests/harness.py --player-smoke` loads `index.html` and checks it has no test code and
+  plays one fight to the end.
 - `python3 tests/harness.py --unit` runs the in-page unit tests headless (Python Playwright driving
-  a real headless Chromium against `index.html`, no npm/node toolchain).
+  a real headless Chromium against `test.html`, no npm/node toolchain).
 - `python3 tests/harness.py --sim --seconds 60 --bot random --ai basic` soaks the fight loop for a
   fixed number of simulated frames, restarting on every KO.
 - `python3 tests/harness.py --matrix` runs the full AI/content soak matrix (every rig × mob × AI
@@ -253,11 +263,16 @@ same reason (a blocked sub-hit never reaches the code path that applies it).
   level-up → arena loop headless; add `--loops 20` for a longer menu+fight soak.
 - `python3 tests/harness.py --tutorial --seed 1` plays the Floor 0 tutorial headless via a scripted
   bot and asserts every prompt fires in order.
+- `python3 tests/harness.py --journey` starts from a fresh save with no debug grants and earns
+  everything through the game's own code (tutorial, campaign, arena streaks, crystals, shop
+  catalyst) until all four champions have ranked up once; it prints per-champion milestones.
 - `python3 tests/harness.py --share --shot /tmp/share.png` checks `G.shareCard()`'s PNG data URL.
 - `python3 tests/harness.py --screens-smoke` visits every screen plus one real fight and checks for
   page/console errors on each; `python3 tests/harness.py --phone-check` asserts the canvas stays
   letterboxed, on-screen buttons are real ≥44px touch targets, and the page never scrolls
   horizontally at an 844×390 CSS-px landscape-phone viewport.
+- `python3 tests/harness.py --saves` seeds damaged saves (a null record, garbage, an unknown version, a
+  failing backup) before the game loads and checks it still starts without losing the original.
 - `python3 tests/harness.py --screen <name> --shot out.png` screenshots any menu screen
   (`title|map|roster|crystal|shop|arena|settings`) without starting a fight; `--pose <key> --shot
   out.png` freezes a fighter in a named rig pose for a clean reference shot; `--tutorial-shot

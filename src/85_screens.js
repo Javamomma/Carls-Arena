@@ -16,7 +16,8 @@ const Screens={
   // Fixed table of what each name shows/renders; kept as one object so show()/refresh() share it
   // instead of a chain of if/else per screen name.
   RENDER:{title:'renderTitle',map:'renderMap',roster:'renderRoster',crystal:'renderCrystal',
-    shop:'renderShop',arena:'renderArena',result:'renderResult',settings:'renderSettings'},
+    shop:'renderShop',arena:'renderArena',result:'renderResult',settings:'renderSettings',
+    campaignComplete:'renderCampaignComplete'},
   // Hides every Phase 4 overlay (plus pauseMenu, so the pause menu's QUIT and the result screen's
   // CONTINUE -- both of which land here through backToOrigin -- never leave it stuck on screen
   // over a browsing screen) and the touch buttons, shows exactly `name`, then renders it. The
@@ -24,7 +25,7 @@ const Screens={
   // visible) -- so show() both toggles AND renders, and Screens.map/roster/... below are thin
   // wrappers that stash their arg (if any) and call this.
   show(name){
-    for(const id of['title','map','roster','crystal','shop','arena','result','pauseMenu','settings'])G.show(id,id===name);
+    for(const id of['title','map','roster','crystal','shop','arena','result','pauseMenu','settings','campaignComplete'])G.show(id,id===name);
     G.show('btns',false);
     this._current=name;
     const fn=this.RENDER[name];
@@ -47,11 +48,12 @@ const Screens={
   // Task 5.4: not a fight-launching screen, so BACK just goes straight to the title (same pattern as
   // map/roster/crystal/shop/arena's own BACK -- none of them route through toOrigin()/_origin either).
   settings(){this.show('settings')},
+  campaignComplete(){this.show('campaignComplete')},
   // Called from G.startFight the instant a fight actually begins (title/result/pauseMenu are
   // already hidden there directly) -- a fight can be launched from any browsing screen (a map
   // node, arena's FIGHT, exhibition off the title screen), so whichever one is still up needs
   // hiding too, or it would linger visually over the fight underneath.
-  hideAll(){for(const id of['title','map','roster','crystal','shop','arena','settings'])G.show(id,false);this._current=null},
+  hideAll(){for(const id of['title','map','roster','crystal','shop','arena','settings','campaignComplete'])G.show(id,false);this._current=null},
   // Re-renders whatever screen is currently up (no visibility change) -- called after any Meta
   // mutation a button on that screen just made, so costs/affordability/counts reflect it
   // immediately without a full show() (which would also re-toggle overlay classes for no reason).
@@ -65,9 +67,10 @@ const Screens={
     if(o.name==='map')this.map(o.args&&o.args[0]);
     else if(typeof this[o.name]==='function')this[o.name]();
     else this.title()},
-  lastFloor(){const ks=Object.keys(Save.data.floors).map(Number);return ks.length?Math.max.apply(null,ks):1},
+  lastFloor(){return FLOORS.reduce((m,fd)=>Quest.unlocked(fd.floor)?Math.max(m,fd.floor):m,1)},
   // ---- title -------------------------------------------------------------------------------
   renderTitle(){
+    Save.syncNote();
     // Task 5.4: the title screen's old bare SOUND toggle became a SETTINGS button -- SOUND itself
     // (#titleMute, still the one place Audio.muted/Save.data.mute actually flip -- see G.init())
     // moved into the new #settings overlay as one more toggle row; renderSettings() below is what
@@ -142,7 +145,7 @@ const Screens={
     heading.textContent=f?f.name:'CAMPAIGN';
     const tabs=document.getElementById('mapTabs');tabs.innerHTML='';
     for(const fd of FLOORS){
-      const unlocked=!!Save.data.floors[fd.floor];
+      const unlocked=Quest.unlocked(fd.floor);
       const b=document.createElement('button');
       b.className='ftab'+(fd.floor===n?' active':'');
       b.textContent='FLOOR '+fd.floor;
@@ -162,6 +165,12 @@ const Screens={
       t.textContent='TUTORIAL';
       t.onclick=()=>{Screens._origin={name:'map',args:[n]};G.startTutorial()};
       tabs.appendChild(t)}
+    // In the tabs row like TUTORIAL, so the arena shortcut adds no height at 854x480.
+    if(Quest.campaignComplete()){
+      const a=document.createElement('button');
+      a.id='mapArena';a.className='node arenago';a.textContent='ARENA';
+      a.onclick=()=>Screens.arena();
+      tabs.appendChild(a)}
     const path=document.getElementById('mapPath');path.innerHTML='';
     if(f){
       // Fix-wave item 6: a non-'open' node is disabled -- it used to be a live button that looked
@@ -197,6 +206,10 @@ const Screens={
     // writer, and only ever sets it, never clears it.
     document.getElementById('mapMsg').textContent='';
     document.getElementById('mapBack').onclick=()=>Screens.title()},
+  // ---- campaign complete ------------------------------------------------------------------------
+  renderCampaignComplete(){
+    document.getElementById('ccArena').onclick=()=>Screens.arena();
+    document.getElementById('ccMap').onclick=()=>Screens.map(Screens.lastFloor())},
   // Task 6.1, ruling 3 (owner playtest note: "recommended LVL 4" hint wanted on the hobgoblin): a
   // door/boss button's label plus a small "REC. LVL n" line under it, red (.under) when the active
   // roster champion's level is below ENCOUNTERS[encId].recLevel -- purely informational, never
@@ -458,7 +471,22 @@ const Screens={
       btn.onclick=item.run
         ?(()=>Screens.openCrystal(itemId==='basicCrystal'?'basic':'premium'))
         :(()=>{Meta.buy(itemId);Screens.refresh()});
-      card.appendChild(h);card.appendChild(cost);card.appendChild(btn);
+      card.appendChild(h);card.appendChild(cost);
+      if(item.pickClass){
+        card.classList.add('kwide');
+        // One button per class: choosing the class is the purchase, so there is no separate BUY.
+        const pick=document.createElement('div');pick.className='clsPick';
+        for(const cls of Meta.playableClasses()){
+          const who=Object.values(CHAMPS).filter(c=>c.cls===cls).map(c=>c.name).join(', ');
+          const b=document.createElement('button');b.id='buy'+itemId[0].toUpperCase()+itemId.slice(1)+'_'+cls;
+          const name=document.createElement('span'),have=document.createElement('span');
+          name.textContent=cls.toUpperCase()+' · '+who;have.textContent='HAVE '+(Save.data.cats[cls]||0);
+          b.appendChild(name);b.appendChild(have);
+          b.disabled=!Screens.canAffordItem(itemId);
+          b.onclick=()=>{Meta.buy(itemId,{cls});Screens.refresh()};
+          pick.appendChild(b)}
+        card.appendChild(pick)}
+      else card.appendChild(btn);
       wrap.appendChild(card)}
     // Task 5.2: a PERKS section beneath the consumable-item cards above -- a permanent, one-time
     // buy per perk (never a `run`/`grant` item, so it doesn't belong in Meta.SHOP_ITEMS), rendered
@@ -505,8 +533,9 @@ const Screens={
         const row=document.createElement('div');row.className='lbrow';
         const champName=(CHAMPS[e.champ]&&CHAMPS[e.champ].name)||e.champ;
         const prog=e.floor!=null?('FLOOR '+e.floor):('STREAK '+e.streak);
-        row.innerHTML=[String(i+1),Render.fmtViewers(e.viewers)+' VIEWERS',champName,prog,e.date]
-          .map(s=>'<span>'+s+'</span>').join('');
+        // textContent because champ and date come from the save and must never be parsed as markup.
+        [String(i+1),Render.fmtViewers(e.viewers)+' VIEWERS',champName,prog,e.date].forEach(s=>{
+          const cell=document.createElement('span');cell.textContent=s;row.appendChild(cell)});
         lb.appendChild(row)})}
     document.getElementById('arenaBack').onclick=()=>Screens.title()},
   // ---- result ----------------------------------------------------------------------------------

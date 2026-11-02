@@ -2333,7 +2333,7 @@ Test.add('G.startFight({floor,node:"boss"}) resolves the boss encounter and sets
   // Task 4.4: {floor,node} now spends energy through Quest.start, which requires the node to be
   // 'open' -- floor 2's boss doesn't exist in Meta.defaults() (only floor 1 is created), so it's
   // opened by hand here rather than relying on default save state.
-  Save.data=Meta.defaults();Save.data.floors[2]={nodes:['done','done','done','done','done'],boss:'open'};
+  Save.data=Meta.defaults();clearIds('f1_grull',...FLOORS[1].nodes);
   G.startFight({floor:2,node:'boss'});
   ok(G.encounter&&G.encounter.boss,'G.encounter.boss must be true');
   eq(G.fight.p2.def.id,'mother_rat');
@@ -2514,13 +2514,13 @@ Test.add('a batch of seeded Ctrl.competent vs AI t3 fights produces at least one
 // Task 4.1: Meta data layer (save v2, migrate, stats, energy) ------------------------------------
 Test.add('Meta.defaults has every top-level key and carl at 1-star/1-rank/1-level',()=>{
   const d=Meta.defaults();
-  for(const k of ['v','seed','gold','units','iso','cats','roster','active','floors','energy','arena','mute','settings','stats'])
+  for(const k of ['v','seed','gold','units','iso','cats','roster','active','cleared','energy','arena','mute','settings','stats'])
     ok(k in d,k+' missing');
-  eq(d.v,2);eq(d.active,'carl');
+  eq(d.v,3);eq(d.active,'carl');
   eq(d.roster.carl.stars,1);eq(d.roster.carl.rank,1);eq(d.roster.carl.level,1)});
 Test.add('Meta.migrate upgrades a v1 save, keeping gold/units/mute/settings and adding roster',()=>{
   const v2=Meta.migrate({v:1,gold:5,units:2,roster:{},mute:true,settings:{}});
-  eq(v2.v,2);eq(v2.gold,5);eq(v2.units,2);eq(v2.mute,true);
+  eq(v2.v,3);eq(v2.gold,5);eq(v2.units,2);eq(v2.mute,true);
   eq(v2.roster.carl.stars,1);eq(v2.roster.carl.rank,1);eq(v2.roster.carl.level,1)});
 Test.add('Meta.migrate fills missing keys on a v2 save without discarding what is there',()=>{
   const d=Meta.migrate({v:2,gold:9});
@@ -2594,7 +2594,7 @@ Test.add('Save.load migrates an existing v1 localStorage value without throwing'
   try{
     localStorage.setItem(Save.key,JSON.stringify({v:1,gold:5,units:2,roster:{},mute:true,settings:{x:1}}));
     Save.load();
-    eq(Save.data.v,2);eq(Save.data.gold,5);eq(Save.data.units,2);eq(Save.data.mute,true);
+    eq(Save.data.v,3);eq(Save.data.gold,5);eq(Save.data.units,2);eq(Save.data.mute,true);
     eq(Save.data.roster.carl.stars,1)
   }finally{
     if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
@@ -2607,7 +2607,7 @@ Test.add('Save.load persists the migrated v2 shape back to localStorage',()=>{
   try{
     localStorage.setItem(Save.key,JSON.stringify({v:1,gold:5,units:2,roster:{},mute:true,settings:{}}));
     Save.load();
-    eq(JSON.parse(localStorage.getItem(Save.key)).v,2,'localStorage must hold the migrated v2 save, not the original v1 one')
+    eq(JSON.parse(localStorage.getItem(Save.key)).v,3,'localStorage must hold the migrated v3 save, not the original v1 one')
   }finally{
     if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
     Save.load()}});
@@ -2616,7 +2616,7 @@ Test.add('Save.put/load round-trips a v2 save',()=>{
   try{
     Save.data=Meta.defaults();Save.data.gold=42;Save.data.roster.carl.stars=3;
     Save.put();Save.load();
-    eq(Save.data.gold,42);eq(Save.data.roster.carl.stars,3);eq(Save.data.v,2)
+    eq(Save.data.gold,42);eq(Save.data.roster.carl.stars,3);eq(Save.data.v,3)
   }finally{
     if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
     Save.load()}});
@@ -2780,6 +2780,8 @@ Test.add('Crystal.open advances Save.data.seed by one per open, so consecutive o
 // would all need renumbering together the day a tutorial floor 0 is inserted at FLOORS[0].
 // Quest.floorDef(n) looks a floor up by its own .floor field instead, so a future floor:0 just plugs
 // in without touching any of the three call sites' indexing math.
+// Marks fights as beaten in the live save.
+const clearIds=(...ids)=>{for(const id of ids)Save.data.cleared[id]=true};
 Test.add('Quest.floorDef(n) looks floors up by their own .floor field, not array index (fix-wave item 9, Phase 5 seam)',()=>{
   eq(Quest.floorDef(1).id,'f1');
   eq(Quest.floorDef(2).id,'f2');
@@ -2814,7 +2816,7 @@ Test.add('Quest.start spends 1 energy and returns the node encounter id; refuses
   eq(Quest.start(1,1),null,'node 1 is locked');
   eq(JSON.stringify(Save.data),before,'a refusal must change nothing')});
 Test.add('Quest.start refuses (unchanged) when energy is empty',()=>{
-  Save.data=Meta.defaults();Save.data.energy.n=0;
+  Save.data=Meta.defaults();Save.data.energy.n=0;Save.data.energy.ts=Energy.now();
   const before=JSON.stringify(Save.data);
   eq(Quest.start(1,0),null);
   eq(JSON.stringify(Save.data),before)});
@@ -2830,11 +2832,10 @@ Test.add('Quest.complete on a loss changes nothing',()=>{
   eq(JSON.stringify(Save.data),before)});
 Test.add('Quest.complete on the last node opens the boss',()=>{
   Save.data=Meta.defaults();
-  for(let i=0;i<5;i++){Save.data.floors[1].nodes[i]='open';Quest.complete(1,i,true)}
+  for(let i=0;i<5;i++)Quest.complete(1,i,true)
   eq(Quest.floor(1).boss.state,'open')});
 Test.add('Quest.complete(1,"boss",true) creates floor 2 with node 0 open',()=>{
   Save.data=Meta.defaults();
-  Save.data.floors[1].boss='open';
   ok(Quest.complete(1,'boss',true));
   eq(Quest.floor(1).boss.state,'done');
   const f2=Quest.floor(2);
@@ -2844,10 +2845,10 @@ Test.add('Quest.complete(1,"boss",true) creates floor 2 with node 0 open',()=>{
   eq(f2.boss.state,'locked')});
 Test.add('Quest.complete on floor 2\'s boss does not create a floor 3 (FLOORS only has 2 floors)',()=>{
   Save.data=Meta.defaults();
-  Save.data.floors[2]={nodes:['done','done','done','done','done'],boss:'open'};
+  clearIds('f1_grull',...FLOORS[1].nodes);
   ok(Quest.complete(2,'boss',true));
   eq(Quest.floor(2).boss.state,'done');
-  eq(Save.data.floors[3],undefined)});
+  eq(Quest.floor(3),null)});
 // Fix-wave item 8 (ruled): node gold raised from 100*n+40*k to 160*n+60*k -- floor 1 only yielded
 // ~1200 gold total under the old numbers, while one roster star costs ~5 dupes worth of crystals
 // (~10000 gold at 500g/basic), gating floor-2 progression almost entirely behind a wall unrelated to
@@ -2859,11 +2860,57 @@ Test.add('Rewards.forNode gives gold/iso/xp scaled by floor and node position (f
   ok(!('units' in r0));ok(!('cats' in r0));
   const r3=Rewards.forNode(1,3);
   eq(r3.gold,160*1+60*3)});
-Test.add('Rewards.forNode boss adds units and one catalyst of the enemy class',()=>{
-  const r=Rewards.forNode(1,'boss');
+Test.add('Rewards.forNode boss adds units and one catalyst of the fighting champion\'s class',()=>{
+  const r=Rewards.forNode(1,'boss','carl');
   eq(r.iso,20);eq(r.xp,30);eq(r.units,50);
-  eq(DEFS.grull.cls,'tank');
-  eq(r.cats.tank,1)});
+  eq(JSON.stringify(r.cats),JSON.stringify({brawler:1}))});
+Test.add('Rewards.forNode boss drops the champion\'s class for every playable champion, other fields unchanged',()=>{
+  const base=Rewards.forNode(1,'boss','mongo');
+  for(const id in CHAMPS){
+    const r=Rewards.forNode(1,'boss',id);
+    eq(JSON.stringify(r.cats),JSON.stringify({[CHAMPS[id].cls]:1}),id);
+    eq(r.gold,base.gold);eq(r.iso,base.iso);eq(r.xp,base.xp);eq(r.units,base.units)}});
+Test.add('Rewards.forNode boss without champId uses Save.data.active',()=>{
+  Save.data=Meta.defaults();Save.data.active='donut';
+  eq(JSON.stringify(Rewards.forNode(1,'boss').cats),JSON.stringify({caster:1}))});
+Test.add('Rewards.forNode boss falls back to the boss class for an unknown champId, a non-champion id, or an invalid active id',()=>{
+  Save.data=Meta.defaults();
+  const bossCls=DEFS[ENCOUNTERS[FLOORS[0].boss].enemy].cls;
+  Save.data.active='goblin'; // non-champion active, no champId
+  eq(JSON.stringify(Rewards.forNode(1,'boss').cats),JSON.stringify({[bossCls]:1}));
+  eq(JSON.stringify(Rewards.forNode(1,'boss','nobody').cats),JSON.stringify({[bossCls]:1}));
+  eq(JSON.stringify(Rewards.forNode(1,'boss','goblin').cats),JSON.stringify({[bossCls]:1}));
+  for(const bad of ['__proto__','constructor']){
+    eq(JSON.stringify(Rewards.forNode(1,'boss',bad).cats),JSON.stringify({[bossCls]:1}),'champId '+bad);
+    Save.data.active=bad;
+    eq(JSON.stringify(Rewards.forNode(1,'boss').cats),JSON.stringify({[bossCls]:1}),'active '+bad)}
+  Save.data.active='donut'; // unknown champId still prefers the valid active champion
+  eq(JSON.stringify(Rewards.forNode(1,'boss','goblin').cats),JSON.stringify({caster:1}))});
+Test.add('a boss fought as a non-champion (p1:goblin) does not throw and still grants a catalyst',()=>{
+  Save.data=Meta.defaults();
+  clearIds(...allFightIds());delete Save.data.cleared[FLOORS[0].boss];
+  Save.data.energy.n=Energy.max;Save.data.energy.ts=Energy.now();
+  Screens._origin={name:'map',args:[1]};
+  G.startFight({floor:1,node:'boss',p1:'goblin',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(Object.values(G.lastRewards.cats).reduce((a,b)=>a+b,0),1);
+  G.toTitle();G.sim=false});
+Test.add('winning a floor boss as Donut grants one caster catalyst and G.lastRewards shows it',()=>{
+  Save.data=Meta.defaults();
+  clearIds(...allFightIds());delete Save.data.cleared[FLOORS[0].boss];
+  Save.data.energy.n=Energy.max;Save.data.energy.ts=Energy.now();
+  Screens._origin={name:'map',args:[1]};
+  const before=Save.data.cats.caster||0;
+  G.startFight({floor:1,node:'boss',champ:'donut',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  eq(JSON.stringify(G.lastRewards.cats),JSON.stringify({caster:1}));
+  eq(Save.data.cats.caster,before+1);
+  ok(document.getElementById('resultLine').textContent.includes('+1 CASTER CATALYST'),'result line must show the catalyst');
+  G.toTitle();G.sim=false});
 // Fix-wave item 9 (Phase 5 seam, ruled): Rewards had no multiplier hook, which is exactly where a
 // future ratings/viewers system needs to land -- without it, that multiplier would have to thread
 // through onFightEnd or every call site individually. Rewards.mult (default {gold:1,iso:1,xp:1}) is
@@ -3003,7 +3050,7 @@ Test.add('a bare {encounter:ID} scripted KO win grants nothing: no rewards, no e
   eq(JSON.stringify(Save.data),before,'Save.data (gold/iso/xp/energy/floor node states) must be completely unchanged');
   G.toTitle();G.sim=false});
 Test.add('G.startFight({floor,node}) refuses without starting a fight when energy is empty, leaving G.state/G.fight unchanged',()=>{
-  Save.data=Meta.defaults();Save.data.energy.n=0;
+  Save.data=Meta.defaults();Save.data.energy.n=0;Save.data.energy.ts=Energy.now();
   G.toTitle();
   const stateBefore=G.state,fightBefore=G.fight;
   const r=G.startFight({floor:1,node:0});
@@ -3563,8 +3610,6 @@ Test.add('map doors show REC. LVL n under the label, with .under when the active
 // floor, and must actually be scrollable when it doesn't fit.
 Test.add('the map path never clips a full floor -- door cards that don\'t fit scroll into view rather than being cut off (fix-wave item 3, updated for Task 8.5 door-card art)',()=>{
   Save.data=Meta.defaults();
-  for(let i=0;i<5;i++)Save.data.floors[1].nodes[i]='open'; // worst case: every row rendered, none locked-thin
-  Save.data.floors[1].boss='open';
   Screens.map(1);
   const path=document.getElementById('mapPath');
   const cs=getComputedStyle(path);
@@ -8041,3 +8086,311 @@ Test.add('Fix-wave I4: Champion of the Floor fires in >=50% of 40 seeded AI-Grul
       if(f.log.some(e=>e.type==='passive'&&e.id==='championOfTheFloor'&&e.who===1))fired=true}
     if(fired)seen++}
   ok(seen/40>=0.5,'Champion of the Floor must fire in at least 50% of 40 seeded fights, got '+Math.round(seen/40*1000)/10+'%')});
+
+// ---- save hardening ------------------------------------------------------------------------------
+const playedV2=()=>({v:2,seed:7,fightSeed:42,gold:1234,units:55,iso:80,
+  cats:{brawler:3,rogue:1,caster:0,tank:2,beast:0,trickster:0},
+  roster:{carl:{stars:1,rank:2,level:5,xp:30,shards:2},donut:{stars:2,rank:1,level:3,xp:10,shards:0}},
+  active:'donut',floors:{1:{nodes:['done','done','open','locked','locked'],boss:'locked'}},
+  energy:{n:4,max:10,ts:1700000000000},arena:{best:6,streak:2},
+  leaderboard:[{viewers:900,champ:'carl',floor:1,date:'2026-10-01'}],pity:{basic:3},
+  settings:{reduceMotion:true,haptics:false,leftHanded:true,useAtlas:false,sfx:false,announcer:true,showButtons:true},
+  tutorialDone:true,mute:true,stats:{fights:9,wins:5}});
+Test.add('migrate: a broken top-level record becomes its default and every other field is untouched',()=>{
+  for(const bad of [null,[],7,'x'])for(const k of ['cats','energy','arena','stats','settings','pity']){
+    const s=playedV2();s[k]=bad;
+    const out=Meta.migrate(s),want=playedV2();
+    eq(JSON.stringify(out[k]),JSON.stringify(Meta.defaults()[k]),k+' repaired from '+JSON.stringify(bad));
+    for(const j in want)if(j!==k&&j!=='v'&&j!=='floors')eq(JSON.stringify(out[j]),JSON.stringify(want[j]),j+' kept while '+k+' broke')}});
+Test.add('migrate: missing keys inside cats/energy/arena/stats/settings are filled, present ones kept',()=>{
+  const s=playedV2();s.cats={brawler:3};s.energy={n:4};s.arena={};s.stats={wins:5};s.settings={haptics:false};
+  const out=Meta.migrate(s),d=Meta.defaults();
+  eq(out.cats.brawler,3);eq(out.cats.rogue,0);eq(out.energy.n,4);eq(out.energy.max,d.energy.max);
+  eq(out.arena.best,0);eq(out.stats.wins,5);eq(out.stats.fights,0);
+  eq(out.settings.haptics,false);eq(out.settings.sfx,true)});
+Test.add('migrate: a broken roster entry becomes a fresh entry, so the champion stays owned',()=>{
+  for(const bad of [null,[],5,'x']){
+    const s=playedV2();s.roster.donut=bad;
+    const out=Meta.migrate(s);
+    eq(JSON.stringify(out.roster.donut),JSON.stringify({stars:1,rank:1,level:1,xp:0,shards:0}));
+    eq(out.roster.carl.level,5);eq(out.active,'donut')}
+  const s=playedV2();s.roster.carl={level:5};
+  const e=Meta.migrate(s).roster.carl;eq(e.level,5);eq(e.stars,1);eq(e.shards,0)});
+Test.add('migrate: a non-object roster or floors falls back to defaults; active is repointed',()=>{
+  const s=playedV2();s.roster=[];s.floors=null;
+  const out=Meta.migrate(s);
+  eq(JSON.stringify(out.roster),JSON.stringify(Meta.defaults().roster));eq(out.active,'carl');
+  eq(JSON.stringify(out.cleared),'{}')});
+Test.add('migrate: floors:{} clears nothing, and existing floors keep their progress',()=>{
+  const s=playedV2();s.floors={};
+  eq(JSON.stringify(Meta.migrate(s).cleared),'{}');
+  const t=playedV2();delete t.floors[1];t.floors[2]={nodes:['done','open','locked','locked','locked'],boss:'locked'};
+  const saved=Save.data;
+  try{
+    const out=Meta.migrate(t);
+    eq(Object.keys(out.cleared).sort().join(),'f1_goblin,f1_grull,f1_hob,f1_goblin2,f1_shaman,f1_skel,f2_grub'.split(',').sort().join());
+    Save.data=out;
+    ok(Quest.unlocked(2),'floor 2 must stay playable');
+    const f=Quest.floor(2);
+    eq(f.nodes.map(x=>x.state).join(),'done,open,locked,locked,locked');
+    Save.data.energy.n=Save.data.energy.max;
+    ok(Quest.canStart(2,1),'the earned open door must be startable');
+  }finally{Save.data=saved}});
+Test.add('migrate: a broken floor entry is reset, a good one and its progress are kept',()=>{
+  const s=playedV2();s.floors[2]=null;s.floors[3]={nodes:'x',boss:5};
+  const out=Meta.migrate(s);
+  eq(Object.keys(out.cleared).sort().join(),'f1_goblin,f1_skel');ok(!('floors' in out))});
+// ---- stable fight ids ----------------------------------------------------------------------------
+const swapDoors=(a,b)=>{const n=FLOORS[0].nodes;[n[a],n[b]]=[n[b],n[a]]};
+const stateOf=(floor,id)=>{const f=Quest.floor(floor);return [].concat(f.nodes,[f.boss]).find(x=>x.id===id).state};
+Test.add('reordering doors in FLOORS moves no progress: each fight keeps its own done state',()=>{
+  const realData=Save.data;
+  try{
+    Save.data=Meta.defaults();
+    ok(Quest.complete(1,0,true));ok(Quest.complete(1,1,true));
+    eq(stateOf(1,'f1_goblin'),'done');eq(stateOf(1,'f1_skel'),'done');eq(stateOf(1,'f1_goblin2'),'open');
+    try{
+      swapDoors(1,2);
+      eq(stateOf(1,'f1_skel'),'done','f1_skel was cleared before the swap');
+      eq(stateOf(1,'f1_goblin'),'done');
+      ok(stateOf(1,'f1_goblin2')!=='done','f1_goblin2 was never cleared');
+    }finally{swapDoors(1,2)}
+    eq(stateOf(1,'f1_goblin2'),'open');
+  }finally{Save.data=realData}});
+Test.add('migrate v2->v3 reads the frozen door order, not the live FLOORS',()=>{
+  try{
+    swapDoors(0,1);swapDoors(2,3);
+    const out=Meta.migrate(playedV2());
+    ok(out.cleared&&typeof out.cleared==='object','a v3 save needs a cleared record');
+    eq(Object.keys(out.cleared).sort().join(),'f1_goblin,f1_skel');
+  }finally{swapDoors(2,3);swapDoors(0,1)}
+  eq(FLOORS[0].nodes.join(),'f1_goblin,f1_skel,f1_goblin2,f1_shaman,f1_hob')});
+Test.add('migrate: a v3 save keeps its cleared record; one that is not a plain object becomes {}',()=>{
+  const s=playedV2();delete s.floors;s.v=3;s.cleared={f1_goblin:true};
+  eq(JSON.stringify(Meta.migrate(s).cleared),'{"f1_goblin":true}');
+  for(const bad of [null,[],5,'x']){const t=playedV2();delete t.floors;t.v=3;t.cleared=bad;eq(JSON.stringify(Meta.migrate(t).cleared),'{}')}});
+Test.add('migrate: a v1 save comes out as v3 with nothing cleared',()=>{
+  const out=Meta.migrate({v:1,gold:5});eq(out.v,3);eq(JSON.stringify(out.cleared),'{}');ok(!('floors' in out))});
+Test.add('Quest.unlocked: floor 1 always, floor 2 once floor 1\'s boss is cleared, nothing past FLOORS',()=>{
+  const realData=Save.data;
+  try{
+    Save.data=Meta.defaults();
+    ok(Quest.unlocked(1));ok(!Quest.unlocked(2));ok(!Quest.unlocked(3));eq(Quest.floor(2),null);
+    clearIds('f1_grull');ok(Quest.unlocked(2));eq(Quest.floor(2).nodes[0].state,'open');
+  }finally{Save.data=realData}});
+Test.add('migrate: a non-array leaderboard becomes [] and non-object entries are dropped',()=>{
+  const s=playedV2();s.leaderboard='x';eq(Meta.migrate(s).leaderboard.length,0);
+  const t=playedV2();t.leaderboard=[null,{viewers:1},5];eq(Meta.migrate(t).leaderboard.length,1)});
+Test.add('Save.put returns false and shows its note once per session when a write fails',()=>{
+  const realSet=Storage.prototype.setItem,realShown=Save.noteShown,realWritable=Save.writable,el=document.getElementById('saveNote');
+  const hadText=el.textContent,hadDisplay=el.style.display;
+  Save.noteShown=0;el.style.display='none';Save.writable=true;
+  try{
+    Storage.prototype.setItem=function(){throw new Error('quota')};
+    eq(Save.put(),false);
+    eq(el.style.display,'block');eq(el.textContent,"Progress isn't saving on this device.");
+    eq(Save.noteShown,1);
+    el.style.display='none';
+    eq(Save.put(),false);
+    eq(el.style.display,'none','the second failure must not show the note again');eq(Save.noteShown,1);
+    let wrote=null;
+    Storage.prototype.setItem=function(k,v){wrote=k};
+    eq(Save.put(),true);eq(wrote,Save.key);
+  }finally{Storage.prototype.setItem=realSet;Save.writable=realWritable;Save.noteShown=realShown;el.textContent=hadText;el.style.display=hadDisplay}});
+Test.add('Save.load backs up an unreadable save and never throws; a failed backup keeps the original',()=>{
+  const realData=Save.data,realSet=Storage.prototype.setItem,realShown=Save.noteShown,realWritable=Save.writable;
+  const keep={main:localStorage.getItem(Save.key),bak:localStorage.getItem(Save.bakKey)};
+  const el=document.getElementById('saveNote'),hadDisplay=el.style.display;
+  try{
+    localStorage.setItem(Save.key,'garbage{');Save.load();
+    eq(localStorage.getItem(Save.bakKey),'garbage{');eq(Save.data.v,3);
+    const odd=JSON.stringify({v:99,gold:5});localStorage.setItem(Save.key,odd);Save.load();
+    eq(localStorage.getItem(Save.bakKey),odd);
+    localStorage.setItem(Save.key,'garbage2{');
+    Storage.prototype.setItem=function(k,v){if(k===Save.bakKey)throw new Error('quota');return realSet.call(this,k,v)};
+    Save.load();
+    eq(localStorage.getItem(Save.key),'garbage2{');eq(Save.writable,false);eq(Save.put(),false);
+    Storage.prototype.setItem=realSet;
+    const realGet=Storage.prototype.getItem;localStorage.setItem(Save.key,'keepme');
+    Storage.prototype.getItem=function(k){if(k===Save.key)throw new Error('denied');return realGet.call(this,k)};
+    try{Save.load()}finally{Storage.prototype.getItem=realGet}
+    eq(Save.writable,false);eq(Save.put(),false);eq(localStorage.getItem(Save.key),'keepme');
+  }finally{
+    Storage.prototype.setItem=realSet;
+    for(const [k,v] of [[Save.key,keep.main],[Save.bakKey,keep.bak]])v===null?localStorage.removeItem(k):localStorage.setItem(k,v);
+    Save.writable=realWritable;Save.noteShown=realShown;el.style.display=hadDisplay;Save.data=realData}});
+// ---- energy refresh on the map + campaign complete ---------------------------------------------
+const allBosses=()=>FLOORS.map(fd=>fd.boss);
+const allFightIds=()=>FLOORS.flatMap(fd=>[...fd.nodes,fd.boss]);
+Test.add('waiting on the map past one regen interval lets Quest.canStart and a door click go through without re-rendering',()=>{
+  const origNow=Energy.now;
+  try{
+    Save.data=Meta.defaults();
+    let t=7000000;Energy.now=()=>t;
+    Save.data.energy.n=0;Save.data.energy.ts=t;
+    Screens.map(1);
+    eq(Quest.canStart(1,0),false,'no energy yet');
+    t+=360000;
+    eq(Quest.canStart(1,0),true,'canStart must tick energy itself');
+    document.querySelectorAll('#mapPath .node:not(.boss)')[0].click();
+    eq(G.state,'FIGHT','door click must start the fight');
+  }finally{Energy.now=origNow;G.toTitle();G.sim=false}});
+Test.add('window focus and visibilitychange tick energy and re-render the map\'s pips',()=>{
+  const origNow=Energy.now;
+  const fullPips=()=>document.querySelectorAll('#mapEnergy .pip.full').length;
+  try{
+    Save.data=Meta.defaults();
+    let t=8000000;Energy.now=()=>t;
+    Save.data.energy.n=0;Save.data.energy.ts=t;
+    Screens.map(1);
+    eq(fullPips(),0);
+    t+=360000;
+    window.dispatchEvent(new Event('focus'));
+    eq(fullPips(),1,'focus must refill and redraw');
+    t+=360000;
+    document.dispatchEvent(new Event('visibilitychange'));
+    eq(fullPips(),2,'becoming visible must refill and redraw');
+  }finally{Energy.now=origNow;Screens.title()}});
+Test.add('Quest.campaignComplete is false on a fresh save and after floor 1 only, true once every boss is cleared',()=>{
+  Save.data=Meta.defaults();
+  eq(Quest.campaignComplete(),false);
+  clearIds(FLOORS[0].boss);
+  eq(Quest.campaignComplete(),false);
+  clearIds(...allBosses());
+  eq(Quest.campaignComplete(),true)});
+Test.add('winning the final boss and pressing CONTINUE shows the campaign-complete screen; ARENA opens the arena',()=>{
+  Save.data=Meta.defaults();
+  clearIds(...allFightIds());delete Save.data.cleared[FLOORS[1].boss];
+  Save.data.energy.n=Energy.max;Save.data.energy.ts=Energy.now();
+  Screens._origin={name:'map',args:[2]};
+  G.startFight({floor:2,node:'boss',champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  ok(Quest.campaignComplete(),'the win must complete the campaign');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'campaignComplete');
+  ok(document.getElementById('campaignComplete').classList.contains('show'));
+  eq(document.querySelector('#campaignComplete h1').textContent,'CAMPAIGN COMPLETE');
+  document.getElementById('ccArena').click();
+  eq(Screens._current,'arena');
+  G.toTitle();G.sim=false});
+Test.add('a win that does not complete the campaign still returns to the map on CONTINUE',()=>{
+  Save.data=Meta.defaults();
+  Screens._origin={name:'map',args:[1]};
+  G.startFight({floor:1,node:0,champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'map');
+  G.toTitle();G.sim=false});
+Test.add('after completion the campaign map shows an arena button and its doors stay disabled',()=>{
+  Save.data=Meta.defaults();
+  Screens.map(1);
+  ok(!document.getElementById('mapArena')||document.getElementById('mapArena').offsetParent===null,'hidden before completion');
+  clearIds(...allFightIds());
+  Screens.map(1);
+  const b=document.getElementById('mapArena');
+  ok(b&&b.offsetParent!==null,'arena button visible after completion');
+  ok([...document.querySelectorAll('#mapPath .node')].every(n=>n.disabled),'beaten doors stay disabled');
+  b.click();
+  eq(Screens._current,'arena');
+  Screens.title()});
+const winFinalBossThenTitle=()=>{
+  Save.data=Meta.defaults();
+  clearIds(...allFightIds());delete Save.data.cleared[FLOORS[1].boss];
+  Save.data.energy.n=Energy.max;Save.data.energy.ts=Energy.now();
+  Screens._origin={name:'map',args:[2]};
+  G.startFight({floor:2,node:'boss',champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  document.getElementById('titleBtn').click()};
+Test.add('final boss win, TITLE, then an arena fight: CONTINUE returns to the arena, not campaign complete',()=>{
+  winFinalBossThenTitle();
+  Screens._origin={name:'arena'};
+  G.startArena({champ:'carl',ctrl1:Ctrl.script([L(0)]),ctrl2:Ctrl.idle(),seed:1});
+  closeIn(G.fight);G.fight.p2.hp=1;G.sim=true;
+  for(let i=0;i<400&&G.state!=='RESULT';i++)G.tick();
+  eq(G.state,'RESULT');
+  document.getElementById('resultTitleBtn').click();
+  eq(Screens._current,'arena');
+  G.toTitle();G.sim=false});
+Test.add('final boss win, TITLE, then an exhibition fight: pause QUIT returns to title, not campaign complete',()=>{
+  winFinalBossThenTitle();
+  Screens._origin={name:'title'};
+  G.startFight({champ:'carl',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle(),seed:1});
+  document.getElementById('quit').click();
+  eq(Screens._current,'title');
+  G.toTitle();G.sim=false});
+
+Test.add('arena leaderboard shows saved text literally and builds no elements from markup',()=>{
+  const saved=Save.data.leaderboard,origin=Screens._origin;
+  try{
+    Save.data.leaderboard=[
+      {champ:'<img src=x>',viewers:1200,streak:3,date:'<b>x</b>'},
+      {champ:'carl',viewers:900,floor:2,date:'2026-01-02'}];
+    Screens.arena();
+    const rows=document.querySelectorAll('#arenaLeaderboard .lbrow');
+    eq(rows.length,2);
+    eq(rows[0].querySelectorAll('img,b').length,0);
+    eq(rows[0].children.length,5);
+    eq(rows[0].children[2].textContent,'<img src=x>');
+    eq(rows[0].children[4].textContent,'<b>x</b>');
+    eq(rows[1].children.length,5);
+    eq(rows[1].children[0].textContent,'2');
+    eq(rows[1].children[2].textContent,CHAMPS.carl.name);
+    eq(rows[1].children[3].textContent,'FLOOR 2');
+    eq(rows[1].children[4].textContent,'2026-01-02');
+    for(const c of rows[1].children)eq(c.tagName,'SPAN')
+  }finally{Save.data.leaderboard=saved;Screens._origin=origin;Screens.title()}});
+
+
+
+// ---- class catalyst (shop) -----------------------------------------------------------------
+const CLASS_CAT_CLASSES={brawler:['CARL'],caster:['PRINCESS DONUT'],trickster:['KATIA'],tank:['MONGO']};
+const classCatPrice=()=>Meta.SHOP_ITEMS.classCatalyst.cost.gold;
+Test.add('Meta.buy(classCatalyst) grants one catalyst of each playable class and deducts exactly the price',()=>{
+  for(const cls in CLASS_CAT_CLASSES){
+    Save.data=Meta.defaults();Save.data.gold=classCatPrice()+7;
+    const others=JSON.stringify(Object.keys(Save.data.cats).filter(c=>c!==cls).map(c=>Save.data.cats[c]));
+    const had=Save.data.cats[cls]||0;
+    ok(Meta.buy('classCatalyst',{cls}),cls);
+    eq(Save.data.cats[cls],had+1,cls+' catalyst');
+    eq(Save.data.gold,7,cls+' gold left');
+    eq(JSON.stringify(Object.keys(Save.data.cats).filter(c=>c!==cls).map(c=>Save.data.cats[c])),others,'other classes untouched')}});
+Test.add('Meta.buy(classCatalyst) refuses and changes nothing when short, or for an unknown or unused class',()=>{
+  Save.data=Meta.defaults();Save.data.gold=classCatPrice()-1;
+  let before=JSON.stringify(Save.data);
+  eq(Meta.buy('classCatalyst',{cls:'brawler'}),false,'short on gold');
+  eq(JSON.stringify(Save.data),before);
+  Save.data.gold=classCatPrice()*10;before=JSON.stringify(Save.data);
+  for(const cls of['beast','rogue','nonsense',undefined,'__proto__']){
+    eq(Meta.buy('classCatalyst',cls===undefined?{}:{cls}),false,String(cls));
+    eq(JSON.stringify(Save.data),before,String(cls)+' must change nothing')}
+  eq(Meta.buy('classCatalyst'),false,'no options');
+  eq(JSON.stringify(Save.data),before)});
+Test.add('a 2-star Carl buys a brawler catalyst in the shop and then ranks up',()=>{
+  Save.data=Meta.defaults();
+  Save.data.roster.carl={stars:2,rank:1,level:1,xp:0,shards:0};
+  Save.data.cats.brawler=0;Save.data.gold=classCatPrice();
+  eq(Roster.rankUp('carl'),false,'no catalyst yet');
+  ok(Meta.buy('classCatalyst',{cls:'brawler'}));
+  ok(Roster.rankUp('carl'));
+  eq(Save.data.roster.carl.rank,2);eq(Save.data.gold,0)});
+Test.add('shop screen renders a labelled class picker and each choice buys its class',()=>{
+  Save.data=Meta.defaults();Save.data.gold=classCatPrice()*4;
+  Screens.shop();
+  const btns=[...document.querySelectorAll('#shopCards .clsPick button')];
+  eq(btns.length,Object.keys(CLASS_CAT_CLASSES).length,'one choice per playable class');
+  for(const cls in CLASS_CAT_CLASSES){
+    const b=document.getElementById('buyClassCatalyst_'+cls);
+    ok(b,'button for '+cls);
+    ok(b.textContent.includes(cls.toUpperCase()+' · '+CLASS_CAT_CLASSES[cls].join(', ')),b&&b.textContent);
+    eq(b.disabled,false)}
+  document.getElementById('buyClassCatalyst_caster').click();
+  eq(Save.data.cats.caster,1);eq(Save.data.gold,classCatPrice()*3);
+  ok(document.getElementById('buyClassCatalyst_caster').textContent.includes('1'),'shows holdings after refresh');
+  Save.data.gold=classCatPrice()-1;Screens.refresh();
+  eq(document.getElementById('buyClassCatalyst_tank').disabled,true,'disabled when short');
+  Screens.title()});

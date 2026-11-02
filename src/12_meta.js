@@ -5,7 +5,7 @@
 // clock only ever enters through Energy.now, which is injectable for deterministic tests.
 const Meta={
   defaults(){
-    return{v:2,seed:1,
+    return{v:3,seed:1,
       // Fix-wave item 4 (final review, Important): the persisted, ever-incrementing seed a REAL (non-
       // harness) fight starts at -- see G.startFight's own comment (80_game.js) for why this exists
       // separately from `seed` above (Meta's own crystal-pull stream, untouched by this). A plain
@@ -16,7 +16,8 @@ const Meta={
       cats:{brawler:0,rogue:0,caster:0,tank:0,beast:0,trickster:0},
       roster:{carl:{stars:1,rank:1,level:1,xp:0,shards:0}},
       active:'carl',
-      floors:{1:{nodes:['open','locked','locked','locked','locked'],boss:'locked'}},
+      // Fight ids (ENCOUNTERS keys) the player has beaten; door states are derived from this and FLOORS.
+      cleared:{},
       energy:{n:Energy.max,max:Energy.max,ts:0},
       arena:{best:0,streak:0},
       // Task 5.1: local top-10 viewers leaderboard ({viewers,champ,floor|streak,date}, insert/sort-
@@ -45,38 +46,52 @@ const Meta={
       // routing) and the result screen's tutorial line.
       tutorialDone:false,
       mute:false,stats:{fights:0,wins:0}}},
-  // v1 -> v2: keep gold/units/mute/settings, everything else starts fresh (including roster, which
-  // v1 saves never meaningfully populated). v2 -> v2: fill in any keys/sub-keys a save from an
-  // earlier Phase 4 build is missing, in place, without discarding what's already there. Anything
-  // else (null, a non-object, or an unrecognized v) resets to defaults().
+  // The door order every v2 save was written against; it must never change, so an upgrade maps
+  // positions to the same fights however FLOORS is reordered later.
+  V2_DOORS:{
+    1:{nodes:['f1_goblin','f1_skel','f1_goblin2','f1_shaman','f1_hob'],boss:'f1_grull'},
+    2:{nodes:['f2_grub','f2_skel2','f2_shaman2','f2_hob2','f2_grub2'],boss:'f2_mother'}},
+  // v1 -> v3: keep gold/units/mute/settings, everything else starts fresh. v2 -> v3: positional floor
+  // progress becomes per-fight `cleared`. v3 -> v3: fill in any keys/sub-keys a save is missing, in
+  // place, without discarding what's already there. Anything else (null, a non-object, or an
+  // unrecognized v) resets to defaults().
   migrate(data){
     if(!data||typeof data!=='object')return Meta.defaults();
     if(data.v===1){
       const d=Meta.defaults();
       d.gold=data.gold||0;d.units=data.units||0;d.mute=!!data.mute;
-      // Task 5.4: merge (not replace) onto d.settings' fresh defaults -- a plain replace here used to
-      // mean a v1 save with its own (pre-5.4, necessarily settings-shape-less) settings object would
-      // completely discard the new reduceMotion/haptics/leftHanded/useAtlas/sfx/announcer defaults,
-      // leaving e.g. haptics undefined (falsy) instead of its intended default true.
+      // Merge (not replace) so a v1 save's own settings object keeps the new keys' defaults.
       d.settings=Object.assign({},d.settings,data.settings&&typeof data.settings==='object'?data.settings:{});
       return d}
-    if(data.v===2){
+    if(data.v===2||data.v===3){
       const d=Meta.defaults();
+      const plain=x=>!!x&&typeof x==='object'&&!Array.isArray(x);
+      // A nested record that isn't a plain object is replaced by its default; a plain one only gets
+      // its missing keys filled, so a damaged save can't make the `in` checks below throw.
+      const fill=(k,def)=>{if(!plain(data[k]))data[k]=def;else for(const j in def)if(!(j in data[k]))data[k][j]=def[j]};
+      const floors=data.v===2&&plain(data.floors)?data.floors:{};
       for(const k in d)if(!(k in data))data[k]=d[k];
-      for(const k in d.cats)if(!(k in data.cats))data.cats[k]=d.cats[k];
-      for(const k in d.energy)if(!(k in data.energy))data.energy[k]=d.energy[k];
-      for(const k in d.arena)if(!(k in data.arena))data.arena[k]=d.arena[k];
-      for(const k in d.stats)if(!(k in data.stats))data.stats[k]=d.stats[k];
-      // Task 5.4: `settings` already existed (as `{}`) before this task, so the generic top-level
-      // loop above never repopulates it for an old save -- explicit per-key backfill, same pattern as
-      // cats/energy/arena/stats just above.
-      if(!data.settings||typeof data.settings!=='object')data.settings=d.settings;
-      else for(const k in d.settings)if(!(k in data.settings))data.settings[k]=d.settings[k];
-      if(!data.roster||typeof data.roster!=='object'||!Object.keys(data.roster).length)data.roster=d.roster;
-      // Fix-wave item 10 (minor): migrate could reset `roster` (right above) without repointing a
-      // stale `active` that named a champion the reset just dropped -- Rewards.grant's xp path reads
-      // Save.data.roster[Save.data.active], so an unowned active silently ate every xp grant with no
-      // error. Repoints to the roster's own first key whenever active isn't (or no longer is) owned.
+      fill('cats',d.cats);fill('energy',d.energy);fill('arena',d.arena);fill('stats',d.stats);
+      fill('settings',d.settings);fill('pity',d.pity);
+      if(!plain(data.roster)||!Object.keys(data.roster).length)data.roster=d.roster;
+      for(const id in data.roster){
+        const fresh={stars:1,rank:1,level:1,xp:0,shards:0};
+        if(!plain(data.roster[id]))data.roster[id]=fresh;
+        else for(const j in fresh)if(!(j in data.roster[id]))data.roster[id][j]=fresh[j]}
+      if(data.v===2){
+        data.cleared={};
+        for(const n in Meta.V2_DOORS){
+          const f=floors[n],door=Meta.V2_DOORS[n];
+          // A v2 game only created floor n+1 after every door and the boss of floor n were beaten, so a later floor's record proves this one is cleared.
+          if(Meta.V2_DOORS[+n+1]&&plain(floors[+n+1])){
+            door.nodes.forEach(id=>{data.cleared[id]=true});data.cleared[door.boss]=true;continue}
+          if(!plain(f))continue;
+          if(Array.isArray(f.nodes))door.nodes.forEach((id,i)=>{if(f.nodes[i]==='done')data.cleared[id]=true});
+          if(f.boss==='done')data.cleared[door.boss]=true}
+        delete data.floors;data.v=3}
+      else if(!plain(data.cleared))data.cleared={};
+      if(!Array.isArray(data.leaderboard))data.leaderboard=[];
+      else data.leaderboard=data.leaderboard.filter(plain);
       if(!data.roster[data.active])data.active=Object.keys(data.roster)[0];
       return data}
     return Meta.defaults()},
@@ -92,14 +107,20 @@ const Meta={
   SHOP_ITEMS:{
     basicCrystal:{label:'BASIC CRYSTAL',cost:{gold:500},run:()=>Crystal.open('basic')},
     premiumCrystal:{label:'PREMIUM CRYSTAL',cost:{units:100},run:()=>Crystal.open('premium')},
-    isoPack:{label:'ISO PACK',cost:{gold:200},grant:{iso:60}}},
-  buy(itemId){
+    isoPack:{label:'ISO PACK',cost:{gold:200},grant:{iso:60}},
+    classCatalyst:{label:'CLASS CATALYST',cost:{gold:600},pickClass:true}},
+  // Derived from CHAMPS so a new champion class shows up in the shop picker without a second list.
+  playableClasses(){return[...new Set(Object.values(CHAMPS).map(c=>c.cls))]},
+  buy(itemId,opts){
     const item=Meta.SHOP_ITEMS[itemId];
     if(!item)throw new Error('unknown shop item: '+itemId);
     if(item.run)return item.run(); // crystal items: Crystal.open does its own cost check/deduction
+    const cls=opts&&opts.cls;
+    if(item.pickClass&&!Meta.playableClasses().includes(cls))return false;
     for(const c in item.cost)if((Save.data[c]||0)<item.cost[c])return false;
     for(const c in item.cost)Save.data[c]-=item.cost[c];
     if(item.grant)for(const c in item.grant)Save.data[c]=(Save.data[c]||0)+item.grant[c];
+    if(item.pickClass)Save.data.cats[cls]=(Save.data.cats[cls]||0)+1;
     Save.put();
     return true},
   buyIso(){return Meta.buy('isoPack')},
@@ -253,49 +274,49 @@ const Quest={
   // their own FLOORS[n-1]/FLOORS[n]. A future tutorial floor (floor:0) can be inserted at FLOORS[0]
   // without renumbering any of them.
   floorDef(n){return FLOORS.find(f=>f.floor===n)||null},
-  // Read floor n's current playable state: Phase 3's static FLOORS def merged with Save.data's
-  // per-node progress. null when either side is missing — an as-yet-uncreated floor (Save.data),
-  // or a floor number FLOORS itself never defined (only 1-2 exist today).
+  // Floor 1 is always open; a later floor opens once the floor before it has its boss cleared.
+  unlocked(n){
+    if(!Quest.floorDef(n))return false;
+    if(n===1)return true;
+    const prev=Quest.floorDef(n-1);
+    return !!prev&&!!Save.data.cleared[prev.boss]},
+  // Floor n's playable state, worked out from FLOORS order and which fights are cleared: a door is
+  // done if cleared, else open when it is first or the door before it is cleared; the boss opens once
+  // the last door is cleared. null for an undefined or still-locked floor.
   floor(n){
     const def=Quest.floorDef(n);
-    const save=Save.data.floors[n];
-    if(!def||!save)return null;
-    return{floor:n,name:def.name,
-      nodes:def.nodes.map((id,i)=>({id,state:save.nodes[i],enc:id})),
-      boss:{id:def.boss,state:save.boss,enc:def.boss}}},
+    if(!def||!Quest.unlocked(n))return null;
+    const cleared=Save.data.cleared;
+    let prevDone=true;
+    const door=id=>{const state=cleared[id]?'done':prevDone?'open':'locked';prevDone=!!cleared[id];return{id,state,enc:id}};
+    const nodes=def.nodes.map(door);
+    return{floor:n,name:def.name,nodes,boss:door(def.boss)}},
+  // True once every floor's boss is beaten; the campaign has nothing further to offer after that.
+  campaignComplete(){return FLOORS.length>0&&FLOORS.every(fd=>!!Save.data.cleared[fd.boss])},
   canStart(n,k){
+    Energy.tick(); // regen that accrued while a screen sat idle must count before the gate reads it
     const f=Quest.floor(n);
     if(!f)return false;
     const node=k==='boss'?f.boss:f.nodes[k];
     if(!node||node.state!=='open')return false;
     return Save.data.energy.n>=1},
   start(n,k){
+    Energy.tick();
     if(!Quest.canStart(n,k))return null;
     const f=Quest.floor(n);
     const node=k==='boss'?f.boss:f.nodes[k];
     if(!Energy.spend(1))return null;
     Save.put();
     return node.id},
-  // A win flips the node/boss just fought to 'done' and unlocks what's next: the following node,
-  // or — off the last node — the boss. A boss win additionally creates floor n+1 (node 0 open,
-  // everything else locked) the first time, but only when FLOORS actually defines that next floor
-  // (Phase 3 ships floors 1-2 today; finishing floor 2's boss is a dead end until a future floor
-  // lands). A loss changes nothing here — Quest.start already spent the energy on the attempt.
+  // A win records the fight just beaten as cleared; a loss changes nothing here -- Quest.start
+  // already spent the energy on the attempt.
   complete(n,k,won){
     if(!won)return false;
-    const save=Save.data.floors[n];
-    if(!save)return false;
-    if(k==='boss'){
-      save.boss='done';
-      const nextDef=Quest.floorDef(n+1);
-      if(nextDef&&!Save.data.floors[n+1]){
-        Save.data.floors[n+1]={nodes:nextDef.nodes.map((_,i)=>i===0?'open':'locked'),boss:'locked'}}}
-    else{
-      if(!save.nodes||save.nodes[k]===undefined)return false;
-      save.nodes[k]='done';
-      if(k+1<save.nodes.length){
-        if(save.nodes[k+1]==='locked')save.nodes[k+1]='open'}
-      else if(save.boss==='locked')save.boss='open'}
+    const f=Quest.floor(n);
+    if(!f)return false;
+    const node=k==='boss'?f.boss:f.nodes[k];
+    if(!node)return false;
+    Save.data.cleared[node.id]=true;
     Save.put();
     return true}};
 const Rewards={
@@ -309,7 +330,9 @@ const Rewards={
   // uses the position just past the last regular node (def.nodes.length, 5 today) for that same
   // gold term, so its base gold continues the node ramp before the boss-only units/catalyst bonus
   // is layered on top.
-  forNode(n,k){
+  // A boss drops the fighting champion's class (the boss's own class can be one nobody plays, like
+  // beast), defaulting to the active champion; an unknown fighter falls back to the boss's class.
+  forNode(n,k,champId){
     const def=Quest.floorDef(n);
     if(!def)throw new Error('unknown floor: '+n);
     const isBoss=k==='boss';
@@ -323,9 +346,10 @@ const Rewards={
              xp:Math.round(30*n*Rewards.mult.xp)};
     if(isBoss){
       r.units=50*n; // not multiplied: Rewards.mult only covers gold/iso/xp, per the frozen shape
-      const enemyId=ENCOUNTERS[def.boss].enemy;
       r.cats={};
-      r.cats[DEFS[enemyId].cls]=1}
+      const own=id=>Object.prototype.hasOwnProperty.call(CHAMPS,id)?CHAMPS[id]:null; // plain lookups hit __proto__/constructor
+      const who=own(champId)||own(Save.data.active);
+      r.cats[who?who.cls:DEFS[ENCOUNTERS[def.boss].enemy].cls]=1}
     return r},
   // Currencies/catalysts apply unconditionally; xp applies to the active champion, levelling it up
   // (Stats.xpToLevel per level, consumed on each level-up) while level stays under its rank's cap —
