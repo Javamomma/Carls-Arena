@@ -4459,6 +4459,20 @@ Test.add('a fresh save\'s CAMPAIGN button starts the tutorial instead of opening
   document.getElementById('btnCampaign').click();
   eq(Screens._current,'map','CAMPAIGN must open the map once tutorialDone is true');
   G.toTitle()});
+Test.add('the title\'s first button reads START TUTORIAL on a fresh save and starts it; with tutorialDone it reads CAMPAIGN and opens the map',()=>{
+  Save.data=Meta.defaults();
+  Screens.title();
+  const b=document.getElementById('btnCampaign');
+  eq(b.textContent.trim(),'START TUTORIAL');
+  b.click();
+  eq(G.mode,'tutorial','START TUTORIAL must start the tutorial');
+  G.toTitle();
+  Save.data.tutorialDone=true;
+  Screens.title();
+  eq(document.getElementById('btnCampaign').textContent.trim(),'CAMPAIGN');
+  document.getElementById('btnCampaign').click();
+  eq(Screens._current,'map','CAMPAIGN must open the map once tutorialDone is true');
+  G.toTitle()});
 Test.add('the result screen shows a TUTORIAL COMPLETE line on a tutorial win',()=>{
   Save.data=Meta.defaults();
   G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});

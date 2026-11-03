@@ -319,7 +319,7 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
    while G.mode==='tutorial' (G.tick's own gate) and hidden by G.toTitle/backToOrigin/startFight. */
 #tutorialPrompt{position:fixed;transform:translateX(-50%);font-size:12px;font-weight:bold;
   letter-spacing:.5px;color:#111;background:#f4c542;border-radius:20px;padding:6px 14px;
-  text-align:center;white-space:nowrap;pointer-events:none;display:none;
+  text-align:center;width:max-content;text-wrap:balance;pointer-events:none;display:none;
   box-shadow:0 2px 8px rgba(0,0,0,.4);z-index:1}
 #tutorialPrompt.show{display:block}
 #tutorialPrompt.flash{background:#8cf4c5}
@@ -9439,7 +9439,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(lesson){lesson.style.left=(r.left+r.width/2)+'px';lesson.style.top=(r.top+108*sy)+'px'}
     if(!el)return;
     el.style.left=(r.left+r.width/2)+'px';
-    el.style.top=(r.top+132*sy)+'px'},
+    // Long prompts wrap inside the canvas's on-screen width; the top sits below the lesson banner
+    // (~24px tall) even when a short canvas scales the fixed 132 up past it.
+    el.style.maxWidth=Math.floor(r.width*.9)+'px';
+    el.style.top=(r.top+Math.max(132*sy,108*sy+24))+'px'},
   // Called once per tutorial-mode tick (see tick() below): mirrors Tutorial.prompt/._flash onto the
   // DOM overlay every frame -- cheap (a textContent/classList write only, no layout work beyond what
   // positionTutorialPrompt already did once at fit()) and simpler than trying to diff for changes,
@@ -10458,6 +10461,8 @@ const Screens={
     // Task 5.3: a fresh save (!Save.data.tutorialDone) routes CAMPAIGN to the tutorial instead of the
     // map -- checked fresh on every click (not just latched at load), so CAMPAIGN opens the map as
     // usual again the instant tutorialDone flips true, with no separate "first run" flag to track.
+    // The first-run label names what the button does so a new player can find the tutorial.
+    document.getElementById('btnCampaign').textContent=Save.data.tutorialDone?'CAMPAIGN':'START TUTORIAL';
     document.getElementById('btnCampaign').onclick=()=>{
       if(!Save.data.tutorialDone){Screens._origin={name:'map',args:[1]};G.startTutorial();return}
       const n=Screens.lastFloor();
@@ -15435,6 +15440,20 @@ Test.add('a fresh save\'s CAMPAIGN button starts the tutorial instead of opening
   G.toTitle();
   Save.data.tutorialDone=true;
   Screens.title();
+  document.getElementById('btnCampaign').click();
+  eq(Screens._current,'map','CAMPAIGN must open the map once tutorialDone is true');
+  G.toTitle()});
+Test.add('the title\'s first button reads START TUTORIAL on a fresh save and starts it; with tutorialDone it reads CAMPAIGN and opens the map',()=>{
+  Save.data=Meta.defaults();
+  Screens.title();
+  const b=document.getElementById('btnCampaign');
+  eq(b.textContent.trim(),'START TUTORIAL');
+  b.click();
+  eq(G.mode,'tutorial','START TUTORIAL must start the tutorial');
+  G.toTitle();
+  Save.data.tutorialDone=true;
+  Screens.title();
+  eq(document.getElementById('btnCampaign').textContent.trim(),'CAMPAIGN');
   document.getElementById('btnCampaign').click();
   eq(Screens._current,'map','CAMPAIGN must open the map once tutorialDone is true');
   G.toTitle()});

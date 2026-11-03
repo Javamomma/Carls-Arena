@@ -818,6 +818,12 @@ def main():
                           "the game starts, only the broken record is repaired, unreadable saves are "
                           "backed up, and a failed backup leaves the original untouched; prints JSON "
                           "and exits 1 on any failed case or page/console error")
+    ap.add_argument('--tutorial-fit', action='store_true',
+                     help="at 854x480, 844x390, 667x375 and 568x320 CSS px, shows every tutorial prompt "
+                          "(plain, and with its stall hint appended as the game does) in a real tutorial "
+                          "fight and asserts #tutorialPrompt sits fully inside the canvas and viewport "
+                          "and clear of #tutorialLesson; --shot PATH screenshots lesson 3 + hint at the "
+                          "smallest viewport; prints JSON and exits 1 on any failure")
     ap.add_argument('--phone-check', action='store_true',
                      help="Task 5.6: sets an 844x390 CSS-px landscape viewport (iPhone SE/8-class "
                           "phone rotated), starts a real fight, and asserts: the canvas is letterboxed "
@@ -1049,6 +1055,63 @@ def main():
         out = {'screens': results, 'final_state': state}
         print(json.dumps(out, indent=1))
         sys.exit(1 if bad_screens or state != 'RESULT' else 0)
+    if a.tutorial_fit:
+        VIEWPORTS = [(854, 480), (844, 390), (667, 375), (568, 320)]
+        probe_js = """(()=>{
+          const rc=e=>{const r=e.getBoundingClientRect();return{left:r.left,top:r.top,right:r.right,bottom:r.bottom}};
+          const p=document.getElementById('tutorialPrompt'),l=document.getElementById('tutorialLesson');
+          return{text:p.textContent,shown:p.classList.contains('show'),prompt:rc(p),lesson:rc(l),
+            canvas:rc(canvas),vw:innerWidth,vh:innerHeight,
+            fontSize:parseFloat(getComputedStyle(p).fontSize)}})()"""
+        failures, rows, errs = [], [], []
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page(viewport={'width': 854, 'height': 480})
+            pg.on('pageerror', lambda e: errs.append(str(e)))
+            pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
+            pg.goto(TEST_PAGE)
+            pg.wait_for_function('typeof G!=="undefined"')
+            pg.evaluate('localStorage.clear();Save.load()')
+            n_steps = pg.evaluate('Tutorial.steps.length')
+            for vw, vh in VIEWPORTS:
+                pg.set_viewport_size({'width': vw, 'height': vh})
+                for step in range(n_steps):
+                    for hinted in (False, True):
+                        # A real tutorial fight, one tick per probe: the hinted text comes from the
+                        # game's own stall path in Tutorial.tick, not from a string built here.
+                        pg.evaluate("""([step,hinted])=>{
+                          G.startTutorial({seed:1,ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+                          Tutorial.state.step=step;Tutorial.prompt=Tutorial.steps[step].prompt;
+                          Tutorial._stepFrames=hinted?Tutorial.STALL_FRAMES-1:0;
+                          G.fit();G.tick()}""", [step, hinted])
+                        r = pg.evaluate(probe_js)
+                        want = pg.evaluate("([s,h])=>Tutorial.steps[s].prompt+(h?' \u2014 '+Tutorial.HINTS[s]:'')", [step, hinted])
+                        pr, cv, ln = r['prompt'], r['canvas'], r['lesson']
+                        inside_canvas = (pr['left'] >= cv['left'] - 0.5 and pr['right'] <= cv['right'] + 0.5 and
+                                         pr['top'] >= cv['top'] - 0.5 and pr['bottom'] <= cv['bottom'] + 0.5)
+                        inside_view = (pr['left'] >= -0.5 and pr['top'] >= -0.5 and
+                                       pr['right'] <= r['vw'] + 0.5 and pr['bottom'] <= r['vh'] + 0.5)
+                        clear = (pr['top'] >= ln['bottom'] - 0.5 or pr['bottom'] <= ln['top'] + 0.5 or
+                                 pr['left'] >= ln['right'] - 0.5 or pr['right'] <= ln['left'] + 0.5)
+                        row = {'viewport': f'{vw}x{vh}', 'step': step + 1, 'hinted': hinted, 'text': r['text'],
+                               'shown': r['shown'], 'textIsGameText': r['text'] == want,
+                               'insideCanvas': inside_canvas, 'insideViewport': inside_view,
+                               'clearOfLesson': clear, 'fontSize': r['fontSize'], 'prompt': pr,
+                               'canvas': cv, 'lesson': ln}
+                        rows.append(row)
+                        if not (r['shown'] and row['textIsGameText'] and inside_canvas and inside_view
+                                and clear and r['fontSize'] >= 12):
+                            failures.append({k: row[k] for k in ('viewport', 'step', 'hinted', 'insideCanvas',
+                                                                 'insideViewport', 'clearOfLesson', 'prompt', 'canvas', 'lesson')})
+            if a.shot:
+                pg.set_viewport_size({'width': 568, 'height': 320})
+                pg.evaluate("""()=>{G.startTutorial({seed:1,ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+                  Tutorial.state.step=2;Tutorial.prompt=Tutorial.steps[2].prompt;
+                  Tutorial._stepFrames=Tutorial.STALL_FRAMES-1;G.fit();G.tick()}""")
+                pg.screenshot(path=a.shot)
+            b.close()
+        print(json.dumps({'checked': len(rows), 'failures': failures, 'errors': errs}, indent=1))
+        sys.exit(1 if failures or errs else 0)
     if a.phone_check:
         with sync_playwright() as p:
             b = p.chromium.launch()

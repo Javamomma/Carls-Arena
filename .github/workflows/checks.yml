@@ -34,6 +34,8 @@ jobs:
         run: python tests/harness.py --screens-smoke
       - name: Phone check
         run: python tests/harness.py --phone-check
+      - name: Tutorial fit
+        run: python tests/harness.py --tutorial-fit
       - name: Saves
         run: python tests/harness.py --saves
       - name: Player smoke

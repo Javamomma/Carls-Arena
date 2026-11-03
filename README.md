@@ -271,6 +271,9 @@ python -m playwright install chromium
   page/console errors on each; `python3 tests/harness.py --phone-check` asserts the canvas stays
   letterboxed, on-screen buttons are real ≥44px touch targets, and the page never scrolls
   horizontally at an 844×390 CSS-px landscape-phone viewport.
+- `python3 tests/harness.py --tutorial-fit` shows every tutorial prompt (and prompt + stall hint) at
+  854×480, 844×390, 667×375 and 568×320 and asserts it stays inside the canvas and clear of the
+  LESSON banner.
 - `python3 tests/harness.py --saves` seeds damaged saves (a null record, garbage, an unknown version, a
   failing backup) before the game loads and checks it still starts without losing the original.
 - `python3 tests/harness.py --screen <name> --shot out.png` screenshots any menu screen

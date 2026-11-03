@@ -79,6 +79,8 @@ const Screens={
     // Task 5.3: a fresh save (!Save.data.tutorialDone) routes CAMPAIGN to the tutorial instead of the
     // map -- checked fresh on every click (not just latched at load), so CAMPAIGN opens the map as
     // usual again the instant tutorialDone flips true, with no separate "first run" flag to track.
+    // The first-run label names what the button does so a new player can find the tutorial.
+    document.getElementById('btnCampaign').textContent=Save.data.tutorialDone?'CAMPAIGN':'START TUTORIAL';
     document.getElementById('btnCampaign').onclick=()=>{
       if(!Save.data.tutorialDone){Screens._origin={name:'map',args:[1]};G.startTutorial();return}
       const n=Screens.lastFloor();

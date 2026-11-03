@@ -250,7 +250,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(lesson){lesson.style.left=(r.left+r.width/2)+'px';lesson.style.top=(r.top+108*sy)+'px'}
     if(!el)return;
     el.style.left=(r.left+r.width/2)+'px';
-    el.style.top=(r.top+132*sy)+'px'},
+    // Long prompts wrap inside the canvas's on-screen width; the top sits below the lesson banner
+    // (~24px tall) even when a short canvas scales the fixed 132 up past it.
+    el.style.maxWidth=Math.floor(r.width*.9)+'px';
+    el.style.top=(r.top+Math.max(132*sy,108*sy+24))+'px'},
   // Called once per tutorial-mode tick (see tick() below): mirrors Tutorial.prompt/._flash onto the
   // DOM overlay every frame -- cheap (a textContent/classList write only, no layout work beyond what
   // positionTutorialPrompt already did once at fit()) and simpler than trying to diff for changes,

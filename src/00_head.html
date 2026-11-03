@@ -319,7 +319,7 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
    while G.mode==='tutorial' (G.tick's own gate) and hidden by G.toTitle/backToOrigin/startFight. */
 #tutorialPrompt{position:fixed;transform:translateX(-50%);font-size:12px;font-weight:bold;
   letter-spacing:.5px;color:#111;background:#f4c542;border-radius:20px;padding:6px 14px;
-  text-align:center;white-space:nowrap;pointer-events:none;display:none;
+  text-align:center;width:max-content;text-wrap:balance;pointer-events:none;display:none;
   box-shadow:0 2px 8px rgba(0,0,0,.4);z-index:1}
 #tutorialPrompt.show{display:block}
 #tutorialPrompt.flash{background:#8cf4c5}
