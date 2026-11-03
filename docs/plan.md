@@ -133,5 +133,23 @@ Acceptance: a harness test drives real pointer events (no `intent.heavy`, no L k
 parry and a heavy punish, and a heavy from standing; it shows what fails today. The fix is chosen
 with Arshia if it changes the controls.
 
-## 12. Character art — `art` — status: waiting on Arshia's choice of direction
-Goal: the fighters look like a modern mobile fighting game, not mannequins.
+## 12. Character art in 3D — `art-3d` — status: decided 3D (Arshia, 2026-11-03); model source pending
+Goal: the fighters look like a modern mobile fighting game (3D, lit, realistic proportions), not
+mannequins. Arshia chose 3D over painted sprites or redrawn vectors, knowing it's the largest
+route. The fight simulation, balance and controls don't change; only how fighters are drawn.
+Stages, each its own task:
+- 12a. 3D preview renderer — `three-preview`: an opt-in `?3d=1` (and a Settings toggle) loads a
+  pinned, tree-shaken three.js bundle from a separate file, so the default player page stays as
+  it is. Humanoid fighters are drawn as lit 3D figures on a transparent layer over today's stage,
+  posed from the existing rig's joint angles, so every move animates without new animation work.
+  Looks without a 3D figure yet (the four-legged ones) fall back to 2D. Tests first: a `--3d-smoke`
+  mode (fight runs, fighters drawn, no errors, falls back when WebGL is missing) and a frame-time
+  check. No cost, no outside art.
+- 12b. One real character (Carl) from the model source Arshia picks, retargeted onto the same
+  poses, with a side-by-side screenshot for Arshia.
+- 12c. The other ten looks, including the four-legged ones.
+- 12d. 3D on by default once Arshia has played it on the phone; 2D stays as the fallback for
+  phones without WebGL.
+Open decision for Arshia: where the 3D models come from (free Mixamo humans, a paid AI 3D
+generator, or both). Nothing is spent without asking.
+Note: this lifts AGENTS.md's "no runtime dependencies" rule for one pinned library (three.js, MIT).
