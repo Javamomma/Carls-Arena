@@ -125,7 +125,7 @@ Acceptance:
 Files: `src/00_head.html`, `src/80_game.js` and/or `src/85_screens.js`, `src/90_tests.js`,
 `tests/harness.py`, `index.html`, `test.html`.
 
-## 11. Heavy attacks work by touch — `heavy-touch` — status: in progress (HEAVY button)
+## 11. Heavy attacks work by touch — `heavy-touch` — status: done (1da71de)
 Goal: lesson 3 ("parry, then a heavy to punish") can be done with a finger, and its instruction
 describes the real gesture. Today a plain hold is a block, so "HOLD to charge a HEAVY" can't work;
 the heavy is swipe-right-and-keep-holding, which throws a kick first.
