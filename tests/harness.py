@@ -42,6 +42,11 @@
   python3 tests/harness.py --player-smoke                           # player page (index.html) only:
       # no test code, title screen, one full fight to RESULT, no page/console errors
 
+  python3 tests/harness.py --touch-heavy                            # real mouse input through lesson 3 at
+      # 844x390: heavy from standing (HEAVY button, swipe-and-hold), BLOCK button then HEAVY button, and
+      # a canvas-hold parry then HEAVY button; prints what each did; exit 1 if lesson 3's punish can't
+      # be done by touch
+
   python3 tests/harness.py --saves                                  # damaged-save cases: a prepared
       # localStorage save is seeded before any game script runs (fresh browser context per case);
       # checks the game still starts, only the broken record is repaired, an unreadable save is
@@ -704,6 +709,196 @@ def run_player_smoke():
           and r['final_state'] == 'RESULT' and not errors)
     return 0 if ok else 1
 
+# --touch-heavy: real mouse input on the canvas/buttons (Input's own listeners), stepped frame by
+# frame, so a finger's chances at lesson 3 are measured without touching intent.heavy or a Ctrl script.
+TOUCH_JS = """(()=>{
+  window.TH={n:0,moves:[],events:[],seq:-1,scan:0,
+    setup(showButtons){
+      localStorage.clear();Save.load();
+      Save.data.settings.showButtons=!!showButtons;Save.put();
+      G.sim=true;G.startTutorial({seed:1});
+      G.fight.p1.moveName='medium';Tutorial.state.step=1;Tutorial.tick(G.fight);G.fight.p1.clearMove();
+      G.fit();
+      this.n=0;this.moves=[];this.events=[];this.seq=G.fight.p1.moveSeq;this.scan=G.fight.log.length;
+      return{state:G.state,mode:G.mode,step:Tutorial.state.step,forceButtons:G.forceButtons}},
+    tick(){G.tick();this.n++;const f=G.fight;if(!f)return;
+      const p=f.p1,q=f.p2;
+      if(p.moveSeq!==this.seq){this.seq=p.moveSeq;
+        this.moves.push({t:this.n,move:p.moveName,p2ParryStunnedAtStart:!!q.parryStunned,
+          p2StunFramesLeft:q.state==='STUNNED'?q.stun-q.f:null})}
+      for(;this.scan<f.log.length;this.scan++){const e=f.log[this.scan];
+        this.events.push({t:this.n,type:e.type,by:e.who===1?'p1':'p2',move:e.move||null})}},
+    step(n,type,by){for(let i=0;i<n;i++){const before=this.events.length;this.tick();
+      if(type&&this.events.slice(before).some(e=>e.type===type&&e.by===by))return{ticks:i+1,seen:true}}
+      return{ticks:n,seen:false}},
+    summary(){const f=G.fight;return{n:this.n,moves:this.moves,
+      events:this.events.filter(e=>/^(parry|punish|hit|block)$/.test(e.type)),
+      lessonStep:Tutorial.state.step,punished:Tutorial._punished,p1State:f.p1.state,state:G.state}}};
+  return true})()"""
+
+class Touch:
+    """One headless 844x390 page with a live lesson-3 tutorial fight and a single mouse pointer."""
+    def __init__(self, pg, show_buttons=False):
+        self.pg = pg
+        pg.evaluate(TOUCH_JS)
+        self.setup = pg.evaluate('b=>TH.setup(b)', show_buttons)
+        self.rect = pg.evaluate('(()=>{const r=canvas.getBoundingClientRect();return{l:r.left,t:r.top,w:r.width,h:r.height}})()')
+        self.down_on = None
+    def xy(self, cx, cy):  # canvas coordinates (854x480) to viewport CSS pixels
+        r = self.rect
+        return r['l'] + cx * r['w'] / 854, r['t'] + cy * r['h'] / 480
+    def btn_xy(self, bid):
+        return self.pg.evaluate("id=>{const r=document.getElementById(id).getBoundingClientRect();"
+                                "return[r.left+r.width/2,r.top+r.height/2]}", bid)
+    def top_element(self, x, y):
+        return self.pg.evaluate("([x,y])=>{const e=document.elementFromPoint(x,y);return e?(e.id||e.tagName):null}", [x, y])
+    def tick(self, n=1):
+        return self.pg.evaluate('n=>TH.step(n)', n) if n > 0 else None
+    def until(self, etype, by, limit):
+        return self.pg.evaluate('([n,t,b])=>TH.step(n,t,b)', [limit, etype, by])['seen']
+    def now(self):
+        return self.pg.evaluate('TH.n')
+    def down(self, x, y):
+        self.pg.mouse.move(x, y); self.pg.mouse.down()
+    def move(self, x, y):
+        self.pg.mouse.move(x, y)
+    def up(self):
+        self.pg.mouse.up()
+    def swipe_right(self, cx, cy, px, frames):
+        """Drags px canvas-pixels right over `frames` sim frames in equal steps (one pointermove per frame)."""
+        for i in range(1, frames + 1):
+            self.tick(1)
+            self.move(*self.xy(cx + px * i / frames, cy))
+    def summary(self):
+        return self.pg.evaluate('TH.summary()')
+
+def score(sm):
+    """Ranks one attempt: lesson done > a heavy that started on a parry-stunned foe > any heavy > a parry."""
+    ev = sm['events']
+    parried = any(e['type'] == 'parry' and e['by'] == 'p1' for e in ev)
+    heavies = [m for m in sm['moves'] if m['move'] == 'heavy']
+    on_stunned = [m for m in heavies if m['p2ParryStunnedAtStart']]
+    return (int(sm['lessonStep'] >= 3), int(bool(on_stunned)), int(bool(heavies)), int(parried))
+
+def digest(params, sm):
+    ev = sm['events']
+    first = lambda ty, by: next((e['t'] for e in ev if e['type'] == ty and e['by'] == by), None)
+    heavies = [m for m in sm['moves'] if m['move'] == 'heavy']
+    return {'params': params,
+            'playerMoves': [{'t': m['t'], 'move': m['move']} for m in sm['moves']],
+            'dummyHitPlayerT': first('hit', 'p2'), 'parryT': first('parry', 'p1'),
+            'heavyStartT': heavies[0]['t'] if heavies else None,
+            'parryStunnedWhenHeavyStarted': heavies[0]['p2ParryStunnedAtStart'] if heavies else None,
+            'stunFramesLeftWhenHeavyStarted': heavies[0]['p2StunFramesLeft'] if heavies else None,
+            'playerHits': [{'t': e['t'], 'move': e['move']} for e in ev if e['type'] == 'hit' and e['by'] == 'p1'],
+            'punishT': first('punish', 'p1'), 'lessonDone': sm['lessonStep'] >= 3,
+            'lessonStep': sm['lessonStep'] + 1}
+
+def run_touch_heavy():
+    errors = []
+    results = {}
+    SPOT = (250, 300)   # canvas px, open floor left of the fighters; no overlay sits on it
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page(viewport={'width': 844, 'height': 390})
+        pg.on('pageerror', lambda e: errors.append(str(e)))
+        pg.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
+        pg.goto(TEST_PAGE)
+        pg.wait_for_function('typeof G!=="undefined"')
+
+        def fresh(show_buttons=False):
+            return Touch(pg, show_buttons)
+
+        # Calibration: with no input the dummy's first scripted kick connects on the player at frame H.
+        t = fresh(); t.tick(200); cal = t.summary()
+        H = next((e['t'] for e in cal['events'] if e['type'] == 'hit' and e['by'] == 'p2'), None)
+        spot_xy = t.xy(*SPOT)
+        results['calibration'] = {'dummyKickConnectsAtFrame': H, 'viewport': '844x390',
+                                  'canvasCssRect': t.rect, 'elementUnderThumbSpot': t.top_element(*spot_xy),
+                                  'lesson3ForcesButtons': t.setup['forceButtons'],
+                                  'elementUnderButtonCentres': {i: t.top_element(*t.btn_xy(i)) for i in
+                                                                ('btnBlock', 'btnHeavy', 'btnKick', 'btnPower')},
+                                  'hint': 'frames are sim ticks since lesson 3 began; 60 per second'}
+
+        def attempts(label, runs, passed):
+            """runs: list of (params, fn(touch)->None). Keeps every digest's counts and the best run."""
+            tally = {'tried': len(runs), 'parried': 0, 'heavyStarted': 0, 'heavyOnStunnedFoe': 0, 'punished': 0}
+            by_variant = {}
+            best = None
+            for params, fn in runs:
+                t = fresh()
+                fn(t)
+                sm = t.summary()
+                d = digest(params, sm)
+                tally['parried'] += d['parryT'] is not None
+                tally['heavyStarted'] += d['heavyStartT'] is not None
+                tally['heavyOnStunnedFoe'] += bool(d['parryStunnedWhenHeavyStarted'])
+                tally['punished'] += d['punishT'] is not None
+                v = by_variant.setdefault(params.get('variant', 'all'), {'tried': 0, 'parried': 0, 'heavyStarted': 0, 'punished': 0})
+                v['tried'] += 1; v['parried'] += d['parryT'] is not None
+                v['heavyStarted'] += d['heavyStartT'] is not None; v['punished'] += d['punishT'] is not None
+                if best is None or score(sm) > best[0]:
+                    best = (score(sm), d)
+            results[label] = dict(tally, byVariant=by_variant, passed=bool(passed(best[1])), best=best[1])
+
+        # (a) a heavy from standing: the HEAVY button, and the older swipe right and keep holding.
+        def run_a_button(hold):
+            def fn(t):
+                t.tick(10); t.down(*t.btn_xy('btnHeavy')); t.tick(hold); t.up(); t.tick(40)
+            return fn
+        def run_a_swipe(px, frames):
+            def fn(t):
+                t.tick(10); t.down(*t.xy(*SPOT)); t.swipe_right(*SPOT, px, frames); t.tick(70); t.up(); t.tick(5)
+            return fn
+        runs_a = [({'variant': 'heavy_button', 'holdFrames': h}, run_a_button(h)) for h in (12, 30, 60)]
+        runs_a += [({'variant': 'swipe_right_and_hold', 'swipePx': px, 'swipeFrames': fr}, run_a_swipe(px, fr))
+                   for px, fr in ((50, 2), (90, 4), (150, 8))]
+        attempts('a_heavy_from_standing', runs_a, lambda d: d['heavyStartT'] is not None)
+        va = results['a_heavy_from_standing']['byVariant']
+        results['a_heavy_from_standing']['passed'] = all(v['heavyStarted'] == v['tried'] for v in va.values())
+
+        def punished(d):
+            return d['lessonDone'] and d['punishT'] is not None
+
+        # (b) lesson 3 as its prompt says, with the buttons: BLOCK as the kick connects, then hold HEAVY.
+        def run_b(k, g, hold):
+            def fn(t):
+                bx, by = t.btn_xy('btnBlock'); hx, hy = t.btn_xy('btnHeavy')
+                t.tick(H - k); t.down(bx, by)
+                if t.until('parry', 'p1', k + 30):
+                    t.tick(g); t.up(); t.tick(1); t.down(hx, hy); t.tick(hold)
+                t.up(); t.tick(5)
+            return fn
+        attempts('b_block_button_then_heavy_button',
+                 [({'pressFramesBeforeHit': k, 'framesAfterParry': g, 'heavyHoldFrames': hold}, run_b(k, g, hold))
+                  for k in range(1, 9) for g in (0, 3) for hold in (40, 70)], punished)
+
+        # (c) a gesture parry (hold on the canvas), then the HEAVY button.
+        def run_c(k, g, hold):
+            def fn(t):
+                hx, hy = t.btn_xy('btnHeavy')
+                t.tick(H - k); t.down(*t.xy(*SPOT))
+                if t.until('parry', 'p1', k + 30):
+                    t.tick(g); t.up(); t.tick(1); t.down(hx, hy); t.tick(hold)
+                t.up(); t.tick(5)
+            return fn
+        attempts('c_canvas_hold_parry_then_heavy_button',
+                 [({'pressFramesBeforeHit': k, 'framesAfterParry': g, 'heavyHoldFrames': hold}, run_c(k, g, hold))
+                  for k in range(9, 17) for g in (0, 3) for hold in (40, 70)], punished)
+        # (d) press HEAVY, drag off onto the canvas and let go there: the hold must end with the touch.
+        def run_d(t):
+            hx, hy = t.btn_xy('btnHeavy')
+            t.tick(10); t.down(hx, hy); t.tick(3); t.move(*t.xy(*SPOT)); t.up()
+            t.stuck = t.pg.evaluate('Input.held.heavy'); t.tick(40)
+        t = fresh(); run_d(t); sm = t.summary()
+        d = digest({'variant': 'press_heavy_drag_off_release_on_canvas'}, sm)
+        results['d_heavy_drag_off_button'] = {'heldHeavyAfterRelease': t.stuck, 'passed': not t.stuck, 'best': d}
+        b.close()
+    out = {'errors': errors, 'results': results}
+    print(json.dumps(out, indent=1))
+    ok = all(v['passed'] for k, v in results.items() if k != 'calibration')
+    return 1 if errors or not ok else 0
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--unit', action='store_true', help='run Test.run() and exit')
@@ -818,6 +1013,13 @@ def main():
                           "the game starts, only the broken record is repaired, unreadable saves are "
                           "backed up, and a failed backup leaves the original untouched; prints JSON "
                           "and exits 1 on any failed case or page/console error")
+    ap.add_argument('--touch-heavy', action='store_true',
+                     help="drives real mouse input (canvas gestures and the on-screen buttons) through a "
+                          "live lesson 3 at 844x390 and reports, for three attempts (heavy from standing "
+                          "by the HEAVY button and by swipe-and-hold; BLOCK button then HEAVY button; "
+                          "canvas-hold parry then HEAVY button), what the player did, whether the foe "
+                          "was still parry-stunned when a heavy started and whether 'punish' fired; "
+                          "exits 1 if either lesson attempt cannot finish lesson 3 with a punish")
     ap.add_argument('--tutorial-fit', action='store_true',
                      help="at 854x480, 844x390, 667x375 and 568x320 CSS px, shows every tutorial prompt "
                           "(plain, and with its stall hint appended as the game does) in a real tutorial "
@@ -858,6 +1060,8 @@ def main():
         sys.exit(run_saves())
     if a.player_smoke:
         sys.exit(run_player_smoke())
+    if a.touch_heavy:
+        sys.exit(run_touch_heavy())
     if a.perf is not None:
         with sync_playwright() as p:
             b = p.chromium.launch()
@@ -1062,7 +1266,10 @@ def main():
           const p=document.getElementById('tutorialPrompt'),l=document.getElementById('tutorialLesson');
           return{text:p.textContent,shown:p.classList.contains('show'),prompt:rc(p),lesson:rc(l),
             canvas:rc(canvas),vw:innerWidth,vh:innerHeight,
-            fontSize:parseFloat(getComputedStyle(p).fontSize)}})()"""
+            fontSize:parseFloat(getComputedStyle(p).fontSize),
+            lines:(cs=>Math.round((p.getBoundingClientRect().height-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom))/(parseFloat(cs.lineHeight)||parseFloat(cs.fontSize)*1.2)))(getComputedStyle(p)),
+            buttons:[...document.querySelectorAll('.cbtn')].filter(b=>getComputedStyle(b).display!=='none')
+              .map(b=>Object.assign({id:b.id},rc(b)))}})()"""
         failures, rows, errs = [], [], []
         with sync_playwright() as p:
             b = p.chromium.launch()
@@ -1083,6 +1290,7 @@ def main():
                           G.startTutorial({seed:1,ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
                           Tutorial.state.step=step;Tutorial.prompt=Tutorial.steps[step].prompt;
                           Tutorial._stepFrames=hinted?Tutorial.STALL_FRAMES-1:0;
+                          G.forceButtons=step<=2;G.applySettings();
                           G.fit();G.tick()}""", [step, hinted])
                         r = pg.evaluate(probe_js)
                         want = pg.evaluate("([s,h])=>Tutorial.steps[s].prompt+(h?' \u2014 '+Tutorial.HINTS[s]:'')", [step, hinted])
@@ -1093,15 +1301,20 @@ def main():
                                        pr['right'] <= r['vw'] + 0.5 and pr['bottom'] <= r['vh'] + 0.5)
                         clear = (pr['top'] >= ln['bottom'] - 0.5 or pr['bottom'] <= ln['top'] + 0.5 or
                                  pr['left'] >= ln['right'] - 0.5 or pr['right'] <= ln['left'] + 0.5)
+                        hits = [bt['id'] for bt in r['buttons']
+                                if pr['left'] < bt['right'] and bt['left'] < pr['right'] and
+                                pr['top'] < bt['bottom'] and bt['top'] < pr['bottom']]
+                        two_lines = hinted or r['lines'] <= 2
                         row = {'viewport': f'{vw}x{vh}', 'step': step + 1, 'hinted': hinted, 'text': r['text'],
+                               'lines': r['lines'], 'overlapsButtons': hits,
                                'shown': r['shown'], 'textIsGameText': r['text'] == want,
                                'insideCanvas': inside_canvas, 'insideViewport': inside_view,
                                'clearOfLesson': clear, 'fontSize': r['fontSize'], 'prompt': pr,
                                'canvas': cv, 'lesson': ln}
                         rows.append(row)
                         if not (r['shown'] and row['textIsGameText'] and inside_canvas and inside_view
-                                and clear and r['fontSize'] >= 12):
-                            failures.append({k: row[k] for k in ('viewport', 'step', 'hinted', 'insideCanvas',
+                                and clear and r['fontSize'] >= 12 and not hits and two_lines):
+                            failures.append({k: row[k] for k in ('viewport', 'step', 'hinted', 'lines', 'overlapsButtons', 'insideCanvas',
                                                                  'insideViewport', 'clearOfLesson', 'prompt', 'canvas', 'lesson')})
             if a.shot:
                 pg.set_viewport_size({'width': 568, 'height': 320})
@@ -1130,7 +1343,7 @@ def main():
             def capture():
                 return pg.evaluate("""(()=>{
                   const cr=canvas.getBoundingClientRect();
-                  const btnIds=['btnBlock','btnPunch','btnKick','btnPower'];
+                  const btnIds=['btnBlock','btnPunch','btnKick','btnHeavy','btnPower'];
                   const btns=btnIds.map(id=>{
                     const el=document.getElementById(id),rc=el.getBoundingClientRect();
                     return{id,left:rc.left,top:rc.top,width:rc.width,height:rc.height,
@@ -1179,9 +1392,10 @@ def main():
         shown_out = check_pass(r_shown)
         # The wiring itself, not just sizing: POWER visible and BLOCK/PUNCH/KICK hidden in the
         # default pass; all four visible once showButtons is on.
-        power_hidden = next(c for c in hidden_out['buttons'] if c['id'] == 'btnPower')
-        atk_hidden = [c for c in hidden_out['buttons'] if c['id'] != 'btnPower']
-        wiring_ok = power_hidden['visible'] and not any(c['visible'] for c in atk_hidden) and \
+        always_hidden = [c for c in hidden_out['buttons'] if c['id'] in ('btnPower', 'btnHeavy')]
+        atk_hidden = [c for c in hidden_out['buttons'] if c['id'] not in ('btnPower', 'btnHeavy')]
+        power_hidden = always_hidden[0]
+        wiring_ok = all(c['visible'] for c in always_hidden) and not any(c['visible'] for c in atk_hidden) and \
             all(c['visible'] for c in shown_out['buttons'])
 
         # Fix-wave item 8 (final review, Important): extended to the DOM meta screens -- the in-fight
@@ -1364,6 +1578,39 @@ def main():
             first_door = first_cards['map']['rect'] if first_cards['map'] else None
             first_door_ok = bool(first_cards['map']) and first_cards['map']['ok']
             b2.close()
+        # HEAVY is always shown: at every phone size (and mirrored) it must be a real >=44px target inside
+        # the viewport that overlaps no other button or the open power picker, with showButtons on.
+        heavy_fit = []
+        with sync_playwright() as p3:
+            b3 = p3.chromium.launch()
+            pg3 = b3.new_page(viewport={'width': 854, 'height': 480})
+            heavy_errs = []
+            pg3.on('pageerror', lambda e: heavy_errs.append(str(e)))
+            pg3.goto(TEST_PAGE)
+            pg3.wait_for_function('typeof G!=="undefined"')
+            pg3.evaluate('localStorage.clear();Save.load()')
+            pg3.evaluate("Save.data.settings.showButtons=true;G.startFight({seed:1,p1:'carl',p2:'donut',"
+                         "ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});document.getElementById('powerPicker').classList.add('show')")
+            for vw, vh in [(854, 480), (844, 390), (667, 375), (568, 320)]:
+                for lh in (False, True):
+                    pg3.set_viewport_size({'width': vw, 'height': vh})
+                    r = pg3.evaluate("""lh=>{document.body.classList.toggle('left-handed',lh);G.fit();
+                      const rc=id=>{const r=document.getElementById(id).getBoundingClientRect();
+                        return{id,left:r.left,top:r.top,right:r.right,bottom:r.bottom,w:r.width,h:r.height}};
+                      const h=rc('btnHeavy');
+                      const hit=o=>h.left<o.right&&o.left<h.right&&h.top<o.bottom&&o.top<h.bottom;
+                      const others=['btnBlock','btnPunch','btnKick','btnPower','pk1','pk2','pk3'].map(rc);
+                      const cv=canvas.getBoundingClientRect(),hudBottom=cv.top+HUD_LINE*cv.height/H;
+                      const pks=['pk1','pk2','pk3'].map(rc),btns=['btnBlock','btnPunch','btnKick','btnHeavy','btnPower'].map(rc);
+                      const pickerHits=[];
+                      for(const k of pks){if(k.top<hudBottom)pickerHits.push(k.id+':HUD');
+                        for(const b of btns)if(k.left<b.right&&b.left<k.right&&k.top<b.bottom&&b.top<k.bottom)pickerHits.push(k.id+':'+b.id)}
+                      return{pickerHits,w:h.w,h:h.h,inside:h.left>=0&&h.top>=0&&h.right<=innerWidth+.5&&h.bottom<=innerHeight+.5,
+                        overlaps:others.filter(hit).map(o=>o.id)}}""", lh)
+                    ok_ = r['w'] >= 44 and r['h'] >= 44 and r['inside'] and not r['overlaps'] and not r['pickerHits']
+                    heavy_fit.append({'viewport': f'{vw}x{vh}', 'leftHanded': lh, 'ok': ok_, **r})
+            b3.close()
+        heavy_bad = [f for f in heavy_fit if not f['ok']]
         screens_bad = [r['screen'] for r in screen_results if r['bad']]
         overlap_bad = [name for name, v in overlap_results.items() if v['bad_pairs'] or v['shrunk']]
         first_card_bad = [name for name, v in first_cards.items() if not v or not v['ok']]
@@ -1371,12 +1618,12 @@ def main():
         out = {'errors': errs, 'attackButtonsHidden': hidden_out, 'attackButtonsShown': shown_out,
                'wiring_ok': wiring_ok, 'screens': screen_results, 'screenErrors': screen_errs,
                'cardOverlap': overlap_results, 'firstCard': first_cards,
-               'firstDoor': first_door, 'firstDoorOk': first_door_ok}
+               'firstDoor': first_door, 'firstDoorOk': first_door_ok, 'heavyFit': heavy_fit}
         print(json.dumps(out, indent=1))
         bad = (errs or not hidden_out['aspect_ok'] or not hidden_out['fits_ok'] or hidden_out['bad_btns']
                or not hidden_out['no_hscroll'] or not shown_out['aspect_ok'] or not shown_out['fits_ok']
                or shown_out['bad_btns'] or not shown_out['no_hscroll'] or not wiring_ok
-               or screen_errs or screens_bad or overlap_bad or first_card_bad)
+               or screen_errs or screens_bad or overlap_bad or first_card_bad or heavy_bad)
         sys.exit(1 if bad else 0)
     errors, console = [], []
     with sync_playwright() as p:

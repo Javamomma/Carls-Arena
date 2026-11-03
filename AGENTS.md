@@ -30,7 +30,7 @@ Base branch: main
 Run this before you stop. It must print `ALL GREEN`:
 
 ```sh
-python3 tools/build.py --check && python3.14 tests/harness.py --unit >/dev/null && python3.14 tests/harness.py --tutorial --seed 1 >/dev/null && python3.14 tests/harness.py --e2e --seed 1 >/dev/null && python3.14 tests/harness.py --screens-smoke >/dev/null && python3.14 tests/harness.py --phone-check >/dev/null && python3.14 tests/harness.py --tutorial-fit >/dev/null && python3.14 tests/harness.py --saves >/dev/null && python3.14 tests/harness.py --player-smoke >/dev/null && python3.14 tests/harness.py --journey >/dev/null && echo ALL GREEN
+python3 tools/build.py --check && python3.14 tests/harness.py --unit >/dev/null && python3.14 tests/harness.py --tutorial --seed 1 >/dev/null && python3.14 tests/harness.py --e2e --seed 1 >/dev/null && python3.14 tests/harness.py --screens-smoke >/dev/null && python3.14 tests/harness.py --phone-check >/dev/null && python3.14 tests/harness.py --tutorial-fit >/dev/null && python3.14 tests/harness.py --saves >/dev/null && python3.14 tests/harness.py --player-smoke >/dev/null && python3.14 tests/harness.py --journey >/dev/null && python3.14 tests/harness.py --touch-heavy >/dev/null && echo ALL GREEN
 ```
 
 To see why a mode failed, run it again without `>/dev/null` and read the JSON it prints. `--unit`

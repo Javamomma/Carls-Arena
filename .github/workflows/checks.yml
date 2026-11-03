@@ -42,3 +42,5 @@ jobs:
         run: python tests/harness.py --player-smoke
       - name: Journey
         run: python tests/harness.py --journey
+      - name: Touch heavy
+        run: python tests/harness.py --touch-heavy

@@ -93,6 +93,8 @@ ignored until the first lifts.
   ends for a quicker in-combo **heavy** finisher instead.
 - **Swipe left** — **DASH BACK** (with a moment of invulnerability); keep holding through the dash
   and it rolls straight into **BLOCK** once the dash ends.
+- **HEAVY** (above POWER, always on screen) charges a heavy for as long as you hold it, with no kick first;
+  it is the way to punish a parry (the lesson 3 move). BLOCK, PUNCH and KICK stay optional.
 - **POWER** (bottom-right, always on screen) taps to fire your strongest affordable special; hold it
   to open a picker for S1/S2/S3 specifically, then release over the one you want.
 
@@ -274,6 +276,10 @@ python -m playwright install chromium
 - `python3 tests/harness.py --tutorial-fit` shows every tutorial prompt (and prompt + stall hint) at
   854×480, 844×390, 667×375 and 568×320 and asserts it stays inside the canvas and clear of the
   LESSON banner.
+- `python3 tests/harness.py --touch-heavy` drives real mouse input (canvas gestures and the on-screen
+  buttons) through the live tutorial's lesson 3 at 844×390 and reports what each attempt did (a heavy
+  from standing by the HEAVY button and by swipe-and-hold; BLOCK button then HEAVY button; a canvas-hold
+  parry then HEAVY button); it exits 1 if either lesson attempt can't finish lesson 3 with a punish.
 - `python3 tests/harness.py --saves` seeds damaged saves (a null record, garbage, an unknown version, a
   failing backup) before the game loads and checks it still starts without losing the original.
 - `python3 tests/harness.py --screen <name> --shot out.png` screenshots any menu screen

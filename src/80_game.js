@@ -24,15 +24,13 @@ const Tutorial={
   // G.startTutorial now removes entirely (clock:Infinity -- see its own comment). _stepFrames counts
   // sim frames since the CURRENT step became current (reset on every advance, see reset()/tick()
   // below); STALL_FRAMES is how long any step is given before `stalled` flips true and its own
-  // fallback hint layers onto the prompt (HINTS below); FORCE_FRAMES is a second, later threshold
-  // (lessons 2-3 only) that temporarily forces the attack/block buttons back on for a player who
-  // still hasn't found them.
-  STALL_FRAMES:600,FORCE_FRAMES:1500,_stepFrames:0,stalled:false,
+  // fallback hint layers onto the prompt (HINTS below).
+  STALL_FRAMES:600,_stepFrames:0,stalled:false,
   // Fix-wave item 1: per-step fallback hints, appended to the step's own prompt once STALL_FRAMES has
   // passed with no progress -- lesson 4 (POWER) keeps its own pre-existing wording (the one hint the
   // final review's first-play walkthrough specifically called out).
   HINTS:['Tap anywhere on the screen','Swipe right anywhere to kick — or tap KICK',
-    'Hold anywhere to block, let go as the flash hits','TAP THE GLOWING POWER BUTTON'],
+    'Press BLOCK as the kick connects, then hold HEAVY','TAP THE GLOWING POWER BUTTON'],
   // Task 6.4 (frozen prompt text): rewritten for the whole-canvas gestures -- lessons 1-2 also point
   // at the real BLOCK/PUNCH/KICK buttons ("(or tap PUNCH)"/"(or tap KICK)"), which G.startTutorial/
   // Tutorial.tick (below) force on (G.forceButtons) for exactly those two lessons, per the plan
@@ -49,7 +47,7 @@ const Tutorial={
   steps:[
     {prompt:'TAP to punch — land 3 hits (or tap PUNCH)',done:()=>Tutorial._lights>=3},
     {prompt:'SWIPE RIGHT to kick (or tap KICK)',done:fight=>!!(fight&&fight.p1&&fight.p1.moveName==='medium')},
-    {prompt:'HOLD to block, release as the hit lands to PARRY — then HOLD to charge a HEAVY and PUNISH',done:()=>Tutorial._punished},
+    {prompt:'BLOCK just as the hit lands to PARRY — then hold HEAVY to PUNISH',done:()=>Tutorial._punished},
     {prompt:'POWER — fire a special',
       done:fight=>!!(fight&&fight.p1&&(fight.p1.moveName==='s1'||fight.p1.moveName==='s2'||fight.p1.moveName==='s3'))}],
   reset(){
@@ -110,14 +108,6 @@ const Tutorial={
     if(!this.stalled&&this._stepFrames>=this.STALL_FRAMES){
       this.stalled=true;
       this.prompt=this.steps[step].prompt+' — '+this.HINTS[step]}
-    // Fix-wave item 1: past FORCE_FRAMES on lesson 2 or 3 specifically (steps 1/2 -- the two lessons
-    // that normally decide BLOCK/PUNCH/KICK visibility on their own, see G.startTutorial/the step===2
-    // transition below), temporarily force the attack buttons back on for a player who's still stuck
-    // well past the stall hint -- lesson 2 already shows them by default so this is a no-op there, but
-    // lesson 3 (block) normally hides them once lesson 2 ends, and a player who can't find the
-    // whole-canvas hold gesture benefits from BLOCK reappearing as a real, visible fallback target.
-    if((step===1||step===2)&&this._stepFrames>=this.FORCE_FRAMES&&typeof G!=='undefined'&&!G.forceButtons){
-      G.forceButtons=true;G.applySettings()}
     if(this.steps[step].done(fight)){
       this.state.done[step]=true;this._flash=30;this.state.step++;
       this._stepFrames=0;this.stalled=false;
@@ -127,16 +117,8 @@ const Tutorial={
       // actually has ground to cover -- lesson 1 leaves it close (see G.startTutorial's own spawn),
       // so without this the dummy would still be sitting inside light range when lesson 2 begins.
       if(this.state.step===1&&fight.p2)fight.p2.x=fight.p1.x+260;
-      // Task 6.4: BLOCK/PUNCH/KICK are only forced on for lessons 1-2 (set true by G.startTutorial,
-      // reset here the instant lesson 3 begins) -- from lesson 3 on, the player's own showButtons
-      // setting is all that's left deciding it (G.applySettings ORs forceButtons with the setting).
-      // Fix-wave item 1: this also clears any FORCE_FRAMES stall-force from lesson 2 above, so lesson
-      // 3 starts exactly as before (buttons hidden unless the player's own setting shows them, or its
-      // own stall force kicks back in) rather than inheriting lesson 2's forced-on state.
-      if(this.state.step===2&&typeof G!=='undefined'){G.forceButtons=false;G.applySettings()}
-      // Fix-wave item 1: same reset leaving lesson 3 (entering POWER) -- clears any stall-force lesson
-      // 3 itself armed, so POWER's own stall hint (pulsing #btnPower) is the only thing left pointing
-      // at anything once every attack button lesson is behind the player.
+      // Lessons 1-3 name BLOCK/PUNCH/KICK on screen, so G.startTutorial's forceButtons stays on until lesson 4.
+      // Entering POWER hides the attack buttons again so its pulsing #btnPower hint is the only pointer.
       if(this.state.step===3&&typeof G!=='undefined'){G.forceButtons=false;G.applySettings()}
       // Fix-wave item 6: the guardActive clear + shieldDown fx are deferred to tick()'s own top-of-
       // function check above (fight.p1 back to IDLE) instead of firing right here -- see that check's
@@ -250,9 +232,10 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(lesson){lesson.style.left=(r.left+r.width/2)+'px';lesson.style.top=(r.top+108*sy)+'px'}
     if(!el)return;
     el.style.left=(r.left+r.width/2)+'px';
-    // Long prompts wrap inside the canvas's on-screen width; the top sits below the lesson banner
-    // (~24px tall) even when a short canvas scales the fixed 132 up past it.
-    el.style.maxWidth=Math.floor(r.width*.9)+'px';
+    // Long prompts wrap inside the canvas's on-screen width, and between the button columns (22px
+    // inset + 76px button + 6px gap each side) so the always-visible HEAVY button never sits on the text;
+    // the top sits below the lesson banner (~24px tall) even when a short canvas scales the fixed 132 up past it.
+    el.style.maxWidth=Math.floor(Math.min(r.width*.9,r.width-2*(22+76+6)))+'px';
     el.style.top=(r.top+Math.max(132*sy,108*sy+24))+'px'},
   // Called once per tutorial-mode tick (see tick() below): mirrors Tutorial.prompt/._flash onto the
   // DOM overlay every frame -- cheap (a textContent/classList write only, no layout work beyond what
@@ -497,7 +480,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
     // regardless of how recently the previous fight's last toast landed.
     this.frameNow=0;this._sayAt=-999;
-    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);
+    Input.releaseHolds();this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);
     // Task 4.5: a fight can be launched from any browsing screen (a map node, arena's FIGHT,
     // exhibition off the title screen) -- hide whichever one is still up so it doesn't linger over
     // the fight underneath.
@@ -527,7 +510,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // by a timer running out -- an idle/tap-only player who never advances past lesson 2 used to sit
     // there until the clock expired and then be handed the FULL completion grant (gold, free crystal,
     // tutorialDone) having learned exactly one move. Pairs with the per-step stall timer above
-    // (Tutorial.STALL_FRAMES/HINTS/FORCE_FRAMES), which is what actually moves a stuck player forward
+    // (Tutorial.STALL_FRAMES/HINTS), which is what actually moves a stuck player forward
     // now that the clock can't do it for them.
     const started=this.startFight(Object.assign({},o,{encounter:'tutorial',mode:'tutorial',clock:Infinity,
       ctrl2:o.ctrl2||Ctrl.tutorialDummy(o.seed||1),
@@ -865,7 +848,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       const scoreCtx=this.mode==='quest'?{floor:this.questTarget.floor}:{streak:Save.data.arena.streak};
       Meta.recordScore(Object.assign({viewers:peakViewers,champ:this.champ,
         date:Meta.today()},scoreCtx))}
-    this.state='RESULT';
+    Input.releaseHolds();this.state='RESULT';
     if(typeof Screens!=='undefined'&&Screens.result)Screens.result(rewards,won,peakViewers);
     else{
       document.getElementById('resultTitle').textContent=won?'VICTORY':'DEFEATED';
@@ -915,14 +898,14 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     p.state=m.state;p.f=m.f;
     if(m.stun!==undefined)p.stun=m.stun;
     this.sim=true},
-  togglePause(){if(this.state==='FIGHT'){this.state='PAUSED';this.show('pauseMenu',true)}else if(this.state==='PAUSED'){this.state='FIGHT';this.show('pauseMenu',false);this.acc=0}},
+  togglePause(){Input.releaseHolds();if(this.state==='FIGHT'){this.state='PAUSED';this.show('pauseMenu',true)}else if(this.state==='PAUSED'){this.state='FIGHT';this.show('pauseMenu',false);this.acc=0}},
   // Task 4.5: browsing (title/map/roster/crystal/shop/arena) all share G.state='TITLE' -- the same
   // generic "not fighting" value togglePause/Input already gate on -- so no new state value is
   // needed; which overlay is actually on screen is Screens' own concern (Screens._current). toTitle
   // always lands on the title screen specifically (tests call this directly and expect exactly
   // that); backToOrigin (below) is the "go back to wherever this fight was launched from" version,
   // used by the pause menu's QUIT and the result overlay's CONTINUE button.
-  toTitle(){this.campaignJustCompleted=false;this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+  toTitle(){Input.releaseHolds();this.campaignJustCompleted=false;this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
     // Task 6.4: an unconditional reset, so leaving the tutorial mid-lesson (before Tutorial.tick's own
     // step===2 transition ever turns it back off) can never leave BLOCK/PUNCH/KICK stuck forced-on
@@ -931,7 +914,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.forceButtons=false;this.applySettings();
     if(typeof Screens!=='undefined')Screens.show('title');
     else{this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)}},
-  backToOrigin(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+  backToOrigin(){Input.releaseHolds();this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
     this.forceButtons=false;this.applySettings(); // Task 6.4: see toTitle's own comment
     // The CONTINUE after the win that finished the campaign goes to the campaign-complete screen once.

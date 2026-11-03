@@ -4544,7 +4544,89 @@ Test.add('lesson 2 (a landed medium) backs the dummy off to 260px so the kick\'s
   eq(Tutorial.state.step,1);
   eq(p2.x,p1.x+260,'the dummy must back off to exactly 260px at the start of lesson 2');
   Tutorial.reset()});
-Test.add('G.forceButtons is forced on for lessons 1-2 and turns back off from lesson 3 onward',()=>{
+Test.add('#btnHeavy is shown in every fight like POWER, sets held.heavy on press and clears it on release or cancel',()=>{
+  Save.data=Meta.defaults();Save.data.settings.showButtons=false;G.applySettings();
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  const h=document.getElementById('btnHeavy');
+  ok(h,'#btnHeavy must exist');
+  eq(h.dataset.label,'HEAVY');
+  ok(h.classList.contains('cbtn')&&!h.classList.contains('atkbtn'),'HEAVY is a .cbtn, not an .atkbtn hidden by the showButtons setting');
+  ok(getComputedStyle(h).display!=='none','HEAVY shows even with showButtons off');
+  h.dispatchEvent(new PointerEvent('pointerdown',{pointerId:11,bubbles:true}));eq(Input.held.heavy,true);
+  h.dispatchEvent(new PointerEvent('pointerup',{pointerId:11,bubbles:true}));eq(Input.held.heavy,false);
+  h.dispatchEvent(new PointerEvent('pointerdown',{pointerId:12,bubbles:true}));eq(Input.held.heavy,true);
+  h.dispatchEvent(new PointerEvent('pointercancel',{pointerId:12,bubbles:true}));eq(Input.held.heavy,false);
+  eq(Input.q.length,0,'pressing HEAVY must not queue a kick or any other action');
+  G.toTitle()});
+Test.add('pressing #btnHeavy from standing starts a heavy on the next sim frame, with no kick first',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  G.sim=true;G.tick();
+  document.getElementById('btnHeavy').dispatchEvent(new PointerEvent('pointerdown',{pointerId:13,bubbles:true}));
+  G.tick();
+  eq(G.fight.p1.moveName,'heavy','the first move after pressing HEAVY must be the heavy');
+  eq(G.fight.p1.state,'CHARGE');
+  document.getElementById('btnHeavy').dispatchEvent(new PointerEvent('pointerup',{pointerId:13,bubbles:true}));
+  G.toTitle();G.sim=false});
+Test.add('BLOCK and HEAVY holds clear when pointer capture is lost, and on pause, fight end and leaving the fight',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  const down=(id,pid)=>document.getElementById(id).dispatchEvent(new PointerEvent('pointerdown',{pointerId:pid,bubbles:true}));
+  for(const [id,key] of [['btnHeavy','heavy'],['btnBlock','block']]){
+    down(id,21);eq(Input.held[key],true);
+    document.getElementById(id).dispatchEvent(new PointerEvent('lostpointercapture',{pointerId:21,bubbles:true}));
+    eq(Input.held[key],false,id+': a lost pointer capture (released off the button) must clear the hold')}
+  down('btnHeavy',22);down('btnBlock',23);
+  G.togglePause();
+  eq(Input.held.heavy,false,'pausing clears HEAVY');eq(Input.held.block,false,'pausing clears BLOCK');
+  G.togglePause();
+  down('btnHeavy',24);down('btnBlock',25);
+  G.onFightEnd(true);
+  eq(Input.held.heavy,false,'a fight ending clears HEAVY');eq(Input.held.block,false,'a fight ending clears BLOCK');
+  down('btnHeavy',26);G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  eq(Input.held.heavy,false,'a new fight starts with nothing held');
+  down('btnHeavy',27);down('btnBlock',28);G.toTitle();
+  eq(Input.held.heavy,false,'leaving the fight clears HEAVY');eq(Input.held.block,false,'leaving the fight clears BLOCK')});
+Test.add('the open power picker clears the HUD and every on-screen button, in both hands',()=>{
+  Save.data=Meta.defaults();Save.data.settings.showButtons=true;
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});G.applySettings();
+  const rc=id=>document.getElementById(id).getBoundingClientRect();
+  const hit=(a,b)=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom;
+  const cv=canvas.getBoundingClientRect(),hudBottom=cv.top+HUD_LINE*cv.height/H;
+  document.getElementById('powerPicker').classList.add('show');
+  for(const lh of [false,true]){
+    document.body.classList.toggle('left-handed',lh);
+    for(const pk of ['pk1','pk2','pk3']){
+      ok(rc(pk).top>=hudBottom,pk+' must sit below the HUD'+(lh?' (left-handed)':''));
+      for(const b of ['btnBlock','btnPunch','btnKick','btnHeavy','btnPower'])
+        ok(!hit(rc(pk),rc(b)),pk+' must not overlap '+b+(lh?' (left-handed)':''))}}
+  document.body.classList.remove('left-handed');document.getElementById('powerPicker').classList.remove('show');
+  Save.data.settings.showButtons=false;G.applySettings();G.toTitle()});
+Test.add('#btnHeavy sits clear of the other on-screen buttons and the power picker, and mirrors when left-handed',()=>{
+  Save.data=Meta.defaults();Save.data.settings.showButtons=true;
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});G.applySettings();
+  const rc=id=>document.getElementById(id).getBoundingClientRect();
+  const hit=(a,b)=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom;
+  document.getElementById('powerPicker').classList.add('show');
+  for(const lh of [false,true]){
+    document.body.classList.toggle('left-handed',lh);
+    const h=rc('btnHeavy');
+    for(const other of ['btnBlock','btnPunch','btnKick','btnPower','pk1','pk2','pk3'])
+      ok(!hit(h,rc(other)),'HEAVY must not overlap '+other+(lh?' (left-handed)':''));
+    ok(h.width>=44&&h.height>=44,'HEAVY is a real touch target');
+    ok(h.left>=0&&h.top>=0&&h.right<=innerWidth&&h.bottom<=innerHeight,'HEAVY is inside the viewport');
+    eq(Math.sign(h.left-rc('btnBlock').left),lh?-1:1,'HEAVY is on the same side as POWER, opposite BLOCK');
+  }
+  document.body.classList.remove('left-handed');
+  document.getElementById('powerPicker').classList.remove('show');
+  Save.data.settings.showButtons=false;G.applySettings();G.toTitle()});
+Test.add('lesson 3 names the real mechanics: BLOCK to parry, then hold HEAVY to punish, in the prompt and the stall hint',()=>{
+  const p=Tutorial.steps[2].prompt,h=Tutorial.HINTS[2];
+  ok(/BLOCK/.test(p)&&/PARRY/.test(p)&&/HEAVY/.test(p)&&/PUNISH/.test(p),'prompt: '+p);
+  ok(/BLOCK/.test(h)&&/HEAVY/.test(h),'hint: '+h);
+  ok(!/HOLD to block|anywhere|charge/i.test(p+h),'must not describe the old canvas-hold heavy');
+  ok(p.length<=70,'prompt must stay short enough for two lines on a phone: '+p.length)});
+Test.add('G.forceButtons is forced on for lessons 1-3 and turns back off from lesson 4 onward',()=>{
   Save.data=Meta.defaults();
   G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
   eq(G.forceButtons,true,'lesson 1 must force the attack buttons on');
@@ -4557,7 +4639,10 @@ Test.add('G.forceButtons is forced on for lessons 1-2 and turns back off from le
   G.fight.p1.moveName='medium';
   Tutorial.tick(G.fight); // a started medium -- advances lesson 2 -> lesson 3
   eq(Tutorial.state.step,2,'sanity: must have advanced into lesson 3');
-  eq(G.forceButtons,false,'lesson 3 must turn the forced buttons back off');
+  eq(G.forceButtons,true,'lesson 3 must keep BLOCK on screen: its prompt names it');
+  Tutorial._punished=true;
+  Tutorial.tick(G.fight); // a landed punish -- advances lesson 3 -> lesson 4
+  eq(G.forceButtons,false,'lesson 4 must turn the forced buttons back off');
   G.toTitle();
   eq(G.forceButtons,false,'leaving the tutorial must never leave the buttons stuck forced-on');
   G.sim=false});
