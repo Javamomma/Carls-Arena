@@ -140,7 +140,7 @@ It's shown in every fight, like POWER, so gesture players can punish too. Lesson
 to the real timing (block as the hit lands, then hold HEAVY) and shows the buttons it names.
 `--touch-heavy` must pass and joins Verify.
 
-## 12. Character art in 3D — `art-3d` — status: 12a in progress; models from Mixamo (Arshia, 2026-11-03)
+## 12. Character art in 3D — `art-3d` — status: 12a done (d1cf81f); 12b waits on the Mixamo animations
 Goal: the fighters look like a modern mobile fighting game (3D, lit, realistic proportions), not
 mannequins. Arshia chose 3D over painted sprites or redrawn vectors, knowing it's the largest
 route. The fight simulation, balance and controls don't change; only how fighters are drawn.
