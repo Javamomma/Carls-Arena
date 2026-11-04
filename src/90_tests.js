@@ -8199,6 +8199,7 @@ Test.add('migrate: a broken top-level record becomes its default and every other
   for(const bad of [null,[],7,'x'])for(const k of ['cats','energy','arena','stats','settings','pity']){
     const s=playedV2();s[k]=bad;
     const out=Meta.migrate(s),want=playedV2();
+    want.settings.fighters3d=false; // this older save predates the key, so it arrives at its default
     eq(JSON.stringify(out[k]),JSON.stringify(Meta.defaults()[k]),k+' repaired from '+JSON.stringify(bad));
     for(const j in want)if(j!==k&&j!=='v'&&j!=='floors')eq(JSON.stringify(out[j]),JSON.stringify(want[j]),j+' kept while '+k+' broke')}});
 Test.add('migrate: missing keys inside cats/energy/arena/stats/settings are filled, present ones kept',()=>{
@@ -8493,3 +8494,91 @@ Test.add('shop screen renders a labelled class picker and each choice buys its c
   Save.data.gold=classCatPrice()-1;Screens.refresh();
   eq(document.getElementById('buyClassCatalyst_tank').disabled,true,'disabled when short');
   Screens.title()});
+// ---- 3D fighters preview: the switch and the 2D/3D seam, none of which needs WebGL to run ----
+Test.add('3D switch: fighters3d is off in a fresh save',()=>{
+  eq(Meta.defaults().settings.fighters3d,false)});
+Test.add('3D switch: Settings has a 3D FIGHTERS (PREVIEW) row bound to fighters3d',()=>{
+  const row=Screens.SETTINGS_ROWS.find(r=>r.key==='fighters3d');
+  ok(row,'no settings row for fighters3d');eq(row.label,'3D FIGHTERS (PREVIEW)')});
+Test.add('3D switch: an older v3 save without the key loads with it off and keeps its progress',()=>{
+  const backup=localStorage.getItem(Save.key);
+  try{
+    const old=Meta.defaults();
+    old.gold=4321;old.units=17;old.iso=99;old.tutorialDone=true;old.settings.leftHanded=true;
+    old.roster.katia={stars:2,rank:2,level:7,xp:5,shards:3};
+    delete old.settings.fighters3d;
+    localStorage.setItem(Save.key,JSON.stringify(old));
+    Save.load();
+    eq(Save.data.settings.fighters3d,false);
+    eq(Save.data.gold,4321);eq(Save.data.units,17);eq(Save.data.iso,99);eq(Save.data.tutorialDone,true);
+    eq(Save.data.settings.leftHanded,true);eq(Save.data.roster.katia.level,7);eq(Save.data.roster.katia.stars,2)
+  }finally{
+    if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
+    Save.load()}});
+Test.add('3D switch: a v1 and a v2 save also come out with it off',()=>{
+  const v1=Meta.migrate({v:1,gold:5,units:2,roster:{},mute:true,settings:{leftHanded:true}});
+  eq(v1.settings.fighters3d,false);eq(v1.settings.leftHanded,true);eq(v1.gold,5);
+  const v2=Meta.migrate({v:2,gold:9,settings:{leftHanded:true}});
+  eq(v2.settings.fighters3d,false);eq(v2.settings.leftHanded,true);eq(v2.gold,9)});
+Test.add('3D switch: ?3d=1 is matched exactly, the way ?atlas=1 is',()=>{
+  ok(Gate3D.queryOn('?3d=1'));ok(Gate3D.queryOn('?a=2&3d=1'));ok(Gate3D.queryOn('?3d=1&a=2'));
+  ok(!Gate3D.queryOn(''));ok(!Gate3D.queryOn('?3d=0'));ok(!Gate3D.queryOn('?x3d=1'));ok(!Gate3D.queryOn('?3d=10'))});
+Test.add('3D switch: with it off, syncing adds no script tag and nothing is active',()=>{
+  eq(Save.data.settings.fighters3d,false);
+  Gate3D.sync();
+  eq(Gate3D.wanted(),false);eq(Gate3D.active(),false);
+  eq(document.querySelectorAll('script[src*="render3d"],script[src*="three"]').length,0);
+  eq(document.querySelectorAll('#wrap>canvas').length,1)});
+Test.add('3D switch: tapping the row flips and saves the setting and asks the gate to load',()=>{
+  const savedLoad=Gate3D.load,saved=Save.data.settings.fighters3d;let loads=0;
+  Gate3D.load=()=>{loads++};
+  try{
+    Screens.settings();
+    const btn=document.getElementById('set_fighters3d');
+    ok(btn,'no #set_fighters3d button');eq(btn.textContent,'3D FIGHTERS (PREVIEW): OFF');
+    btn.click();
+    eq(Save.data.settings.fighters3d,true);eq(JSON.parse(localStorage.getItem(Save.key)).settings.fighters3d,true);
+    eq(loads,1);
+    eq(document.getElementById('set_fighters3d').textContent,'3D FIGHTERS (PREVIEW): ON');
+    document.getElementById('set_fighters3d').click();
+    eq(Save.data.settings.fighters3d,false)
+  }finally{Gate3D.load=savedLoad;Save.data.settings.fighters3d=saved;Save.put();G.applySettings();Screens.title()}});
+Test.add('3D seam: a fighter the 3D layer handles gets no 2D body or reflection, the other one does, and the 3D layer draws once per frame',()=>{
+  const savedHandles=Gate3D.handles,savedFrame=Gate3D.frame,savedDraw=Rig.draw;
+  let frames=0;const drew=[];
+  G.sim=true;G.startFight({seed:1,p1:'carl',p2:'goblin'});
+  const f=G.fight;
+  Gate3D.handles=F=>F===f.p1;
+  Gate3D.frame=()=>{frames++};
+  Rig.draw=function(c,F){drew.push(F===f.p1?'p1':'p2')};
+  try{
+    Render.frame(f);
+    eq(frames,1);eq(drew.filter(d=>d==='p1').length,0);
+    eq(drew.filter(d=>d==='p2').length,2,'p2 still draws its body and its reflection in 2D')
+  }finally{Gate3D.handles=savedHandles;Gate3D.frame=savedFrame;Rig.draw=savedDraw;G.toTitle()}});
+Test.add('3D seam: the charge bar and block ring still draw over a fighter the 3D layer handles',()=>{
+  const savedHandles=Gate3D.handles,savedDraw=Rig.draw;
+  G.sim=true;G.startFight({seed:1,p1:'carl',p2:'goblin'});
+  const f=G.fight,calls=[];
+  Gate3D.handles=()=>true;Rig.draw=()=>{};
+  const fake=new Proxy(Render.ctx,{get(t,k){
+    if(k==='fillRect'||k==='arc')return(...a)=>{calls.push(k)};
+    const v=t[k];return typeof v==='function'?v.bind(t):v},
+    set(t,k,v){t[k]=v;return true}});
+  try{
+    f.p1.state='BLOCK';f.p1.f=2;calls.length=0;
+    Render.fighter(fake,f.p1,G.cam,0);
+    ok(calls.includes('arc'),'block ring not drawn');
+    f.p1.state='CHARGE';f.p1.move=MOVES.heavy;f.p1.f=2;calls.length=0;
+    Render.fighter(fake,f.p1,G.cam,0);
+    ok(calls.includes('fillRect'),'charge bar not drawn')
+  }finally{Gate3D.handles=savedHandles;Rig.draw=savedDraw;G.toTitle()}});
+Test.add('3D seam: nothing about the fight changes when the gate says a fighter is drawn in 3D',()=>{
+  const run=handles=>{
+    const saved=Gate3D.handles;Gate3D.handles=handles;
+    try{G.sim=true;G.startFight({seed:7,p1:'carl',p2:'goblin',ai:'brawl',ctrl1:Ctrl.random(7)});
+      for(let i=0;i<600&&G.state==='FIGHT';i++){G.tick();Render.frame(G.fight)}
+      const f=G.fight,out=[f.frame,f.p1.hp,f.p2.hp,f.p1.x,f.p2.x,f.p1.power,f.p2.power].join();
+      G.toTitle();return out
+    }finally{Gate3D.handles=saved}};
+  eq(run(()=>true),run(()=>false))});

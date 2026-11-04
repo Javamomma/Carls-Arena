@@ -502,7 +502,7 @@ const Meta={
       // Task 6.3: showButtons (BLOCK/PUNCH/KICK on-screen, default off now that the whole canvas is
       // a gesture surface -- POWER stays shown regardless) backfills for free through migrate()'s
       // existing per-key settings loop below, same story as every other key in this object.
-      settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true,showButtons:false},
+      settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true,showButtons:false,fighters3d:false},
       // Task 5.3: a plain top-level boolean, same free-ride-through-migrate() story as leaderboard/
       // pity above -- a pre-5.3 v2 save picks it up for free via migrate()'s generic "fill anything
       // top-level missing" loop below, no dedicated migrate branch needed. false until G.onFightEnd
@@ -8154,6 +8154,41 @@ const Rig={
     return cnv}};
 for(const id in DEFS)if(LOOKS[id])DEFS[id].look=LOOKS[id];
 
+// The off-by-default switch for the 3D fighters: until it's on, the page requests no 3D file and opens no WebGL context.
+const Gate3D={
+  state:'off', // off, loading, ready or failed
+  lost:false,
+  queryOn(search){return /(?:^|[?&])3d=1(?:&|$)/.test(search)},
+  wanted(){return !!(Save.data&&Save.data.settings&&Save.data.settings.fighters3d)||this.queryOn(location.search)},
+  active(){return this.state==='ready'&&!this.lost&&this.wanted()},
+  // Called whenever the setting may have changed, so flipping it never needs a reload.
+  sync(){
+    if(this.wanted())this.load();
+    if(this.state==='ready')Render3D.show(this.active())},
+  // three.js logs a console error when it can't get a context, so the context is opened here first and handed over.
+  load(){
+    if(this.state!=='off')return;
+    const cv=document.createElement('canvas');
+    let gl=null;
+    try{gl=cv.getContext('webgl2',{alpha:true,premultipliedAlpha:true,antialias:true,stencil:false,powerPreference:'high-performance'})}catch(e){}
+    if(!gl){this.state='failed';return}
+    this.state='loading';
+    const add=(src,next)=>{
+      const s=document.createElement('script');s.src=src;
+      s.onload=next;s.onerror=()=>{this.state='failed'};
+      document.head.appendChild(s)};
+    add('three.min.js',()=>add('render3d.js',()=>{
+      try{Render3D.init(cv,gl);this.state='ready';this.sync()}
+      catch(e){console.warn('3D fighters off: '+e.message);this.state='failed'}}))},
+  handles(F){return this.active()&&Render3D.supports(lookFor(F.def).id)},
+  overlay(){return this.active()?Render3D.top:null},
+  fit(){if(this.state==='ready')Render3D.fit()},
+  // A renderer fault must cost the player the preview, never the fight.
+  frame(f,cam){
+    if(!this.active())return;
+    try{Render3D.frame(f,cam)}
+    catch(e){console.warn('3D fighters off: '+e.message);this.state='failed';Render3D.show(false)}}};
+
 const Render={ctx:canvas.getContext('2d'),
   // HUD statics (title glyph, chevron cell masks) never change frame to frame, so they're baked into
   // offscreen canvases once and just drawImage'd every frame instead of re-running the path/gradient/
@@ -8298,14 +8333,16 @@ const Render={ctx:canvas.getContext('2d'),
   // just off bodyLen (the long axis of a horizontal quadruped body) instead of shoulder width.
   shadow(c,F){const look=lookFor(F.def),scale=F.def.scale||1,
       w=(look.rig==='quad'?look.bodyLen*1.15:look.shoulderW*1.6)*scale;
-    c.save();c.globalAlpha=.35;c.fillStyle='#000';
-    c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore();
+    // The 3D layer lays its own contact shadow, which follows the pose.
+    if(!Gate3D.handles(F)){c.save();c.globalAlpha=.35;c.fillStyle='#000';
+      c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore()}
     // Task 8.3: a wet-floor specular streak under the fighter's own feet, tinted/brightened by
     // whichever torch is nearest THIS fighter's x (Stage.lightAt) so the floor reads as reflecting
     // the same torchlight the fighter stands in. streakGeom is a pure function of (F,lit) -- no
     // canvas access -- purely so "the streak follows fighter x" is assertable without a canvas mock.
     const g=this.streakGeom(F,Stage.lightAt(F.x));
-    c.save();c.globalAlpha=g.alpha;c.fillStyle=g.tint;
+    // Under a solid figure the streak has to sit inside the contact shadow, not glow around it.
+    c.save();c.globalAlpha=g.alpha*(Gate3D.handles(F)?.4:1);c.fillStyle=g.tint;
     c.beginPath();c.ellipse(g.x,FLOOR+3,g.w/2,g.w*.09,0,0,Math.PI*2);c.fill();c.restore()},
   // Pure geometry for the specular streak above: {x, w, alpha, tint}. x always equals F.x (the
   // ruling's "follows fighter x"); w scales off the same footprint shadow() sizes off; alpha rides
@@ -8316,10 +8353,11 @@ const Render={ctx:canvas.getContext('2d'),
     return{x:F.x,w:w*.7,alpha:.16+.26*lit.k,tint:lit.tint}},
   fighter(c,F,cam,frame){
     const flash=F.state==='HITSTUN'&&F.f<3,lit=Stage.lightAt(F.x);
-    if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame,lit);c.filter='none';c.restore()}
-    else{Rig.draw(c,F,cam,frame,lit);
-      if(flash){c.save();c.globalAlpha=.45;c.fillStyle='#fff';
-        c.fillRect(F.x-F.width,FLOOR-140*(F.def.scale||1),F.width*2,140*(F.def.scale||1));c.restore()}}
+    if(!Gate3D.handles(F)){
+      if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame,lit);c.filter='none';c.restore()}
+      else{Rig.draw(c,F,cam,frame,lit);
+        if(flash){c.save();c.globalAlpha=.45;c.fillStyle='#fff';
+          c.fillRect(F.x-F.width,FLOOR-140*(F.def.scale||1),F.width*2,140*(F.def.scale||1));c.restore()}}}
     // Fix-wave item 1: both above-the-head overlays now draw in SCREEN space (this function runs
     // inside Render.frame's still-applied camera transform; c.save/setTransform(identity)/c.restore
     // scopes the reset to just this one draw) at overlayScreenY's clamped y, so neither can ever
@@ -8745,7 +8783,7 @@ const Render={ctx:canvas.getContext('2d'),
     if(cinematic>=54)return Math.min(1,(72-cinematic)/18);
     if(cinematic>=6)return 1;
     return cinematic/5},
-  frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
+  frame(f){let c=this.ctx;const cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
     this.hudCache(); // built once, before any HUD draw so it's ready whether or not f/hud runs this call
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
     Camera.apply(c,cam);
@@ -8764,9 +8802,15 @@ const Render={ctx:canvas.getContext('2d'),
     // check skips entirely) whenever no fight is up or no S3 is playing.
     Stage.draw(c,cam,fr,Stage.build(G.encounter&&G.encounter.floor===2?'sewers':'doorway'),f?this.s3Desat(f.cinematic):0);
     if(f){
-      this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
+      if(!Gate3D.handles(f.p1))this.reflection(c,f.p1,cam,fr);
+      if(!Gate3D.handles(f.p2))this.reflection(c,f.p2,cam,fr);
       this.shadow(c,f.p1);this.shadow(c,f.p2);
       this.fighter(c,f.p1,cam,fr);this.fighter(c,f.p2,cam,fr)}
+    Gate3D.frame(f,cam);
+    // Sparks, the S3 card and the HUD have to read on top of the fighters, so with WebGL up they move to the 2D layer above it.
+    const top=Gate3D.overlay();
+    if(top){c=top;c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);Camera.apply(c,cam);
+      if(Math.abs(FX.shake.x)>0.05||Math.abs(FX.shake.y)>0.05)c.translate(FX.shake.x/cam.zoom,FX.shake.y/cam.zoom)}
     FX.draw(c,cam,fr);
     c.setTransform(1,0,0,1,0,0);
     if(FX.flash>0){c.globalAlpha=Math.min(1,FX.flash/6);c.fillStyle='#fff';c.fillRect(0,0,W,H);c.globalAlpha=1}
@@ -9365,7 +9409,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // already caps gameplay at 1.12; 1.28 is the S3 cinematic punch-in) so a Camera.update before any
   // startFight (shouldn't happen, but tests instantiate G without always calling it) behaves exactly
   // as it did before this existed.
-  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast();this.positionTutorialPrompt();this.checkOrientation()},
+  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast();this.positionTutorialPrompt();this.checkOrientation();Gate3D.fit()},
   // Positions #toast off the canvas's own box (canvas.getBoundingClientRect()), not #wrap, so it
   // tracks the actual displayed game area exactly even when #wrap letterboxes the canvas at an
   // aspect ratio other than W/H. Fix round 2: moved from just under the HUD's floor-line text to
@@ -9482,6 +9526,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // SETTINGS or the tutorial is forcing them on for its early lessons (G.forceButtons, Task 6.4) --
     // POWER (not an .atkbtn) is unaffected and always shows during a fight.
     document.body.classList.toggle('show-atk',!!(Save.data.settings.showButtons||this.forceButtons));
+    Gate3D.sync();
     this.positionToast()},
   // Pure function of (viewport w/h, is-a-touch-device) — no window/navigator read of its own — so
   // tests can drive every truth-table cell directly, per the frozen interface. Portrait AND a touch
@@ -10489,6 +10534,7 @@ const Screens={
     // wiring needed here.
     {key:'showButtons',label:'SHOW ATTACK BUTTONS'},
     {key:'useAtlas',label:'USE SPRITE ATLAS'},
+    {key:'fighters3d',label:'3D FIGHTERS (PREVIEW)'},
     {key:'sfx',label:'SOUND EFFECTS'},
     {key:'announcer',label:'ANNOUNCER TEXT'}],
   renderSettings(){
@@ -19178,6 +19224,7 @@ Test.add('migrate: a broken top-level record becomes its default and every other
   for(const bad of [null,[],7,'x'])for(const k of ['cats','energy','arena','stats','settings','pity']){
     const s=playedV2();s[k]=bad;
     const out=Meta.migrate(s),want=playedV2();
+    want.settings.fighters3d=false; // this older save predates the key, so it arrives at its default
     eq(JSON.stringify(out[k]),JSON.stringify(Meta.defaults()[k]),k+' repaired from '+JSON.stringify(bad));
     for(const j in want)if(j!==k&&j!=='v'&&j!=='floors')eq(JSON.stringify(out[j]),JSON.stringify(want[j]),j+' kept while '+k+' broke')}});
 Test.add('migrate: missing keys inside cats/energy/arena/stats/settings are filled, present ones kept',()=>{
@@ -19472,5 +19519,93 @@ Test.add('shop screen renders a labelled class picker and each choice buys its c
   Save.data.gold=classCatPrice()-1;Screens.refresh();
   eq(document.getElementById('buyClassCatalyst_tank').disabled,true,'disabled when short');
   Screens.title()});
+// ---- 3D fighters preview: the switch and the 2D/3D seam, none of which needs WebGL to run ----
+Test.add('3D switch: fighters3d is off in a fresh save',()=>{
+  eq(Meta.defaults().settings.fighters3d,false)});
+Test.add('3D switch: Settings has a 3D FIGHTERS (PREVIEW) row bound to fighters3d',()=>{
+  const row=Screens.SETTINGS_ROWS.find(r=>r.key==='fighters3d');
+  ok(row,'no settings row for fighters3d');eq(row.label,'3D FIGHTERS (PREVIEW)')});
+Test.add('3D switch: an older v3 save without the key loads with it off and keeps its progress',()=>{
+  const backup=localStorage.getItem(Save.key);
+  try{
+    const old=Meta.defaults();
+    old.gold=4321;old.units=17;old.iso=99;old.tutorialDone=true;old.settings.leftHanded=true;
+    old.roster.katia={stars:2,rank:2,level:7,xp:5,shards:3};
+    delete old.settings.fighters3d;
+    localStorage.setItem(Save.key,JSON.stringify(old));
+    Save.load();
+    eq(Save.data.settings.fighters3d,false);
+    eq(Save.data.gold,4321);eq(Save.data.units,17);eq(Save.data.iso,99);eq(Save.data.tutorialDone,true);
+    eq(Save.data.settings.leftHanded,true);eq(Save.data.roster.katia.level,7);eq(Save.data.roster.katia.stars,2)
+  }finally{
+    if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
+    Save.load()}});
+Test.add('3D switch: a v1 and a v2 save also come out with it off',()=>{
+  const v1=Meta.migrate({v:1,gold:5,units:2,roster:{},mute:true,settings:{leftHanded:true}});
+  eq(v1.settings.fighters3d,false);eq(v1.settings.leftHanded,true);eq(v1.gold,5);
+  const v2=Meta.migrate({v:2,gold:9,settings:{leftHanded:true}});
+  eq(v2.settings.fighters3d,false);eq(v2.settings.leftHanded,true);eq(v2.gold,9)});
+Test.add('3D switch: ?3d=1 is matched exactly, the way ?atlas=1 is',()=>{
+  ok(Gate3D.queryOn('?3d=1'));ok(Gate3D.queryOn('?a=2&3d=1'));ok(Gate3D.queryOn('?3d=1&a=2'));
+  ok(!Gate3D.queryOn(''));ok(!Gate3D.queryOn('?3d=0'));ok(!Gate3D.queryOn('?x3d=1'));ok(!Gate3D.queryOn('?3d=10'))});
+Test.add('3D switch: with it off, syncing adds no script tag and nothing is active',()=>{
+  eq(Save.data.settings.fighters3d,false);
+  Gate3D.sync();
+  eq(Gate3D.wanted(),false);eq(Gate3D.active(),false);
+  eq(document.querySelectorAll('script[src*="render3d"],script[src*="three"]').length,0);
+  eq(document.querySelectorAll('#wrap>canvas').length,1)});
+Test.add('3D switch: tapping the row flips and saves the setting and asks the gate to load',()=>{
+  const savedLoad=Gate3D.load,saved=Save.data.settings.fighters3d;let loads=0;
+  Gate3D.load=()=>{loads++};
+  try{
+    Screens.settings();
+    const btn=document.getElementById('set_fighters3d');
+    ok(btn,'no #set_fighters3d button');eq(btn.textContent,'3D FIGHTERS (PREVIEW): OFF');
+    btn.click();
+    eq(Save.data.settings.fighters3d,true);eq(JSON.parse(localStorage.getItem(Save.key)).settings.fighters3d,true);
+    eq(loads,1);
+    eq(document.getElementById('set_fighters3d').textContent,'3D FIGHTERS (PREVIEW): ON');
+    document.getElementById('set_fighters3d').click();
+    eq(Save.data.settings.fighters3d,false)
+  }finally{Gate3D.load=savedLoad;Save.data.settings.fighters3d=saved;Save.put();G.applySettings();Screens.title()}});
+Test.add('3D seam: a fighter the 3D layer handles gets no 2D body or reflection, the other one does, and the 3D layer draws once per frame',()=>{
+  const savedHandles=Gate3D.handles,savedFrame=Gate3D.frame,savedDraw=Rig.draw;
+  let frames=0;const drew=[];
+  G.sim=true;G.startFight({seed:1,p1:'carl',p2:'goblin'});
+  const f=G.fight;
+  Gate3D.handles=F=>F===f.p1;
+  Gate3D.frame=()=>{frames++};
+  Rig.draw=function(c,F){drew.push(F===f.p1?'p1':'p2')};
+  try{
+    Render.frame(f);
+    eq(frames,1);eq(drew.filter(d=>d==='p1').length,0);
+    eq(drew.filter(d=>d==='p2').length,2,'p2 still draws its body and its reflection in 2D')
+  }finally{Gate3D.handles=savedHandles;Gate3D.frame=savedFrame;Rig.draw=savedDraw;G.toTitle()}});
+Test.add('3D seam: the charge bar and block ring still draw over a fighter the 3D layer handles',()=>{
+  const savedHandles=Gate3D.handles,savedDraw=Rig.draw;
+  G.sim=true;G.startFight({seed:1,p1:'carl',p2:'goblin'});
+  const f=G.fight,calls=[];
+  Gate3D.handles=()=>true;Rig.draw=()=>{};
+  const fake=new Proxy(Render.ctx,{get(t,k){
+    if(k==='fillRect'||k==='arc')return(...a)=>{calls.push(k)};
+    const v=t[k];return typeof v==='function'?v.bind(t):v},
+    set(t,k,v){t[k]=v;return true}});
+  try{
+    f.p1.state='BLOCK';f.p1.f=2;calls.length=0;
+    Render.fighter(fake,f.p1,G.cam,0);
+    ok(calls.includes('arc'),'block ring not drawn');
+    f.p1.state='CHARGE';f.p1.move=MOVES.heavy;f.p1.f=2;calls.length=0;
+    Render.fighter(fake,f.p1,G.cam,0);
+    ok(calls.includes('fillRect'),'charge bar not drawn')
+  }finally{Gate3D.handles=savedHandles;Rig.draw=savedDraw;G.toTitle()}});
+Test.add('3D seam: nothing about the fight changes when the gate says a fighter is drawn in 3D',()=>{
+  const run=handles=>{
+    const saved=Gate3D.handles;Gate3D.handles=handles;
+    try{G.sim=true;G.startFight({seed:7,p1:'carl',p2:'goblin',ai:'brawl',ctrl1:Ctrl.random(7)});
+      for(let i=0;i<600&&G.state==='FIGHT';i++){G.tick();Render.frame(G.fight)}
+      const f=G.fight,out=[f.frame,f.p1.hp,f.p2.hp,f.p1.x,f.p2.x,f.p1.power,f.p2.power].join();
+      G.toTitle();return out
+    }finally{Gate3D.handles=saved}};
+  eq(run(()=>true),run(()=>false))});
 
 </script></body></html>

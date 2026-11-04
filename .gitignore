@@ -4,3 +4,4 @@ __pycache__/
 !docs/shots/*.png
 .superpowers/
 docs/reference/
+node_modules/

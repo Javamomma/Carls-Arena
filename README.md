@@ -67,7 +67,7 @@ After the tutorial, the title screen offers CAMPAIGN, ARENA, ROSTER, KIOSK, EXHI
   local leaderboard ranks your best runs by peak viewers.
 - **SETTINGS** toggles reduce motion, haptics (a short vibration when you're hit, on supported
   devices), left-handed controls (mirrors the on-screen button placement — see below), show attack
-  buttons (BLOCK/PUNCH/KICK, off by default), the optional sprite atlas, sound effects, and announcer
+  buttons (BLOCK/PUNCH/KICK, off by default), the optional sprite atlas, the 3D fighters preview, sound effects, and announcer
   text.
 
 Every fight tracks **viewers** — a live score built from hits, parries, and specials (style
@@ -268,6 +268,14 @@ python -m playwright install chromium
 - `python3 tests/harness.py --journey` starts from a fresh save with no debug grants and earns
   everything through the game's own code (tutorial, campaign, arena streaks, crystals, shop
   catalyst) until all four champions have ranked up once; it prints per-champion milestones.
+- `python3 tests/harness.py --3d-smoke` covers the opt-in 3D fighters (`?3d=1` or the 3D FIGHTERS
+  (PREVIEW) setting): real fights at phone and desktop size with fighters read back from WebGL, every
+  fallback to 2D, no 3D request without the flag, and ms/frame for the 2D path next to the 3D path.
+  `--3d-perf 300 --angle metal` repeats the timing on a Mac's real GPU; `--3d-shots DIR` writes the
+  2D and 3D comparison screenshots.
+- `tools/three/build.sh` rebuilds the tree-shaken three.js bundle with Bun (version and integrity
+  pinned in `tools/three/bun.lock`, what it includes in `tools/three/entry.js`); `tools/build.py` then
+  copies it next to `index.html`. The bundle is committed, so only changing it needs Bun.
 - `python3 tests/harness.py --share --shot /tmp/share.png` checks `G.shareCard()`'s PNG data URL.
 - `python3 tests/harness.py --screens-smoke` visits every screen plus one real fight and checks for
   page/console errors on each; `python3 tests/harness.py --phone-check` asserts the canvas stays
@@ -361,3 +369,6 @@ the rig — nothing else about a fight changes.
 A fan project, built for fun and not for profit. *Dungeon Crawler Carl* is Matt Dinniman's — this
 game borrows its tone and setting as an homage and isn't affiliated with or endorsed by him or his
 publisher. All code, art, and writing here are original.
+
+Third-party: [three.js](https://threejs.org) 0.170.0 (MIT license, `tools/three/LICENSE`), used only
+by the opt-in 3D fighters preview and loaded from its own file when that's switched on.

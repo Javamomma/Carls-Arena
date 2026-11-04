@@ -44,3 +44,5 @@ jobs:
         run: python tests/harness.py --journey
       - name: Touch heavy
         run: python tests/harness.py --touch-heavy
+      - name: 3D smoke
+        run: python tests/harness.py --3d-smoke

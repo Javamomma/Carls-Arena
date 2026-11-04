@@ -112,6 +112,7 @@ const Screens={
     // wiring needed here.
     {key:'showButtons',label:'SHOW ATTACK BUTTONS'},
     {key:'useAtlas',label:'USE SPRITE ATLAS'},
+    {key:'fighters3d',label:'3D FIGHTERS (PREVIEW)'},
     {key:'sfx',label:'SOUND EFFECTS'},
     {key:'announcer',label:'ANNOUNCER TEXT'}],
   renderSettings(){

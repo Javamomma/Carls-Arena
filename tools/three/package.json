@@ -1,0 +1,8 @@
+{
+  "name": "carls-arena-three-bundle",
+  "private": true,
+  "description": "Pins the one runtime library the opt-in 3D fighters use; tools/three/build.sh bundles it.",
+  "dependencies": {
+    "three": "0.170.0"
+  }
+}

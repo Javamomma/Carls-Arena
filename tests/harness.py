@@ -47,6 +47,16 @@
       # a canvas-hold parry then HEAVY button; prints what each did; exit 1 if lesson 3's punish can't
       # be done by touch
 
+  python3 tests/harness.py --3d-smoke                                # opt-in 3D fighters: a real fight on
+      # test.html?3d=1 at 854x480 and 844x390 (script loaded, WebGL canvas over the game canvas, fighters
+      # read back from WebGL, no 2D bodies, HUD/stage/FX still on the 2D canvas), the fallbacks (no WebGL,
+      # missing bundle, lost context, quad looks), no 3D request without the flag, and ms/frame for the
+      # 2D path next to the 3D path; exit 1 on any failed check or page/console error
+  python3 tests/harness.py --3d-perf 300 --angle metal              # only the ms/frame comparison, on the
+      # given ANGLE backend (metal uses this Mac's real GPU; the default swiftshader is software GL)
+  python3 tests/harness.py --3d-shots /tmp                          # writes carls-3d-idle.png, carls-3d-hit.png
+      # and carls-2d-idle.png at 854x480: the same fight moments in both renderers
+
   python3 tests/harness.py --saves                                  # damaged-save cases: a prepared
       # localStorage save is seeded before any game script runs (fresh browser context per case);
       # checks the game still starts, only the broken record is repaired, an unreadable save is
@@ -583,6 +593,13 @@ SAVE_KEY = 'carlsArena.v1'
 BAK_KEY = 'carlsArena.v1.bak'
 
 # A real v2 save (written by the old build) must load as v3: same values everywhere, same door states.
+# These saves predate the keys below, which must arrive at their defaults; everything the save already had must not move.
+SETTINGS_SINCE_FIXTURES = {'fighters3d': False}
+def field_kept(k, was, now):
+    if k != 'settings' or not isinstance(now, dict):
+        return now == was
+    return {j: now.get(j) for j in was} == was and {j: v for j, v in now.items() if j not in was} == SETTINGS_SINCE_FIXTURES
+
 def check_v2_fixture(pg, raw):
     fails = []
     old = json.loads(raw)
@@ -595,7 +612,7 @@ def check_v2_fixture(pg, raw):
     for k, v in old.items():
         if k in ('v', 'floors'):
             continue
-        if got.get(k) != v:
+        if not field_kept(k, v, got.get(k)):
             fails.append('field %s changed: %r' % (k, got.get(k)))
     for n, fl in old['floors'].items():
         state = pg.evaluate('(()=>{const f=Quest.floor(%s);return f&&{nodes:f.nodes.map(x=>x.state),boss:f.boss.state}})()' % n)
@@ -658,7 +675,7 @@ def run_saves():
                     if got.get(c['broken']) != dflt[c['broken']]:
                         fails.append('%s not repaired to defaults: %r' % (c['broken'], got.get(c['broken'])))
                     for k, v in c['orig'].items():
-                        if k not in (c['broken'], 'v', 'floors') and got.get(k) != v:
+                        if k not in (c['broken'], 'v', 'floors') and not field_kept(k, v, got.get(k)):
                             fails.append('field %s changed: %r' % (k, got.get(k)))
                     # A repaired null field must not cost the player the original save.
                     bak = pg.evaluate('window.__origGet.call(localStorage,%s)' % json.dumps(BAK_KEY))
@@ -771,6 +788,466 @@ class Touch:
             self.move(*self.xy(cx + px * i / frames, cy))
     def summary(self):
         return self.pg.evaluate('TH.summary()')
+
+# ---- opt-in 3D fighters ---------------------------------------------------------------------------
+FILES_3D = ('render3d.js', 'three.min.js')
+# Asks for a named ANGLE backend so WebGL exists on every host; swiftshader is software GL, so CI needs no GPU.
+def angle_args(angle='swiftshader'):
+    return ['--use-angle=' + angle, '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
+
+# Page-side helpers. Every read happens in the same task as Render.frame, while the WebGL back buffer is still valid.
+SMOKE3D_JS = r"""(()=>{window.S3={
+  read(x,y,w,h){
+    const cv=Render3D.canvas,gl=cv.getContext('webgl2'),sx=cv.width/W,sy=cv.height/H;
+    const px=Math.max(0,Math.round(x*sx)),pyTop=Math.max(0,Math.round(y*sy));
+    const pw=Math.max(1,Math.min(cv.width-px,Math.round(w*sx))),ph=Math.max(1,Math.min(cv.height-pyTop,Math.round(h*sy)));
+    const buf=new Uint8Array(pw*ph*4);
+    gl.readPixels(px,cv.height-pyTop-ph,pw,ph,gl.RGBA,gl.UNSIGNED_BYTE,buf);
+    let opaque=0,r=0,g=0,b=0,top=Infinity,bottom=-Infinity,left=Infinity,right=-Infinity;
+    for(let row=0;row<ph;row++)for(let col=0;col<pw;col++){const i=(row*pw+col)*4;
+      if(buf[i+3]>=250){opaque++;r+=buf[i];g+=buf[i+1];b+=buf[i+2];
+        const yy=(pyTop+ph-1-row)/sy,xx=(px+col)/sx;
+        if(yy<top)top=yy;if(yy>bottom)bottom=yy;if(xx<left)left=xx;if(xx>right)right=xx}}
+    const n=opaque||1;
+    return{opaque,total:pw*ph,frac:opaque/(pw*ph),r:r/n,g:g/n,b:b/n,lum:(r+g+b)/(3*n),top,bottom,left,right}},
+  // A window around one fighter, in 854x480 canvas pixels.
+  around(F,half){half=half||100;const s=Camera.toScreen(G.cam,F.x,FLOOR);
+    return this.read(s.sx-half,Math.max(0,s.sy-400),half*2,Math.min(H,400+40))},
+  spy(){const o={rig:[],stage:0,hud:0,fx:0,frames3d:0};
+    const wrap=(obj,k,fn)=>{const orig=obj[k];obj[k]=function(...a){fn(a);return orig.apply(this,a)}};
+    wrap(Rig,'draw',a=>o.rig.push(a[1].def.id));
+    wrap(Stage,'draw',a=>{o.stage++;if(a[0].canvas===window.canvas||a[0]===Render.ctx)o.stageOnGame=(o.stageOnGame||0)+1});
+    wrap(Render,'hud',a=>{o.hud++;if(a[0]===Render3D.top)o.hudOnTop=(o.hudOnTop||0)+1});
+    wrap(FX,'draw',a=>{o.fx++;if(a[0]===Render3D.top)o.fxOnTop=(o.fxOnTop||0)+1});
+    wrap(Gate3D,'frame',()=>o.frames3d++);
+    return o},
+  // Two fighters far enough apart that a window around one cannot catch the other.
+  apart(f){const m=G.cam.x;f.p1.x=m-215;f.p2.x=m+215;f.p1.face=1;f.p2.face=-1;f.p1.state='IDLE';f.p2.state='IDLE';f.p1.f=0;f.p2.f=0;f.p1.dx=0;f.p2.dx=0},
+  gamePixel(x,y){return Array.from(Render.ctx.getImageData(x,y,1,1).data)},
+  topPixel(x,y){return Array.from(Render3D.top.getImageData(x,y,1,1).data)},
+  fight(opts,every){
+    G.sim=true;G.startFight(Object.assign({seed:1,p1:'carl',encounter:'f1_goblin',ctrl1:Ctrl.competent(1)},opts));
+    let ticks=0,renders=0,samples=0,minP1=1,minP2=1,hudTop=0;const poses={};
+    while(G.state==='FIGHT'&&ticks<30000){G.tick();ticks++;
+      if(ticks%every===0&&G.state==='FIGHT'){Render.frame(G.fight);renders++;
+        poses[Rig.poseFor(G.fight.p1).key]=1;poses[Rig.poseFor(G.fight.p2).key]=1;
+        if(renders%3===0){samples++;
+          minP1=Math.min(minP1,this.around(G.fight.p1).frac);minP2=Math.min(minP2,this.around(G.fight.p2).frac);
+          hudTop=Math.max(hudTop,this.read(0,0,W,70).opaque)}}}
+    return{ticks,renders,samples,minP1,minP2,hudTop,poses:Object.keys(poses),state:G.state}}};
+  return true})()"""
+
+# Bones against Rig.solve for every 3D look, pose, a few moments and both facings. Hips, spine and legs must match the
+# 2D joints exactly. Arm segments must match exactly too, but the shoulders ride with the torso, as a solid body's do.
+# A fall past the 38 degree lean settles onto the floor and a foot the rig sinks bends its knee instead, so those are
+# held to staying above the floor.
+JOINTS3D_JS = r"""(()=>{const J=['hip','neck','head','lHip','rHip','lKnee','rKnee','lFoot','rFoot'];
+  const SEG=[['lShoulder','lElbow'],['lElbow','lHand'],['rShoulder','rElbow'],['rElbow','rHand']];
+  let worst=0,where=null,n=0,worstShoulder=0,prone=0,sunk=0,sunkAt=null;
+  for(const id in LOOKS){const look=LOOKS[id];if(look.rig==='quad')continue;
+    const table=look.rig==='big'?POSES_BIG:POSES;
+    for(const key in table)for(const t of[0,.37,1])for(const face of[1,-1]){
+      const want=Rig.solve(look,key,t,face),got=Render3D.solveProbe(id,key,t,face);
+      const lean=(samplePose(table,key,t).ang.torso||0)+(look.hunch||0);
+      if(Math.abs(lean)>=D(38)){prone++;
+        for(const b in got){const under=got[b].y;if(under>sunk){sunk=under;sunkAt=[id,key,t,b]}}
+        continue}
+      const note=(d,w)=>{n++;if(d>worst){worst=d;where=w}};
+      for(const b of J){
+        const leg=b[0]==='l'||b[0]==='r'?b[0]:null;
+        if(leg&&want[leg+'Foot'].y>0){if(got[leg+'Foot'].y>sunk){sunk=got[leg+'Foot'].y;sunkAt=[id,key,t,b]}continue}
+        note(Math.hypot(want[b].x-got[b].x,want[b].y-got[b].y),[id,key,t,face,b,want[b],got[b]])}
+      for(const[a,b]of SEG)note(Math.hypot((want[b].x-want[a].x)-(got[b].x-got[a].x),(want[b].y-want[a].y)-(got[b].y-got[a].y)),[id,key,t,face,a+'>'+b]);
+      // The most a shoulder may stray from the rig's is its own arc around the neck for this lean.
+      for(const b of['lShoulder','rShoulder']){
+        const allow=(look.shoulderW/2+4)*2*Math.abs(Math.sin(lean/2))+.75;
+        worstShoulder=Math.max(worstShoulder,Math.hypot(want[b].x-got[b].x,want[b].y-got[b].y)-allow)}}}
+  return{worst,where,n,worstShoulder,prone,sunk,sunkAt}})()"""
+
+# The poses that reach highest, per look, at the zoom the fight camera allows that pose: the figure may never cover the HUD.
+TALL3D_JS = r"""(()=>{const out=[];let worst=0;
+  for(const id in LOOKS){if(LOOKS[id].rig==='quad'||!DEFS[id])continue;
+    G.sim=true;G.startFight({seed:1,p1:id,p2:'goblin',ai:'brawl',ctrl1:Ctrl.script([]),ctrl2:Ctrl.script([])});
+    const f=G.fight;S3.apart(f);
+    for(const[k,set]of[['heavy',F=>{F.move=MOVES.heavy;F.moveName='heavy';F.state='ATTACK';F.f=0}],
+        ['charge',F=>{F.move=MOVES.heavy;F.moveName='heavy';F.state='CHARGE';F.f=F.move.charge}],
+        ['win',F=>{F.state='WIN';F.f=30}],['s3',F=>{F.move=MOVES.s3;F.moveName='s3';F.state='ATTACK';F.f=60}]]){
+      set(f.p1);
+      G.cam.zoom=Math.min(1.12,(Camera.anchorY-HUD_LINE)/Math.max(G.topNow(f.p1),G.topNow(f.p2)));
+      Render.frame(f);
+      const o=S3.read(0,0,W,70).opaque;if(o>worst)worst=o;if(o)out.push([id,k,o])}
+    G.toTitle()}
+  return{worst,out}})()"""
+
+def run_3d_case(b, url, viewport=(854, 480), init=None, route=None, allow_load_errors=False, density=1):
+    """One fresh page: returns (pg, errors, requests) with G up; the caller closes the context."""
+    ctx = b.new_context(viewport={'width': viewport[0], 'height': viewport[1]}, device_scale_factor=density)
+    pg = ctx.new_page()
+    errors, reqs = [], []
+    pg.on('pageerror', lambda e: errors.append(str(e)))
+    def on_console(m):
+        if m.type == 'error' and not (allow_load_errors and 'Failed to load resource' in m.text):
+            errors.append(m.text)
+    pg.on('console', on_console)
+    pg.on('request', lambda r: reqs.append(r.url))
+    if init:
+        pg.add_init_script(init)
+    if route:
+        pg.route(route, lambda r: r.abort())
+    pg.goto(url)
+    pg.wait_for_function('typeof G!=="undefined"')
+    return ctx, pg, errors, reqs
+
+def wait_3d(pg, timeout=15000):
+    try:
+        pg.wait_for_function('typeof Gate3D!=="undefined"&&Gate3D.active()', timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+def settles(pg, js, timeout=8000):
+    """True once the page condition holds; other agents load this machine, so a fixed sleep isn't enough."""
+    try:
+        pg.wait_for_function(js, timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+def asked_for_3d(reqs):
+    return [u for u in reqs if u.rsplit('/', 1)[-1].split('?')[0] in FILES_3D]
+
+def smoke_viewport(b, size):
+    """The real fight at one viewport size; returns the dict of named boolean checks plus details."""
+    ctx, pg, errors, reqs = run_3d_case(b, TEST_PAGE + '?3d=1', viewport=size)
+    active = wait_3d(pg)
+    c = {'gate_active': active}
+    d = {}
+    if active:
+        pg.evaluate('localStorage.clear();Save.load()')
+        pg.evaluate(SMOKE3D_JS)
+        r = pg.evaluate("""(()=>{
+          const gc=canvas,cv=Render3D.canvas,o={};
+          o.script_loaded=typeof THREE==='object'&&typeof Render3D==='object';
+          o.is_webgl2=!!cv.getContext('webgl2');
+          const a=gc.getBoundingClientRect(),b=cv.getBoundingClientRect();
+          o.rect=[a.left,a.top,a.width,a.height,b.left,b.top,b.width,b.height];
+          o.canvas_over=Math.abs(a.left-b.left)<=.5&&Math.abs(a.top-b.top)<=.5&&Math.abs(a.width-b.width)<=.5&&Math.abs(a.height-b.height)<=.5;
+          G.sim=true;G.startFight({seed:1,p1:'carl',encounter:'f1_goblin'});
+          o.no_input_steal=getComputedStyle(cv).pointerEvents==='none'&&document.elementFromPoint(a.left+a.width/2,a.top+a.height*.62)===gc;
+          G.toTitle();
+          const after=(x,y)=>!!(x.compareDocumentPosition(y)&Node.DOCUMENT_POSITION_FOLLOWING);
+          o.layers_in_order=after(gc,cv)&&after(cv,Render3D.topCanvas)&&after(Render3D.topCanvas,document.getElementById('btns'));
+          o.top_layer_no_input=getComputedStyle(Render3D.topCanvas).pointerEvents==='none';
+          o.smooth_scaling=getComputedStyle(cv).imageRendering!=='pixelated';
+          const roster=Object.keys(LOOKS).map(id=>[id,LOOKS[id].rig,!!Render3D.figureFor(id)]);
+          o.figures=roster;
+          o.human_big_have_figures=roster.filter(r=>r[1]!=='quad').every(r=>r[2]);
+          o.quads_fall_back=roster.filter(r=>r[1]==='quad').every(r=>!r[2])&&roster.some(r=>r[1]==='quad');
+          return o})()""")
+        d['rect'] = r.pop('rect'); d['figures'] = r.pop('figures')
+        c.update(r)
+        c['requested_both_files'] = len(set(u.rsplit('/', 1)[-1] for u in asked_for_3d(reqs))) == 2
+        j = pg.evaluate(JOINTS3D_JS)
+        d['joints'] = j
+        c['joints_match_rig_solve'] = j['n'] > 1000 and j['worst'] <= 0.75 and j['worstShoulder'] <= 0
+        c['falls_stay_above_floor'] = j['prone'] > 10 and j['sunk'] <= 30
+        # World-to-screen must agree with the 2D camera at the zooms a fight reaches, including shake.
+        m = pg.evaluate("""(()=>{G.sim=true;G.startFight({seed:1,p1:'carl',encounter:'f1_goblin'});
+          let worst=0;const f=G.fight;
+          for(const zoom of[1,1.12,1.28])for(const x of[G.cam.x-200,G.cam.x,G.cam.x+200])for(const y of[FLOOR,FLOOR-180]){
+            G.cam.zoom=zoom;Render.frame(f);
+            const p=Render3D.project(x,y),s=Camera.toScreen(G.cam,x,y);
+            worst=Math.max(worst,Math.hypot(p.sx-s.sx,p.sy-s.sy))}
+          FX.shake.x=9;FX.shake.y=-5;Render.frame(f);
+          const p=Render3D.project(G.cam.x,FLOOR),s=Camera.toScreen(G.cam,G.cam.x,FLOOR);
+          const shook=Math.hypot(p.sx-(s.sx+9),p.sy-(s.sy-5));
+          FX.shake.x=0;FX.shake.y=0;G.cam.zoom=1;
+          return{worst,shook}})()""")
+        d['projection'] = m
+        c['projection_matches_camera'] = m['worst'] <= 1
+        c['projection_follows_shake'] = m['shook'] <= 1
+        # Facing, floor line and each fighter's own column, read from drawn pixels with the two far apart.
+        p = pg.evaluate("""(()=>{const f=G.fight;S3.apart(f);Render.frame(f);
+          const a=S3.around(f.p1,110),b=S3.around(f.p2,110);
+          const fy=Camera.toScreen(G.cam,0,FLOOR).sy;
+          const sa=Camera.toScreen(G.cam,f.p1.x,FLOOR).sx,sb=Camera.toScreen(G.cam,f.p2.x,FLOOR).sx;
+          const out={a,b,fy,sa,sb};
+          const a1=S3.read(sa,0,110,H).opaque,a0=S3.read(sa-110,0,110,H).opaque;
+          f.p1.face=-1;Render.frame(f);
+          out.flip=[a0,a1,S3.read(sa-110,0,110,H).opaque,S3.read(sa,0,110,H).opaque];f.p1.face=1;
+          return out})()""")
+        d['placement'] = p
+        c['both_fighters_opaque'] = p['a']['frac'] > 0.02 and p['b']['frac'] > 0.02
+        c['feet_on_floor_line'] = abs(p['a']['bottom'] - p['fy']) <= 24 and abs(p['b']['bottom'] - p['fy']) <= 24
+        c['centered_on_fighter_x'] = (abs((p['a']['left'] + p['a']['right']) / 2 - p['sa']) <= 40
+                                      and abs((p['b']['left'] + p['b']['right']) / 2 - p['sb']) <= 40)
+        c['face_flip_mirrors'] = abs(p['flip'][0] - p['flip'][3]) <= 0.2 * max(p['flip'][0], 1) and abs(p['flip'][1] - p['flip'][2]) <= 0.2 * max(p['flip'][1], 1)
+        # Hit flash, torch tint and KO all have to show up in the pixels of the 3D figure.
+        fx = pg.evaluate("""(()=>{const f=G.fight,F=f.p2;S3.apart(f);
+          Render.frame(f);const idle=S3.around(F);
+          F.state='HITSTUN';F.f=0;F.stun=20;Render.frame(f);const flash=S3.around(F);F.state='IDLE';F.f=0;
+          const saved=Stage.lightAt;
+          Stage.lightAt=()=>({tint:'#ff2000',k:1,rimSide:1});Render.frame(f);const red=S3.around(F);
+          Stage.lightAt=()=>({tint:'#0030ff',k:1,rimSide:1});Render.frame(f);const blue=S3.around(F);
+          Stage.lightAt=saved;
+          F.state='KO';F.f=20;Render.frame(f);const ko=S3.around(F);F.state='IDLE';F.f=0;Render.frame(f);
+          const keep=o=>({lum:o.lum,r:o.r,b:o.b,top:o.top,bottom:o.bottom,frac:o.frac});
+          return{idle:keep(idle),flash:keep(flash),red:keep(red),blue:keep(blue),ko:keep(ko)}})()""")
+        d['reads'] = fx
+        c['hit_flash_reads'] = fx['flash']['lum'] >= fx['idle']['lum'] * 1.25
+        c['torch_tint_reads'] = (fx['red']['r'] - fx['red']['b']) > (fx['blue']['r'] - fx['blue']['b']) + 8
+        c['ko_lies_down'] = fx['ko']['top'] - fx['idle']['top'] >= 0.35 * (fx['idle']['bottom'] - fx['idle']['top'])
+        # The real fight, Carl vs the floor-1 goblin, to RESULT with the spies on.
+        g = pg.evaluate("""(()=>{const o=S3.spy();const r=S3.fight({},8);
+          Render.frame(G.fight);
+          return{r,rig:o.rig,stage:o.stage,hud:o.hud,fx:o.fx,frames3d:o.frames3d,stageOnGame:o.stageOnGame||0,hudOnTop:o.hudOnTop||0,fxOnTop:o.fxOnTop||0,
+            portrait:S3.topPixel(46,42),stagePx:S3.gamePixel(427,300),topMiddle:S3.topPixel(427,300)}})()""")
+        d['fight'] = dict(g['r'], rig_draws=len(g['rig']), stage=g['stage'], hud=g['hud'], fx=g['fx'], frames3d=g['frames3d'],
+                          portrait=g['portrait'], stage_px=g['stagePx'], top_middle=g['topMiddle'])
+        fr = g['r']
+        c['fight_reached_result'] = fr['state'] == 'RESULT' and fr['renders'] > 20
+        c['poses_varied'] = len(fr['poses']) >= 4
+        c['drew_both_every_sample'] = fr['samples'] > 5 and fr['minP1'] > 0.02 and fr['minP2'] > 0.02
+        c['no_2d_bodies'] = len(g['rig']) == 0
+        c['stage_hud_fx_on_2d'] = g['stage'] >= fr['renders'] and g['hud'] >= fr['renders'] and g['fx'] >= fr['renders'] and g['frames3d'] >= fr['renders']
+        c['stage_on_game_canvas'] = g['stageOnGame'] >= fr['renders'] and g['stagePx'][3] == 255 and sum(g['stagePx'][:3]) > 0
+        c['hud_and_fx_above_figures'] = g['hudOnTop'] >= fr['renders'] and g['fxOnTop'] >= fr['renders'] and g['portrait'][3] == 255 and g['topMiddle'][3] < 128
+        c['hud_stays_clear_of_figures'] = fr['hudTop'] == 0
+        t = pg.evaluate(TALL3D_JS)
+        d['tall_poses'] = t
+        c['tall_poses_clear_hud'] = t['worst'] == 0
+        # The layer has to follow G.fit when the window changes.
+        pg.set_viewport_size({'width': size[0] - 120, 'height': size[1] - 60})
+        c['follows_resize'] = settles(pg, """(()=>{const a=canvas.getBoundingClientRect(),b=Render3D.canvas.getBoundingClientRect();
+          return innerWidth===%d&&Math.abs(a.left-b.left)<=.5&&Math.abs(a.top-b.top)<=.5&&Math.abs(a.width-b.width)<=.5&&Math.abs(a.height-b.height)<=.5})()""" % (size[0] - 120))
+    c['no_errors'] = not errors
+    d['errors'] = errors
+    ctx.close()
+    return c, d
+
+def smoke_fallbacks(b):
+    """Every way 3D can be off or broken: the game must play in 2D with no error."""
+    checks, details = {}, {}
+    FIGHT = """(()=>{G.sim=true;const rig=[];const orig=Rig.draw;Rig.draw=function(c,F,...r){rig.push(F.def.id);return orig.call(this,c,F,...r)};
+      G.startFight({seed:1,p1:'carl',encounter:'f1_goblin',ctrl1:Ctrl.competent(1)});
+      let n=0;while(G.state==='FIGHT'&&n<30000){G.tick();n++;if(n%40===0&&G.state==='FIGHT')Render.frame(G.fight)}
+      Rig.draw=orig;return{state:G.state,ticks:n,carl:rig.filter(x=>x==='carl').length,goblin:rig.filter(x=>x==='goblin').length,
+        webgl_canvases:document.querySelectorAll('#wrap>canvas').length-1}})()"""
+    # No flag: not one 3D request, no WebGL context, on both pages, through a real fight.
+    probe = ("window.__webgl=0;const __gc=HTMLCanvasElement.prototype.getContext;"
+             "HTMLCanvasElement.prototype.getContext=function(k,...r){if(/webgl/i.test(k))window.__webgl++;return __gc.call(this,k,...r)};")
+    for name, url in (('test_page', TEST_PAGE), ('player_page', INDEX)):
+        ctx, pg, errors, reqs = run_3d_case(b, url, init=probe)
+        pg.evaluate('localStorage.clear();Save.load()')
+        r = pg.evaluate(FIGHT)
+        pg.wait_for_timeout(100)
+        checks['no_flag_%s_requests_nothing' % name] = not asked_for_3d(reqs)
+        checks['no_flag_%s_no_webgl_context' % name] = pg.evaluate('window.__webgl') == 0
+        checks['no_flag_%s_draws_2d' % name] = r['state'] == 'RESULT' and r['carl'] > 0 and r['goblin'] > 0 and r['webgl_canvases'] == 0
+        checks['no_flag_%s_no_errors' % name] = not errors
+        details['no_flag_' + name] = dict(r, errors=errors)
+        ctx.close()
+    # WebGL unavailable: getContext returns null, the flag is on, the game must not care.
+    noctx = ("const __gc=HTMLCanvasElement.prototype.getContext;"
+             "HTMLCanvasElement.prototype.getContext=function(k,...r){if(/webgl/i.test(k))return null;return __gc.call(this,k,...r)};")
+    ctx, pg, errors, reqs = run_3d_case(b, TEST_PAGE + '?3d=1', init=noctx)
+    pg.wait_for_timeout(300)
+    pg.evaluate('localStorage.clear();Save.load()')
+    r = pg.evaluate(FIGHT)
+    checks['no_webgl_inactive'] = pg.evaluate('typeof Gate3D!=="undefined"&&Gate3D.active()===false')
+    checks['no_webgl_draws_2d'] = r['state'] == 'RESULT' and r['carl'] > 0 and r['goblin'] > 0
+    checks['no_webgl_no_errors'] = not errors
+    details['no_webgl'] = dict(r, errors=errors, requested=asked_for_3d(reqs))
+    ctx.close()
+    # The bundle can't be fetched (offline, or a partial deploy): 2D, and the only noise is the browser's own failed-load line.
+    ctx, pg, errors, reqs = run_3d_case(b, TEST_PAGE + '?3d=1', route='**/three.min.js', allow_load_errors=True)
+    pg.wait_for_timeout(500)
+    pg.evaluate('localStorage.clear();Save.load()')
+    r = pg.evaluate(FIGHT)
+    checks['missing_bundle_inactive'] = pg.evaluate('typeof Gate3D!=="undefined"&&Gate3D.active()===false')
+    checks['missing_bundle_draws_2d'] = r['state'] == 'RESULT' and r['carl'] > 0 and r['goblin'] > 0
+    checks['missing_bundle_no_errors'] = not errors
+    details['missing_bundle'] = dict(r, errors=errors)
+    ctx.close()
+    # A phone can drop the GL context at any time: the fighters must come back in 2D on the next frame.
+    ctx, pg, errors, reqs = run_3d_case(b, TEST_PAGE + '?3d=1')
+    if wait_3d(pg):
+        r = pg.evaluate("""(()=>{G.sim=true;G.startFight({seed:1,p1:'carl',encounter:'f1_goblin'});Render.frame(G.fight);
+          const gl=Render3D.canvas.getContext('webgl2');window.__lose=gl.getExtension('WEBGL_lose_context');
+          window.__lose.loseContext();return true})()""")
+        settles(pg, 'Gate3D.lost===true')
+        r = pg.evaluate("""(()=>{const rig=[];const orig=Rig.draw;Rig.draw=function(c,F,...r){rig.push(F.def.id);return orig.call(this,c,F,...r)};
+          Render.frame(G.fight);Rig.draw=orig;return{active:Gate3D.active(),rig}})()""")
+        checks['context_lost_falls_back'] = (not r['active']) and 'carl' in r['rig'] and 'goblin' in r['rig']
+        pg.evaluate('window.__lose.restoreContext()')
+        settles(pg, 'Gate3D.lost===false')
+        r2 = pg.evaluate("""(()=>{const rig=[];const orig=Rig.draw;Rig.draw=function(c,F,...r){rig.push(F.def.id);return orig.call(this,c,F,...r)};
+          Render.frame(G.fight);Rig.draw=orig;return{active:Gate3D.active(),rig}})()""")
+        checks['context_restored_returns'] = r2['active'] and not r2['rig']
+    else:
+        checks['context_lost_falls_back'] = False
+        checks['context_restored_returns'] = False
+    checks['context_lost_no_errors'] = not errors
+    details['context_lost_errors'] = errors
+    ctx.close()
+    # Per-look fallback: a quad stays 2D, reflection included, next to a 3D Carl.
+    ctx, pg, errors, reqs = run_3d_case(b, TEST_PAGE + '?3d=1')
+    if wait_3d(pg):
+        pg.evaluate(SMOKE3D_JS)
+        r = pg.evaluate("""(()=>{const o=S3.spy();G.sim=true;G.startFight({seed:1,p1:'carl',p2:'donut',ai:'brawl'});const f=G.fight;S3.apart(f);
+          Render.frame(f);return{rig:o.rig,carl:S3.around(f.p1).frac,donut:S3.around(f.p2).frac,handlesDonut:Gate3D.handles(f.p2),handlesCarl:Gate3D.handles(f.p1)}})()""")
+        checks['quad_draws_2d_with_reflection'] = r['rig'].count('donut') == 2 and 'carl' not in r['rig']
+        checks['quad_not_on_webgl'] = r['donut'] == 0 and r['carl'] > 0.02 and r['handlesCarl'] and not r['handlesDonut']
+        details['quad'] = r
+    else:
+        checks['quad_draws_2d_with_reflection'] = False
+        checks['quad_not_on_webgl'] = False
+    checks['quad_no_errors'] = not errors
+    ctx.close()
+    # The Settings toggle, by click: on loads and draws in 3D without a reload, off goes straight back to 2D.
+    ctx, pg, errors, reqs = run_3d_case(b, TEST_PAGE)
+    pg.evaluate('localStorage.clear();Save.load();Screens.settings()')
+    has_btn = pg.evaluate("!!document.getElementById('set_fighters3d')")
+    checks['toggle_row_exists'] = has_btn
+    if has_btn:
+        pg.click('#set_fighters3d')
+        on = wait_3d(pg)
+        checks['toggle_on_loads_3d'] = on
+        if on:
+            r = pg.evaluate("""(()=>{G.sim=true;G.startFight({seed:1,p1:'carl',encounter:'f1_goblin'});const rig=[];const orig=Rig.draw;
+              Rig.draw=function(c,F,...r){rig.push(F.def.id);return orig.call(this,c,F,...r)};Render.frame(G.fight);const on3d=rig.length;
+              G.toTitle();Screens.settings();document.getElementById('set_fighters3d').click();
+              G.startFight({seed:1,p1:'carl',encounter:'f1_goblin'});rig.length=0;Render.frame(G.fight);const off2d=rig.length;
+              const hidden=getComputedStyle(Render3D.canvas).display==='none'||!Render3D.canvas.isConnected;
+              Rig.draw=orig;return{on3d,off2d,hidden,active:Gate3D.active()}})()""")
+            checks['toggle_on_no_2d_bodies'] = r['on3d'] == 0
+            checks['toggle_off_back_to_2d'] = r['off2d'] > 0 and r['hidden'] and not r['active']
+            details['toggle'] = r
+    else:
+        checks['toggle_on_loads_3d'] = False
+    checks['toggle_no_errors'] = not errors
+    ctx.close()
+    # The player page itself plays a whole fight in 3D, with no test helpers around it.
+    ctx, pg, errors, reqs = run_3d_case(b, INDEX + '?3d=1')
+    on = wait_3d(pg)
+    checks['player_page_3d_active'] = on
+    if on:
+        r = pg.evaluate(FIGHT)
+        checks['player_page_3d_reaches_result'] = r['state'] == 'RESULT' and r['carl'] == 0 and r['goblin'] == 0
+        details['player_page_3d'] = r
+    checks['player_page_3d_no_errors'] = not errors
+    ctx.close()
+    return checks, details
+
+def run_3d_frame_times(b, frames, angle, phone=False):
+    """ms/frame for the same seeded fight down both paths. Canvas readback would swamp the numbers on a real GPU, so there are
+    three plain ones: JS time in Render.frame, the extra wait for WebGL to finish (3D only), and real rAF pacing with the
+    browser compositing every layer, which is the one that includes the 2D canvas's own raster."""
+    STEP_JS = """([n,three])=>{G.sim=true;let s=1,t=0,tGl=0;
+      const start=seed=>G.startFight({seed,p1:'carl',encounter:'f1_goblin',ctrl1:Ctrl.competent(seed)});
+      start(s);const gl=three?Render3D.canvas.getContext('webgl2'):null,px=new Uint8Array(4);
+      for(let i=0;i<n;i++){G.tick();
+        const a=performance.now();Render.frame(G.fight);const c=performance.now();
+        if(gl)gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px);
+        const e=performance.now();t+=c-a;tGl+=e-c;
+        if(G.state==='RESULT'){s++;start(s)}}
+      let renderer=null;if(gl){const x=gl.getExtension('WEBGL_debug_renderer_info');renderer=x?gl.getParameter(x.UNMASKED_RENDERER_WEBGL):'?'}
+      return{ms_render_js:t/n,ms_webgl_finish:tGl/n,ms_cpu_gpu:(t+tGl)/n,renderer}}"""
+    RAF_JS = """n=>new Promise(done=>{G.sim=true;let s=100,last=0,count=0,sum=0,long=0;
+      const start=seed=>G.startFight({seed,p1:'carl',encounter:'f1_goblin',ctrl1:Ctrl.competent(seed)});
+      start(s);
+      const step=t=>{if(last){const d=t-last;sum+=d;count++;if(d>20)long++}last=t;
+        G.tick();if(G.state==='RESULT'){s++;start(s)}
+        if(count<n)requestAnimationFrame(step);else done({raf_ms:sum/count,raf_frames_over_20ms:long,raf_frames:count})};
+      requestAnimationFrame(step)})"""
+    out = {'frames': frames, 'angle': angle}
+    # phone=True is a landscape phone at 2x: the WebGL buffer a real one would fill, which is where the 3D path pays.
+    size, density = ((844, 390), 2) if phone else ((854, 480), 1)
+    out['viewport'] = [size[0], size[1], density]
+    ctx, pg, errors, _ = run_3d_case(b, TEST_PAGE, viewport=size, density=density)
+    pg.evaluate('localStorage.clear();Save.load()')
+    out['2d'] = pg.evaluate(STEP_JS, [frames, False])
+    out['2d'].update(pg.evaluate(RAF_JS, frames))
+    errs2 = list(errors)
+    ctx.close()
+    ctx, pg, errors, _ = run_3d_case(b, TEST_PAGE + '?3d=1', viewport=size, density=density)
+    ok = wait_3d(pg)
+    if ok:
+        pg.evaluate('localStorage.clear();Save.load()')
+        out['3d'] = pg.evaluate(STEP_JS, [frames, True])
+        out['3d'].update(pg.evaluate(RAF_JS, frames))
+        out['3d_info'] = pg.evaluate('(()=>{const c=Render3D.canvas;return{buffer:[c.width,c.height],calls:Render3D.renderer.info.render.calls,triangles:Render3D.renderer.info.render.triangles}})()')
+    ctx.close()
+    # GL driver chatter about the deliberate readback is not a game error.
+    out['errors'] = [e for e in errs2 + errors if 'GPU stall due to ReadPixels' not in e]
+    return out, ok
+
+def run_3d_smoke(frames=300):
+    report = {'viewports': {}}
+    failed = []
+    missing = [n for n in FILES_3D if not os.path.exists(os.path.join(ROOT, n))]
+    report['files'] = {n: (os.path.getsize(os.path.join(ROOT, n)) if n not in missing else None) for n in FILES_3D}
+    if missing:
+        failed.append('files_exist: ' + ','.join(missing))
+    with sync_playwright() as p:
+        b = p.chromium.launch(args=angle_args())
+        for size in ((854, 480), (844, 390)):
+            c, d = smoke_viewport(b, size)
+            key = '%dx%d' % size
+            report['viewports'][key] = {'checks': c, 'details': d}
+            failed += ['%s: %s' % (key, k) for k, v in c.items() if not v]
+        c, d = smoke_fallbacks(b)
+        report['fallbacks'] = {'checks': c, 'details': d}
+        failed += ['fallbacks: %s' % k for k, v in c.items() if not v]
+        times, ok = run_3d_frame_times(b, frames, 'swiftshader')
+        report['frame_time'] = times
+        if not ok or times['errors']:
+            failed.append('frame_time')
+        b.close()
+    report['failed'] = failed
+    print(json.dumps(report, indent=1))
+    return 1 if failed else 0
+
+def run_3d_perf(frames, angle):
+    with sync_playwright() as p:
+        b = p.chromium.launch(args=angle_args(angle))
+        desk, ok = run_3d_frame_times(b, frames, angle)
+        phone, ok2 = run_3d_frame_times(b, frames, angle, phone=True)
+        b.close()
+    print(json.dumps({'desktop_854x480': desk, 'phone_844x390_2x': phone}, indent=1))
+    return 0 if ok and ok2 and not desk['errors'] and not phone['errors'] else 1
+
+# Scripted so the 2D and 3D shots land on the same frames of the same fight: the sim doesn't read which renderer is on.
+SHOT3D_JS = """which=>{localStorage.clear();Save.load();G.sim=true;
+  G.startFight({seed:3,p1:'carl',encounter:'f1_goblin',ctrl1:Ctrl.script([{f:40,until:1800,intent:{light:true}}])});
+  const f=G.fight;f.p1.x=G.cam.x-62;f.p2.x=G.cam.x+62;
+  const snap=()=>{FX.flash=0};
+  if(which==='idle'){for(let i=0;i<30;i++)G.tick();f.p2.state='IDLE';f.p2.f=8;snap();return{p1:f.p1.state,p2:f.p2.state,frame:f.frame}}
+  for(let i=0;i<400;i++){G.tick();if(f.p2.state==='HITSTUN'&&f.p2.f>=1&&f.p2.f<3&&f.p1.state==='ATTACK')break}
+  snap();return{p1:f.p1.state,p2:f.p2.state,frame:f.frame}}"""
+
+def run_3d_shots(out_dir):
+    results = {}
+    with sync_playwright() as p:
+        b = p.chromium.launch(args=angle_args())
+        for name, url, which, three in (('carls-3d-idle.png', TEST_PAGE + '?3d=1', 'idle', True),
+                                        ('carls-3d-hit.png', TEST_PAGE + '?3d=1', 'hit', True),
+                                        ('carls-2d-idle.png', TEST_PAGE, 'idle', False),
+                                        ('carls-2d-hit.png', TEST_PAGE, 'hit', False)):
+            ctx, pg, errors, _ = run_3d_case(b, url)
+            if three and not wait_3d(pg):
+                results[name] = 'no 3D'
+                ctx.close()
+                continue
+            info = pg.evaluate(SHOT3D_JS, which)
+            pg.wait_for_timeout(250)  # G.loop keeps redrawing the frozen sim, so the screenshot has a fresh frame
+            path = os.path.join(out_dir, name)
+            pg.screenshot(path=path)
+            results[name] = dict(info, path=path, errors=errors)
+            ctx.close()
+        b.close()
+    print(json.dumps(results, indent=1))
+    return 1 if any(isinstance(r, str) or r['errors'] for r in results.values()) else 0
 
 def score(sm):
     """Ranks one attempt: lesson done > a heavy that started on a parry-stunned foe > any heavy > a parry."""
@@ -1008,6 +1485,13 @@ def main():
     ap.add_argument('--player-smoke', action='store_true',
                      help="load the player page (index.html): no test code in it, the game starts on "
                           "the title screen, one real fight plays to RESULT, no page/console errors")
+    ap.add_argument('--3d-smoke', dest='smoke3d', action='store_true',
+                    help='the opt-in 3D fighters: real fights, fallbacks, no-flag no-request check, ms/frame; exit 1 on any failure')
+    ap.add_argument('--3d-perf', dest='perf3d', type=int, default=None, metavar='N',
+                    help='ms/frame over N frames for the 2D path next to the 3D path')
+    ap.add_argument('--3d-shots', dest='shots3d', default=None, metavar='DIR',
+                    help='write the 2D and 3D comparison screenshots into DIR')
+    ap.add_argument('--angle', default='swiftshader', help='ANGLE backend for --3d-perf (metal uses a real GPU on a Mac)')
     ap.add_argument('--saves', action='store_true',
                      help="seed damaged saves into localStorage before any game script runs and check "
                           "the game starts, only the broken record is repaired, unreadable saves are "
@@ -1060,6 +1544,12 @@ def main():
         sys.exit(run_saves())
     if a.player_smoke:
         sys.exit(run_player_smoke())
+    if a.smoke3d:
+        sys.exit(run_3d_smoke())
+    if a.perf3d is not None:
+        sys.exit(run_3d_perf(a.perf3d, a.angle))
+    if a.shots3d:
+        sys.exit(run_3d_shots(a.shots3d))
     if a.touch_heavy:
         sys.exit(run_touch_heavy())
     if a.perf is not None:
