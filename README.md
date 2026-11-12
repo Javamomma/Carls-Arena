@@ -67,7 +67,7 @@ After the tutorial, the title screen offers CAMPAIGN, ARENA, ROSTER, KIOSK, EXHI
   local leaderboard ranks your best runs by peak viewers.
 - **SETTINGS** toggles reduce motion, haptics (a short vibration when you're hit, on supported
   devices), left-handed controls (mirrors the on-screen button placement — see below), show attack
-  buttons (BLOCK/PUNCH/KICK, off by default), the optional sprite atlas, sound effects, and announcer
+  buttons (BLOCK/PUNCH/KICK, off by default), the optional sprite atlas, the 3D fighters preview, sound effects, and announcer
   text.
 
 Every fight tracks **viewers** — a live score built from hits, parries, and specials (style
@@ -93,6 +93,8 @@ ignored until the first lifts.
   ends for a quicker in-combo **heavy** finisher instead.
 - **Swipe left** — **DASH BACK** (with a moment of invulnerability); keep holding through the dash
   and it rolls straight into **BLOCK** once the dash ends.
+- **HEAVY** (above POWER, always on screen) charges a heavy for as long as you hold it, with no kick first;
+  it is the way to punish a parry (the lesson 3 move). BLOCK, PUNCH and KICK stay optional.
 - **POWER** (bottom-right, always on screen) taps to fire your strongest affordable special; hold it
   to open a picker for S1/S2/S3 specifically, then release over the one you want.
 
@@ -266,11 +268,26 @@ python -m playwright install chromium
 - `python3 tests/harness.py --journey` starts from a fresh save with no debug grants and earns
   everything through the game's own code (tutorial, campaign, arena streaks, crystals, shop
   catalyst) until all four champions have ranked up once; it prints per-champion milestones.
+- `python3 tests/harness.py --3d-smoke` covers the opt-in 3D fighters (`?3d=1` or the 3D FIGHTERS
+  (PREVIEW) setting): real fights at phone and desktop size with fighters read back from WebGL, every
+  fallback to 2D, no 3D request without the flag, and ms/frame for the 2D path next to the 3D path.
+  `--3d-perf 300 --angle metal` repeats the timing on a Mac's real GPU; `--3d-shots DIR` writes the
+  2D and 3D comparison screenshots.
+- `tools/three/build.sh` rebuilds the tree-shaken three.js bundle with Bun (version and integrity
+  pinned in `tools/three/bun.lock`, what it includes in `tools/three/entry.js`); `tools/build.py` then
+  copies it next to `index.html`. The bundle is committed, so only changing it needs Bun.
 - `python3 tests/harness.py --share --shot /tmp/share.png` checks `G.shareCard()`'s PNG data URL.
 - `python3 tests/harness.py --screens-smoke` visits every screen plus one real fight and checks for
   page/console errors on each; `python3 tests/harness.py --phone-check` asserts the canvas stays
   letterboxed, on-screen buttons are real ≥44px touch targets, and the page never scrolls
   horizontally at an 844×390 CSS-px landscape-phone viewport.
+- `python3 tests/harness.py --tutorial-fit` shows every tutorial prompt (and prompt + stall hint) at
+  854×480, 844×390, 667×375 and 568×320 and asserts it stays inside the canvas and clear of the
+  LESSON banner.
+- `python3 tests/harness.py --touch-heavy` drives real mouse input (canvas gestures and the on-screen
+  buttons) through the live tutorial's lesson 3 at 844×390 and reports what each attempt did (a heavy
+  from standing by the HEAVY button and by swipe-and-hold; BLOCK button then HEAVY button; a canvas-hold
+  parry then HEAVY button); it exits 1 if either lesson attempt can't finish lesson 3 with a punish.
 - `python3 tests/harness.py --saves` seeds damaged saves (a null record, garbage, an unknown version, a
   failing backup) before the game loads and checks it still starts without losing the original.
 - `python3 tests/harness.py --screen <name> --shot out.png` screenshots any menu screen
@@ -352,3 +369,6 @@ the rig — nothing else about a fight changes.
 A fan project, built for fun and not for profit. *Dungeon Crawler Carl* is Matt Dinniman's — this
 game borrows its tone and setting as an homage and isn't affiliated with or endorsed by him or his
 publisher. All code, art, and writing here are original.
+
+Third-party: [three.js](https://threejs.org) 0.170.0 (MIT license, `tools/three/LICENSE`), used only
+by the opt-in 3D fighters preview and loaded from its own file when that's switched on.

@@ -45,9 +45,10 @@ body.reduce-motion .cbtn.pulse{animation:none;box-shadow:0 0 24px 8px rgba(244,1
 @media (prefers-reduced-motion:reduce){.cbtn.pulse{animation:none;box-shadow:0 0 24px 8px rgba(244,197,66,.95)}}
 #btnBlock{left:22px;bottom:40px}
 #btnPower{right:22px;bottom:40px}
+#btnHeavy{right:22px;bottom:136px}
 #btnKick{right:110px;bottom:40px}
 #btnPunch{right:198px;bottom:40px}
-#powerPicker{position:absolute;right:14px;bottom:128px;display:none;gap:10px}
+#powerPicker{position:absolute;right:106px;bottom:140px;display:none;gap:10px}
 #powerPicker.show{display:flex}
 #powerPicker button{width:52px;height:52px;border-radius:50%;border:2px solid #f4c542;background:#1a1f33;color:#f4c542;font:inherit;font-size:13px;font-weight:bold}
 #powerPicker button:disabled{opacity:.3}
@@ -58,9 +59,10 @@ body.reduce-motion .cbtn.pulse{animation:none;box-shadow:0 0 24px 8px rgba(244,1
    mirrored offsets. */
 body.left-handed #btnBlock{left:auto;right:22px}
 body.left-handed #btnPower{right:auto;left:22px}
+body.left-handed #btnHeavy{right:auto;left:22px}
 body.left-handed #btnKick{right:auto;left:110px}
 body.left-handed #btnPunch{right:auto;left:198px}
-body.left-handed #powerPicker{right:auto;left:14px}
+body.left-handed #powerPicker{right:auto;left:106px}
 /* Positioned in JS (G.positionToast, called from G.fit on load/resize) off canvas.getBoundingClientRect()
    so it tracks the canvas box exactly (not #wrap, which can letterbox at other aspect ratios); left/top/
    max-width are set inline per call. */
@@ -319,7 +321,7 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
    while G.mode==='tutorial' (G.tick's own gate) and hidden by G.toTitle/backToOrigin/startFight. */
 #tutorialPrompt{position:fixed;transform:translateX(-50%);font-size:12px;font-weight:bold;
   letter-spacing:.5px;color:#111;background:#f4c542;border-radius:20px;padding:6px 14px;
-  text-align:center;white-space:nowrap;pointer-events:none;display:none;
+  text-align:center;width:max-content;text-wrap:balance;pointer-events:none;display:none;
   box-shadow:0 2px 8px rgba(0,0,0,.4);z-index:1}
 #tutorialPrompt.show{display:block}
 #tutorialPrompt.flash{background:#8cf4c5}
@@ -338,6 +340,7 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
 <button id="btnBlock" class="cbtn atkbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
 <button id="btnPunch" class="cbtn atkbtn" data-label="PUNCH"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><rect x="7" y="9" width="12" height="10" rx="3"/><circle cx="9.5" cy="7" r="2.3"/><circle cx="13" cy="6" r="2.3"/><circle cx="16.5" cy="7" r="2.3"/><rect x="4" y="11" width="5" height="6" rx="2.4"/></svg></button>
 <button id="btnKick" class="cbtn atkbtn" data-label="KICK"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M9 2h5v10.5l5.2 2.3c1 .45 1.8 1.4 1.8 2.6V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4.2C4 11.3 6.2 9.4 9 9.4z"/></svg></button>
+<button id="btnHeavy" class="cbtn" data-label="HEAVY"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M3 3h13a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-3.5v10a1.5 1.5 0 0 1-3 0V11H3z"/></svg></button>
 <button id="btnPower" class="cbtn" data-label="POWER"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M13 1 3 14h6.5L8.5 23 21 9h-7z"/></svg></button>
 <div id="powerPicker"><button id="pk1">S1</button><button id="pk2">S2</button><button id="pk3">S3</button></div>
 </div>

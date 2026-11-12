@@ -4459,6 +4459,20 @@ Test.add('a fresh save\'s CAMPAIGN button starts the tutorial instead of opening
   document.getElementById('btnCampaign').click();
   eq(Screens._current,'map','CAMPAIGN must open the map once tutorialDone is true');
   G.toTitle()});
+Test.add('the title\'s first button reads START TUTORIAL on a fresh save and starts it; with tutorialDone it reads CAMPAIGN and opens the map',()=>{
+  Save.data=Meta.defaults();
+  Screens.title();
+  const b=document.getElementById('btnCampaign');
+  eq(b.textContent.trim(),'START TUTORIAL');
+  b.click();
+  eq(G.mode,'tutorial','START TUTORIAL must start the tutorial');
+  G.toTitle();
+  Save.data.tutorialDone=true;
+  Screens.title();
+  eq(document.getElementById('btnCampaign').textContent.trim(),'CAMPAIGN');
+  document.getElementById('btnCampaign').click();
+  eq(Screens._current,'map','CAMPAIGN must open the map once tutorialDone is true');
+  G.toTitle()});
 Test.add('the result screen shows a TUTORIAL COMPLETE line on a tutorial win',()=>{
   Save.data=Meta.defaults();
   G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
@@ -4530,7 +4544,89 @@ Test.add('lesson 2 (a landed medium) backs the dummy off to 260px so the kick\'s
   eq(Tutorial.state.step,1);
   eq(p2.x,p1.x+260,'the dummy must back off to exactly 260px at the start of lesson 2');
   Tutorial.reset()});
-Test.add('G.forceButtons is forced on for lessons 1-2 and turns back off from lesson 3 onward',()=>{
+Test.add('#btnHeavy is shown in every fight like POWER, sets held.heavy on press and clears it on release or cancel',()=>{
+  Save.data=Meta.defaults();Save.data.settings.showButtons=false;G.applySettings();
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  const h=document.getElementById('btnHeavy');
+  ok(h,'#btnHeavy must exist');
+  eq(h.dataset.label,'HEAVY');
+  ok(h.classList.contains('cbtn')&&!h.classList.contains('atkbtn'),'HEAVY is a .cbtn, not an .atkbtn hidden by the showButtons setting');
+  ok(getComputedStyle(h).display!=='none','HEAVY shows even with showButtons off');
+  h.dispatchEvent(new PointerEvent('pointerdown',{pointerId:11,bubbles:true}));eq(Input.held.heavy,true);
+  h.dispatchEvent(new PointerEvent('pointerup',{pointerId:11,bubbles:true}));eq(Input.held.heavy,false);
+  h.dispatchEvent(new PointerEvent('pointerdown',{pointerId:12,bubbles:true}));eq(Input.held.heavy,true);
+  h.dispatchEvent(new PointerEvent('pointercancel',{pointerId:12,bubbles:true}));eq(Input.held.heavy,false);
+  eq(Input.q.length,0,'pressing HEAVY must not queue a kick or any other action');
+  G.toTitle()});
+Test.add('pressing #btnHeavy from standing starts a heavy on the next sim frame, with no kick first',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  G.sim=true;G.tick();
+  document.getElementById('btnHeavy').dispatchEvent(new PointerEvent('pointerdown',{pointerId:13,bubbles:true}));
+  G.tick();
+  eq(G.fight.p1.moveName,'heavy','the first move after pressing HEAVY must be the heavy');
+  eq(G.fight.p1.state,'CHARGE');
+  document.getElementById('btnHeavy').dispatchEvent(new PointerEvent('pointerup',{pointerId:13,bubbles:true}));
+  G.toTitle();G.sim=false});
+Test.add('BLOCK and HEAVY holds clear when pointer capture is lost, and on pause, fight end and leaving the fight',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  const down=(id,pid)=>document.getElementById(id).dispatchEvent(new PointerEvent('pointerdown',{pointerId:pid,bubbles:true}));
+  for(const [id,key] of [['btnHeavy','heavy'],['btnBlock','block']]){
+    down(id,21);eq(Input.held[key],true);
+    document.getElementById(id).dispatchEvent(new PointerEvent('lostpointercapture',{pointerId:21,bubbles:true}));
+    eq(Input.held[key],false,id+': a lost pointer capture (released off the button) must clear the hold')}
+  down('btnHeavy',22);down('btnBlock',23);
+  G.togglePause();
+  eq(Input.held.heavy,false,'pausing clears HEAVY');eq(Input.held.block,false,'pausing clears BLOCK');
+  G.togglePause();
+  down('btnHeavy',24);down('btnBlock',25);
+  G.onFightEnd(true);
+  eq(Input.held.heavy,false,'a fight ending clears HEAVY');eq(Input.held.block,false,'a fight ending clears BLOCK');
+  down('btnHeavy',26);G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  eq(Input.held.heavy,false,'a new fight starts with nothing held');
+  down('btnHeavy',27);down('btnBlock',28);G.toTitle();
+  eq(Input.held.heavy,false,'leaving the fight clears HEAVY');eq(Input.held.block,false,'leaving the fight clears BLOCK')});
+Test.add('the open power picker clears the HUD and every on-screen button, in both hands',()=>{
+  Save.data=Meta.defaults();Save.data.settings.showButtons=true;
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});G.applySettings();
+  const rc=id=>document.getElementById(id).getBoundingClientRect();
+  const hit=(a,b)=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom;
+  const cv=canvas.getBoundingClientRect(),hudBottom=cv.top+HUD_LINE*cv.height/H;
+  document.getElementById('powerPicker').classList.add('show');
+  for(const lh of [false,true]){
+    document.body.classList.toggle('left-handed',lh);
+    for(const pk of ['pk1','pk2','pk3']){
+      ok(rc(pk).top>=hudBottom,pk+' must sit below the HUD'+(lh?' (left-handed)':''));
+      for(const b of ['btnBlock','btnPunch','btnKick','btnHeavy','btnPower'])
+        ok(!hit(rc(pk),rc(b)),pk+' must not overlap '+b+(lh?' (left-handed)':''))}}
+  document.body.classList.remove('left-handed');document.getElementById('powerPicker').classList.remove('show');
+  Save.data.settings.showButtons=false;G.applySettings();G.toTitle()});
+Test.add('#btnHeavy sits clear of the other on-screen buttons and the power picker, and mirrors when left-handed',()=>{
+  Save.data=Meta.defaults();Save.data.settings.showButtons=true;
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});G.applySettings();
+  const rc=id=>document.getElementById(id).getBoundingClientRect();
+  const hit=(a,b)=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom;
+  document.getElementById('powerPicker').classList.add('show');
+  for(const lh of [false,true]){
+    document.body.classList.toggle('left-handed',lh);
+    const h=rc('btnHeavy');
+    for(const other of ['btnBlock','btnPunch','btnKick','btnPower','pk1','pk2','pk3'])
+      ok(!hit(h,rc(other)),'HEAVY must not overlap '+other+(lh?' (left-handed)':''));
+    ok(h.width>=44&&h.height>=44,'HEAVY is a real touch target');
+    ok(h.left>=0&&h.top>=0&&h.right<=innerWidth&&h.bottom<=innerHeight,'HEAVY is inside the viewport');
+    eq(Math.sign(h.left-rc('btnBlock').left),lh?-1:1,'HEAVY is on the same side as POWER, opposite BLOCK');
+  }
+  document.body.classList.remove('left-handed');
+  document.getElementById('powerPicker').classList.remove('show');
+  Save.data.settings.showButtons=false;G.applySettings();G.toTitle()});
+Test.add('lesson 3 names the real mechanics: BLOCK to parry, then hold HEAVY to punish, in the prompt and the stall hint',()=>{
+  const p=Tutorial.steps[2].prompt,h=Tutorial.HINTS[2];
+  ok(/BLOCK/.test(p)&&/PARRY/.test(p)&&/HEAVY/.test(p)&&/PUNISH/.test(p),'prompt: '+p);
+  ok(/BLOCK/.test(h)&&/HEAVY/.test(h),'hint: '+h);
+  ok(!/HOLD to block|anywhere|charge/i.test(p+h),'must not describe the old canvas-hold heavy');
+  ok(p.length<=70,'prompt must stay short enough for two lines on a phone: '+p.length)});
+Test.add('G.forceButtons is forced on for lessons 1-3 and turns back off from lesson 4 onward',()=>{
   Save.data=Meta.defaults();
   G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
   eq(G.forceButtons,true,'lesson 1 must force the attack buttons on');
@@ -4543,7 +4639,10 @@ Test.add('G.forceButtons is forced on for lessons 1-2 and turns back off from le
   G.fight.p1.moveName='medium';
   Tutorial.tick(G.fight); // a started medium -- advances lesson 2 -> lesson 3
   eq(Tutorial.state.step,2,'sanity: must have advanced into lesson 3');
-  eq(G.forceButtons,false,'lesson 3 must turn the forced buttons back off');
+  eq(G.forceButtons,true,'lesson 3 must keep BLOCK on screen: its prompt names it');
+  Tutorial._punished=true;
+  Tutorial.tick(G.fight); // a landed punish -- advances lesson 3 -> lesson 4
+  eq(G.forceButtons,false,'lesson 4 must turn the forced buttons back off');
   G.toTitle();
   eq(G.forceButtons,false,'leaving the tutorial must never leave the buttons stuck forced-on');
   G.sim=false});
@@ -8100,6 +8199,7 @@ Test.add('migrate: a broken top-level record becomes its default and every other
   for(const bad of [null,[],7,'x'])for(const k of ['cats','energy','arena','stats','settings','pity']){
     const s=playedV2();s[k]=bad;
     const out=Meta.migrate(s),want=playedV2();
+    want.settings.fighters3d=false; // this older save predates the key, so it arrives at its default
     eq(JSON.stringify(out[k]),JSON.stringify(Meta.defaults()[k]),k+' repaired from '+JSON.stringify(bad));
     for(const j in want)if(j!==k&&j!=='v'&&j!=='floors')eq(JSON.stringify(out[j]),JSON.stringify(want[j]),j+' kept while '+k+' broke')}});
 Test.add('migrate: missing keys inside cats/energy/arena/stats/settings are filled, present ones kept',()=>{
@@ -8394,3 +8494,91 @@ Test.add('shop screen renders a labelled class picker and each choice buys its c
   Save.data.gold=classCatPrice()-1;Screens.refresh();
   eq(document.getElementById('buyClassCatalyst_tank').disabled,true,'disabled when short');
   Screens.title()});
+// ---- 3D fighters preview: the switch and the 2D/3D seam, none of which needs WebGL to run ----
+Test.add('3D switch: fighters3d is off in a fresh save',()=>{
+  eq(Meta.defaults().settings.fighters3d,false)});
+Test.add('3D switch: Settings has a 3D FIGHTERS (PREVIEW) row bound to fighters3d',()=>{
+  const row=Screens.SETTINGS_ROWS.find(r=>r.key==='fighters3d');
+  ok(row,'no settings row for fighters3d');eq(row.label,'3D FIGHTERS (PREVIEW)')});
+Test.add('3D switch: an older v3 save without the key loads with it off and keeps its progress',()=>{
+  const backup=localStorage.getItem(Save.key);
+  try{
+    const old=Meta.defaults();
+    old.gold=4321;old.units=17;old.iso=99;old.tutorialDone=true;old.settings.leftHanded=true;
+    old.roster.katia={stars:2,rank:2,level:7,xp:5,shards:3};
+    delete old.settings.fighters3d;
+    localStorage.setItem(Save.key,JSON.stringify(old));
+    Save.load();
+    eq(Save.data.settings.fighters3d,false);
+    eq(Save.data.gold,4321);eq(Save.data.units,17);eq(Save.data.iso,99);eq(Save.data.tutorialDone,true);
+    eq(Save.data.settings.leftHanded,true);eq(Save.data.roster.katia.level,7);eq(Save.data.roster.katia.stars,2)
+  }finally{
+    if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
+    Save.load()}});
+Test.add('3D switch: a v1 and a v2 save also come out with it off',()=>{
+  const v1=Meta.migrate({v:1,gold:5,units:2,roster:{},mute:true,settings:{leftHanded:true}});
+  eq(v1.settings.fighters3d,false);eq(v1.settings.leftHanded,true);eq(v1.gold,5);
+  const v2=Meta.migrate({v:2,gold:9,settings:{leftHanded:true}});
+  eq(v2.settings.fighters3d,false);eq(v2.settings.leftHanded,true);eq(v2.gold,9)});
+Test.add('3D switch: ?3d=1 is matched exactly, the way ?atlas=1 is',()=>{
+  ok(Gate3D.queryOn('?3d=1'));ok(Gate3D.queryOn('?a=2&3d=1'));ok(Gate3D.queryOn('?3d=1&a=2'));
+  ok(!Gate3D.queryOn(''));ok(!Gate3D.queryOn('?3d=0'));ok(!Gate3D.queryOn('?x3d=1'));ok(!Gate3D.queryOn('?3d=10'))});
+Test.add('3D switch: with it off, syncing adds no script tag and nothing is active',()=>{
+  eq(Save.data.settings.fighters3d,false);
+  Gate3D.sync();
+  eq(Gate3D.wanted(),false);eq(Gate3D.active(),false);
+  eq(document.querySelectorAll('script[src*="render3d"],script[src*="three"]').length,0);
+  eq(document.querySelectorAll('#wrap>canvas').length,1)});
+Test.add('3D switch: tapping the row flips and saves the setting and asks the gate to load',()=>{
+  const savedLoad=Gate3D.load,saved=Save.data.settings.fighters3d;let loads=0;
+  Gate3D.load=()=>{loads++};
+  try{
+    Screens.settings();
+    const btn=document.getElementById('set_fighters3d');
+    ok(btn,'no #set_fighters3d button');eq(btn.textContent,'3D FIGHTERS (PREVIEW): OFF');
+    btn.click();
+    eq(Save.data.settings.fighters3d,true);eq(JSON.parse(localStorage.getItem(Save.key)).settings.fighters3d,true);
+    eq(loads,1);
+    eq(document.getElementById('set_fighters3d').textContent,'3D FIGHTERS (PREVIEW): ON');
+    document.getElementById('set_fighters3d').click();
+    eq(Save.data.settings.fighters3d,false)
+  }finally{Gate3D.load=savedLoad;Save.data.settings.fighters3d=saved;Save.put();G.applySettings();Screens.title()}});
+Test.add('3D seam: a fighter the 3D layer handles gets no 2D body or reflection, the other one does, and the 3D layer draws once per frame',()=>{
+  const savedHandles=Gate3D.handles,savedFrame=Gate3D.frame,savedDraw=Rig.draw;
+  let frames=0;const drew=[];
+  G.sim=true;G.startFight({seed:1,p1:'carl',p2:'goblin'});
+  const f=G.fight;
+  Gate3D.handles=F=>F===f.p1;
+  Gate3D.frame=()=>{frames++};
+  Rig.draw=function(c,F){drew.push(F===f.p1?'p1':'p2')};
+  try{
+    Render.frame(f);
+    eq(frames,1);eq(drew.filter(d=>d==='p1').length,0);
+    eq(drew.filter(d=>d==='p2').length,2,'p2 still draws its body and its reflection in 2D')
+  }finally{Gate3D.handles=savedHandles;Gate3D.frame=savedFrame;Rig.draw=savedDraw;G.toTitle()}});
+Test.add('3D seam: the charge bar and block ring still draw over a fighter the 3D layer handles',()=>{
+  const savedHandles=Gate3D.handles,savedDraw=Rig.draw;
+  G.sim=true;G.startFight({seed:1,p1:'carl',p2:'goblin'});
+  const f=G.fight,calls=[];
+  Gate3D.handles=()=>true;Rig.draw=()=>{};
+  const fake=new Proxy(Render.ctx,{get(t,k){
+    if(k==='fillRect'||k==='arc')return(...a)=>{calls.push(k)};
+    const v=t[k];return typeof v==='function'?v.bind(t):v},
+    set(t,k,v){t[k]=v;return true}});
+  try{
+    f.p1.state='BLOCK';f.p1.f=2;calls.length=0;
+    Render.fighter(fake,f.p1,G.cam,0);
+    ok(calls.includes('arc'),'block ring not drawn');
+    f.p1.state='CHARGE';f.p1.move=MOVES.heavy;f.p1.f=2;calls.length=0;
+    Render.fighter(fake,f.p1,G.cam,0);
+    ok(calls.includes('fillRect'),'charge bar not drawn')
+  }finally{Gate3D.handles=savedHandles;Rig.draw=savedDraw;G.toTitle()}});
+Test.add('3D seam: nothing about the fight changes when the gate says a fighter is drawn in 3D',()=>{
+  const run=handles=>{
+    const saved=Gate3D.handles;Gate3D.handles=handles;
+    try{G.sim=true;G.startFight({seed:7,p1:'carl',p2:'goblin',ai:'brawl',ctrl1:Ctrl.random(7)});
+      for(let i=0;i<600&&G.state==='FIGHT';i++){G.tick();Render.frame(G.fight)}
+      const f=G.fight,out=[f.frame,f.p1.hp,f.p2.hp,f.p1.x,f.p2.x,f.p1.power,f.p2.power].join();
+      G.toTitle();return out
+    }finally{Gate3D.handles=saved}};
+  eq(run(()=>true),run(()=>false))});

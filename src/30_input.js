@@ -165,10 +165,16 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
   // whether or not they're currently visible.
   bindButtons(){
     const id=x=>document.getElementById(x);
-    const block=id('btnBlock');
-    block.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.held.block=true});
-    const blockOff=()=>{this.held.block=false};
-    block.addEventListener('pointerup',blockOff);block.addEventListener('pointercancel',blockOff);
+    // Held buttons capture their pointer so a drag off the button still ends on it, and every end
+    // path (up, cancel, lost capture) clears the hold; a stuck block/heavy would keep charging forever.
+    const holdButton=(el,key)=>{
+      el.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.held[key]=true;
+        try{el.setPointerCapture(e.pointerId)}catch(_){}});
+      const off=()=>{this.held[key]=false};
+      el.addEventListener('pointerup',off);el.addEventListener('pointercancel',off);
+      el.addEventListener('lostpointercapture',off)};
+    holdButton(id('btnBlock'),'block');
+    holdButton(id('btnHeavy'),'heavy');
     id('btnPunch').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('light')});
     id('btnKick').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('medium')});
     const power=id('btnPower'),picker=id('powerPicker');
@@ -186,6 +192,9 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
   // picker. DASH_BACK.frames (40_movedata.js) is counted here as SIM FRAMES elapsed since a dashBack
   // fired, not wall time -- one increment per tick() call while that pointer is still down, matching
   // the real DASH state's own duration exactly.
+  // Drops every held input and the in-flight canvas gesture; called whenever a fight starts, ends or pauses,
+  // since the matching pointerup may never reach us once the fight screen is gone.
+  releaseHolds(){this._ptr=null;this.held.block=false;this.held.heavy=false},
   tick(){const P=this._ptr;
     if(P){
       if(!P.dashDir&&!P.blockOn&&!P.drifted&&this.now()-P.t0>=this.GESTURE.BLOCK_HOLD_FRAMES){

@@ -142,14 +142,16 @@ const Render={ctx:canvas.getContext('2d'),
   // just off bodyLen (the long axis of a horizontal quadruped body) instead of shoulder width.
   shadow(c,F){const look=lookFor(F.def),scale=F.def.scale||1,
       w=(look.rig==='quad'?look.bodyLen*1.15:look.shoulderW*1.6)*scale;
-    c.save();c.globalAlpha=.35;c.fillStyle='#000';
-    c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore();
+    // The 3D layer lays its own contact shadow, which follows the pose.
+    if(!Gate3D.handles(F)){c.save();c.globalAlpha=.35;c.fillStyle='#000';
+      c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore()}
     // Task 8.3: a wet-floor specular streak under the fighter's own feet, tinted/brightened by
     // whichever torch is nearest THIS fighter's x (Stage.lightAt) so the floor reads as reflecting
     // the same torchlight the fighter stands in. streakGeom is a pure function of (F,lit) -- no
     // canvas access -- purely so "the streak follows fighter x" is assertable without a canvas mock.
     const g=this.streakGeom(F,Stage.lightAt(F.x));
-    c.save();c.globalAlpha=g.alpha;c.fillStyle=g.tint;
+    // Under a solid figure the streak has to sit inside the contact shadow, not glow around it.
+    c.save();c.globalAlpha=g.alpha*(Gate3D.handles(F)?.4:1);c.fillStyle=g.tint;
     c.beginPath();c.ellipse(g.x,FLOOR+3,g.w/2,g.w*.09,0,0,Math.PI*2);c.fill();c.restore()},
   // Pure geometry for the specular streak above: {x, w, alpha, tint}. x always equals F.x (the
   // ruling's "follows fighter x"); w scales off the same footprint shadow() sizes off; alpha rides
@@ -160,10 +162,11 @@ const Render={ctx:canvas.getContext('2d'),
     return{x:F.x,w:w*.7,alpha:.16+.26*lit.k,tint:lit.tint}},
   fighter(c,F,cam,frame){
     const flash=F.state==='HITSTUN'&&F.f<3,lit=Stage.lightAt(F.x);
-    if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame,lit);c.filter='none';c.restore()}
-    else{Rig.draw(c,F,cam,frame,lit);
-      if(flash){c.save();c.globalAlpha=.45;c.fillStyle='#fff';
-        c.fillRect(F.x-F.width,FLOOR-140*(F.def.scale||1),F.width*2,140*(F.def.scale||1));c.restore()}}
+    if(!Gate3D.handles(F)){
+      if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame,lit);c.filter='none';c.restore()}
+      else{Rig.draw(c,F,cam,frame,lit);
+        if(flash){c.save();c.globalAlpha=.45;c.fillStyle='#fff';
+          c.fillRect(F.x-F.width,FLOOR-140*(F.def.scale||1),F.width*2,140*(F.def.scale||1));c.restore()}}}
     // Fix-wave item 1: both above-the-head overlays now draw in SCREEN space (this function runs
     // inside Render.frame's still-applied camera transform; c.save/setTransform(identity)/c.restore
     // scopes the reset to just this one draw) at overlayScreenY's clamped y, so neither can ever
@@ -589,7 +592,7 @@ const Render={ctx:canvas.getContext('2d'),
     if(cinematic>=54)return Math.min(1,(72-cinematic)/18);
     if(cinematic>=6)return 1;
     return cinematic/5},
-  frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
+  frame(f){let c=this.ctx;const cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
     this.hudCache(); // built once, before any HUD draw so it's ready whether or not f/hud runs this call
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
     Camera.apply(c,cam);
@@ -608,9 +611,15 @@ const Render={ctx:canvas.getContext('2d'),
     // check skips entirely) whenever no fight is up or no S3 is playing.
     Stage.draw(c,cam,fr,Stage.build(G.encounter&&G.encounter.floor===2?'sewers':'doorway'),f?this.s3Desat(f.cinematic):0);
     if(f){
-      this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
+      if(!Gate3D.handles(f.p1))this.reflection(c,f.p1,cam,fr);
+      if(!Gate3D.handles(f.p2))this.reflection(c,f.p2,cam,fr);
       this.shadow(c,f.p1);this.shadow(c,f.p2);
       this.fighter(c,f.p1,cam,fr);this.fighter(c,f.p2,cam,fr)}
+    Gate3D.frame(f,cam);
+    // Sparks, the S3 card and the HUD have to read on top of the fighters, so with WebGL up they move to the 2D layer above it.
+    const top=Gate3D.overlay();
+    if(top){c=top;c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);Camera.apply(c,cam);
+      if(Math.abs(FX.shake.x)>0.05||Math.abs(FX.shake.y)>0.05)c.translate(FX.shake.x/cam.zoom,FX.shake.y/cam.zoom)}
     FX.draw(c,cam,fr);
     c.setTransform(1,0,0,1,0,0);
     if(FX.flash>0){c.globalAlpha=Math.min(1,FX.flash/6);c.fillStyle='#fff';c.fillRect(0,0,W,H);c.globalAlpha=1}

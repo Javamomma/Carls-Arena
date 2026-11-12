@@ -108,3 +108,55 @@ tests, not only assumed.
 Acceptance: each `null-<field>` case in `--saves` also checks that `carlsArena.v1.bak` holds the
 original v2 string, the same check the fixture cases make. Nothing in `src/` changes.
 Files: `tests/harness.py`.
+
+# Playtest round 1 (Arshia, 2026-11-02)
+
+## 10. Tutorial text fits the phone, and the way in is labelled — `tutorial-fit` — status: done (07b552a)
+Goal: every tutorial instruction is readable on a phone, and a new player can see where the
+tutorial starts.
+Acceptance:
+- Every lesson prompt and stall hint (`Tutorial.steps[].prompt`, `Tutorial.HINTS`, with the hint
+  appended the way the game appends it) sits fully inside the canvas on phone-sized landscape
+  screens (at least 844x390, 667x375 and 568x320 CSS px) and at 854x480. Long ones wrap onto a
+  second line instead of running off the edge. A harness check proves it and fails on today's code.
+- On a fresh save the title screen's first button says START TUTORIAL. Once the tutorial is done
+  it says CAMPAIGN again. Its behaviour doesn't change.
+- Prompt wording stays as it is (task 11 rewrites lesson 3).
+Files: `src/00_head.html`, `src/80_game.js` and/or `src/85_screens.js`, `src/90_tests.js`,
+`tests/harness.py`, `index.html`, `test.html`.
+
+## 11. Heavy attacks work by touch — `heavy-touch` — status: done (1da71de)
+Goal: lesson 3 ("parry, then a heavy to punish") can be done with a finger, and its instruction
+describes the real gesture. Today a plain hold is a block, so "HOLD to charge a HEAVY" can't work;
+the heavy is swipe-right-and-keep-holding, which throws a kick first.
+Acceptance: a harness test drives real pointer events (no `intent.heavy`, no L key) through a
+parry and a heavy punish, and a heavy from standing; it shows what fails today. The fix is chosen
+with Arshia if it changes the controls.
+Finding (a75f9f8, `--touch-heavy`): by touch, a punish is impossible in the lesson and in real
+fights. A plain hold only blocks, and a swipe right always throws a kick first, which clears the
+parry stun. There is no HEAVY button.
+Arshia's choice (2026-11-03): add a HEAVY button. Hold it to charge a heavy, with no kick first.
+It's shown in every fight, like POWER, so gesture players can punish too. Lesson 3 is rewritten
+to the real timing (block as the hit lands, then hold HEAVY) and shows the buttons it names.
+`--touch-heavy` must pass and joins Verify.
+
+## 12. Character art in 3D — `art-3d` — status: 12a done (d1cf81f); 12b waits on the Mixamo animations
+Goal: the fighters look like a modern mobile fighting game (3D, lit, realistic proportions), not
+mannequins. Arshia chose 3D over painted sprites or redrawn vectors, knowing it's the largest
+route. The fight simulation, balance and controls don't change; only how fighters are drawn.
+Stages, each its own task:
+- 12a. 3D preview renderer — `three-preview`: an opt-in `?3d=1` (and a Settings toggle) loads a
+  pinned, tree-shaken three.js bundle from a separate file, so the default player page stays as
+  it is. Humanoid fighters are drawn as lit 3D figures on a transparent layer over today's stage,
+  posed from the existing rig's joint angles, so every move animates without new animation work.
+  Looks without a 3D figure yet (the four-legged ones) fall back to 2D. Tests first: a `--3d-smoke`
+  mode (fight runs, fighters drawn, no errors, falls back when WebGL is missing) and a frame-time
+  check. No cost, no outside art.
+- 12b. One real character (Carl) from the model source Arshia picks, retargeted onto the same
+  poses, with a side-by-side screenshot for Arshia.
+- 12c. The other ten looks, including the four-legged ones.
+- 12d. 3D on by default once Arshia has played it on the phone; 2D stays as the fallback for
+  phones without WebGL.
+Open decision for Arshia: where the 3D models come from (free Mixamo humans, a paid AI 3D
+generator, or both). Nothing is spent without asking.
+Note: this lifts AGENTS.md's "no runtime dependencies" rule for one pinned library (three.js, MIT).

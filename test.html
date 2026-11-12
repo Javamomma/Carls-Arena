@@ -45,9 +45,10 @@ body.reduce-motion .cbtn.pulse{animation:none;box-shadow:0 0 24px 8px rgba(244,1
 @media (prefers-reduced-motion:reduce){.cbtn.pulse{animation:none;box-shadow:0 0 24px 8px rgba(244,197,66,.95)}}
 #btnBlock{left:22px;bottom:40px}
 #btnPower{right:22px;bottom:40px}
+#btnHeavy{right:22px;bottom:136px}
 #btnKick{right:110px;bottom:40px}
 #btnPunch{right:198px;bottom:40px}
-#powerPicker{position:absolute;right:14px;bottom:128px;display:none;gap:10px}
+#powerPicker{position:absolute;right:106px;bottom:140px;display:none;gap:10px}
 #powerPicker.show{display:flex}
 #powerPicker button{width:52px;height:52px;border-radius:50%;border:2px solid #f4c542;background:#1a1f33;color:#f4c542;font:inherit;font-size:13px;font-weight:bold}
 #powerPicker button:disabled{opacity:.3}
@@ -58,9 +59,10 @@ body.reduce-motion .cbtn.pulse{animation:none;box-shadow:0 0 24px 8px rgba(244,1
    mirrored offsets. */
 body.left-handed #btnBlock{left:auto;right:22px}
 body.left-handed #btnPower{right:auto;left:22px}
+body.left-handed #btnHeavy{right:auto;left:22px}
 body.left-handed #btnKick{right:auto;left:110px}
 body.left-handed #btnPunch{right:auto;left:198px}
-body.left-handed #powerPicker{right:auto;left:14px}
+body.left-handed #powerPicker{right:auto;left:106px}
 /* Positioned in JS (G.positionToast, called from G.fit on load/resize) off canvas.getBoundingClientRect()
    so it tracks the canvas box exactly (not #wrap, which can letterbox at other aspect ratios); left/top/
    max-width are set inline per call. */
@@ -319,7 +321,7 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
    while G.mode==='tutorial' (G.tick's own gate) and hidden by G.toTitle/backToOrigin/startFight. */
 #tutorialPrompt{position:fixed;transform:translateX(-50%);font-size:12px;font-weight:bold;
   letter-spacing:.5px;color:#111;background:#f4c542;border-radius:20px;padding:6px 14px;
-  text-align:center;white-space:nowrap;pointer-events:none;display:none;
+  text-align:center;width:max-content;text-wrap:balance;pointer-events:none;display:none;
   box-shadow:0 2px 8px rgba(0,0,0,.4);z-index:1}
 #tutorialPrompt.show{display:block}
 #tutorialPrompt.flash{background:#8cf4c5}
@@ -338,6 +340,7 @@ body.reduce-motion .node.next{animation:none;box-shadow:0 0 0 4px rgba(244,197,6
 <button id="btnBlock" class="cbtn atkbtn" data-label="BLOCK"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 19.5 5.5V11C19.5 16 16 20 12 21.5 8 20 4.5 16 4.5 11V5.5Z"/></svg></button>
 <button id="btnPunch" class="cbtn atkbtn" data-label="PUNCH"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><rect x="7" y="9" width="12" height="10" rx="3"/><circle cx="9.5" cy="7" r="2.3"/><circle cx="13" cy="6" r="2.3"/><circle cx="16.5" cy="7" r="2.3"/><rect x="4" y="11" width="5" height="6" rx="2.4"/></svg></button>
 <button id="btnKick" class="cbtn atkbtn" data-label="KICK"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M9 2h5v10.5l5.2 2.3c1 .45 1.8 1.4 1.8 2.6V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4.2C4 11.3 6.2 9.4 9 9.4z"/></svg></button>
+<button id="btnHeavy" class="cbtn" data-label="HEAVY"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M3 3h13a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-3.5v10a1.5 1.5 0 0 1-3 0V11H3z"/></svg></button>
 <button id="btnPower" class="cbtn" data-label="POWER"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M13 1 3 14h6.5L8.5 23 21 9h-7z"/></svg></button>
 <div id="powerPicker"><button id="pk1">S1</button><button id="pk2">S2</button><button id="pk3">S3</button></div>
 </div>
@@ -499,7 +502,7 @@ const Meta={
       // Task 6.3: showButtons (BLOCK/PUNCH/KICK on-screen, default off now that the whole canvas is
       // a gesture surface -- POWER stays shown regardless) backfills for free through migrate()'s
       // existing per-key settings loop below, same story as every other key in this object.
-      settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true,showButtons:false},
+      settings:{reduceMotion:false,haptics:true,leftHanded:false,useAtlas:false,sfx:true,announcer:true,showButtons:false,fighters3d:false},
       // Task 5.3: a plain top-level boolean, same free-ride-through-migrate() story as leaderboard/
       // pity above -- a pre-5.3 v2 save picks it up for free via migrate()'s generic "fill anything
       // top-level missing" loop below, no dedicated migrate branch needed. false until G.onFightEnd
@@ -1400,10 +1403,16 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
   // whether or not they're currently visible.
   bindButtons(){
     const id=x=>document.getElementById(x);
-    const block=id('btnBlock');
-    block.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.held.block=true});
-    const blockOff=()=>{this.held.block=false};
-    block.addEventListener('pointerup',blockOff);block.addEventListener('pointercancel',blockOff);
+    // Held buttons capture their pointer so a drag off the button still ends on it, and every end
+    // path (up, cancel, lost capture) clears the hold; a stuck block/heavy would keep charging forever.
+    const holdButton=(el,key)=>{
+      el.addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.held[key]=true;
+        try{el.setPointerCapture(e.pointerId)}catch(_){}});
+      const off=()=>{this.held[key]=false};
+      el.addEventListener('pointerup',off);el.addEventListener('pointercancel',off);
+      el.addEventListener('lostpointercapture',off)};
+    holdButton(id('btnBlock'),'block');
+    holdButton(id('btnHeavy'),'heavy');
     id('btnPunch').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('light')});
     id('btnKick').addEventListener('pointerdown',e=>{e.stopPropagation();Audio.init();this.q.push('medium')});
     const power=id('btnPower'),picker=id('powerPicker');
@@ -1421,6 +1430,9 @@ const Input={q:[],held:{block:false,heavy:false},_ptr:null,pointerLog:[],
   // picker. DASH_BACK.frames (40_movedata.js) is counted here as SIM FRAMES elapsed since a dashBack
   // fired, not wall time -- one increment per tick() call while that pointer is still down, matching
   // the real DASH state's own duration exactly.
+  // Drops every held input and the in-flight canvas gesture; called whenever a fight starts, ends or pauses,
+  // since the matching pointerup may never reach us once the fight screen is gone.
+  releaseHolds(){this._ptr=null;this.held.block=false;this.held.heavy=false},
   tick(){const P=this._ptr;
     if(P){
       if(!P.dashDir&&!P.blockOn&&!P.drifted&&this.now()-P.t0>=this.GESTURE.BLOCK_HOLD_FRAMES){
@@ -8142,6 +8154,41 @@ const Rig={
     return cnv}};
 for(const id in DEFS)if(LOOKS[id])DEFS[id].look=LOOKS[id];
 
+// The off-by-default switch for the 3D fighters: until it's on, the page requests no 3D file and opens no WebGL context.
+const Gate3D={
+  state:'off', // off, loading, ready or failed
+  lost:false,
+  queryOn(search){return /(?:^|[?&])3d=1(?:&|$)/.test(search)},
+  wanted(){return !!(Save.data&&Save.data.settings&&Save.data.settings.fighters3d)||this.queryOn(location.search)},
+  active(){return this.state==='ready'&&!this.lost&&this.wanted()},
+  // Called whenever the setting may have changed, so flipping it never needs a reload.
+  sync(){
+    if(this.wanted())this.load();
+    if(this.state==='ready')Render3D.show(this.active())},
+  // three.js logs a console error when it can't get a context, so the context is opened here first and handed over.
+  load(){
+    if(this.state!=='off')return;
+    const cv=document.createElement('canvas');
+    let gl=null;
+    try{gl=cv.getContext('webgl2',{alpha:true,premultipliedAlpha:true,antialias:true,stencil:false,powerPreference:'high-performance'})}catch(e){}
+    if(!gl){this.state='failed';return}
+    this.state='loading';
+    const add=(src,next)=>{
+      const s=document.createElement('script');s.src=src;
+      s.onload=next;s.onerror=()=>{this.state='failed'};
+      document.head.appendChild(s)};
+    add('three.min.js',()=>add('render3d.js',()=>{
+      try{Render3D.init(cv,gl);this.state='ready';this.sync()}
+      catch(e){console.warn('3D fighters off: '+e.message);this.state='failed'}}))},
+  handles(F){return this.active()&&Render3D.supports(lookFor(F.def).id)},
+  overlay(){return this.active()?Render3D.top:null},
+  fit(){if(this.state==='ready')Render3D.fit()},
+  // A renderer fault must cost the player the preview, never the fight.
+  frame(f,cam){
+    if(!this.active())return;
+    try{Render3D.frame(f,cam)}
+    catch(e){console.warn('3D fighters off: '+e.message);this.state='failed';Render3D.show(false)}}};
+
 const Render={ctx:canvas.getContext('2d'),
   // HUD statics (title glyph, chevron cell masks) never change frame to frame, so they're baked into
   // offscreen canvases once and just drawImage'd every frame instead of re-running the path/gradient/
@@ -8286,14 +8333,16 @@ const Render={ctx:canvas.getContext('2d'),
   // just off bodyLen (the long axis of a horizontal quadruped body) instead of shoulder width.
   shadow(c,F){const look=lookFor(F.def),scale=F.def.scale||1,
       w=(look.rig==='quad'?look.bodyLen*1.15:look.shoulderW*1.6)*scale;
-    c.save();c.globalAlpha=.35;c.fillStyle='#000';
-    c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore();
+    // The 3D layer lays its own contact shadow, which follows the pose.
+    if(!Gate3D.handles(F)){c.save();c.globalAlpha=.35;c.fillStyle='#000';
+      c.beginPath();c.ellipse(F.x,FLOOR,w/2,w*.16,0,0,Math.PI*2);c.fill();c.restore()}
     // Task 8.3: a wet-floor specular streak under the fighter's own feet, tinted/brightened by
     // whichever torch is nearest THIS fighter's x (Stage.lightAt) so the floor reads as reflecting
     // the same torchlight the fighter stands in. streakGeom is a pure function of (F,lit) -- no
     // canvas access -- purely so "the streak follows fighter x" is assertable without a canvas mock.
     const g=this.streakGeom(F,Stage.lightAt(F.x));
-    c.save();c.globalAlpha=g.alpha;c.fillStyle=g.tint;
+    // Under a solid figure the streak has to sit inside the contact shadow, not glow around it.
+    c.save();c.globalAlpha=g.alpha*(Gate3D.handles(F)?.4:1);c.fillStyle=g.tint;
     c.beginPath();c.ellipse(g.x,FLOOR+3,g.w/2,g.w*.09,0,0,Math.PI*2);c.fill();c.restore()},
   // Pure geometry for the specular streak above: {x, w, alpha, tint}. x always equals F.x (the
   // ruling's "follows fighter x"); w scales off the same footprint shadow() sizes off; alpha rides
@@ -8304,10 +8353,11 @@ const Render={ctx:canvas.getContext('2d'),
     return{x:F.x,w:w*.7,alpha:.16+.26*lit.k,tint:lit.tint}},
   fighter(c,F,cam,frame){
     const flash=F.state==='HITSTUN'&&F.f<3,lit=Stage.lightAt(F.x);
-    if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame,lit);c.filter='none';c.restore()}
-    else{Rig.draw(c,F,cam,frame,lit);
-      if(flash){c.save();c.globalAlpha=.45;c.fillStyle='#fff';
-        c.fillRect(F.x-F.width,FLOOR-140*(F.def.scale||1),F.width*2,140*(F.def.scale||1));c.restore()}}
+    if(!Gate3D.handles(F)){
+      if(flash&&'filter'in c){c.save();c.filter='brightness(2)';Rig.draw(c,F,cam,frame,lit);c.filter='none';c.restore()}
+      else{Rig.draw(c,F,cam,frame,lit);
+        if(flash){c.save();c.globalAlpha=.45;c.fillStyle='#fff';
+          c.fillRect(F.x-F.width,FLOOR-140*(F.def.scale||1),F.width*2,140*(F.def.scale||1));c.restore()}}}
     // Fix-wave item 1: both above-the-head overlays now draw in SCREEN space (this function runs
     // inside Render.frame's still-applied camera transform; c.save/setTransform(identity)/c.restore
     // scopes the reset to just this one draw) at overlayScreenY's clamped y, so neither can ever
@@ -8733,7 +8783,7 @@ const Render={ctx:canvas.getContext('2d'),
     if(cinematic>=54)return Math.min(1,(72-cinematic)/18);
     if(cinematic>=6)return 1;
     return cinematic/5},
-  frame(f){const c=this.ctx,cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
+  frame(f){let c=this.ctx;const cam=G.cam||{x:STAGE_W/2,zoom:1},fr=f?f.frame:0;
     this.hudCache(); // built once, before any HUD draw so it's ready whether or not f/hud runs this call
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);
     Camera.apply(c,cam);
@@ -8752,9 +8802,15 @@ const Render={ctx:canvas.getContext('2d'),
     // check skips entirely) whenever no fight is up or no S3 is playing.
     Stage.draw(c,cam,fr,Stage.build(G.encounter&&G.encounter.floor===2?'sewers':'doorway'),f?this.s3Desat(f.cinematic):0);
     if(f){
-      this.reflection(c,f.p1,cam,fr);this.reflection(c,f.p2,cam,fr);
+      if(!Gate3D.handles(f.p1))this.reflection(c,f.p1,cam,fr);
+      if(!Gate3D.handles(f.p2))this.reflection(c,f.p2,cam,fr);
       this.shadow(c,f.p1);this.shadow(c,f.p2);
       this.fighter(c,f.p1,cam,fr);this.fighter(c,f.p2,cam,fr)}
+    Gate3D.frame(f,cam);
+    // Sparks, the S3 card and the HUD have to read on top of the fighters, so with WebGL up they move to the 2D layer above it.
+    const top=Gate3D.overlay();
+    if(top){c=top;c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);Camera.apply(c,cam);
+      if(Math.abs(FX.shake.x)>0.05||Math.abs(FX.shake.y)>0.05)c.translate(FX.shake.x/cam.zoom,FX.shake.y/cam.zoom)}
     FX.draw(c,cam,fr);
     c.setTransform(1,0,0,1,0,0);
     if(FX.flash>0){c.globalAlpha=Math.min(1,FX.flash/6);c.fillStyle='#fff';c.fillRect(0,0,W,H);c.globalAlpha=1}
@@ -9213,15 +9269,13 @@ const Tutorial={
   // G.startTutorial now removes entirely (clock:Infinity -- see its own comment). _stepFrames counts
   // sim frames since the CURRENT step became current (reset on every advance, see reset()/tick()
   // below); STALL_FRAMES is how long any step is given before `stalled` flips true and its own
-  // fallback hint layers onto the prompt (HINTS below); FORCE_FRAMES is a second, later threshold
-  // (lessons 2-3 only) that temporarily forces the attack/block buttons back on for a player who
-  // still hasn't found them.
-  STALL_FRAMES:600,FORCE_FRAMES:1500,_stepFrames:0,stalled:false,
+  // fallback hint layers onto the prompt (HINTS below).
+  STALL_FRAMES:600,_stepFrames:0,stalled:false,
   // Fix-wave item 1: per-step fallback hints, appended to the step's own prompt once STALL_FRAMES has
   // passed with no progress -- lesson 4 (POWER) keeps its own pre-existing wording (the one hint the
   // final review's first-play walkthrough specifically called out).
   HINTS:['Tap anywhere on the screen','Swipe right anywhere to kick — or tap KICK',
-    'Hold anywhere to block, let go as the flash hits','TAP THE GLOWING POWER BUTTON'],
+    'Press BLOCK as the kick connects, then hold HEAVY','TAP THE GLOWING POWER BUTTON'],
   // Task 6.4 (frozen prompt text): rewritten for the whole-canvas gestures -- lessons 1-2 also point
   // at the real BLOCK/PUNCH/KICK buttons ("(or tap PUNCH)"/"(or tap KICK)"), which G.startTutorial/
   // Tutorial.tick (below) force on (G.forceButtons) for exactly those two lessons, per the plan
@@ -9238,7 +9292,7 @@ const Tutorial={
   steps:[
     {prompt:'TAP to punch — land 3 hits (or tap PUNCH)',done:()=>Tutorial._lights>=3},
     {prompt:'SWIPE RIGHT to kick (or tap KICK)',done:fight=>!!(fight&&fight.p1&&fight.p1.moveName==='medium')},
-    {prompt:'HOLD to block, release as the hit lands to PARRY — then HOLD to charge a HEAVY and PUNISH',done:()=>Tutorial._punished},
+    {prompt:'BLOCK just as the hit lands to PARRY — then hold HEAVY to PUNISH',done:()=>Tutorial._punished},
     {prompt:'POWER — fire a special',
       done:fight=>!!(fight&&fight.p1&&(fight.p1.moveName==='s1'||fight.p1.moveName==='s2'||fight.p1.moveName==='s3'))}],
   reset(){
@@ -9299,14 +9353,6 @@ const Tutorial={
     if(!this.stalled&&this._stepFrames>=this.STALL_FRAMES){
       this.stalled=true;
       this.prompt=this.steps[step].prompt+' — '+this.HINTS[step]}
-    // Fix-wave item 1: past FORCE_FRAMES on lesson 2 or 3 specifically (steps 1/2 -- the two lessons
-    // that normally decide BLOCK/PUNCH/KICK visibility on their own, see G.startTutorial/the step===2
-    // transition below), temporarily force the attack buttons back on for a player who's still stuck
-    // well past the stall hint -- lesson 2 already shows them by default so this is a no-op there, but
-    // lesson 3 (block) normally hides them once lesson 2 ends, and a player who can't find the
-    // whole-canvas hold gesture benefits from BLOCK reappearing as a real, visible fallback target.
-    if((step===1||step===2)&&this._stepFrames>=this.FORCE_FRAMES&&typeof G!=='undefined'&&!G.forceButtons){
-      G.forceButtons=true;G.applySettings()}
     if(this.steps[step].done(fight)){
       this.state.done[step]=true;this._flash=30;this.state.step++;
       this._stepFrames=0;this.stalled=false;
@@ -9316,16 +9362,8 @@ const Tutorial={
       // actually has ground to cover -- lesson 1 leaves it close (see G.startTutorial's own spawn),
       // so without this the dummy would still be sitting inside light range when lesson 2 begins.
       if(this.state.step===1&&fight.p2)fight.p2.x=fight.p1.x+260;
-      // Task 6.4: BLOCK/PUNCH/KICK are only forced on for lessons 1-2 (set true by G.startTutorial,
-      // reset here the instant lesson 3 begins) -- from lesson 3 on, the player's own showButtons
-      // setting is all that's left deciding it (G.applySettings ORs forceButtons with the setting).
-      // Fix-wave item 1: this also clears any FORCE_FRAMES stall-force from lesson 2 above, so lesson
-      // 3 starts exactly as before (buttons hidden unless the player's own setting shows them, or its
-      // own stall force kicks back in) rather than inheriting lesson 2's forced-on state.
-      if(this.state.step===2&&typeof G!=='undefined'){G.forceButtons=false;G.applySettings()}
-      // Fix-wave item 1: same reset leaving lesson 3 (entering POWER) -- clears any stall-force lesson
-      // 3 itself armed, so POWER's own stall hint (pulsing #btnPower) is the only thing left pointing
-      // at anything once every attack button lesson is behind the player.
+      // Lessons 1-3 name BLOCK/PUNCH/KICK on screen, so G.startTutorial's forceButtons stays on until lesson 4.
+      // Entering POWER hides the attack buttons again so its pulsing #btnPower hint is the only pointer.
       if(this.state.step===3&&typeof G!=='undefined'){G.forceButtons=false;G.applySettings()}
       // Fix-wave item 6: the guardActive clear + shieldDown fx are deferred to tick()'s own top-of-
       // function check above (fight.p1 back to IDLE) instead of firing right here -- see that check's
@@ -9371,7 +9409,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
   // already caps gameplay at 1.12; 1.28 is the S3 cinematic punch-in) so a Camera.update before any
   // startFight (shouldn't happen, but tests instantiate G without always calling it) behaves exactly
   // as it did before this existed.
-  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast();this.positionTutorialPrompt();this.checkOrientation()},
+  fit(){const s=Math.min(innerWidth/W,innerHeight/H);canvas.style.width=Math.floor(W*s)+'px';canvas.style.height=Math.floor(H*s)+'px';this.positionToast();this.positionTutorialPrompt();this.checkOrientation();Gate3D.fit()},
   // Positions #toast off the canvas's own box (canvas.getBoundingClientRect()), not #wrap, so it
   // tracks the actual displayed game area exactly even when #wrap letterboxes the canvas at an
   // aspect ratio other than W/H. Fix round 2: moved from just under the HUD's floor-line text to
@@ -9439,7 +9477,11 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     if(lesson){lesson.style.left=(r.left+r.width/2)+'px';lesson.style.top=(r.top+108*sy)+'px'}
     if(!el)return;
     el.style.left=(r.left+r.width/2)+'px';
-    el.style.top=(r.top+132*sy)+'px'},
+    // Long prompts wrap inside the canvas's on-screen width, and between the button columns (22px
+    // inset + 76px button + 6px gap each side) so the always-visible HEAVY button never sits on the text;
+    // the top sits below the lesson banner (~24px tall) even when a short canvas scales the fixed 132 up past it.
+    el.style.maxWidth=Math.floor(Math.min(r.width*.9,r.width-2*(22+76+6)))+'px';
+    el.style.top=(r.top+Math.max(132*sy,108*sy+24))+'px'},
   // Called once per tutorial-mode tick (see tick() below): mirrors Tutorial.prompt/._flash onto the
   // DOM overlay every frame -- cheap (a textContent/classList write only, no layout work beyond what
   // positionTutorialPrompt already did once at fit()) and simpler than trying to diff for changes,
@@ -9484,6 +9526,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // SETTINGS or the tutorial is forcing them on for its early lessons (G.forceButtons, Task 6.4) --
     // POWER (not an .atkbtn) is unaffected and always shows during a fight.
     document.body.classList.toggle('show-atk',!!(Save.data.settings.showButtons||this.forceButtons));
+    Gate3D.sync();
     this.positionToast()},
   // Pure function of (viewport w/h, is-a-touch-device) — no window/navigator read of its own — so
   // tests can drive every truth-table cell directly, per the frozen interface. Portrait AND a touch
@@ -9683,7 +9726,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // Fresh throttle window per fight so the opening announcer line always fires immediately,
     // regardless of how recently the previous fight's last toast landed.
     this.frameNow=0;this._sayAt=-999;
-    this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);
+    Input.releaseHolds();this.state='FIGHT';this.show('title',false);this.show('result',false);this.show('pauseMenu',false);
     // Task 4.5: a fight can be launched from any browsing screen (a map node, arena's FIGHT,
     // exhibition off the title screen) -- hide whichever one is still up so it doesn't linger over
     // the fight underneath.
@@ -9713,7 +9756,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     // by a timer running out -- an idle/tap-only player who never advances past lesson 2 used to sit
     // there until the clock expired and then be handed the FULL completion grant (gold, free crystal,
     // tutorialDone) having learned exactly one move. Pairs with the per-step stall timer above
-    // (Tutorial.STALL_FRAMES/HINTS/FORCE_FRAMES), which is what actually moves a stuck player forward
+    // (Tutorial.STALL_FRAMES/HINTS), which is what actually moves a stuck player forward
     // now that the clock can't do it for them.
     const started=this.startFight(Object.assign({},o,{encounter:'tutorial',mode:'tutorial',clock:Infinity,
       ctrl2:o.ctrl2||Ctrl.tutorialDummy(o.seed||1),
@@ -10051,7 +10094,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
       const scoreCtx=this.mode==='quest'?{floor:this.questTarget.floor}:{streak:Save.data.arena.streak};
       Meta.recordScore(Object.assign({viewers:peakViewers,champ:this.champ,
         date:Meta.today()},scoreCtx))}
-    this.state='RESULT';
+    Input.releaseHolds();this.state='RESULT';
     if(typeof Screens!=='undefined'&&Screens.result)Screens.result(rewards,won,peakViewers);
     else{
       document.getElementById('resultTitle').textContent=won?'VICTORY':'DEFEATED';
@@ -10101,14 +10144,14 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     p.state=m.state;p.f=m.f;
     if(m.stun!==undefined)p.stun=m.stun;
     this.sim=true},
-  togglePause(){if(this.state==='FIGHT'){this.state='PAUSED';this.show('pauseMenu',true)}else if(this.state==='PAUSED'){this.state='FIGHT';this.show('pauseMenu',false);this.acc=0}},
+  togglePause(){Input.releaseHolds();if(this.state==='FIGHT'){this.state='PAUSED';this.show('pauseMenu',true)}else if(this.state==='PAUSED'){this.state='FIGHT';this.show('pauseMenu',false);this.acc=0}},
   // Task 4.5: browsing (title/map/roster/crystal/shop/arena) all share G.state='TITLE' -- the same
   // generic "not fighting" value togglePause/Input already gate on -- so no new state value is
   // needed; which overlay is actually on screen is Screens' own concern (Screens._current). toTitle
   // always lands on the title screen specifically (tests call this directly and expect exactly
   // that); backToOrigin (below) is the "go back to wherever this fight was launched from" version,
   // used by the pause menu's QUIT and the result overlay's CONTINUE button.
-  toTitle(){this.campaignJustCompleted=false;this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+  toTitle(){Input.releaseHolds();this.campaignJustCompleted=false;this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
     // Task 6.4: an unconditional reset, so leaving the tutorial mid-lesson (before Tutorial.tick's own
     // step===2 transition ever turns it back off) can never leave BLOCK/PUNCH/KICK stuck forced-on
@@ -10117,7 +10160,7 @@ const G={state:'TITLE',fight:null,encounter:null,acc:0,last:0,sim:false,debug:fa
     this.forceButtons=false;this.applySettings();
     if(typeof Screens!=='undefined')Screens.show('title');
     else{this.show('pauseMenu',false);this.show('result',false);this.show('btns',false);this.show('title',true)}},
-  backToOrigin(){this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
+  backToOrigin(){Input.releaseHolds();this.state='TITLE';this.fight=null;this.encounter=null;this.cinemFocus=null;
     this.hideTutorialPrompt();
     this.forceButtons=false;this.applySettings(); // Task 6.4: see toTitle's own comment
     // The CONTINUE after the win that finished the campaign goes to the campaign-complete screen once.
@@ -10458,6 +10501,8 @@ const Screens={
     // Task 5.3: a fresh save (!Save.data.tutorialDone) routes CAMPAIGN to the tutorial instead of the
     // map -- checked fresh on every click (not just latched at load), so CAMPAIGN opens the map as
     // usual again the instant tutorialDone flips true, with no separate "first run" flag to track.
+    // The first-run label names what the button does so a new player can find the tutorial.
+    document.getElementById('btnCampaign').textContent=Save.data.tutorialDone?'CAMPAIGN':'START TUTORIAL';
     document.getElementById('btnCampaign').onclick=()=>{
       if(!Save.data.tutorialDone){Screens._origin={name:'map',args:[1]};G.startTutorial();return}
       const n=Screens.lastFloor();
@@ -10489,6 +10534,7 @@ const Screens={
     // wiring needed here.
     {key:'showButtons',label:'SHOW ATTACK BUTTONS'},
     {key:'useAtlas',label:'USE SPRITE ATLAS'},
+    {key:'fighters3d',label:'3D FIGHTERS (PREVIEW)'},
     {key:'sfx',label:'SOUND EFFECTS'},
     {key:'announcer',label:'ANNOUNCER TEXT'}],
   renderSettings(){
@@ -15438,6 +15484,20 @@ Test.add('a fresh save\'s CAMPAIGN button starts the tutorial instead of opening
   document.getElementById('btnCampaign').click();
   eq(Screens._current,'map','CAMPAIGN must open the map once tutorialDone is true');
   G.toTitle()});
+Test.add('the title\'s first button reads START TUTORIAL on a fresh save and starts it; with tutorialDone it reads CAMPAIGN and opens the map',()=>{
+  Save.data=Meta.defaults();
+  Screens.title();
+  const b=document.getElementById('btnCampaign');
+  eq(b.textContent.trim(),'START TUTORIAL');
+  b.click();
+  eq(G.mode,'tutorial','START TUTORIAL must start the tutorial');
+  G.toTitle();
+  Save.data.tutorialDone=true;
+  Screens.title();
+  eq(document.getElementById('btnCampaign').textContent.trim(),'CAMPAIGN');
+  document.getElementById('btnCampaign').click();
+  eq(Screens._current,'map','CAMPAIGN must open the map once tutorialDone is true');
+  G.toTitle()});
 Test.add('the result screen shows a TUTORIAL COMPLETE line on a tutorial win',()=>{
   Save.data=Meta.defaults();
   G.startTutorial({ctrl1:Ctrl.script([L(0,600)]),ctrl2:Ctrl.idle()});
@@ -15509,7 +15569,89 @@ Test.add('lesson 2 (a landed medium) backs the dummy off to 260px so the kick\'s
   eq(Tutorial.state.step,1);
   eq(p2.x,p1.x+260,'the dummy must back off to exactly 260px at the start of lesson 2');
   Tutorial.reset()});
-Test.add('G.forceButtons is forced on for lessons 1-2 and turns back off from lesson 3 onward',()=>{
+Test.add('#btnHeavy is shown in every fight like POWER, sets held.heavy on press and clears it on release or cancel',()=>{
+  Save.data=Meta.defaults();Save.data.settings.showButtons=false;G.applySettings();
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
+  const h=document.getElementById('btnHeavy');
+  ok(h,'#btnHeavy must exist');
+  eq(h.dataset.label,'HEAVY');
+  ok(h.classList.contains('cbtn')&&!h.classList.contains('atkbtn'),'HEAVY is a .cbtn, not an .atkbtn hidden by the showButtons setting');
+  ok(getComputedStyle(h).display!=='none','HEAVY shows even with showButtons off');
+  h.dispatchEvent(new PointerEvent('pointerdown',{pointerId:11,bubbles:true}));eq(Input.held.heavy,true);
+  h.dispatchEvent(new PointerEvent('pointerup',{pointerId:11,bubbles:true}));eq(Input.held.heavy,false);
+  h.dispatchEvent(new PointerEvent('pointerdown',{pointerId:12,bubbles:true}));eq(Input.held.heavy,true);
+  h.dispatchEvent(new PointerEvent('pointercancel',{pointerId:12,bubbles:true}));eq(Input.held.heavy,false);
+  eq(Input.q.length,0,'pressing HEAVY must not queue a kick or any other action');
+  G.toTitle()});
+Test.add('pressing #btnHeavy from standing starts a heavy on the next sim frame, with no kick first',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  G.sim=true;G.tick();
+  document.getElementById('btnHeavy').dispatchEvent(new PointerEvent('pointerdown',{pointerId:13,bubbles:true}));
+  G.tick();
+  eq(G.fight.p1.moveName,'heavy','the first move after pressing HEAVY must be the heavy');
+  eq(G.fight.p1.state,'CHARGE');
+  document.getElementById('btnHeavy').dispatchEvent(new PointerEvent('pointerup',{pointerId:13,bubbles:true}));
+  G.toTitle();G.sim=false});
+Test.add('BLOCK and HEAVY holds clear when pointer capture is lost, and on pause, fight end and leaving the fight',()=>{
+  Save.data=Meta.defaults();
+  G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  const down=(id,pid)=>document.getElementById(id).dispatchEvent(new PointerEvent('pointerdown',{pointerId:pid,bubbles:true}));
+  for(const [id,key] of [['btnHeavy','heavy'],['btnBlock','block']]){
+    down(id,21);eq(Input.held[key],true);
+    document.getElementById(id).dispatchEvent(new PointerEvent('lostpointercapture',{pointerId:21,bubbles:true}));
+    eq(Input.held[key],false,id+': a lost pointer capture (released off the button) must clear the hold')}
+  down('btnHeavy',22);down('btnBlock',23);
+  G.togglePause();
+  eq(Input.held.heavy,false,'pausing clears HEAVY');eq(Input.held.block,false,'pausing clears BLOCK');
+  G.togglePause();
+  down('btnHeavy',24);down('btnBlock',25);
+  G.onFightEnd(true);
+  eq(Input.held.heavy,false,'a fight ending clears HEAVY');eq(Input.held.block,false,'a fight ending clears BLOCK');
+  down('btnHeavy',26);G.startFight({seed:1,p1:'carl',p2:'donut',ai:'dummy',ctrl1:Ctrl.player(),ctrl2:Ctrl.idle()});
+  eq(Input.held.heavy,false,'a new fight starts with nothing held');
+  down('btnHeavy',27);down('btnBlock',28);G.toTitle();
+  eq(Input.held.heavy,false,'leaving the fight clears HEAVY');eq(Input.held.block,false,'leaving the fight clears BLOCK')});
+Test.add('the open power picker clears the HUD and every on-screen button, in both hands',()=>{
+  Save.data=Meta.defaults();Save.data.settings.showButtons=true;
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});G.applySettings();
+  const rc=id=>document.getElementById(id).getBoundingClientRect();
+  const hit=(a,b)=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom;
+  const cv=canvas.getBoundingClientRect(),hudBottom=cv.top+HUD_LINE*cv.height/H;
+  document.getElementById('powerPicker').classList.add('show');
+  for(const lh of [false,true]){
+    document.body.classList.toggle('left-handed',lh);
+    for(const pk of ['pk1','pk2','pk3']){
+      ok(rc(pk).top>=hudBottom,pk+' must sit below the HUD'+(lh?' (left-handed)':''));
+      for(const b of ['btnBlock','btnPunch','btnKick','btnHeavy','btnPower'])
+        ok(!hit(rc(pk),rc(b)),pk+' must not overlap '+b+(lh?' (left-handed)':''))}}
+  document.body.classList.remove('left-handed');document.getElementById('powerPicker').classList.remove('show');
+  Save.data.settings.showButtons=false;G.applySettings();G.toTitle()});
+Test.add('#btnHeavy sits clear of the other on-screen buttons and the power picker, and mirrors when left-handed',()=>{
+  Save.data=Meta.defaults();Save.data.settings.showButtons=true;
+  G.startFight({p2:'donut',ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});G.applySettings();
+  const rc=id=>document.getElementById(id).getBoundingClientRect();
+  const hit=(a,b)=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom;
+  document.getElementById('powerPicker').classList.add('show');
+  for(const lh of [false,true]){
+    document.body.classList.toggle('left-handed',lh);
+    const h=rc('btnHeavy');
+    for(const other of ['btnBlock','btnPunch','btnKick','btnPower','pk1','pk2','pk3'])
+      ok(!hit(h,rc(other)),'HEAVY must not overlap '+other+(lh?' (left-handed)':''));
+    ok(h.width>=44&&h.height>=44,'HEAVY is a real touch target');
+    ok(h.left>=0&&h.top>=0&&h.right<=innerWidth&&h.bottom<=innerHeight,'HEAVY is inside the viewport');
+    eq(Math.sign(h.left-rc('btnBlock').left),lh?-1:1,'HEAVY is on the same side as POWER, opposite BLOCK');
+  }
+  document.body.classList.remove('left-handed');
+  document.getElementById('powerPicker').classList.remove('show');
+  Save.data.settings.showButtons=false;G.applySettings();G.toTitle()});
+Test.add('lesson 3 names the real mechanics: BLOCK to parry, then hold HEAVY to punish, in the prompt and the stall hint',()=>{
+  const p=Tutorial.steps[2].prompt,h=Tutorial.HINTS[2];
+  ok(/BLOCK/.test(p)&&/PARRY/.test(p)&&/HEAVY/.test(p)&&/PUNISH/.test(p),'prompt: '+p);
+  ok(/BLOCK/.test(h)&&/HEAVY/.test(h),'hint: '+h);
+  ok(!/HOLD to block|anywhere|charge/i.test(p+h),'must not describe the old canvas-hold heavy');
+  ok(p.length<=70,'prompt must stay short enough for two lines on a phone: '+p.length)});
+Test.add('G.forceButtons is forced on for lessons 1-3 and turns back off from lesson 4 onward',()=>{
   Save.data=Meta.defaults();
   G.startTutorial({ctrl1:Ctrl.idle(),ctrl2:Ctrl.idle()});
   eq(G.forceButtons,true,'lesson 1 must force the attack buttons on');
@@ -15522,7 +15664,10 @@ Test.add('G.forceButtons is forced on for lessons 1-2 and turns back off from le
   G.fight.p1.moveName='medium';
   Tutorial.tick(G.fight); // a started medium -- advances lesson 2 -> lesson 3
   eq(Tutorial.state.step,2,'sanity: must have advanced into lesson 3');
-  eq(G.forceButtons,false,'lesson 3 must turn the forced buttons back off');
+  eq(G.forceButtons,true,'lesson 3 must keep BLOCK on screen: its prompt names it');
+  Tutorial._punished=true;
+  Tutorial.tick(G.fight); // a landed punish -- advances lesson 3 -> lesson 4
+  eq(G.forceButtons,false,'lesson 4 must turn the forced buttons back off');
   G.toTitle();
   eq(G.forceButtons,false,'leaving the tutorial must never leave the buttons stuck forced-on');
   G.sim=false});
@@ -19079,6 +19224,7 @@ Test.add('migrate: a broken top-level record becomes its default and every other
   for(const bad of [null,[],7,'x'])for(const k of ['cats','energy','arena','stats','settings','pity']){
     const s=playedV2();s[k]=bad;
     const out=Meta.migrate(s),want=playedV2();
+    want.settings.fighters3d=false; // this older save predates the key, so it arrives at its default
     eq(JSON.stringify(out[k]),JSON.stringify(Meta.defaults()[k]),k+' repaired from '+JSON.stringify(bad));
     for(const j in want)if(j!==k&&j!=='v'&&j!=='floors')eq(JSON.stringify(out[j]),JSON.stringify(want[j]),j+' kept while '+k+' broke')}});
 Test.add('migrate: missing keys inside cats/energy/arena/stats/settings are filled, present ones kept',()=>{
@@ -19373,5 +19519,93 @@ Test.add('shop screen renders a labelled class picker and each choice buys its c
   Save.data.gold=classCatPrice()-1;Screens.refresh();
   eq(document.getElementById('buyClassCatalyst_tank').disabled,true,'disabled when short');
   Screens.title()});
+// ---- 3D fighters preview: the switch and the 2D/3D seam, none of which needs WebGL to run ----
+Test.add('3D switch: fighters3d is off in a fresh save',()=>{
+  eq(Meta.defaults().settings.fighters3d,false)});
+Test.add('3D switch: Settings has a 3D FIGHTERS (PREVIEW) row bound to fighters3d',()=>{
+  const row=Screens.SETTINGS_ROWS.find(r=>r.key==='fighters3d');
+  ok(row,'no settings row for fighters3d');eq(row.label,'3D FIGHTERS (PREVIEW)')});
+Test.add('3D switch: an older v3 save without the key loads with it off and keeps its progress',()=>{
+  const backup=localStorage.getItem(Save.key);
+  try{
+    const old=Meta.defaults();
+    old.gold=4321;old.units=17;old.iso=99;old.tutorialDone=true;old.settings.leftHanded=true;
+    old.roster.katia={stars:2,rank:2,level:7,xp:5,shards:3};
+    delete old.settings.fighters3d;
+    localStorage.setItem(Save.key,JSON.stringify(old));
+    Save.load();
+    eq(Save.data.settings.fighters3d,false);
+    eq(Save.data.gold,4321);eq(Save.data.units,17);eq(Save.data.iso,99);eq(Save.data.tutorialDone,true);
+    eq(Save.data.settings.leftHanded,true);eq(Save.data.roster.katia.level,7);eq(Save.data.roster.katia.stars,2)
+  }finally{
+    if(backup===null)localStorage.removeItem(Save.key);else localStorage.setItem(Save.key,backup);
+    Save.load()}});
+Test.add('3D switch: a v1 and a v2 save also come out with it off',()=>{
+  const v1=Meta.migrate({v:1,gold:5,units:2,roster:{},mute:true,settings:{leftHanded:true}});
+  eq(v1.settings.fighters3d,false);eq(v1.settings.leftHanded,true);eq(v1.gold,5);
+  const v2=Meta.migrate({v:2,gold:9,settings:{leftHanded:true}});
+  eq(v2.settings.fighters3d,false);eq(v2.settings.leftHanded,true);eq(v2.gold,9)});
+Test.add('3D switch: ?3d=1 is matched exactly, the way ?atlas=1 is',()=>{
+  ok(Gate3D.queryOn('?3d=1'));ok(Gate3D.queryOn('?a=2&3d=1'));ok(Gate3D.queryOn('?3d=1&a=2'));
+  ok(!Gate3D.queryOn(''));ok(!Gate3D.queryOn('?3d=0'));ok(!Gate3D.queryOn('?x3d=1'));ok(!Gate3D.queryOn('?3d=10'))});
+Test.add('3D switch: with it off, syncing adds no script tag and nothing is active',()=>{
+  eq(Save.data.settings.fighters3d,false);
+  Gate3D.sync();
+  eq(Gate3D.wanted(),false);eq(Gate3D.active(),false);
+  eq(document.querySelectorAll('script[src*="render3d"],script[src*="three"]').length,0);
+  eq(document.querySelectorAll('#wrap>canvas').length,1)});
+Test.add('3D switch: tapping the row flips and saves the setting and asks the gate to load',()=>{
+  const savedLoad=Gate3D.load,saved=Save.data.settings.fighters3d;let loads=0;
+  Gate3D.load=()=>{loads++};
+  try{
+    Screens.settings();
+    const btn=document.getElementById('set_fighters3d');
+    ok(btn,'no #set_fighters3d button');eq(btn.textContent,'3D FIGHTERS (PREVIEW): OFF');
+    btn.click();
+    eq(Save.data.settings.fighters3d,true);eq(JSON.parse(localStorage.getItem(Save.key)).settings.fighters3d,true);
+    eq(loads,1);
+    eq(document.getElementById('set_fighters3d').textContent,'3D FIGHTERS (PREVIEW): ON');
+    document.getElementById('set_fighters3d').click();
+    eq(Save.data.settings.fighters3d,false)
+  }finally{Gate3D.load=savedLoad;Save.data.settings.fighters3d=saved;Save.put();G.applySettings();Screens.title()}});
+Test.add('3D seam: a fighter the 3D layer handles gets no 2D body or reflection, the other one does, and the 3D layer draws once per frame',()=>{
+  const savedHandles=Gate3D.handles,savedFrame=Gate3D.frame,savedDraw=Rig.draw;
+  let frames=0;const drew=[];
+  G.sim=true;G.startFight({seed:1,p1:'carl',p2:'goblin'});
+  const f=G.fight;
+  Gate3D.handles=F=>F===f.p1;
+  Gate3D.frame=()=>{frames++};
+  Rig.draw=function(c,F){drew.push(F===f.p1?'p1':'p2')};
+  try{
+    Render.frame(f);
+    eq(frames,1);eq(drew.filter(d=>d==='p1').length,0);
+    eq(drew.filter(d=>d==='p2').length,2,'p2 still draws its body and its reflection in 2D')
+  }finally{Gate3D.handles=savedHandles;Gate3D.frame=savedFrame;Rig.draw=savedDraw;G.toTitle()}});
+Test.add('3D seam: the charge bar and block ring still draw over a fighter the 3D layer handles',()=>{
+  const savedHandles=Gate3D.handles,savedDraw=Rig.draw;
+  G.sim=true;G.startFight({seed:1,p1:'carl',p2:'goblin'});
+  const f=G.fight,calls=[];
+  Gate3D.handles=()=>true;Rig.draw=()=>{};
+  const fake=new Proxy(Render.ctx,{get(t,k){
+    if(k==='fillRect'||k==='arc')return(...a)=>{calls.push(k)};
+    const v=t[k];return typeof v==='function'?v.bind(t):v},
+    set(t,k,v){t[k]=v;return true}});
+  try{
+    f.p1.state='BLOCK';f.p1.f=2;calls.length=0;
+    Render.fighter(fake,f.p1,G.cam,0);
+    ok(calls.includes('arc'),'block ring not drawn');
+    f.p1.state='CHARGE';f.p1.move=MOVES.heavy;f.p1.f=2;calls.length=0;
+    Render.fighter(fake,f.p1,G.cam,0);
+    ok(calls.includes('fillRect'),'charge bar not drawn')
+  }finally{Gate3D.handles=savedHandles;Rig.draw=savedDraw;G.toTitle()}});
+Test.add('3D seam: nothing about the fight changes when the gate says a fighter is drawn in 3D',()=>{
+  const run=handles=>{
+    const saved=Gate3D.handles;Gate3D.handles=handles;
+    try{G.sim=true;G.startFight({seed:7,p1:'carl',p2:'goblin',ai:'brawl',ctrl1:Ctrl.random(7)});
+      for(let i=0;i<600&&G.state==='FIGHT';i++){G.tick();Render.frame(G.fight)}
+      const f=G.fight,out=[f.frame,f.p1.hp,f.p2.hp,f.p1.x,f.p2.x,f.p1.power,f.p2.power].join();
+      G.toTitle();return out
+    }finally{Gate3D.handles=saved}};
+  eq(run(()=>true),run(()=>false))});
 
 </script></body></html>

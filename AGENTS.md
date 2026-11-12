@@ -9,7 +9,8 @@ Base branch: main
 
 ## Stack
 - Vanilla JavaScript and HTML/CSS. No runtime dependencies, no network, no assets. The sprite atlas
-  stays opt-in (off by default).
+  stays opt-in (off by default), and so does the 3D fighters preview, the one exception: it loads
+  one pinned library (three.js) from its own file only when switched on.
 - `src/*` is concatenated in filename order into `index.html` by `tools/build.py` (Python 3).
 - Unit tests are in-page: `src/90_tests.js` (`Test.add(name, fn)`; helpers `eq`, `ok`, `threw`).
 - `tests/harness.py` drives headless Chromium through Python Playwright and runs every check mode.
@@ -20,17 +21,21 @@ Base branch: main
   `python3.14 -m playwright install chromium`.
 
 ## Build
-- Edit files in `src/`, then run `python3 tools/build.py`. It writes two files: `index.html` (the
-  player page, everything except `src/90_tests.js`) and `test.html` (everything, which the harness
-  loads). Commit both rebuilt files together with the `src/` change.
-- Never hand-edit `index.html` or `test.html`.
+- Edit files in `src/`, then run `python3 tools/build.py`. It writes `index.html` (the player page,
+  everything except `src/90_tests.js` and `src/71_render3d.js`), `test.html` (the same plus the
+  tests, which the harness loads), and the opt-in 3D files `render3d.js` (from `src/71_render3d.js`)
+  and `three.min.js` (copied from `tools/three/three.min.js`). Commit the rebuilt files together
+  with the `src/` change.
+- `tools/three/build.sh` rebuilds the three.js bundle with Bun. Run it only when `tools/three/entry.js`
+  or the pinned version changes.
+- Never hand-edit `index.html`, `test.html`, `render3d.js` or `three.min.js`.
 - `python3 tools/build.py --check` exits 1 and names each stale file.
 
 ## Verify
 Run this before you stop. It must print `ALL GREEN`:
 
 ```sh
-python3 tools/build.py --check && python3.14 tests/harness.py --unit >/dev/null && python3.14 tests/harness.py --tutorial --seed 1 >/dev/null && python3.14 tests/harness.py --e2e --seed 1 >/dev/null && python3.14 tests/harness.py --screens-smoke >/dev/null && python3.14 tests/harness.py --phone-check >/dev/null && python3.14 tests/harness.py --saves >/dev/null && python3.14 tests/harness.py --player-smoke >/dev/null && python3.14 tests/harness.py --journey >/dev/null && echo ALL GREEN
+python3 tools/build.py --check && python3.14 tests/harness.py --unit >/dev/null && python3.14 tests/harness.py --tutorial --seed 1 >/dev/null && python3.14 tests/harness.py --e2e --seed 1 >/dev/null && python3.14 tests/harness.py --screens-smoke >/dev/null && python3.14 tests/harness.py --phone-check >/dev/null && python3.14 tests/harness.py --tutorial-fit >/dev/null && python3.14 tests/harness.py --saves >/dev/null && python3.14 tests/harness.py --player-smoke >/dev/null && python3.14 tests/harness.py --journey >/dev/null && python3.14 tests/harness.py --touch-heavy >/dev/null && python3.14 tests/harness.py --3d-smoke >/dev/null && echo ALL GREEN
 ```
 
 To see why a mode failed, run it again without `>/dev/null` and read the JSON it prints. `--unit`
